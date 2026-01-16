@@ -13,7 +13,7 @@ export default function BoardPage() {
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/60">
               Current Turn
             </p>
-            <p className="text-3xl md:text-4xl font-semibold">Team Indigo</p>
+            <p className="text-3xl md:text-4xl font-semibold">Indigo</p>
             <p className="text-sm text-white/70">
               Waiting for an action to be confirmed.
             </p>
@@ -43,18 +43,18 @@ export default function BoardPage() {
           </p>
           <ol className="space-y-3 text-lg">
             {[
-              "Team Indigo",
-              "Team Ember",
-              "Team Jade",
-              "Team Nova",
-            ].map((team, index) => (
+              "Indigo",
+              "Ember",
+              "Jade",
+              "Nova",
+            ].map((player, index) => (
               <li
-                key={team}
+                key={player}
                 className={`flex items-center justify-between rounded-2xl border border-white/10 px-4 py-3 ${
                   index === 0 ? "bg-white/10" : "bg-black/20"
                 }`}
               >
-                <span>{team}</span>
+                <span>{player}</span>
                 <span className="text-sm text-white/60">#{index + 1}</span>
               </li>
             ))}
@@ -98,9 +98,9 @@ export default function BoardPage() {
         </div>
         <ul className="space-y-3 text-base">
           {[
-            "Team Ember paid rent to Team Indigo ($1,200)",
-            "Bank issued dividend to all teams ($200)",
-            "Team Jade completed a property set",
+            "Ember paid rent to Indigo ($1,200)",
+            "Bank issued dividend to all players ($200)",
+            "Jade completed a property set",
           ].map((event) => (
             <li
               key={event}
