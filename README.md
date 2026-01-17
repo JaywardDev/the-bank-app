@@ -17,6 +17,7 @@ Create a Supabase project and add the environment variables shown in `.env.examp
 
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `NEXT_PUBLIC_SITE_URL`
 
 Create the tables used by the scaffold UI:
 

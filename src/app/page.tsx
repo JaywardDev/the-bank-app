@@ -37,6 +37,13 @@ export default function Home() {
   const [authLoading, setAuthLoading] = useState(true);
 
   const isConfigured = useMemo(() => supabaseClient.isConfigured(), []);
+  const magicLinkRedirectTo = useMemo(() => {
+    if (process.env.NODE_ENV === "development") {
+      return "http://localhost:3000";
+    }
+
+    return process.env.NEXT_PUBLIC_SITE_URL ?? "";
+  }, []);
 
   const loadLobby = useCallback(
     async (gameId: string, accessToken: string) => {
@@ -129,7 +136,12 @@ export default function Home() {
     setNotice(null);
 
     try {
-      await supabaseClient.signInWithOtp(authEmail, window.location.origin);
+      if (!magicLinkRedirectTo) {
+        setNotice("Missing NEXT_PUBLIC_SITE_URL for magic link redirect.");
+        return;
+      }
+
+      await supabaseClient.signInWithOtp(authEmail, magicLinkRedirectTo);
       setNotice("Magic link sent! Check your inbox to finish sign-in.");
     } catch (error) {
       if (error instanceof Error) {
