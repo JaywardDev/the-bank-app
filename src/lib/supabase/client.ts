@@ -1,3 +1,5 @@
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
 
@@ -22,6 +24,27 @@ const baseHeaders = {
 };
 
 const isConfigured = () => Boolean(supabaseUrl && supabaseAnonKey);
+let realtimeClient: SupabaseClient | null = null;
+
+const getRealtimeClient = () => {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  if (!isConfigured()) {
+    return null;
+  }
+
+  if (!realtimeClient) {
+    realtimeClient = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        persistSession: false,
+      },
+    });
+  }
+
+  return realtimeClient;
+};
 
 const readStoredSession = (): SupabaseSession | null => {
   if (typeof window === "undefined") {
@@ -219,6 +242,7 @@ const fetchFromSupabase = async <T>(
 
 export const supabaseClient = {
   isConfigured,
+  getRealtimeClient,
   getSession,
   signInWithOtp,
   signOut,
