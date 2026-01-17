@@ -38,11 +38,19 @@ export default function Home() {
 
   const isConfigured = useMemo(() => supabaseClient.isConfigured(), []);
   const magicLinkRedirectTo = useMemo(() => {
+    if (process.env.NEXT_PUBLIC_SITE_URL) {
+      return process.env.NEXT_PUBLIC_SITE_URL;
+    }
+
+    if (typeof window !== "undefined") {
+      return window.location.origin;
+    }
+
     if (process.env.NODE_ENV === "development") {
       return "http://localhost:3000";
     }
 
-    return process.env.NEXT_PUBLIC_SITE_URL ?? "";
+    return "";
   }, []);
 
   const loadLobby = useCallback(
