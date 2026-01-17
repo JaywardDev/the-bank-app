@@ -16,6 +16,21 @@ type Player = {
   created_at: string | null;
 };
 
+type GameState = {
+  game_id: string;
+  version: number;
+  current_player_id: string | null;
+  last_roll: number | null;
+};
+
+type GameEvent = {
+  id: string;
+  event_type: string;
+  payload: Record<string, unknown> | null;
+  created_at: string;
+  version: number;
+};
+
 type BoardLobbyPageProps = {
   params: {
     gameId: string;
@@ -25,6 +40,8 @@ type BoardLobbyPageProps = {
 export default function BoardLobbyPage({ params }: BoardLobbyPageProps) {
   const [game, setGame] = useState<Game | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
+  const [gameState, setGameState] = useState<GameState | null>(null);
+  const [events, setEvents] = useState<GameEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -36,6 +53,22 @@ export default function BoardLobbyPage({ params }: BoardLobbyPageProps) {
       { method: "GET" },
     );
     setPlayers(playerRows);
+  }, [params.gameId]);
+
+  const loadGameState = useCallback(async () => {
+    const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
+      `game_state?select=game_id,version,current_player_id,last_roll&game_id=eq.${params.gameId}&limit=1`,
+      { method: "GET" },
+    );
+    setGameState(stateRow ?? null);
+  }, [params.gameId]);
+
+  const loadEvents = useCallback(async () => {
+    const eventRows = await supabaseClient.fetchFromSupabase<GameEvent[]>(
+      `game_events?select=id,event_type,payload,created_at,version&game_id=eq.${params.gameId}&order=version.desc&limit=8`,
+      { method: "GET" },
+    );
+    setEvents(eventRows);
   }, [params.gameId]);
 
   const loadLobby = useCallback(async () => {
@@ -59,6 +92,8 @@ export default function BoardLobbyPage({ params }: BoardLobbyPageProps) {
 
       setGame(gameRow);
       await loadPlayers();
+      await loadGameState();
+      await loadEvents();
     } catch (error) {
       if (error instanceof Error) {
         setErrorMessage(error.message);
@@ -68,7 +103,7 @@ export default function BoardLobbyPage({ params }: BoardLobbyPageProps) {
     } finally {
       setLoading(false);
     }
-  }, [isConfigured, loadPlayers, params.gameId]);
+  }, [isConfigured, loadEvents, loadGameState, loadPlayers, params.gameId]);
 
   const refreshPlayers = useCallback(async () => {
     if (!isConfigured) {
@@ -85,6 +120,38 @@ export default function BoardLobbyPage({ params }: BoardLobbyPageProps) {
       }
     }
   }, [isConfigured, loadPlayers]);
+
+  const refreshGameState = useCallback(async () => {
+    if (!isConfigured) {
+      return;
+    }
+
+    try {
+      await loadGameState();
+    } catch (error) {
+      if (error instanceof Error) {
+        setErrorMessage(error.message);
+      } else {
+        setErrorMessage("Unable to refresh game state.");
+      }
+    }
+  }, [isConfigured, loadGameState]);
+
+  const refreshEvents = useCallback(async () => {
+    if (!isConfigured) {
+      return;
+    }
+
+    try {
+      await loadEvents();
+    } catch (error) {
+      if (error instanceof Error) {
+        setErrorMessage(error.message);
+      } else {
+        setErrorMessage("Unable to refresh game events.");
+      }
+    }
+  }, [isConfigured, loadEvents]);
 
   useEffect(() => {
     void loadLobby();
@@ -114,12 +181,46 @@ export default function BoardLobbyPage({ params }: BoardLobbyPageProps) {
           void refreshPlayers();
         },
       )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "game_state",
+          filter: `game_id=eq.${params.gameId}`,
+        },
+        () => {
+          void refreshGameState();
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "game_events",
+          filter: `game_id=eq.${params.gameId}`,
+        },
+        () => {
+          void refreshEvents();
+        },
+      )
       .subscribe();
 
     return () => {
       realtimeClient.removeChannel(channel);
     };
-  }, [isConfigured, params.gameId, refreshPlayers]);
+  }, [
+    isConfigured,
+    params.gameId,
+    refreshEvents,
+    refreshGameState,
+    refreshPlayers,
+  ]);
+
+  const currentPlayer = players.find(
+    (player) => player.id === gameState?.current_player_id,
+  );
 
   const lobbyStatus = loading
     ? "Syncing lobby…"
@@ -197,36 +298,102 @@ export default function BoardLobbyPage({ params }: BoardLobbyPageProps) {
                 </p>
               </div>
             </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
+                <p className="text-xs uppercase tracking-wide text-white/50">
+                  Current turn
+                </p>
+                <p className="text-lg font-semibold text-white">
+                  {currentPlayer?.display_name ?? "Waiting for start"}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
+                <p className="text-xs uppercase tracking-wide text-white/50">
+                  Last roll
+                </p>
+                <p className="text-2xl font-semibold text-white">
+                  {gameState?.last_roll ?? "—"}
+                </p>
+              </div>
+            </div>
           </div>
 
-          <div className="rounded-3xl border border-white/10 bg-white/5 p-6 space-y-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/60">
-                Players in lobby
-              </p>
-              <p className="text-sm text-white/60">
-                Updates automatically when someone joins or leaves.
-              </p>
-            </div>
-            <ul className="space-y-3 text-lg">
-              {players.length === 0 ? (
-                <li className="rounded-2xl border border-dashed border-white/20 bg-black/30 px-4 py-6 text-center text-sm text-white/60">
-                  No players yet. Have everyone join with the code.
-                </li>
-              ) : (
-                players.map((player, index) => (
-                  <li
-                    key={player.id}
-                    className="flex items-center justify-between rounded-2xl border border-white/10 bg-black/30 px-4 py-3"
-                  >
-                    <span>{player.display_name ?? "Player"}</span>
-                    <span className="text-sm text-white/60">
-                      #{index + 1}
-                    </span>
+          <div className="space-y-4">
+            <div className="rounded-3xl border border-white/10 bg-white/5 p-6 space-y-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/60">
+                  Players in lobby
+                </p>
+                <p className="text-sm text-white/60">
+                  Updates automatically when someone joins or leaves.
+                </p>
+              </div>
+              <ul className="space-y-3 text-lg">
+                {players.length === 0 ? (
+                  <li className="rounded-2xl border border-dashed border-white/20 bg-black/30 px-4 py-6 text-center text-sm text-white/60">
+                    No players yet. Have everyone join with the code.
                   </li>
-                ))
-              )}
-            </ul>
+                ) : (
+                  players.map((player, index) => (
+                    <li
+                      key={player.id}
+                      className="flex items-center justify-between rounded-2xl border border-white/10 bg-black/30 px-4 py-3"
+                    >
+                      <span>{player.display_name ?? "Player"}</span>
+                      <span className="text-sm text-white/60">
+                        #{index + 1}
+                      </span>
+                    </li>
+                  ))
+                )}
+              </ul>
+            </div>
+            <div className="rounded-3xl border border-white/10 bg-white/5 p-6 space-y-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/60">
+                  Live event feed
+                </p>
+                <p className="text-sm text-white/60">
+                  Latest actions broadcast from the bank.
+                </p>
+              </div>
+              <ul className="space-y-3 text-sm text-white/70">
+                {events.length === 0 ? (
+                  <li className="rounded-2xl border border-dashed border-white/20 bg-black/30 px-4 py-5 text-center text-xs text-white/50">
+                    Events will appear once the game starts.
+                  </li>
+                ) : (
+                  events.map((event) => {
+                    const payload = event.payload as
+                      | { roll?: number; to_player_name?: string }
+                      | null;
+
+                    return (
+                      <li
+                        key={event.id}
+                        className="rounded-2xl border border-white/10 bg-black/30 px-4 py-3"
+                      >
+                        <div className="flex items-center justify-between text-xs uppercase tracking-wide text-white/50">
+                          <span>{event.event_type.replaceAll("_", " ")}</span>
+                          <span>v{event.version}</span>
+                        </div>
+                        <div className="mt-2 text-sm text-white">
+                          {event.event_type === "ROLL_DICE" &&
+                          typeof payload?.roll === "number"
+                            ? `Rolled ${payload.roll}`
+                            : event.event_type === "END_TURN" &&
+                                payload?.to_player_name
+                              ? `Turn → ${payload.to_player_name}`
+                              : event.event_type === "START_GAME"
+                                ? "Game started"
+                                : "Update received"}
+                        </div>
+                      </li>
+                    );
+                  })
+                )}
+              </ul>
+            </div>
           </div>
         </section>
       ) : null}
