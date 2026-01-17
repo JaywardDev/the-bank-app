@@ -26,6 +26,16 @@ const baseHeaders = {
 const isConfigured = () => Boolean(supabaseUrl && supabaseAnonKey);
 let realtimeClient: SupabaseClient | null = null;
 
+const getMagicLinkRedirectUrl = () => {
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim() ?? "";
+
+  if (!siteUrl) {
+    return "";
+  }
+
+  return siteUrl;
+};
+
 const getRealtimeClient = () => {
   if (typeof window === "undefined") {
     return null;
@@ -188,16 +198,28 @@ const getSession = async () => {
   return refreshSession(stored.refresh_token);
 };
 
-const signInWithOtp = async (email: string, redirectTo: string) => {
+const signInWithOtp = async (email: string) => {
+  const redirectTo = getMagicLinkRedirectUrl();
+
+  if (!redirectTo) {
+    throw new Error(
+      "Missing NEXT_PUBLIC_SITE_URL for magic link redirects.",
+    );
+  }
+
+  const payload = {
+    email,
+    options: {
+      emailRedirectTo: redirectTo,
+    },
+  };
+
+  console.log("Supabase OTP request payload:", payload);
+
   const response = await fetch(`${supabaseUrl}/auth/v1/otp`, {
     method: "POST",
     headers: baseHeaders,
-    body: JSON.stringify({
-      email,
-      options: {
-        emailRedirectTo: redirectTo,
-      },
-    }),
+    body: JSON.stringify(payload),
   });
 
   if (!response.ok) {
@@ -242,6 +264,7 @@ const fetchFromSupabase = async <T>(
 
 export const supabaseClient = {
   isConfigured,
+  getMagicLinkRedirectUrl,
   getRealtimeClient,
   getSession,
   signInWithOtp,

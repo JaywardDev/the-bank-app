@@ -38,13 +38,7 @@ export default function Home() {
 
   const isConfigured = useMemo(() => supabaseClient.isConfigured(), []);
   const magicLinkRedirectTo = useMemo(() => {
-    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
-
-    if (process.env.NODE_ENV === "production") {
-      return siteUrl ?? "";
-    }
-
-    return siteUrl ?? "http://localhost:3000";
+    return supabaseClient.getMagicLinkRedirectUrl();
   }, []);
 
   useEffect(() => {
@@ -150,7 +144,7 @@ export default function Home() {
       }
 
       console.log(`Magic link redirect_to = ${magicLinkRedirectTo}`);
-      await supabaseClient.signInWithOtp(authEmail, magicLinkRedirectTo);
+      await supabaseClient.signInWithOtp(authEmail);
       setNotice("Magic link sent! Check your inbox to finish sign-in.");
     } catch (error) {
       if (error instanceof Error) {
