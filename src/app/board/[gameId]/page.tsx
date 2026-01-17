@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import PageShell from "@/app/components/PageShell";
-import { supabaseClient } from "@/lib/supabase/client";
+import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 
 type Game = {
   id: string;
@@ -39,6 +39,7 @@ type BoardLobbyPageProps = {
 };
 
 export default function BoardLobbyPage({ params }: BoardLobbyPageProps) {
+  const [session, setSession] = useState<SupabaseSession | null>(null);
   const [game, setGame] = useState<Game | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [gameState, setGameState] = useState<GameState | null>(null);
@@ -48,26 +49,29 @@ export default function BoardLobbyPage({ params }: BoardLobbyPageProps) {
 
   const isConfigured = useMemo(() => supabaseClient.isConfigured(), []);
 
-  const loadPlayers = useCallback(async () => {
+  const loadPlayers = useCallback(async (accessToken?: string) => {
     const playerRows = await supabaseClient.fetchFromSupabase<Player[]>(
       `players?select=id,user_id,display_name,created_at&game_id=eq.${params.gameId}&order=created_at.asc`,
       { method: "GET" },
+      accessToken,
     );
     setPlayers(playerRows);
   }, [params.gameId]);
 
-  const loadGameState = useCallback(async () => {
+  const loadGameState = useCallback(async (accessToken?: string) => {
     const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
       `game_state?select=game_id,version,current_player_user_id,last_roll&game_id=eq.${params.gameId}&limit=1`,
       { method: "GET" },
+      accessToken,
     );
     setGameState(stateRow ?? null);
   }, [params.gameId]);
 
-  const loadEvents = useCallback(async () => {
+  const loadEvents = useCallback(async (accessToken?: string) => {
     const eventRows = await supabaseClient.fetchFromSupabase<GameEvent[]>(
       `game_events?select=id,event_type,payload,created_at,version&game_id=eq.${params.gameId}&order=version.desc&limit=8`,
       { method: "GET" },
+      accessToken,
     );
     setEvents(eventRows);
   }, [params.gameId]);
@@ -82,9 +86,13 @@ export default function BoardLobbyPage({ params }: BoardLobbyPageProps) {
     setErrorMessage(null);
 
     try {
+      const currentSession = await supabaseClient.getSession();
+      setSession(currentSession);
+
       const [gameRow] = await supabaseClient.fetchFromSupabase<Game[]>(
         `games?select=id,join_code,created_at&id=eq.${params.gameId}&limit=1`,
         { method: "GET" },
+        currentSession?.access_token,
       );
 
       if (!gameRow) {
@@ -92,9 +100,9 @@ export default function BoardLobbyPage({ params }: BoardLobbyPageProps) {
       }
 
       setGame(gameRow);
-      await loadPlayers();
-      await loadGameState();
-      await loadEvents();
+      await loadPlayers(currentSession?.access_token);
+      await loadGameState(currentSession?.access_token);
+      await loadEvents(currentSession?.access_token);
     } catch (error) {
       if (error instanceof Error) {
         setErrorMessage(error.message);
@@ -112,7 +120,7 @@ export default function BoardLobbyPage({ params }: BoardLobbyPageProps) {
     }
 
     try {
-      await loadPlayers();
+      await loadPlayers(session?.access_token);
     } catch (error) {
       if (error instanceof Error) {
         setErrorMessage(error.message);
@@ -120,7 +128,7 @@ export default function BoardLobbyPage({ params }: BoardLobbyPageProps) {
         setErrorMessage("Unable to refresh players.");
       }
     }
-  }, [isConfigured, loadPlayers]);
+  }, [isConfigured, loadPlayers, session?.access_token]);
 
   const refreshGameState = useCallback(async () => {
     if (!isConfigured) {
@@ -128,7 +136,7 @@ export default function BoardLobbyPage({ params }: BoardLobbyPageProps) {
     }
 
     try {
-      await loadGameState();
+      await loadGameState(session?.access_token);
     } catch (error) {
       if (error instanceof Error) {
         setErrorMessage(error.message);
@@ -136,7 +144,7 @@ export default function BoardLobbyPage({ params }: BoardLobbyPageProps) {
         setErrorMessage("Unable to refresh game state.");
       }
     }
-  }, [isConfigured, loadGameState]);
+  }, [isConfigured, loadGameState, session?.access_token]);
 
   const refreshEvents = useCallback(async () => {
     if (!isConfigured) {
@@ -144,7 +152,7 @@ export default function BoardLobbyPage({ params }: BoardLobbyPageProps) {
     }
 
     try {
-      await loadEvents();
+      await loadEvents(session?.access_token);
     } catch (error) {
       if (error instanceof Error) {
         setErrorMessage(error.message);
@@ -152,7 +160,7 @@ export default function BoardLobbyPage({ params }: BoardLobbyPageProps) {
         setErrorMessage("Unable to refresh game events.");
       }
     }
-  }, [isConfigured, loadEvents]);
+  }, [isConfigured, loadEvents, session?.access_token]);
 
   useEffect(() => {
     void loadLobby();

@@ -29,14 +29,30 @@ create unique index if not exists game_events_game_id_version_unique
 alter table public.game_state enable row level security;
 alter table public.game_events enable row level security;
 
+drop policy if exists "game_state_select_all" on public.game_state;
 create policy "game_state_select_all"
   on public.game_state
   for select
   to anon, authenticated
-  using (true);
+  using (
+    exists (
+      select 1
+      from public.players
+      where players.game_id = game_state.game_id
+        and players.user_id = auth.uid()
+    )
+  );
 
+drop policy if exists "game_events_select_all" on public.game_events;
 create policy "game_events_select_all"
   on public.game_events
   for select
   to anon, authenticated
-  using (true);
+  using (
+    exists (
+      select 1
+      from public.players
+      where players.game_id = game_events.game_id
+        and players.user_id = auth.uid()
+    )
+  );

@@ -41,36 +41,42 @@ export default function PlayPage() {
 
   const isConfigured = useMemo(() => supabaseClient.isConfigured(), []);
 
-  const loadPlayers = useCallback(async (activeGameId: string) => {
+  const loadPlayers = useCallback(async (activeGameId: string, accessToken?: string) => {
     const playerRows = await supabaseClient.fetchFromSupabase<Player[]>(
       `players?select=id,user_id,display_name,created_at&game_id=eq.${activeGameId}&order=created_at.asc`,
       { method: "GET" },
+      accessToken,
     );
     setPlayers(playerRows);
   }, []);
 
-  const loadGameState = useCallback(async (activeGameId: string) => {
+  const loadGameState = useCallback(
+    async (activeGameId: string, accessToken?: string) => {
     const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
       `game_state?select=game_id,version,current_player_user_id,balances,last_roll&game_id=eq.${activeGameId}&limit=1`,
       { method: "GET" },
+      accessToken,
     );
     setGameState(stateRow ?? null);
-  }, []);
+    },
+    [],
+  );
 
-  const loadEvents = useCallback(async (activeGameId: string) => {
+  const loadEvents = useCallback(async (activeGameId: string, accessToken?: string) => {
     const eventRows = await supabaseClient.fetchFromSupabase<GameEvent[]>(
       `game_events?select=id,event_type,payload,created_at,version&game_id=eq.${activeGameId}&order=version.desc&limit=10`,
       { method: "GET" },
+      accessToken,
     );
     setEvents(eventRows);
   }, []);
 
   const loadGameData = useCallback(
-    async (activeGameId: string) => {
+    async (activeGameId: string, accessToken?: string) => {
       await Promise.all([
-        loadPlayers(activeGameId),
-        loadGameState(activeGameId),
-        loadEvents(activeGameId),
+        loadPlayers(activeGameId, accessToken),
+        loadGameState(activeGameId, accessToken),
+        loadEvents(activeGameId, accessToken),
       ]);
     },
     [loadEvents, loadGameState, loadPlayers],
@@ -98,7 +104,7 @@ export default function PlayPage() {
 
         if (storedGameId) {
           try {
-            await loadGameData(storedGameId);
+            await loadGameData(storedGameId, currentSession?.access_token);
           } catch (error) {
             if (error instanceof Error) {
               setNotice(error.message);
@@ -140,7 +146,7 @@ export default function PlayPage() {
           filter: `game_id=eq.${gameId}`,
         },
         () => {
-          void loadPlayers(gameId);
+          void loadPlayers(gameId, session?.access_token);
         },
       )
       .on(
@@ -152,7 +158,7 @@ export default function PlayPage() {
           filter: `game_id=eq.${gameId}`,
         },
         () => {
-          void loadGameState(gameId);
+          void loadGameState(gameId, session?.access_token);
         },
       )
       .on(
@@ -164,7 +170,7 @@ export default function PlayPage() {
           filter: `game_id=eq.${gameId}`,
         },
         () => {
-          void loadEvents(gameId);
+          void loadEvents(gameId, session?.access_token);
         },
       )
       .subscribe();
@@ -172,7 +178,14 @@ export default function PlayPage() {
     return () => {
       realtimeClient.removeChannel(channel);
     };
-  }, [gameId, isConfigured, loadEvents, loadGameState, loadPlayers]);
+  }, [
+    gameId,
+    isConfigured,
+    loadEvents,
+    loadGameState,
+    loadPlayers,
+    session?.access_token,
+  ]);
 
   const currentPlayer = players.find(
     (player) => player.user_id === gameState?.current_player_user_id,
@@ -201,6 +214,7 @@ export default function PlayPage() {
           body: JSON.stringify({
             gameId,
             action,
+            expectedVersion: gameState?.version ?? 0,
           }),
         });
 

@@ -4,12 +4,12 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
 
-const anonHeaders = {
+const playerHeaders = {
   apikey: supabaseAnonKey,
   "Content-Type": "application/json",
 };
 
-const serviceHeaders = {
+const bankHeaders = {
   apikey: supabaseServiceRoleKey,
   Authorization: `Bearer ${supabaseServiceRoleKey}`,
   "Content-Type": "application/json",
@@ -18,6 +18,7 @@ const serviceHeaders = {
 type ActionRequest = {
   gameId?: string;
   action?: "START_GAME" | "ROLL_DICE" | "END_TURN";
+  expectedVersion?: number;
 };
 
 type SupabaseUser = {
@@ -52,7 +53,7 @@ const isConfigured = () =>
 const fetchUser = async (accessToken: string) => {
   const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
     headers: {
-      ...anonHeaders,
+      ...playerHeaders,
       Authorization: `Bearer ${accessToken}`,
     },
   });
@@ -71,7 +72,7 @@ const fetchFromSupabase = async <T>(
   const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
     ...options,
     headers: {
-      ...serviceHeaders,
+      ...playerHeaders,
       ...(options.headers ?? {}),
     },
   });
@@ -84,6 +85,25 @@ const fetchFromSupabase = async <T>(
   return (await response.json()) as T;
 };
 
+const fetchFromSupabaseWithService = async <T>(
+  path: string,
+  options: RequestInit,
+): Promise<T> => {
+  const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
+    ...options,
+    headers: {
+      ...bankHeaders,
+      ...(options.headers ?? {}),
+    },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(errorText || "Supabase request failed.");
+  }
+
+  return (await response.json()) as T;
+};
 const parseBearerToken = (authorization: string | null) => {
   if (!authorization) {
     return null;
@@ -123,6 +143,20 @@ export async function POST(request: Request) {
     );
   }
 
+  if (typeof body.expectedVersion !== "number") {
+    return NextResponse.json(
+      { error: "Missing expectedVersion." },
+      { status: 400 },
+    );
+  }
+
+  if (!Number.isInteger(body.expectedVersion) || body.expectedVersion < 0) {
+    return NextResponse.json(
+      { error: "Invalid expectedVersion." },
+      { status: 400 },
+    );
+  }
+
   const gameId = body.gameId;
 
   const [game] = await fetchFromSupabase<GameRow[]>(
@@ -144,7 +178,23 @@ export async function POST(request: Request) {
     { method: "GET" },
   );
 
-  const nextVersion = (gameState?.version ?? 0) + 1;
+  if (!players.some((player) => player.user_id === user.id)) {
+    return NextResponse.json(
+      { error: "You are not a member of this game." },
+      { status: 403 },
+    );
+  }
+
+  const currentVersion = gameState?.version ?? 0;
+
+  if (body.expectedVersion !== currentVersion) {
+    return NextResponse.json(
+      { error: "Version mismatch." },
+      { status: 409 },
+    );
+  }
+
+  const nextVersion = currentVersion + 1;
 
   if (body.action === "START_GAME") {
     if (game.created_by && game.created_by !== user.id) {
@@ -167,7 +217,7 @@ export async function POST(request: Request) {
       return acc;
     }, {});
 
-    const [updatedState] = await fetchFromSupabase<GameStateRow[]>(
+    const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
       "game_state?on_conflict=game_id",
       {
         method: "POST",
@@ -185,7 +235,7 @@ export async function POST(request: Request) {
       },
     );
 
-    await fetchFromSupabase(
+    await fetchFromSupabaseWithService(
       "game_events",
       {
         method: "POST",
@@ -241,8 +291,8 @@ export async function POST(request: Request) {
     const dieTwo = Math.floor(Math.random() * 6) + 1;
     const rollTotal = dieOne + dieTwo;
 
-    const [updatedState] = await fetchFromSupabase<GameStateRow[]>(
-      `game_state?game_id=eq.${gameId}`,
+    const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
+      `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
       {
         method: "PATCH",
         headers: {
@@ -256,7 +306,14 @@ export async function POST(request: Request) {
       },
     );
 
-    await fetchFromSupabase(
+    if (!updatedState) {
+      return NextResponse.json(
+        { error: "Version mismatch." },
+        { status: 409 },
+      );
+    }
+
+    await fetchFromSupabaseWithService(
       "game_events",
       {
         method: "POST",
@@ -289,8 +346,8 @@ export async function POST(request: Request) {
       currentIndex === -1 ? 0 : (currentIndex + 1) % players.length;
     const nextPlayer = players[nextIndex];
 
-    const [updatedState] = await fetchFromSupabase<GameStateRow[]>(
-      `game_state?game_id=eq.${gameId}`,
+    const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
+      `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
       {
         method: "PATCH",
         headers: {
@@ -304,7 +361,14 @@ export async function POST(request: Request) {
       },
     );
 
-    await fetchFromSupabase(
+    if (!updatedState) {
+      return NextResponse.json(
+        { error: "Version mismatch." },
+        { status: 409 },
+      );
+    }
+
+    await fetchFromSupabaseWithService(
       "game_events",
       {
         method: "POST",
