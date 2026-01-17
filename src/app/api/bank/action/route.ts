@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "@/lib/env";
 
-const supabaseUrl = SUPABASE_URL;
-const supabaseAnonKey = SUPABASE_ANON_KEY;
-const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseUrl = (process.env.SUPABASE_URL ?? SUPABASE_URL ?? "").trim();
+const supabaseAnonKey = (
+  process.env.SUPABASE_ANON_KEY ?? SUPABASE_ANON_KEY ?? ""
+).trim();
+const supabaseServiceRoleKey = (process.env.SUPABASE_SERVICE_ROLE_KEY ?? "").trim();
 
 const playerHeaders = {
   apikey: supabaseAnonKey,
