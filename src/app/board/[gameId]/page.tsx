@@ -12,6 +12,7 @@ type Game = {
 
 type Player = {
   id: string;
+  user_id: string;
   display_name: string | null;
   created_at: string | null;
 };
@@ -19,7 +20,7 @@ type Player = {
 type GameState = {
   game_id: string;
   version: number;
-  current_player_id: string | null;
+  current_player_user_id: string | null;
   last_roll: number | null;
 };
 
@@ -49,7 +50,7 @@ export default function BoardLobbyPage({ params }: BoardLobbyPageProps) {
 
   const loadPlayers = useCallback(async () => {
     const playerRows = await supabaseClient.fetchFromSupabase<Player[]>(
-      `players?select=id,display_name,created_at&game_id=eq.${params.gameId}&order=created_at.asc`,
+      `players?select=id,user_id,display_name,created_at&game_id=eq.${params.gameId}&order=created_at.asc`,
       { method: "GET" },
     );
     setPlayers(playerRows);
@@ -57,7 +58,7 @@ export default function BoardLobbyPage({ params }: BoardLobbyPageProps) {
 
   const loadGameState = useCallback(async () => {
     const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
-      `game_state?select=game_id,version,current_player_id,last_roll&game_id=eq.${params.gameId}&limit=1`,
+      `game_state?select=game_id,version,current_player_user_id,last_roll&game_id=eq.${params.gameId}&limit=1`,
       { method: "GET" },
     );
     setGameState(stateRow ?? null);
@@ -219,7 +220,7 @@ export default function BoardLobbyPage({ params }: BoardLobbyPageProps) {
   ]);
 
   const currentPlayer = players.find(
-    (player) => player.id === gameState?.current_player_id,
+    (player) => player.user_id === gameState?.current_player_user_id,
   );
 
   const lobbyStatus = loading

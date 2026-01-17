@@ -2,9 +2,16 @@ import { NextResponse } from "next/server";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
 
-const baseHeaders = {
+const anonHeaders = {
   apikey: supabaseAnonKey,
+  "Content-Type": "application/json",
+};
+
+const serviceHeaders = {
+  apikey: supabaseServiceRoleKey,
+  Authorization: `Bearer ${supabaseServiceRoleKey}`,
   "Content-Type": "application/json",
 };
 
@@ -34,17 +41,18 @@ type PlayerRow = {
 type GameStateRow = {
   game_id: string;
   version: number;
-  current_player_id: string | null;
+  current_player_user_id: string | null;
   balances: Record<string, number> | null;
   last_roll: number | null;
 };
 
-const isConfigured = () => Boolean(supabaseUrl && supabaseAnonKey);
+const isConfigured = () =>
+  Boolean(supabaseUrl && supabaseAnonKey && supabaseServiceRoleKey);
 
 const fetchUser = async (accessToken: string) => {
   const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
     headers: {
-      ...baseHeaders,
+      ...anonHeaders,
       Authorization: `Bearer ${accessToken}`,
     },
   });
@@ -59,13 +67,11 @@ const fetchUser = async (accessToken: string) => {
 const fetchFromSupabase = async <T>(
   path: string,
   options: RequestInit,
-  accessToken: string,
 ): Promise<T> => {
   const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
     ...options,
     headers: {
-      ...baseHeaders,
-      Authorization: `Bearer ${accessToken}`,
+      ...serviceHeaders,
       ...(options.headers ?? {}),
     },
   });
@@ -122,7 +128,6 @@ export async function POST(request: Request) {
   const [game] = await fetchFromSupabase<GameRow[]>(
     `games?select=id,starting_cash,created_by&id=eq.${gameId}&limit=1`,
     { method: "GET" },
-    token,
   );
 
   if (!game) {
@@ -132,13 +137,11 @@ export async function POST(request: Request) {
   const players = await fetchFromSupabase<PlayerRow[]>(
     `players?select=id,user_id,display_name,created_at&game_id=eq.${gameId}&order=created_at.asc`,
     { method: "GET" },
-    token,
   );
 
   const [gameState] = await fetchFromSupabase<GameStateRow[]>(
-    `game_state?select=game_id,version,current_player_id,balances,last_roll&game_id=eq.${gameId}&limit=1`,
+    `game_state?select=game_id,version,current_player_user_id,balances,last_roll&game_id=eq.${gameId}&limit=1`,
     { method: "GET" },
-    token,
   );
 
   const nextVersion = (gameState?.version ?? 0) + 1;
@@ -174,13 +177,12 @@ export async function POST(request: Request) {
         body: JSON.stringify({
           game_id: gameId,
           version: nextVersion,
-          current_player_id: players[0].id,
+          current_player_user_id: players[0].user_id,
           balances,
           last_roll: null,
           updated_at: new Date().toISOString(),
         }),
       },
-      token,
     );
 
     await fetchFromSupabase(
@@ -204,7 +206,6 @@ export async function POST(request: Request) {
           created_by: user.id,
         }),
       },
-      token,
     );
 
     return NextResponse.json({ gameState: updatedState });
@@ -218,7 +219,7 @@ export async function POST(request: Request) {
   }
 
   const currentPlayer = players.find(
-    (player) => player.id === gameState.current_player_id,
+    (player) => player.user_id === gameState.current_player_user_id,
   );
 
   if (!currentPlayer) {
@@ -253,7 +254,6 @@ export async function POST(request: Request) {
           updated_at: new Date().toISOString(),
         }),
       },
-      token,
     );
 
     await fetchFromSupabase(
@@ -276,7 +276,6 @@ export async function POST(request: Request) {
           created_by: user.id,
         }),
       },
-      token,
     );
 
     return NextResponse.json({ gameState: updatedState });
@@ -284,7 +283,7 @@ export async function POST(request: Request) {
 
   if (body.action === "END_TURN") {
     const currentIndex = players.findIndex(
-      (player) => player.id === gameState.current_player_id,
+      (player) => player.user_id === gameState.current_player_user_id,
     );
     const nextIndex =
       currentIndex === -1 ? 0 : (currentIndex + 1) % players.length;
@@ -299,11 +298,10 @@ export async function POST(request: Request) {
         },
         body: JSON.stringify({
           version: nextVersion,
-          current_player_id: nextPlayer.id,
+          current_player_user_id: nextPlayer.user_id,
           updated_at: new Date().toISOString(),
         }),
       },
-      token,
     );
 
     await fetchFromSupabase(
@@ -326,7 +324,6 @@ export async function POST(request: Request) {
           created_by: user.id,
         }),
       },
-      token,
     );
 
     return NextResponse.json({ gameState: updatedState });
