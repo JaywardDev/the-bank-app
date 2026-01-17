@@ -4,7 +4,7 @@ add column if not exists starting_cash integer not null default 1500;
 create table if not exists public.game_state (
   game_id uuid primary key references public.games(id) on delete cascade,
   version integer not null default 0,
-  current_player_id uuid references public.players(id),
+  current_player_user_id uuid,
   balances jsonb not null default '{}'::jsonb,
   last_roll integer,
   updated_at timestamptz not null default now()
@@ -23,6 +23,9 @@ create table if not exists public.game_events (
 create index if not exists game_events_game_id_idx
   on public.game_events(game_id, version desc);
 
+create unique index if not exists game_events_game_id_version_unique
+  on public.game_events(game_id, version);
+
 alter table public.game_state enable row level security;
 alter table public.game_events enable row level security;
 
@@ -32,27 +35,8 @@ create policy "game_state_select_all"
   to anon, authenticated
   using (true);
 
-create policy "game_state_insert_authenticated"
-  on public.game_state
-  for insert
-  to authenticated
-  with check (true);
-
-create policy "game_state_update_authenticated"
-  on public.game_state
-  for update
-  to authenticated
-  using (true)
-  with check (true);
-
 create policy "game_events_select_all"
   on public.game_events
   for select
   to anon, authenticated
   using (true);
-
-create policy "game_events_insert_authenticated"
-  on public.game_events
-  for insert
-  to authenticated
-  with check (true);
