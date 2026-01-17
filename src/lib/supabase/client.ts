@@ -28,7 +28,27 @@ const baseHeaders = {
   "Content-Type": "application/json",
 };
 
-const isConfigured = () => Boolean(supabaseUrl && supabaseAnonKey);
+const getSupabaseConfig = () => {
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return null;
+  }
+
+  return {
+    supabaseUrl,
+    supabaseAnonKey,
+  };
+};
+
+const requireSupabaseConfig = () => {
+  const config = getSupabaseConfig();
+  if (!config) {
+    throw new Error("Supabase is not configured.");
+  }
+
+  return config;
+};
+
+const isConfigured = () => Boolean(getSupabaseConfig());
 let realtimeClient: SupabaseClient | null = null;
 
 const getRealtimeClient = () => {
@@ -36,12 +56,13 @@ const getRealtimeClient = () => {
     return null;
   }
 
-  if (!isConfigured()) {
+  const config = getSupabaseConfig();
+  if (!config) {
     return null;
   }
 
   if (!realtimeClient) {
-    realtimeClient = createClient(supabaseUrl, supabaseAnonKey, {
+    realtimeClient = createClient(config.supabaseUrl, config.supabaseAnonKey, {
       auth: {
         persistSession: false,
       },
@@ -84,7 +105,7 @@ const clearSession = () => {
   window.localStorage.removeItem(storageKey);
 };
 
-const fetchUser = async (accessToken: string) => {
+const fetchUser = async (supabaseUrl: string, accessToken: string) => {
   const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
     headers: {
       ...baseHeaders,
@@ -100,7 +121,7 @@ const fetchUser = async (accessToken: string) => {
   return data;
 };
 
-const refreshSession = async (refreshToken: string) => {
+const refreshSession = async (supabaseUrl: string, refreshToken: string) => {
   const response = await fetch(
     `${supabaseUrl}/auth/v1/token?grant_type=refresh_token`,
     {
@@ -134,7 +155,7 @@ const refreshSession = async (refreshToken: string) => {
   return session;
 };
 
-const parseSessionFromUrl = async () => {
+const parseSessionFromUrl = async (supabaseUrl: string) => {
   if (typeof window === "undefined") {
     return null;
   }
@@ -153,7 +174,7 @@ const parseSessionFromUrl = async () => {
     return null;
   }
 
-  const user = await fetchUser(accessToken);
+  const user = await fetchUser(supabaseUrl, accessToken);
   if (!user) {
     return null;
   }
@@ -172,11 +193,12 @@ const parseSessionFromUrl = async () => {
 };
 
 const getSession = async () => {
-  if (!isConfigured()) {
+  const config = getSupabaseConfig();
+  if (!config) {
     return null;
   }
 
-  const urlSession = await parseSessionFromUrl();
+  const urlSession = await parseSessionFromUrl(config.supabaseUrl);
   if (urlSession) {
     return urlSession;
   }
@@ -190,13 +212,11 @@ const getSession = async () => {
     return stored;
   }
 
-  return refreshSession(stored.refresh_token);
+  return refreshSession(config.supabaseUrl, stored.refresh_token);
 };
 
 const signInWithOtp = async (email: string) => {
-  if (!isConfigured()) {
-    throw new Error("Supabase is not configured.");
-  }
+  const config = requireSupabaseConfig();
 
   const redirectTo = getSiteUrl();
 
@@ -207,7 +227,7 @@ const signInWithOtp = async (email: string) => {
     },
   };
 
-  const response = await fetch(`${supabaseUrl}/auth/v1/otp`, {
+  const response = await fetch(`${config.supabaseUrl}/auth/v1/otp`, {
     method: "POST",
     headers: baseHeaders,
     body: JSON.stringify(payload),
@@ -220,7 +240,8 @@ const signInWithOtp = async (email: string) => {
 };
 
 const signOut = async (accessToken: string) => {
-  await fetch(`${supabaseUrl}/auth/v1/logout`, {
+  const config = requireSupabaseConfig();
+  await fetch(`${config.supabaseUrl}/auth/v1/logout`, {
     method: "POST",
     headers: {
       ...baseHeaders,
@@ -236,7 +257,8 @@ const fetchFromSupabase = async <T>(
   options: RequestInit = {},
   accessToken?: string,
 ): Promise<T> => {
-  const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
+  const config = requireSupabaseConfig();
+  const response = await fetch(`${config.supabaseUrl}/rest/v1/${path}`, {
     ...options,
     headers: {
       ...baseHeaders,
