@@ -2,23 +2,28 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
-First, run the development server:
+First, install dependencies and run the development server:
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Supabase setup (Phase 3 scaffold)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Create a Supabase project and add the environment variables shown in `.env.example`:
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+
+Create the tables used by the scaffold UI:
+
+- `games` (`id` uuid, `join_code` text, `created_by` uuid, `created_at` timestamp)
+- `players` (`id` uuid, `game_id` uuid, `user_id` uuid, `display_name` text, `created_at` timestamp)
+
+With auth enabled, the app sends a magic link and stores the session locally after sign-in. You can then create or join a lobby from the home screen.
 
 ## Learn More
 
