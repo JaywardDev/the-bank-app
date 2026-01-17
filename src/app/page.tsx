@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { getConfigErrors, SITE_URL } from "@/lib/env";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 
 const lastGameKey = "bank.lastGameId";
@@ -37,13 +38,8 @@ export default function Home() {
   const [authLoading, setAuthLoading] = useState(true);
 
   const isConfigured = useMemo(() => supabaseClient.isConfigured(), []);
-  const magicLinkRedirectTo = useMemo(() => {
-    return supabaseClient.getMagicLinkRedirectUrl();
-  }, []);
-
-  useEffect(() => {
-    console.debug("Magic link redirectTo:", magicLinkRedirectTo);
-  }, [magicLinkRedirectTo]);
+  const configErrors = useMemo(() => getConfigErrors(), []);
+  const hasConfigErrors = configErrors.length > 0;
 
   const loadLobby = useCallback(
     async (gameId: string, accessToken: string) => {
@@ -136,14 +132,11 @@ export default function Home() {
     setNotice(null);
 
     try {
-      if (!magicLinkRedirectTo) {
-        setNotice(
-          "Missing NEXT_PUBLIC_SITE_URL for magic link redirect in production.",
-        );
+      if (hasConfigErrors) {
+        setNotice("Fix configuration errors before signing in.");
         return;
       }
 
-      console.log(`Magic link redirect_to = ${magicLinkRedirectTo}`);
       await supabaseClient.signInWithOtp(authEmail);
       setNotice("Magic link sent! Check your inbox to finish sign-in.");
     } catch (error) {
@@ -321,10 +314,14 @@ export default function Home() {
           </p>
         </header>
 
-        {!isConfigured ? (
+        {hasConfigErrors ? (
           <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-            Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to
-            begin.
+            <div className="font-semibold">Configuration required</div>
+            <ul className="mt-2 list-disc space-y-1 pl-5">
+              {configErrors.map((error) => (
+                <li key={error}>{error}</li>
+              ))}
+            </ul>
           </div>
         ) : null}
 
@@ -370,7 +367,7 @@ export default function Home() {
                 className="w-full rounded-xl bg-neutral-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-400"
                 type="button"
                 onClick={handleSendMagicLink}
-                disabled={loadingAction === "auth"}
+                disabled={loadingAction === "auth" || hasConfigErrors}
               >
                 {loadingAction === "auth" ? "Sending…" : "Send magic link"}
               </button>
@@ -478,9 +475,16 @@ export default function Home() {
           </div>
         ) : null}
 
-        <footer className="text-xs text-neutral-500">
-          Phase 3: Supabase auth + create/join scaffold • Bank-authoritative
-          logic coming next
+        <footer className="space-y-1 text-xs text-neutral-500">
+          <div>
+            Phase 3: Supabase auth + create/join scaffold • Bank-authoritative
+            logic coming next
+          </div>
+          {!hasConfigErrors ? (
+            <div className="text-[10px] text-neutral-400">
+              Config OK • SITE_URL: {SITE_URL}
+            </div>
+          ) : null}
         </footer>
       </div>
     </main>

@@ -1,7 +1,12 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import {
+  SUPABASE_ANON_KEY,
+  SUPABASE_URL,
+  getSiteUrl,
+} from "@/lib/env";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
+const supabaseUrl = SUPABASE_URL;
+const supabaseAnonKey = SUPABASE_ANON_KEY;
 
 const storageKey = "bank.supabase.session";
 
@@ -19,22 +24,12 @@ export type SupabaseSession = {
 };
 
 const baseHeaders = {
-  apikey: supabaseAnonKey,
+  ...(supabaseAnonKey ? { apikey: supabaseAnonKey } : {}),
   "Content-Type": "application/json",
 };
 
 const isConfigured = () => Boolean(supabaseUrl && supabaseAnonKey);
 let realtimeClient: SupabaseClient | null = null;
-
-const getMagicLinkRedirectUrl = () => {
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim() ?? "";
-
-  if (!siteUrl) {
-    return "";
-  }
-
-  return siteUrl;
-};
 
 const getRealtimeClient = () => {
   if (typeof window === "undefined") {
@@ -199,22 +194,18 @@ const getSession = async () => {
 };
 
 const signInWithOtp = async (email: string) => {
-  const redirectTo = getMagicLinkRedirectUrl();
-
-  if (!redirectTo) {
-    throw new Error(
-      "Missing NEXT_PUBLIC_SITE_URL for magic link redirects.",
-    );
+  if (!isConfigured()) {
+    throw new Error("Supabase is not configured.");
   }
+
+  const redirectTo = getSiteUrl();
 
   const payload = {
     email,
     options: {
-      emailRedirectTo: redirectTo,
+      email_redirect_to: redirectTo,
     },
   };
-
-  console.log("Supabase OTP request payload:", payload);
 
   const response = await fetch(`${supabaseUrl}/auth/v1/otp`, {
     method: "POST",
@@ -264,7 +255,6 @@ const fetchFromSupabase = async <T>(
 
 export const supabaseClient = {
   isConfigured,
-  getMagicLinkRedirectUrl,
   getRealtimeClient,
   getSession,
   signInWithOtp,
