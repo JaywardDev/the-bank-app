@@ -40,15 +40,11 @@ export default function Home() {
   const magicLinkRedirectTo = useMemo(() => {
     const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
 
-    if (siteUrl) {
-      return siteUrl;
+    if (process.env.NODE_ENV === "production") {
+      return siteUrl ?? "";
     }
 
-    if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
-      return window.location.origin;
-    }
-
-    return "";
+    return siteUrl ?? "http://localhost:3000";
   }, []);
 
   useEffect(() => {
@@ -147,10 +143,13 @@ export default function Home() {
 
     try {
       if (!magicLinkRedirectTo) {
-        setNotice("Missing NEXT_PUBLIC_SITE_URL for magic link redirect.");
+        setNotice(
+          "Missing NEXT_PUBLIC_SITE_URL for magic link redirect in production.",
+        );
         return;
       }
 
+      console.log(`Magic link redirect_to = ${magicLinkRedirectTo}`);
       await supabaseClient.signInWithOtp(authEmail, magicLinkRedirectTo);
       setNotice("Magic link sent! Check your inbox to finish sign-in.");
     } catch (error) {
