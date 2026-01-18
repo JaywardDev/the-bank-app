@@ -21,8 +21,10 @@ Create a Supabase project and add the environment variables shown in `.env.examp
 
 Create the tables used by the scaffold UI:
 
-- `games` (`id` uuid, `join_code` text, `created_by` uuid, `created_at` timestamp)
-- `players` (`id` uuid, `game_id` uuid, `user_id` uuid, `display_name` text, `created_at` timestamp)
+- `games` (`id` uuid, `join_code` text, `status` text, `created_at` timestamptz, `created_by` uuid, `starting_cash` int4)
+- `players` (`id` uuid, `game_id` uuid, `user_id` uuid, `display_name` text, `created_at` timestamptz)
+- `game_state` (`game_id` uuid, `version` int4, `current_player_id` uuid, `balances` jsonb, `last_roll` int4, `updated_at` timestamptz)
+- `game_events` (`id` uuid, `game_id` uuid, `version` int4, `event_type` text, `payload` jsonb, `created_at` timestamptz, `created_by` uuid)
 
 With auth enabled, the app sends a magic link and stores the session locally after sign-in. You can then create or join a lobby from the home screen.
 
