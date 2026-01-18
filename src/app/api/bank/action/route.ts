@@ -49,7 +49,7 @@ type PlayerRow = {
 type GameStateRow = {
   game_id: string;
   version: number;
-  current_player_user_id: string | null;
+  current_player_id: string | null;
   balances: Record<string, number> | null;
   last_roll: number | null;
 };
@@ -212,7 +212,7 @@ export async function POST(request: Request) {
       };
 
       await fetchFromSupabaseWithService<GameStateRow[]>(
-        "game_state?select=game_id,version,current_player_user_id,balances,last_roll",
+        "game_state?select=game_id,version,current_player_id,balances,last_roll",
         {
           method: "POST",
           headers: {
@@ -221,7 +221,7 @@ export async function POST(request: Request) {
           body: JSON.stringify({
             game_id: game.id,
             version: 0,
-            current_player_user_id: null,
+            current_player_id: null,
             balances,
             last_roll: null,
             updated_at: new Date().toISOString(),
@@ -267,7 +267,7 @@ export async function POST(request: Request) {
     );
 
     const [gameState] = await fetchFromSupabase<GameStateRow[]>(
-      `game_state?select=game_id,version,current_player_user_id,balances,last_roll&game_id=eq.${gameId}&limit=1`,
+      `game_state?select=game_id,version,current_player_id,balances,last_roll&game_id=eq.${gameId}&limit=1`,
       { method: "GET" },
     );
 
@@ -320,7 +320,7 @@ export async function POST(request: Request) {
           body: JSON.stringify({
             game_id: gameId,
             version: nextVersion,
-            current_player_user_id: players[0].user_id,
+            current_player_id: players[0].user_id,
             balances,
             last_roll: null,
             updated_at: new Date().toISOString(),
@@ -362,7 +362,7 @@ export async function POST(request: Request) {
     }
 
     const currentPlayer = players.find(
-      (player) => player.user_id === gameState.current_player_user_id,
+      (player) => player.user_id === gameState.current_player_id,
     );
 
     if (!currentPlayer) {
@@ -433,7 +433,7 @@ export async function POST(request: Request) {
 
     if (body.action === "END_TURN") {
       const currentIndex = players.findIndex(
-        (player) => player.user_id === gameState.current_player_user_id,
+        (player) => player.user_id === gameState.current_player_id,
       );
       const nextIndex =
         currentIndex === -1 ? 0 : (currentIndex + 1) % players.length;
@@ -448,7 +448,7 @@ export async function POST(request: Request) {
           },
           body: JSON.stringify({
             version: nextVersion,
-            current_player_user_id: nextPlayer.user_id,
+            current_player_id: nextPlayer.user_id,
             updated_at: new Date().toISOString(),
           }),
         },
