@@ -18,6 +18,8 @@ const bankHeaders = {
   "Content-Type": "application/json",
 };
 
+const STARTING_BALANCE = 1500;
+
 type ActionRequest = {
   gameId?: string;
   playerName?: string;
@@ -183,7 +185,7 @@ export async function POST(request: Request) {
         );
       }
 
-      await fetchFromSupabaseWithService<PlayerRow[]>(
+      const [hostPlayer] = await fetchFromSupabaseWithService<PlayerRow[]>(
         "players?select=id,user_id,display_name,created_at",
         {
           method: "POST",
@@ -198,8 +200,19 @@ export async function POST(request: Request) {
         },
       );
 
+      if (!hostPlayer) {
+        return NextResponse.json(
+          { error: "Unable to create the host player." },
+          { status: 500 },
+        );
+      }
+
+      const balances: Record<string, number> = {
+        [hostPlayer.id]: STARTING_BALANCE,
+      };
+
       await fetchFromSupabaseWithService<GameStateRow[]>(
-        "game_state?select=game_id,version,current_player_id,balances,last_roll",
+        "game_state?select=game_id,version,current_player_user_id,balances,last_roll",
         {
           method: "POST",
           headers: {
@@ -208,8 +221,8 @@ export async function POST(request: Request) {
           body: JSON.stringify({
             game_id: game.id,
             version: 0,
-            current_player_id: null,
-            balances: null,
+            current_player_user_id: null,
+            balances,
             last_roll: null,
             updated_at: new Date().toISOString(),
           }),
