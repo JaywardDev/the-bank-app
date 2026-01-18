@@ -38,6 +38,7 @@ export default function PlayPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"wallet" | "board">("wallet");
 
   const isConfigured = useMemo(() => supabaseClient.isConfigured(), []);
 
@@ -259,7 +260,38 @@ export default function PlayPage() {
         </div>
       ) : null}
 
-      <section className="space-y-4">
+      <section className="rounded-2xl border bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+              View mode
+            </p>
+            <p className="text-sm text-neutral-600">
+              Switch between wallet controls and a read-only board projection.
+            </p>
+          </div>
+          <div className="inline-flex rounded-full border border-neutral-200 bg-neutral-100 p-1">
+            {(["wallet", "board"] as const).map((mode) => (
+              <button
+                key={mode}
+                className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-wide transition ${
+                  viewMode === mode
+                    ? "bg-neutral-900 text-white"
+                    : "text-neutral-500 hover:text-neutral-700"
+                }`}
+                type="button"
+                onClick={() => setViewMode(mode)}
+              >
+                {mode === "wallet" ? "Wallet view" : "Board view"}
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {viewMode === "wallet" ? (
+        <>
+          <section className="space-y-4">
         <div className="rounded-2xl border bg-white p-5 shadow-sm space-y-4">
           <div className="flex items-start justify-between">
             <div>
@@ -533,6 +565,141 @@ export default function PlayPage() {
           </button>
         </div>
       </section>
+        </>
+      ) : (
+        <section className="space-y-4">
+          <div className="rounded-2xl border bg-white p-5 shadow-sm space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                  Board projection
+                </p>
+                <p className="text-lg font-semibold text-neutral-900">
+                  Read-only landscape view
+                </p>
+              </div>
+              <span className="text-xs text-neutral-400">Actions hidden</span>
+            </div>
+            <div className="flex h-56 items-center justify-center rounded-2xl border border-dashed border-neutral-200 bg-neutral-50 text-center text-sm text-neutral-500">
+              Board map placeholder (properties, tokens, and auctions)
+            </div>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
+            <div className="rounded-2xl border bg-white p-5 shadow-sm space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                Current turn
+              </p>
+              <p className="text-2xl font-semibold text-neutral-900">
+                {currentPlayer?.display_name ?? "Waiting for start"}
+              </p>
+              <p className="text-sm text-neutral-500">
+                Last roll: {gameState?.last_roll ?? "—"}
+              </p>
+              <div className="grid gap-3 pt-2 sm:grid-cols-2">
+                <div className="rounded-2xl border border-dashed border-neutral-200 p-3 text-sm text-neutral-600">
+                  Active phase placeholder
+                </div>
+                <div className="rounded-2xl border border-dashed border-neutral-200 p-3 text-sm text-neutral-600">
+                  Next player placeholder
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border bg-white p-5 shadow-sm space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                Turn order
+              </p>
+              <ol className="space-y-3 text-sm">
+                {players.length === 0 ? (
+                  <li className="rounded-2xl border border-dashed border-neutral-200 p-4 text-center text-neutral-500">
+                    No players yet.
+                  </li>
+                ) : (
+                  players.map((player, index) => (
+                    <li
+                      key={player.id}
+                      className={`flex items-center justify-between rounded-2xl border px-4 py-3 ${
+                        player.id === currentPlayer?.id
+                          ? "border-neutral-900 bg-neutral-50"
+                          : "border-neutral-200"
+                      }`}
+                    >
+                      <span className="font-medium text-neutral-800">
+                        {player.display_name ?? "Player"}
+                      </span>
+                      <span className="text-xs text-neutral-400">
+                        #{index + 1}
+                      </span>
+                    </li>
+                  ))
+                )}
+              </ol>
+            </div>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
+            <div className="rounded-2xl border bg-white p-5 shadow-sm space-y-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                  Event log
+                </p>
+                <p className="text-sm text-neutral-600">
+                  Live board feed synced from the bank.
+                </p>
+              </div>
+              <div className="space-y-3 text-sm">
+                {events.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-neutral-200 p-4 text-center text-neutral-500">
+                    Events will appear once the game starts.
+                  </div>
+                ) : (
+                  events.map((event) => (
+                    <div
+                      key={event.id}
+                      className="rounded-2xl border border-neutral-200 px-4 py-3"
+                    >
+                      <div className="flex items-center justify-between text-xs uppercase text-neutral-400">
+                        <span>{event.event_type.replaceAll("_", " ")}</span>
+                        <span>v{event.version}</span>
+                      </div>
+                      <p className="mt-2 text-sm text-neutral-700">
+                        Event details placeholder
+                      </p>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border bg-white p-5 shadow-sm space-y-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                Economy summary
+              </p>
+              <div className="space-y-3 text-sm">
+                {[
+                  { label: "Bank balance", value: "$205,000" },
+                  { label: "Cash in circulation", value: "$74,300" },
+                  { label: "Properties owned", value: "16 / 28" },
+                  { label: "Trades pending", value: "3" },
+                ].map((item) => (
+                  <div
+                    key={item.label}
+                    className="rounded-2xl border border-dashed border-neutral-200 p-3"
+                  >
+                    <p className="text-xs uppercase tracking-wide text-neutral-400">
+                      {item.label}
+                    </p>
+                    <p className="text-lg font-semibold text-neutral-900">
+                      {item.value}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
     </PageShell>
   );
 }

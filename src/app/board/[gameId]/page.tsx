@@ -4,12 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import PageShell from "@/app/components/PageShell";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 
-type Game = {
-  id: string;
-  join_code: string;
-  created_at: string | null;
-};
-
 type Player = {
   id: string;
   user_id: string;
@@ -32,15 +26,14 @@ type GameEvent = {
   version: number;
 };
 
-type BoardLobbyPageProps = {
+type BoardDisplayPageProps = {
   params: {
     gameId: string;
   };
 };
 
-export default function BoardLobbyPage({ params }: BoardLobbyPageProps) {
+export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
   const [session, setSession] = useState<SupabaseSession | null>(null);
-  const [game, setGame] = useState<Game | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [events, setEvents] = useState<GameEvent[]>([]);
@@ -49,34 +42,43 @@ export default function BoardLobbyPage({ params }: BoardLobbyPageProps) {
 
   const isConfigured = useMemo(() => supabaseClient.isConfigured(), []);
 
-  const loadPlayers = useCallback(async (accessToken?: string) => {
-    const playerRows = await supabaseClient.fetchFromSupabase<Player[]>(
-      `players?select=id,user_id,display_name,created_at&game_id=eq.${params.gameId}&order=created_at.asc`,
-      { method: "GET" },
-      accessToken,
-    );
-    setPlayers(playerRows);
-  }, [params.gameId]);
+  const loadPlayers = useCallback(
+    async (accessToken?: string) => {
+      const playerRows = await supabaseClient.fetchFromSupabase<Player[]>(
+        `players?select=id,user_id,display_name,created_at&game_id=eq.${params.gameId}&order=created_at.asc`,
+        { method: "GET" },
+        accessToken,
+      );
+      setPlayers(playerRows);
+    },
+    [params.gameId],
+  );
 
-  const loadGameState = useCallback(async (accessToken?: string) => {
-    const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
-      `game_state?select=game_id,version,current_player_id,last_roll&game_id=eq.${params.gameId}&limit=1`,
-      { method: "GET" },
-      accessToken,
-    );
-    setGameState(stateRow ?? null);
-  }, [params.gameId]);
+  const loadGameState = useCallback(
+    async (accessToken?: string) => {
+      const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
+        `game_state?select=game_id,version,current_player_id,last_roll&game_id=eq.${params.gameId}&limit=1`,
+        { method: "GET" },
+        accessToken,
+      );
+      setGameState(stateRow ?? null);
+    },
+    [params.gameId],
+  );
 
-  const loadEvents = useCallback(async (accessToken?: string) => {
-    const eventRows = await supabaseClient.fetchFromSupabase<GameEvent[]>(
-      `game_events?select=id,event_type,payload,created_at,version&game_id=eq.${params.gameId}&order=version.desc&limit=8`,
-      { method: "GET" },
-      accessToken,
-    );
-    setEvents(eventRows);
-  }, [params.gameId]);
+  const loadEvents = useCallback(
+    async (accessToken?: string) => {
+      const eventRows = await supabaseClient.fetchFromSupabase<GameEvent[]>(
+        `game_events?select=id,event_type,payload,created_at,version&game_id=eq.${params.gameId}&order=version.desc&limit=12`,
+        { method: "GET" },
+        accessToken,
+      );
+      setEvents(eventRows);
+    },
+    [params.gameId],
+  );
 
-  const loadLobby = useCallback(async () => {
+  const loadBoardData = useCallback(async () => {
     if (!isConfigured) {
       setLoading(false);
       return;
@@ -89,82 +91,25 @@ export default function BoardLobbyPage({ params }: BoardLobbyPageProps) {
       const currentSession = await supabaseClient.getSession();
       setSession(currentSession);
 
-      const [gameRow] = await supabaseClient.fetchFromSupabase<Game[]>(
-        `games?select=id,join_code,created_at&id=eq.${params.gameId}&limit=1`,
-        { method: "GET" },
-        currentSession?.access_token,
-      );
-
-      if (!gameRow) {
-        throw new Error("Game not found.");
-      }
-
-      setGame(gameRow);
-      await loadPlayers(currentSession?.access_token);
-      await loadGameState(currentSession?.access_token);
-      await loadEvents(currentSession?.access_token);
+      await Promise.all([
+        loadPlayers(currentSession?.access_token),
+        loadGameState(currentSession?.access_token),
+        loadEvents(currentSession?.access_token),
+      ]);
     } catch (error) {
       if (error instanceof Error) {
         setErrorMessage(error.message);
       } else {
-        setErrorMessage("Unable to load the lobby.");
+        setErrorMessage("Unable to load board data.");
       }
     } finally {
       setLoading(false);
     }
-  }, [isConfigured, loadEvents, loadGameState, loadPlayers, params.gameId]);
-
-  const refreshPlayers = useCallback(async () => {
-    if (!isConfigured) {
-      return;
-    }
-
-    try {
-      await loadPlayers(session?.access_token);
-    } catch (error) {
-      if (error instanceof Error) {
-        setErrorMessage(error.message);
-      } else {
-        setErrorMessage("Unable to refresh players.");
-      }
-    }
-  }, [isConfigured, loadPlayers, session?.access_token]);
-
-  const refreshGameState = useCallback(async () => {
-    if (!isConfigured) {
-      return;
-    }
-
-    try {
-      await loadGameState(session?.access_token);
-    } catch (error) {
-      if (error instanceof Error) {
-        setErrorMessage(error.message);
-      } else {
-        setErrorMessage("Unable to refresh game state.");
-      }
-    }
-  }, [isConfigured, loadGameState, session?.access_token]);
-
-  const refreshEvents = useCallback(async () => {
-    if (!isConfigured) {
-      return;
-    }
-
-    try {
-      await loadEvents(session?.access_token);
-    } catch (error) {
-      if (error instanceof Error) {
-        setErrorMessage(error.message);
-      } else {
-        setErrorMessage("Unable to refresh game events.");
-      }
-    }
-  }, [isConfigured, loadEvents, session?.access_token]);
+  }, [isConfigured, loadEvents, loadGameState, loadPlayers]);
 
   useEffect(() => {
-    void loadLobby();
-  }, [loadLobby]);
+    void loadBoardData();
+  }, [loadBoardData]);
 
   useEffect(() => {
     if (!isConfigured) {
@@ -177,7 +122,7 @@ export default function BoardLobbyPage({ params }: BoardLobbyPageProps) {
     }
 
     const channel = realtimeClient
-      .channel(`board-lobby:${params.gameId}`)
+      .channel(`board-display:${params.gameId}`)
       .on(
         "postgres_changes",
         {
@@ -187,7 +132,7 @@ export default function BoardLobbyPage({ params }: BoardLobbyPageProps) {
           filter: `game_id=eq.${params.gameId}`,
         },
         () => {
-          void refreshPlayers();
+          void loadPlayers(session?.access_token);
         },
       )
       .on(
@@ -199,7 +144,7 @@ export default function BoardLobbyPage({ params }: BoardLobbyPageProps) {
           filter: `game_id=eq.${params.gameId}`,
         },
         () => {
-          void refreshGameState();
+          void loadGameState(session?.access_token);
         },
       )
       .on(
@@ -211,7 +156,7 @@ export default function BoardLobbyPage({ params }: BoardLobbyPageProps) {
           filter: `game_id=eq.${params.gameId}`,
         },
         () => {
-          void refreshEvents();
+          void loadEvents(session?.access_token);
         },
       )
       .subscribe();
@@ -221,40 +166,33 @@ export default function BoardLobbyPage({ params }: BoardLobbyPageProps) {
     };
   }, [
     isConfigured,
+    loadEvents,
+    loadGameState,
+    loadPlayers,
     params.gameId,
-    refreshEvents,
-    refreshGameState,
-    refreshPlayers,
+    session?.access_token,
   ]);
 
   const currentPlayer = players.find(
     (player) => player.user_id === gameState?.current_player_id,
   );
 
-  const lobbyStatus = loading
-    ? "Syncing lobby…"
-    : errorMessage
-      ? "Waiting for connection"
-      : players.length > 0
-        ? "Waiting for the bank to start"
-        : "Waiting for players to join";
-
   return (
     <PageShell
-      title="Board Lobby"
-      subtitle="Big-screen view for the table before the game begins."
+      title="Board Display"
+      subtitle="Read-only, large-screen projection of the live table."
       variant="board"
     >
       {!isConfigured ? (
-        <div className="rounded-3xl border border-amber-200 bg-amber-100 p-6 text-amber-900">
+        <div className="rounded-3xl border border-amber-200/30 bg-amber-500/10 p-6 text-amber-100">
           Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to
-          enable live lobby updates.
+          enable live board updates.
         </div>
       ) : null}
 
       {loading ? (
         <div className="rounded-3xl border border-white/10 bg-white/5 p-6 text-lg text-white/70">
-          Loading lobby…
+          Loading board…
         </div>
       ) : null}
 
@@ -264,148 +202,163 @@ export default function BoardLobbyPage({ params }: BoardLobbyPageProps) {
         </div>
       ) : null}
 
-      {game ? (
-        <section className="grid gap-6 lg:grid-cols-[2fr_1fr]">
-          <div className="rounded-3xl border border-white/10 bg-white/5 p-6 md:p-8 space-y-6">
-            <div className="flex items-center justify-between">
+      <section className="grid gap-6 lg:grid-cols-[2fr_1fr]">
+        <div className="rounded-3xl border border-white/10 bg-white/5 p-6 md:p-8 space-y-6">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/60">
+              Board map
+            </p>
+            <span className="text-xs text-white/50">Projection only</span>
+          </div>
+          <div className="flex h-[320px] items-center justify-center rounded-3xl border border-dashed border-white/20 bg-black/30 text-center text-sm text-white/60 md:h-[420px]">
+            Board map placeholder (properties, tokens, and auctions)
+          </div>
+          <div className="grid gap-4 md:grid-cols-3">
+            {[
+              { label: "Bank balance", value: "$205,000" },
+              { label: "Cash in circulation", value: "$74,300" },
+              { label: "Properties owned", value: "16 / 28" },
+            ].map((stat) => (
+              <div
+                key={stat.label}
+                className="rounded-2xl border border-white/10 bg-black/30 p-4"
+              >
+                <p className="text-xs uppercase tracking-wide text-white/50">
+                  {stat.label}
+                </p>
+                <p className="text-2xl font-semibold text-white">{stat.value}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div className="rounded-3xl border border-white/10 bg-white/5 p-6 space-y-4">
+            <div>
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/60">
-                Join code
+                Current turn
               </p>
-              <span className="text-xs text-white/50">Lobby open</span>
+              <p className="text-3xl font-semibold">
+                {currentPlayer?.display_name ?? "Waiting for start"}
+              </p>
+              <p className="text-sm text-white/70">
+                Last roll: {gameState?.last_roll ?? "—"}
+              </p>
             </div>
-            <div className="rounded-3xl border border-white/10 bg-black/40 px-6 py-8 text-center">
-              <div className="text-sm uppercase tracking-[0.4em] text-white/60">
-                Share this code
-              </div>
-              <div className="mt-3 text-4xl font-semibold tracking-[0.4em] text-white">
-                {game.join_code}
-              </div>
-            </div>
-            <div className="grid gap-4 md:grid-cols-3">
-              <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
-                <p className="text-xs uppercase tracking-wide text-white/50">
-                  Lobby status
-                </p>
-                <p className="text-lg font-semibold text-white">
-                  {lobbyStatus}
-                </p>
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
-                <p className="text-xs uppercase tracking-wide text-white/50">
-                  Players ready
-                </p>
-                <p className="text-2xl font-semibold text-white">
-                  {players.length}
-                </p>
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
-                <p className="text-xs uppercase tracking-wide text-white/50">
-                  Game ID
-                </p>
-                <p className="truncate text-sm font-semibold text-white">
-                  {game.id}
-                </p>
-              </div>
-            </div>
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
-                <p className="text-xs uppercase tracking-wide text-white/50">
-                  Current turn
-                </p>
-                <p className="text-lg font-semibold text-white">
-                  {currentPlayer?.display_name ?? "Waiting for start"}
-                </p>
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
-                <p className="text-xs uppercase tracking-wide text-white/50">
-                  Last roll
-                </p>
-                <p className="text-2xl font-semibold text-white">
-                  {gameState?.last_roll ?? "—"}
-                </p>
-              </div>
+            <div className="rounded-2xl border border-white/10 bg-black/30 p-4 space-y-3">
+              <p className="text-xs uppercase tracking-wide text-white/50">
+                Active phase
+              </p>
+              <p className="text-lg font-semibold">
+                Rolling + trade confirmation
+              </p>
+              <p className="text-sm text-white/60">Next: TBD</p>
             </div>
           </div>
+          <div className="rounded-3xl border border-white/10 bg-white/5 p-6 space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/60">
+              Turn order
+            </p>
+            <ol className="space-y-3 text-lg">
+              {players.length === 0 ? (
+                <li className="rounded-2xl border border-dashed border-white/20 bg-black/30 px-4 py-6 text-center text-sm text-white/60">
+                  No players yet.
+                </li>
+              ) : (
+                players.map((player, index) => (
+                  <li
+                    key={player.id}
+                    className={`flex items-center justify-between rounded-2xl border border-white/10 px-4 py-3 ${
+                      player.id === currentPlayer?.id
+                        ? "bg-white/10"
+                        : "bg-black/20"
+                    }`}
+                  >
+                    <span>{player.display_name ?? "Player"}</span>
+                    <span className="text-sm text-white/60">#{index + 1}</span>
+                  </li>
+                ))
+              )}
+            </ol>
+          </div>
+        </div>
+      </section>
 
+      <section className="grid gap-6 lg:grid-cols-[1.2fr_1fr]">
+        <div className="rounded-3xl border border-white/10 bg-white/5 p-6 md:p-8 space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/60">
+              Event log
+            </p>
+            <span className="text-xs text-white/50">Read-only feed</span>
+          </div>
+          <ul className="space-y-3 text-base">
+            {events.length === 0 ? (
+              <li className="rounded-2xl border border-dashed border-white/20 bg-black/30 px-4 py-5 text-center text-xs text-white/50">
+                Events will appear once the game starts.
+              </li>
+            ) : (
+              events.map((event) => (
+                <li
+                  key={event.id}
+                  className="rounded-2xl border border-white/10 bg-black/30 px-4 py-3"
+                >
+                  <div className="flex items-center justify-between text-xs uppercase tracking-wide text-white/50">
+                    <span>{event.event_type.replaceAll("_", " ")}</span>
+                    <span>v{event.version}</span>
+                  </div>
+                  <p className="mt-2 text-sm text-white/80">
+                    Event details placeholder
+                  </p>
+                </li>
+              ))
+            )}
+          </ul>
+        </div>
+
+        <div className="rounded-3xl border border-white/10 bg-white/5 p-6 space-y-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/60">
+            Economy summary
+          </p>
           <div className="space-y-4">
-            <div className="rounded-3xl border border-white/10 bg-white/5 p-6 space-y-4">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/60">
-                  Players in lobby
+            {[
+              {
+                label: "Bank balance",
+                value: "$205,000",
+                note: "Placeholder until live metrics",
+              },
+              {
+                label: "Cash in circulation",
+                value: "$74,300",
+                note: "Placeholder",
+              },
+              {
+                label: "Trades pending",
+                value: "3",
+                note: "Placeholder",
+              },
+              {
+                label: "Auction pressure",
+                value: "Moderate",
+                note: "Placeholder",
+              },
+            ].map((metric) => (
+              <div
+                key={metric.label}
+                className="rounded-2xl border border-white/10 bg-black/30 p-4"
+              >
+                <p className="text-xs uppercase tracking-wide text-white/50">
+                  {metric.label}
                 </p>
-                <p className="text-sm text-white/60">
-                  Updates automatically when someone joins or leaves.
+                <p className="text-2xl font-semibold text-white">
+                  {metric.value}
                 </p>
+                <p className="text-sm text-white/60">{metric.note}</p>
               </div>
-              <ul className="space-y-3 text-lg">
-                {players.length === 0 ? (
-                  <li className="rounded-2xl border border-dashed border-white/20 bg-black/30 px-4 py-6 text-center text-sm text-white/60">
-                    No players yet. Have everyone join with the code.
-                  </li>
-                ) : (
-                  players.map((player, index) => (
-                    <li
-                      key={player.id}
-                      className="flex items-center justify-between rounded-2xl border border-white/10 bg-black/30 px-4 py-3"
-                    >
-                      <span>{player.display_name ?? "Player"}</span>
-                      <span className="text-sm text-white/60">
-                        #{index + 1}
-                      </span>
-                    </li>
-                  ))
-                )}
-              </ul>
-            </div>
-            <div className="rounded-3xl border border-white/10 bg-white/5 p-6 space-y-3">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/60">
-                  Live event feed
-                </p>
-                <p className="text-sm text-white/60">
-                  Latest actions broadcast from the bank.
-                </p>
-              </div>
-              <ul className="space-y-3 text-sm text-white/70">
-                {events.length === 0 ? (
-                  <li className="rounded-2xl border border-dashed border-white/20 bg-black/30 px-4 py-5 text-center text-xs text-white/50">
-                    Events will appear once the game starts.
-                  </li>
-                ) : (
-                  events.map((event) => {
-                    const payload = event.payload as
-                      | { roll?: number; to_player_name?: string }
-                      | null;
-
-                    return (
-                      <li
-                        key={event.id}
-                        className="rounded-2xl border border-white/10 bg-black/30 px-4 py-3"
-                      >
-                        <div className="flex items-center justify-between text-xs uppercase tracking-wide text-white/50">
-                          <span>{event.event_type.replaceAll("_", " ")}</span>
-                          <span>v{event.version}</span>
-                        </div>
-                        <div className="mt-2 text-sm text-white">
-                          {event.event_type === "ROLL_DICE" &&
-                          typeof payload?.roll === "number"
-                            ? `Rolled ${payload.roll}`
-                            : event.event_type === "END_TURN" &&
-                                payload?.to_player_name
-                              ? `Turn → ${payload.to_player_name}`
-                              : event.event_type === "START_GAME"
-                                ? "Game started"
-                                : "Update received"}
-                        </div>
-                      </li>
-                    );
-                  })
-                )}
-              </ul>
-            </div>
+            ))}
           </div>
-        </section>
-      ) : null}
+        </div>
+      </section>
     </PageShell>
   );
 }
