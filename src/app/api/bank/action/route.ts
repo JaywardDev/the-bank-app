@@ -23,7 +23,9 @@ const STARTING_BALANCE = 1500;
 type ActionRequest = {
   gameId?: string;
   playerName?: string;
-  action?: "CREATE_GAME" | "START_GAME" | "ROLL_DICE" | "END_TURN";
+  joinCode?: string;
+  displayName?: string;
+  action?: "CREATE_GAME" | "JOIN_GAME" | "START_GAME" | "ROLL_DICE" | "END_TURN";
   expectedVersion?: number;
 };
 
@@ -35,7 +37,9 @@ type SupabaseUser = {
 type GameRow = {
   id: string;
   join_code: string | null;
+  status: string | null;
   starting_cash: number | null;
+  created_at: string | null;
   created_by: string | null;
 };
 
@@ -230,6 +234,78 @@ export async function POST(request: Request) {
       );
 
       return NextResponse.json({ gameId: game.id });
+    }
+
+    if (body.action === "JOIN_GAME") {
+      if (!body.displayName?.trim()) {
+        return NextResponse.json(
+          { error: "Missing displayName." },
+          { status: 400 },
+        );
+      }
+
+      if (!body.joinCode?.trim()) {
+        return NextResponse.json(
+          { error: "Missing joinCode." },
+          { status: 400 },
+        );
+      }
+
+      const joinCode = body.joinCode.trim().toUpperCase();
+
+      const [game] = await fetchFromSupabaseWithService<GameRow[]>(
+        `games?select=id,join_code,status,created_at&join_code=eq.${joinCode}&limit=1`,
+        { method: "GET" },
+      );
+
+      if (!game) {
+        return NextResponse.json(
+          { error: "No game found for that code." },
+          { status: 404 },
+        );
+      }
+
+      if (game.status && game.status !== "lobby") {
+        return NextResponse.json(
+          { error: "That game is already in progress." },
+          { status: 400 },
+        );
+      }
+
+      const [player] = await fetchFromSupabaseWithService<PlayerRow[]>(
+        "players?select=id,user_id,display_name,created_at&on_conflict=game_id,user_id",
+        {
+          method: "POST",
+          headers: {
+            Prefer: "resolution=merge-duplicates, return=representation",
+          },
+          body: JSON.stringify({
+            game_id: game.id,
+            user_id: user.id,
+            display_name: body.displayName.trim(),
+          }),
+        },
+      );
+
+      if (!player) {
+        return NextResponse.json(
+          { error: "Unable to join the game." },
+          { status: 500 },
+        );
+      }
+
+      const players = await fetchFromSupabaseWithService<PlayerRow[]>(
+        `players?select=id,user_id,display_name,created_at&game_id=eq.${game.id}&order=created_at.asc`,
+        { method: "GET" },
+      );
+
+      return NextResponse.json({
+        gameId: game.id,
+        join_code: game.join_code,
+        created_at: game.created_at,
+        player,
+        players,
+      });
     }
 
     if (!body.gameId) {

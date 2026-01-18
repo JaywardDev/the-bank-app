@@ -232,35 +232,46 @@ export default function Home() {
     setNotice(null);
 
     try {
-      const [game] = await supabaseClient.fetchFromSupabase<Game[]>(
-        `games?select=id,join_code,created_at&join_code=eq.${joinCode
-          .trim()
-          .toUpperCase()}&limit=1`,
-        { method: "GET" },
-        session.access_token,
-      );
+      const response = await fetch("/api/bank/action", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          action: "JOIN_GAME",
+          joinCode: joinCode.trim(),
+          displayName: playerName.trim(),
+        }),
+      });
 
-      if (!game) {
-        throw new Error("No game found for that code.");
+      if (!response.ok) {
+        const error = (await response.json()) as { error?: string };
+        throw new Error(error.error ?? "Unable to join the game.");
       }
 
-      await supabaseClient.fetchFromSupabase<Player[]>(
-        "players?select=id,display_name,created_at",
-        {
-          method: "POST",
-          headers: {
-            Prefer: "return=representation",
-          },
-          body: JSON.stringify({
-            game_id: game.id,
-            user_id: session.user.id,
-            display_name: playerName.trim(),
-          }),
-        },
-        session.access_token,
-      );
+      const data = (await response.json()) as {
+        gameId?: string;
+        join_code?: string | null;
+        created_at?: string | null;
+        players?: Player[];
+      };
 
-      await loadLobby(game.id, session.access_token);
+      if (!data.gameId || !data.join_code) {
+        throw new Error("Unable to join the game.");
+      }
+
+      setActiveGame({
+        id: data.gameId,
+        join_code: data.join_code,
+        created_at: data.created_at ?? null,
+      });
+      setPlayers(data.players ?? []);
+
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(lastGameKey, data.gameId);
+      }
+
       setNotice("You are in the lobby. Waiting for the host.");
     } catch (error) {
       if (error instanceof Error) {
