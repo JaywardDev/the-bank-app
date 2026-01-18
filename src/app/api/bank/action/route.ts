@@ -131,349 +131,354 @@ const parseBearerToken = (authorization: string | null) => {
 };
 
 export async function POST(request: Request) {
-  if (!isConfigured()) {
-    return NextResponse.json(
-      { error: "Supabase is not configured." },
-      { status: 500 },
-    );
-  }
-
-  const token = parseBearerToken(request.headers.get("authorization"));
-  if (!token) {
-    return NextResponse.json({ error: "Missing session." }, { status: 401 });
-  }
-
-  const user = await fetchUser(token);
-  if (!user) {
-    return NextResponse.json({ error: "Invalid session." }, { status: 401 });
-  }
-
-  const body = (await request.json()) as ActionRequest;
-  if (!body.action) {
-    return NextResponse.json({ error: "Missing action." }, { status: 400 });
-  }
-
-  if (body.action === "CREATE_GAME") {
-    if (!body.playerName?.trim()) {
+  try {
+    if (!isConfigured()) {
       return NextResponse.json(
-        { error: "Missing playerName." },
-        { status: 400 },
-      );
-    }
-
-    const [game] = await fetchFromSupabaseWithService<GameRow[]>(
-      "games?select=id,join_code,created_by",
-      {
-        method: "POST",
-        headers: {
-          Prefer: "return=representation",
-        },
-        body: JSON.stringify({
-          join_code: createJoinCode(),
-          created_by: user.id,
-        }),
-      },
-    );
-
-    if (!game) {
-      return NextResponse.json(
-        { error: "Unable to create the game." },
+        { error: "Supabase is not configured." },
         { status: 500 },
       );
     }
 
-    await fetchFromSupabaseWithService<PlayerRow[]>(
-      "players?select=id,user_id,display_name,created_at",
-      {
-        method: "POST",
-        headers: {
-          Prefer: "return=representation",
-        },
-        body: JSON.stringify({
-          game_id: game.id,
-          user_id: user.id,
-          display_name: body.playerName.trim(),
-        }),
-      },
-    );
-
-    await fetchFromSupabaseWithService<GameStateRow[]>(
-      "game_state?select=game_id,version,current_player_user_id,balances,last_roll",
-      {
-        method: "POST",
-        headers: {
-          Prefer: "return=representation",
-        },
-        body: JSON.stringify({
-          game_id: game.id,
-          version: 0,
-          current_player_user_id: null,
-          balances: null,
-          last_roll: null,
-          updated_at: new Date().toISOString(),
-        }),
-      },
-    );
-
-    return NextResponse.json({ gameId: game.id });
-  }
-
-  if (!body.gameId) {
-    return NextResponse.json({ error: "Missing gameId." }, { status: 400 });
-  }
-
-  if (typeof body.expectedVersion !== "number") {
-    return NextResponse.json(
-      { error: "Missing expectedVersion." },
-      { status: 400 },
-    );
-  }
-
-  if (!Number.isInteger(body.expectedVersion) || body.expectedVersion < 0) {
-    return NextResponse.json(
-      { error: "Invalid expectedVersion." },
-      { status: 400 },
-    );
-  }
-
-  const gameId = body.gameId;
-
-  const [game] = await fetchFromSupabase<GameRow[]>(
-    `games?select=id,join_code,starting_cash,created_by&id=eq.${gameId}&limit=1`,
-    { method: "GET" },
-  );
-
-  if (!game) {
-    return NextResponse.json({ error: "Game not found." }, { status: 404 });
-  }
-
-  const players = await fetchFromSupabase<PlayerRow[]>(
-    `players?select=id,user_id,display_name,created_at&game_id=eq.${gameId}&order=created_at.asc`,
-    { method: "GET" },
-  );
-
-  const [gameState] = await fetchFromSupabase<GameStateRow[]>(
-    `game_state?select=game_id,version,current_player_user_id,balances,last_roll&game_id=eq.${gameId}&limit=1`,
-    { method: "GET" },
-  );
-
-  if (!players.some((player) => player.user_id === user.id)) {
-    return NextResponse.json(
-      { error: "You are not a member of this game." },
-      { status: 403 },
-    );
-  }
-
-  const currentVersion = gameState?.version ?? 0;
-
-  if (body.expectedVersion !== currentVersion) {
-    return NextResponse.json(
-      { error: "Version mismatch." },
-      { status: 409 },
-    );
-  }
-
-  const nextVersion = currentVersion + 1;
-
-  if (body.action === "START_GAME") {
-    if (game.created_by && game.created_by !== user.id) {
-      return NextResponse.json(
-        { error: "Only the host can start the game." },
-        { status: 403 },
-      );
+    const token = parseBearerToken(request.headers.get("authorization"));
+    if (!token) {
+      return NextResponse.json({ error: "Missing session." }, { status: 401 });
     }
 
-    if (players.length === 0) {
+    const user = await fetchUser(token);
+    if (!user) {
+      return NextResponse.json({ error: "Invalid session." }, { status: 401 });
+    }
+
+    const body = (await request.json()) as ActionRequest;
+    if (!body.action) {
+      return NextResponse.json({ error: "Missing action." }, { status: 400 });
+    }
+
+    if (body.action === "CREATE_GAME") {
+      if (!body.playerName?.trim()) {
+        return NextResponse.json(
+          { error: "Missing playerName." },
+          { status: 400 },
+        );
+      }
+
+      const [game] = await fetchFromSupabaseWithService<GameRow[]>(
+        "games?select=id,join_code,created_by",
+        {
+          method: "POST",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            join_code: createJoinCode(),
+            created_by: user.id,
+          }),
+        },
+      );
+
+      if (!game) {
+        return NextResponse.json(
+          { error: "Unable to create the game." },
+          { status: 500 },
+        );
+      }
+
+      await fetchFromSupabaseWithService<PlayerRow[]>(
+        "players?select=id,user_id,display_name,created_at",
+        {
+          method: "POST",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            game_id: game.id,
+            user_id: user.id,
+            display_name: body.playerName.trim(),
+          }),
+        },
+      );
+
+      await fetchFromSupabaseWithService<GameStateRow[]>(
+        "game_state?select=game_id,version,current_player_user_id,balances,last_roll",
+        {
+          method: "POST",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            game_id: game.id,
+            version: 0,
+            current_player_user_id: null,
+            balances: null,
+            last_roll: null,
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      );
+
+      return NextResponse.json({ gameId: game.id });
+    }
+
+    if (!body.gameId) {
+      return NextResponse.json({ error: "Missing gameId." }, { status: 400 });
+    }
+
+    if (typeof body.expectedVersion !== "number") {
       return NextResponse.json(
-        { error: "Add at least one player before starting." },
+        { error: "Missing expectedVersion." },
         { status: 400 },
       );
     }
 
-    const startingCash = game.starting_cash ?? 1500;
-    const balances = players.reduce<Record<string, number>>((acc, player) => {
-      acc[player.id] = startingCash;
-      return acc;
-    }, {});
+    if (!Number.isInteger(body.expectedVersion) || body.expectedVersion < 0) {
+      return NextResponse.json(
+        { error: "Invalid expectedVersion." },
+        { status: 400 },
+      );
+    }
 
-    const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
-      "game_state?on_conflict=game_id",
-      {
-        method: "POST",
-        headers: {
-          Prefer: "resolution=merge-duplicates, return=representation",
-        },
-        body: JSON.stringify({
-          game_id: gameId,
-          version: nextVersion,
-          current_player_user_id: players[0].user_id,
-          balances,
-          last_roll: null,
-          updated_at: new Date().toISOString(),
-        }),
-      },
+    const gameId = body.gameId;
+
+    const [game] = await fetchFromSupabase<GameRow[]>(
+      `games?select=id,join_code,starting_cash,created_by&id=eq.${gameId}&limit=1`,
+      { method: "GET" },
     );
 
-    await fetchFromSupabaseWithService(
-      "game_events",
-      {
-        method: "POST",
-        headers: {
-          Prefer: "return=representation",
-        },
-        body: JSON.stringify({
-          game_id: gameId,
-          version: nextVersion,
-          event_type: "START_GAME",
-          payload: {
-            starting_cash: startingCash,
-            player_order: players.map((player) => ({
-              id: player.id,
-              name: player.display_name,
-            })),
-          },
-          created_by: user.id,
-        }),
-      },
+    if (!game) {
+      return NextResponse.json({ error: "Game not found." }, { status: 404 });
+    }
+
+    const players = await fetchFromSupabase<PlayerRow[]>(
+      `players?select=id,user_id,display_name,created_at&game_id=eq.${gameId}&order=created_at.asc`,
+      { method: "GET" },
     );
 
-    return NextResponse.json({ gameState: updatedState });
-  }
-
-  if (!gameState) {
-    return NextResponse.json(
-      { error: "Game has not started yet." },
-      { status: 400 },
-    );
-  }
-
-  const currentPlayer = players.find(
-    (player) => player.user_id === gameState.current_player_user_id,
-  );
-
-  if (!currentPlayer) {
-    return NextResponse.json(
-      { error: "Current player is missing." },
-      { status: 400 },
-    );
-  }
-
-  if (currentPlayer.user_id !== user.id) {
-    return NextResponse.json(
-      { error: "It is not your turn." },
-      { status: 403 },
-    );
-  }
-
-  if (body.action === "ROLL_DICE") {
-    const dieOne = Math.floor(Math.random() * 6) + 1;
-    const dieTwo = Math.floor(Math.random() * 6) + 1;
-    const rollTotal = dieOne + dieTwo;
-
-    const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
-      `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
-      {
-        method: "PATCH",
-        headers: {
-          Prefer: "return=representation",
-        },
-        body: JSON.stringify({
-          version: nextVersion,
-          last_roll: rollTotal,
-          updated_at: new Date().toISOString(),
-        }),
-      },
+    const [gameState] = await fetchFromSupabase<GameStateRow[]>(
+      `game_state?select=game_id,version,current_player_user_id,balances,last_roll&game_id=eq.${gameId}&limit=1`,
+      { method: "GET" },
     );
 
-    if (!updatedState) {
+    if (!players.some((player) => player.user_id === user.id)) {
+      return NextResponse.json(
+        { error: "You are not a member of this game." },
+        { status: 403 },
+      );
+    }
+
+    const currentVersion = gameState?.version ?? 0;
+
+    if (body.expectedVersion !== currentVersion) {
       return NextResponse.json(
         { error: "Version mismatch." },
         { status: 409 },
       );
     }
 
-    await fetchFromSupabaseWithService(
-      "game_events",
-      {
-        method: "POST",
-        headers: {
-          Prefer: "return=representation",
-        },
-        body: JSON.stringify({
-          game_id: gameId,
-          version: nextVersion,
-          event_type: "ROLL_DICE",
-          payload: {
-            player_id: currentPlayer.id,
-            player_name: currentPlayer.display_name,
-            roll: rollTotal,
-            dice: [dieOne, dieTwo],
+    const nextVersion = currentVersion + 1;
+
+    if (body.action === "START_GAME") {
+      if (game.created_by && game.created_by !== user.id) {
+        return NextResponse.json(
+          { error: "Only the host can start the game." },
+          { status: 403 },
+        );
+      }
+
+      if (players.length === 0) {
+        return NextResponse.json(
+          { error: "Add at least one player before starting." },
+          { status: 400 },
+        );
+      }
+
+      const startingCash = game.starting_cash ?? 1500;
+      const balances = players.reduce<Record<string, number>>((acc, player) => {
+        acc[player.id] = startingCash;
+        return acc;
+      }, {});
+
+      const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
+        "game_state?on_conflict=game_id",
+        {
+          method: "POST",
+          headers: {
+            Prefer: "resolution=merge-duplicates, return=representation",
           },
-          created_by: user.id,
-        }),
-      },
-    );
+          body: JSON.stringify({
+            game_id: gameId,
+            version: nextVersion,
+            current_player_user_id: players[0].user_id,
+            balances,
+            last_roll: null,
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      );
 
-    return NextResponse.json({ gameState: updatedState });
-  }
+      await fetchFromSupabaseWithService(
+        "game_events",
+        {
+          method: "POST",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            game_id: gameId,
+            version: nextVersion,
+            event_type: "START_GAME",
+            payload: {
+              starting_cash: startingCash,
+              player_order: players.map((player) => ({
+                id: player.id,
+                name: player.display_name,
+              })),
+            },
+            created_by: user.id,
+          }),
+        },
+      );
 
-  if (body.action === "END_TURN") {
-    const currentIndex = players.findIndex(
+      return NextResponse.json({ gameState: updatedState });
+    }
+
+    if (!gameState) {
+      return NextResponse.json(
+        { error: "Game has not started yet." },
+        { status: 400 },
+      );
+    }
+
+    const currentPlayer = players.find(
       (player) => player.user_id === gameState.current_player_user_id,
     );
-    const nextIndex =
-      currentIndex === -1 ? 0 : (currentIndex + 1) % players.length;
-    const nextPlayer = players[nextIndex];
 
-    const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
-      `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
-      {
-        method: "PATCH",
-        headers: {
-          Prefer: "return=representation",
-        },
-        body: JSON.stringify({
-          version: nextVersion,
-          current_player_user_id: nextPlayer.user_id,
-          updated_at: new Date().toISOString(),
-        }),
-      },
-    );
-
-    if (!updatedState) {
+    if (!currentPlayer) {
       return NextResponse.json(
-        { error: "Version mismatch." },
-        { status: 409 },
+        { error: "Current player is missing." },
+        { status: 400 },
       );
     }
 
-    await fetchFromSupabaseWithService(
-      "game_events",
-      {
-        method: "POST",
-        headers: {
-          Prefer: "return=representation",
-        },
-        body: JSON.stringify({
-          game_id: gameId,
-          version: nextVersion,
-          event_type: "END_TURN",
-          payload: {
-            from_player_id: currentPlayer.id,
-            from_player_name: currentPlayer.display_name,
-            to_player_id: nextPlayer.id,
-            to_player_name: nextPlayer.display_name,
+    if (currentPlayer.user_id !== user.id) {
+      return NextResponse.json(
+        { error: "It is not your turn." },
+        { status: 403 },
+      );
+    }
+
+    if (body.action === "ROLL_DICE") {
+      const dieOne = Math.floor(Math.random() * 6) + 1;
+      const dieTwo = Math.floor(Math.random() * 6) + 1;
+      const rollTotal = dieOne + dieTwo;
+
+      const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
           },
-          created_by: user.id,
-        }),
-      },
+          body: JSON.stringify({
+            version: nextVersion,
+            last_roll: rollTotal,
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      );
+
+      if (!updatedState) {
+        return NextResponse.json(
+          { error: "Version mismatch." },
+          { status: 409 },
+        );
+      }
+
+      await fetchFromSupabaseWithService(
+        "game_events",
+        {
+          method: "POST",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            game_id: gameId,
+            version: nextVersion,
+            event_type: "ROLL_DICE",
+            payload: {
+              player_id: currentPlayer.id,
+              player_name: currentPlayer.display_name,
+              roll: rollTotal,
+              dice: [dieOne, dieTwo],
+            },
+            created_by: user.id,
+          }),
+        },
+      );
+
+      return NextResponse.json({ gameState: updatedState });
+    }
+
+    if (body.action === "END_TURN") {
+      const currentIndex = players.findIndex(
+        (player) => player.user_id === gameState.current_player_user_id,
+      );
+      const nextIndex =
+        currentIndex === -1 ? 0 : (currentIndex + 1) % players.length;
+      const nextPlayer = players[nextIndex];
+
+      const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            version: nextVersion,
+            current_player_user_id: nextPlayer.user_id,
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      );
+
+      if (!updatedState) {
+        return NextResponse.json(
+          { error: "Version mismatch." },
+          { status: 409 },
+        );
+      }
+
+      await fetchFromSupabaseWithService(
+        "game_events",
+        {
+          method: "POST",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            game_id: gameId,
+            version: nextVersion,
+            event_type: "END_TURN",
+            payload: {
+              from_player_id: currentPlayer.id,
+              from_player_name: currentPlayer.display_name,
+              to_player_id: nextPlayer.id,
+              to_player_name: nextPlayer.display_name,
+            },
+            created_by: user.id,
+          }),
+        },
+      );
+
+      return NextResponse.json({ gameState: updatedState });
+    }
+
+    return NextResponse.json(
+      { error: "Unsupported action." },
+      { status: 400 },
     );
-
-    return NextResponse.json({ gameState: updatedState });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error.";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
-
-  return NextResponse.json(
-    { error: "Unsupported action." },
-    { status: 400 },
-  );
 }
