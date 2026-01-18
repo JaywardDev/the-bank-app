@@ -16,7 +16,7 @@ type Player = {
 type GameState = {
   game_id: string;
   version: number;
-  current_player_user_id: string | null;
+  current_player_id: string | null;
   balances: Record<string, number> | null;
   last_roll: number | null;
 };
@@ -53,7 +53,7 @@ export default function PlayPage() {
   const loadGameState = useCallback(
     async (activeGameId: string, accessToken?: string) => {
     const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
-      `game_state?select=game_id,version,current_player_user_id,balances,last_roll&game_id=eq.${activeGameId}&limit=1`,
+      `game_state?select=game_id,version,current_player_id,balances,last_roll&game_id=eq.${activeGameId}&limit=1`,
       { method: "GET" },
       accessToken,
     );
@@ -188,7 +188,7 @@ export default function PlayPage() {
   ]);
 
   const currentPlayer = players.find(
-    (player) => player.user_id === gameState?.current_player_user_id,
+    (player) => player.user_id === gameState?.current_player_id,
   );
   const isMyTurn = Boolean(
     session && currentPlayer && currentPlayer.user_id === session.user.id,

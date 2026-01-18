@@ -20,7 +20,7 @@ type Player = {
 type GameState = {
   game_id: string;
   version: number;
-  current_player_user_id: string | null;
+  current_player_id: string | null;
   last_roll: number | null;
 };
 
@@ -60,7 +60,7 @@ export default function BoardLobbyPage({ params }: BoardLobbyPageProps) {
 
   const loadGameState = useCallback(async (accessToken?: string) => {
     const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
-      `game_state?select=game_id,version,current_player_user_id,last_roll&game_id=eq.${params.gameId}&limit=1`,
+      `game_state?select=game_id,version,current_player_id,last_roll&game_id=eq.${params.gameId}&limit=1`,
       { method: "GET" },
       accessToken,
     );
@@ -228,7 +228,7 @@ export default function BoardLobbyPage({ params }: BoardLobbyPageProps) {
   ]);
 
   const currentPlayer = players.find(
-    (player) => player.user_id === gameState?.current_player_user_id,
+    (player) => player.user_id === gameState?.current_player_id,
   );
 
   const lobbyStatus = loading
