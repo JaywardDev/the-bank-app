@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import PageShell from "@/app/components/PageShell";
+import { getBoardPackById } from "@/lib/boardPacks";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 
 type Player = {
@@ -9,6 +10,11 @@ type Player = {
   user_id: string;
   display_name: string | null;
   created_at: string | null;
+};
+
+type GameMeta = {
+  id: string;
+  board_pack_id: string | null;
 };
 
 type GameState = {
@@ -34,6 +40,7 @@ type BoardDisplayPageProps = {
 
 export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
   const [session, setSession] = useState<SupabaseSession | null>(null);
+  const [gameMeta, setGameMeta] = useState<GameMeta | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [events, setEvents] = useState<GameEvent[]>([]);
@@ -50,6 +57,18 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
         accessToken,
       );
       setPlayers(playerRows);
+    },
+    [params.gameId],
+  );
+
+  const loadGameMeta = useCallback(
+    async (accessToken?: string) => {
+      const [game] = await supabaseClient.fetchFromSupabase<GameMeta[]>(
+        `games?select=id,board_pack_id&id=eq.${params.gameId}&limit=1`,
+        { method: "GET" },
+        accessToken,
+      );
+      setGameMeta(game ?? null);
     },
     [params.gameId],
   );
@@ -92,6 +111,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
       setSession(currentSession);
 
       await Promise.all([
+        loadGameMeta(currentSession?.access_token),
         loadPlayers(currentSession?.access_token),
         loadGameState(currentSession?.access_token),
         loadEvents(currentSession?.access_token),
@@ -105,7 +125,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
     } finally {
       setLoading(false);
     }
-  }, [isConfigured, loadEvents, loadGameState, loadPlayers]);
+  }, [isConfigured, loadEvents, loadGameMeta, loadGameState, loadPlayers]);
 
   useEffect(() => {
     void loadBoardData();
@@ -176,6 +196,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
   const currentPlayer = players.find(
     (player) => player.user_id === gameState?.current_player_id,
   );
+  const boardPack = getBoardPackById(gameMeta?.board_pack_id);
 
   return (
     <PageShell
@@ -205,9 +226,14 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
       <section className="grid gap-6 lg:grid-cols-[2fr_1fr]">
         <div className="rounded-3xl border border-white/10 bg-white/5 p-6 md:p-8 space-y-6">
           <div className="flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/60">
-              Board map
-            </p>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/60">
+                Board map
+              </p>
+              <p className="text-xs text-white/50">
+                Board pack: {boardPack?.displayName ?? "Unknown"}
+              </p>
+            </div>
             <span className="text-xs text-white/50">Projection only</span>
           </div>
           <div className="flex h-[320px] items-center justify-center rounded-3xl border border-dashed border-white/20 bg-black/30 text-center text-sm text-white/60 md:h-[420px]">

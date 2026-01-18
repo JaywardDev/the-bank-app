@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { defaultBoardPackId, getBoardPackById } from "@/lib/boardPacks";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "@/lib/env";
 
 const supabaseUrl = (process.env.SUPABASE_URL ?? SUPABASE_URL ?? "").trim();
@@ -25,6 +26,7 @@ type ActionRequest = {
   playerName?: string;
   joinCode?: string;
   displayName?: string;
+  boardPackId?: string;
   action?: "CREATE_GAME" | "JOIN_GAME" | "START_GAME" | "ROLL_DICE" | "END_TURN";
   expectedVersion?: number;
 };
@@ -41,6 +43,7 @@ type GameRow = {
   starting_cash: number | null;
   created_at: string | null;
   created_by: string | null;
+  board_pack_id: string | null;
 };
 
 type PlayerRow = {
@@ -168,6 +171,8 @@ export async function POST(request: Request) {
         );
       }
 
+      const boardPack = getBoardPackById(body.boardPackId);
+
       const [game] = await fetchFromSupabaseWithService<GameRow[]>(
         "games?select=id,join_code,created_by",
         {
@@ -178,6 +183,7 @@ export async function POST(request: Request) {
           body: JSON.stringify({
             join_code: createJoinCode(),
             created_by: user.id,
+            board_pack_id: boardPack?.id ?? defaultBoardPackId,
           }),
         },
       );
@@ -254,7 +260,7 @@ export async function POST(request: Request) {
       const joinCode = body.joinCode.trim().toUpperCase();
 
       const [game] = await fetchFromSupabaseWithService<GameRow[]>(
-        `games?select=id,join_code,status,created_at&join_code=eq.${joinCode}&limit=1`,
+        `games?select=id,join_code,status,created_at,board_pack_id&join_code=eq.${joinCode}&limit=1`,
         { method: "GET" },
       );
 
@@ -303,6 +309,7 @@ export async function POST(request: Request) {
         gameId: game.id,
         join_code: game.join_code,
         created_at: game.created_at,
+        board_pack_id: game.board_pack_id,
         player,
         players,
       });

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getConfigErrors, SITE_URL } from "@/lib/env";
+import { boardPacks, defaultBoardPackId } from "@/lib/boardPacks";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 
 const lastGameKey = "bank.lastGameId";
@@ -10,6 +11,7 @@ type Game = {
   id: string;
   join_code: string;
   created_at: string | null;
+  board_pack_id: string | null;
 };
 
 type Player = {
@@ -23,6 +25,7 @@ export default function Home() {
   const [authEmail, setAuthEmail] = useState("");
   const [playerName, setPlayerName] = useState("");
   const [joinCode, setJoinCode] = useState("");
+  const [boardPackId, setBoardPackId] = useState(defaultBoardPackId);
   const [activeGame, setActiveGame] = useState<Game | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
@@ -36,7 +39,7 @@ export default function Home() {
   const loadLobby = useCallback(
     async (gameId: string, accessToken: string) => {
       const game = await supabaseClient.fetchFromSupabase<Game[]>(
-        `games?select=id,join_code,created_at&id=eq.${gameId}&limit=1`,
+        `games?select=id,join_code,created_at,board_pack_id&id=eq.${gameId}&limit=1`,
         { method: "GET" },
         accessToken,
       );
@@ -186,6 +189,7 @@ export default function Home() {
         body: JSON.stringify({
           action: "CREATE_GAME",
           playerName: playerName.trim(),
+          boardPackId,
         }),
       });
 
@@ -259,6 +263,7 @@ export default function Home() {
         gameId?: string;
         join_code?: string | null;
         created_at?: string | null;
+        board_pack_id?: string | null;
         players?: Player[];
       };
 
@@ -270,6 +275,7 @@ export default function Home() {
         id: data.gameId,
         join_code: data.join_code,
         created_at: data.created_at ?? null,
+        board_pack_id: data.board_pack_id ?? null,
       });
       setPlayers(data.players ?? []);
 
@@ -390,6 +396,22 @@ export default function Home() {
           <p className="text-sm text-neutral-500">
             Host a new table and share the join code with players.
           </p>
+          <div className="space-y-2">
+            <label className="text-xs font-medium uppercase text-neutral-500">
+              Board pack
+            </label>
+            <select
+              className="w-full rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm"
+              value={boardPackId}
+              onChange={(event) => setBoardPackId(event.target.value)}
+            >
+              {boardPacks.map((pack) => (
+                <option key={pack.id} value={pack.id}>
+                  {pack.displayName}
+                </option>
+              ))}
+            </select>
+          </div>
           <button
             className="w-full rounded-xl bg-neutral-900 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-400"
             type="button"

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import PageShell from "../components/PageShell";
+import { getBoardPackById } from "@/lib/boardPacks";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 
 const lastGameKey = "bank.lastGameId";
@@ -11,6 +12,11 @@ type Player = {
   user_id: string;
   display_name: string | null;
   created_at: string | null;
+};
+
+type GameMeta = {
+  id: string;
+  board_pack_id: string | null;
 };
 
 type GameState = {
@@ -32,6 +38,7 @@ type GameEvent = {
 export default function PlayPage() {
   const [session, setSession] = useState<SupabaseSession | null>(null);
   const [gameId, setGameId] = useState<string | null>(null);
+  const [gameMeta, setGameMeta] = useState<GameMeta | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [events, setEvents] = useState<GameEvent[]>([]);
@@ -50,6 +57,18 @@ export default function PlayPage() {
     );
     setPlayers(playerRows);
   }, []);
+
+  const loadGameMeta = useCallback(
+    async (activeGameId: string, accessToken?: string) => {
+      const [game] = await supabaseClient.fetchFromSupabase<GameMeta[]>(
+        `games?select=id,board_pack_id&id=eq.${activeGameId}&limit=1`,
+        { method: "GET" },
+        accessToken,
+      );
+      setGameMeta(game ?? null);
+    },
+    [],
+  );
 
   const loadGameState = useCallback(
     async (activeGameId: string, accessToken?: string) => {
@@ -75,12 +94,13 @@ export default function PlayPage() {
   const loadGameData = useCallback(
     async (activeGameId: string, accessToken?: string) => {
       await Promise.all([
+        loadGameMeta(activeGameId, accessToken),
         loadPlayers(activeGameId, accessToken),
         loadGameState(activeGameId, accessToken),
         loadEvents(activeGameId, accessToken),
       ]);
     },
-    [loadEvents, loadGameState, loadPlayers],
+    [loadEvents, loadGameMeta, loadGameState, loadPlayers],
   );
 
   useEffect(() => {
@@ -194,6 +214,7 @@ export default function PlayPage() {
   const isMyTurn = Boolean(
     session && currentPlayer && currentPlayer.user_id === session.user.id,
   );
+  const boardPack = getBoardPackById(gameMeta?.board_pack_id);
 
   const handleBankAction = useCallback(
     async (action: "ROLL_DICE" | "END_TURN") => {
@@ -268,6 +289,9 @@ export default function PlayPage() {
             </p>
             <p className="text-sm text-neutral-600">
               Switch between wallet controls and a read-only board projection.
+            </p>
+            <p className="text-xs text-neutral-400">
+              Board pack: {boardPack?.displayName ?? "Unknown"}
             </p>
           </div>
           <div className="inline-flex rounded-full border border-neutral-200 bg-neutral-100 p-1">
