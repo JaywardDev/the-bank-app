@@ -20,7 +20,8 @@ const bankHeaders = {
 
 type ActionRequest = {
   gameId?: string;
-  action?: "START_GAME" | "ROLL_DICE" | "END_TURN";
+  playerName?: string;
+  action?: "CREATE_GAME" | "START_GAME" | "ROLL_DICE" | "END_TURN";
   expectedVersion?: number;
 };
 
@@ -31,6 +32,7 @@ type SupabaseUser = {
 
 type GameRow = {
   id: string;
+  join_code: string | null;
   starting_cash: number | null;
   created_by: string | null;
 };
@@ -52,6 +54,14 @@ type GameStateRow = {
 
 const isConfigured = () =>
   Boolean(supabaseUrl && supabaseAnonKey && supabaseServiceRoleKey);
+
+const createJoinCode = () => {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const segments = Array.from({ length: 6 }, () =>
+    alphabet[Math.floor(Math.random() * alphabet.length)],
+  );
+  return segments.join("");
+};
 
 const fetchUser = async (accessToken: string) => {
   const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
@@ -139,11 +149,77 @@ export async function POST(request: Request) {
   }
 
   const body = (await request.json()) as ActionRequest;
-  if (!body.gameId || !body.action) {
-    return NextResponse.json(
-      { error: "Missing gameId or action." },
-      { status: 400 },
+  if (!body.action) {
+    return NextResponse.json({ error: "Missing action." }, { status: 400 });
+  }
+
+  if (body.action === "CREATE_GAME") {
+    if (!body.playerName?.trim()) {
+      return NextResponse.json(
+        { error: "Missing playerName." },
+        { status: 400 },
+      );
+    }
+
+    const [game] = await fetchFromSupabaseWithService<GameRow[]>(
+      "games?select=id,join_code,created_by",
+      {
+        method: "POST",
+        headers: {
+          Prefer: "return=representation",
+        },
+        body: JSON.stringify({
+          join_code: createJoinCode(),
+          created_by: user.id,
+        }),
+      },
     );
+
+    if (!game) {
+      return NextResponse.json(
+        { error: "Unable to create the game." },
+        { status: 500 },
+      );
+    }
+
+    await fetchFromSupabaseWithService<PlayerRow[]>(
+      "players?select=id,user_id,display_name,created_at",
+      {
+        method: "POST",
+        headers: {
+          Prefer: "return=representation",
+        },
+        body: JSON.stringify({
+          game_id: game.id,
+          user_id: user.id,
+          display_name: body.playerName.trim(),
+        }),
+      },
+    );
+
+    await fetchFromSupabaseWithService<GameStateRow[]>(
+      "game_state?select=game_id,version,current_player_user_id,balances,last_roll",
+      {
+        method: "POST",
+        headers: {
+          Prefer: "return=representation",
+        },
+        body: JSON.stringify({
+          game_id: game.id,
+          version: 0,
+          current_player_user_id: null,
+          balances: null,
+          last_roll: null,
+          updated_at: new Date().toISOString(),
+        }),
+      },
+    );
+
+    return NextResponse.json({ gameId: game.id });
+  }
+
+  if (!body.gameId) {
+    return NextResponse.json({ error: "Missing gameId." }, { status: 400 });
   }
 
   if (typeof body.expectedVersion !== "number") {
@@ -163,7 +239,7 @@ export async function POST(request: Request) {
   const gameId = body.gameId;
 
   const [game] = await fetchFromSupabase<GameRow[]>(
-    `games?select=id,starting_cash,created_by&id=eq.${gameId}&limit=1`,
+    `games?select=id,join_code,starting_cash,created_by&id=eq.${gameId}&limit=1`,
     { method: "GET" },
   );
 

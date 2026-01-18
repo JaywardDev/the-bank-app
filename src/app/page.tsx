@@ -18,14 +18,6 @@ type Player = {
   created_at: string | null;
 };
 
-const createJoinCode = () => {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  const segments = Array.from({ length: 6 }, () =>
-    alphabet[Math.floor(Math.random() * alphabet.length)],
-  );
-  return segments.join("");
-};
-
 export default function Home() {
   const [session, setSession] = useState<SupabaseSession | null>(null);
   const [authEmail, setAuthEmail] = useState("");
@@ -185,43 +177,29 @@ export default function Home() {
     setNotice(null);
 
     try {
-      const joinCodeValue = createJoinCode();
-      const [game] = await supabaseClient.fetchFromSupabase<Game[]>(
-        "games?select=id,join_code,created_at",
-        {
-          method: "POST",
-          headers: {
-            Prefer: "return=representation",
-          },
-          body: JSON.stringify({
-            join_code: joinCodeValue,
-            created_by: session.user.id,
-          }),
+      const response = await fetch("/api/bank/action", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
         },
-        session.access_token,
-      );
+        body: JSON.stringify({
+          action: "CREATE_GAME",
+          playerName: playerName.trim(),
+        }),
+      });
 
-      if (!game) {
+      if (!response.ok) {
+        const error = (await response.json()) as { error?: string };
+        throw new Error(error.error ?? "Unable to create the game.");
+      }
+
+      const data = (await response.json()) as { gameId?: string };
+      if (!data.gameId) {
         throw new Error("Unable to create the game.");
       }
 
-      await supabaseClient.fetchFromSupabase<Player[]>(
-        "players?select=id,display_name,created_at",
-        {
-          method: "POST",
-          headers: {
-            Prefer: "return=representation",
-          },
-          body: JSON.stringify({
-            game_id: game.id,
-            user_id: session.user.id,
-            display_name: playerName.trim(),
-          }),
-        },
-        session.access_token,
-      );
-
-      await loadLobby(game.id, session.access_token);
+      await loadLobby(data.gameId, session.access_token);
       setNotice("Game created. Share the code to invite others.");
     } catch (error) {
       if (error instanceof Error) {
