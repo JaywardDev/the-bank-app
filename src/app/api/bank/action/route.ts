@@ -199,7 +199,7 @@ export async function POST(request: Request) {
       );
 
       await fetchFromSupabaseWithService<GameStateRow[]>(
-        "game_state?select=game_id,version,current_player_user_id,balances,last_roll",
+        "game_state?select=game_id,version,current_player_id,balances,last_roll",
         {
           method: "POST",
           headers: {
@@ -208,7 +208,7 @@ export async function POST(request: Request) {
           body: JSON.stringify({
             game_id: game.id,
             version: 0,
-            current_player_user_id: null,
+            current_player_id: null,
             balances: null,
             last_roll: null,
             updated_at: new Date().toISOString(),
