@@ -265,10 +265,10 @@ export async function POST(request: Request) {
         );
       }
 
-      if (game.status && game.status !== "lobby") {
+      if (game.status !== "lobby") {
         return NextResponse.json(
           { error: "That game is already in progress." },
-          { status: 400 },
+          { status: 409 },
         );
       }
 
@@ -329,7 +329,7 @@ export async function POST(request: Request) {
     const gameId = body.gameId;
 
     const [game] = await fetchFromSupabase<GameRow[]>(
-      `games?select=id,join_code,starting_cash,created_by&id=eq.${gameId}&limit=1`,
+      `games?select=id,join_code,starting_cash,created_by,status&id=eq.${gameId}&limit=1`,
       { method: "GET" },
     );
 
@@ -377,6 +377,39 @@ export async function POST(request: Request) {
         return NextResponse.json(
           { error: "Add at least one player before starting." },
           { status: 400 },
+        );
+      }
+
+      const [startedGame] = await fetchFromSupabaseWithService<GameRow[]>(
+        `games?select=id,status&id=eq.${gameId}&status=eq.lobby`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            status: "in_progress",
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      );
+
+      if (!startedGame) {
+        const [latestGame] = await fetchFromSupabaseWithService<GameRow[]>(
+          `games?select=id,status&id=eq.${gameId}&limit=1`,
+          { method: "GET" },
+        );
+
+        if (latestGame?.status === "in_progress") {
+          return NextResponse.json(
+            { error: "Game already started." },
+            { status: 409 },
+          );
+        }
+
+        return NextResponse.json(
+          { error: "Game is not in the lobby." },
+          { status: 409 },
         );
       }
 

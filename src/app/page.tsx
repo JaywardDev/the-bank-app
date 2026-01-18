@@ -247,6 +247,11 @@ export default function Home() {
 
       if (!response.ok) {
         const error = (await response.json()) as { error?: string };
+        if (response.status === 409) {
+          throw new Error(
+            error.error ?? "That game has already started. Ask the host to reset.",
+          );
+        }
         throw new Error(error.error ?? "Unable to join the game.");
       }
 
