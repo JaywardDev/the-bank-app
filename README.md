@@ -21,7 +21,7 @@ Create a Supabase project and add the environment variables shown in `.env.examp
 
 Create the tables used by the scaffold UI:
 
-- `games` (`id` uuid, `join_code` text, `status` text, `created_at` timestamptz, `created_by` uuid, `starting_cash` int4)
+- `games` (`id` uuid, `join_code` text, `status` text, `created_at` timestamptz, `created_by` uuid, `starting_cash` int4, `board_pack_id` text)
 - `players` (`id` uuid, `game_id` uuid, `user_id` uuid, `display_name` text, `created_at` timestamptz)
 - `game_state` (`game_id` uuid, `version` int4, `current_player_id` uuid, `balances` jsonb, `last_roll` int4, `updated_at` timestamptz)
 - `game_events` (`id` uuid, `game_id` uuid, `version` int4, `event_type` text, `payload` jsonb, `created_at` timestamptz, `created_by` uuid)
