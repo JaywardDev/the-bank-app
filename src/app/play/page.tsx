@@ -17,6 +17,7 @@ type Player = {
 type GameMeta = {
   id: string;
   board_pack_id: string | null;
+  status: string | null;
 };
 
 type GameState = {
@@ -61,7 +62,7 @@ export default function PlayPage() {
   const loadGameMeta = useCallback(
     async (activeGameId: string, accessToken?: string) => {
       const [game] = await supabaseClient.fetchFromSupabase<GameMeta[]>(
-        `games?select=id,board_pack_id&id=eq.${activeGameId}&limit=1`,
+        `games?select=id,board_pack_id,status&id=eq.${activeGameId}&limit=1`,
         { method: "GET" },
         accessToken,
       );
@@ -72,12 +73,12 @@ export default function PlayPage() {
 
   const loadGameState = useCallback(
     async (activeGameId: string, accessToken?: string) => {
-    const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
-      `game_state?select=game_id,version,current_player_id,balances,last_roll&game_id=eq.${activeGameId}&limit=1`,
-      { method: "GET" },
-      accessToken,
-    );
-    setGameState(stateRow ?? null);
+      const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
+        `game_state?select=game_id,version,current_player_id,balances,last_roll&game_id=eq.${activeGameId}&limit=1`,
+        { method: "GET" },
+        accessToken,
+      );
+      setGameState(stateRow ?? null);
     },
     [],
   );
@@ -194,6 +195,18 @@ export default function PlayPage() {
           void loadEvents(gameId, session?.access_token);
         },
       )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "games",
+          filter: `id=eq.${gameId}`,
+        },
+        () => {
+          void loadGameMeta(gameId, session?.access_token);
+        },
+      )
       .subscribe();
 
     return () => {
@@ -208,18 +221,29 @@ export default function PlayPage() {
     session?.access_token,
   ]);
 
+  const isInProgress = gameMeta?.status === "in_progress";
   const currentPlayer = players.find(
     (player) => player.user_id === gameState?.current_player_id,
   );
   const isMyTurn = Boolean(
-    session && currentPlayer && currentPlayer.user_id === session.user.id,
+    isInProgress &&
+      session &&
+      currentPlayer &&
+      currentPlayer.user_id === session.user.id,
   );
+  const canRoll = isMyTurn && gameState?.last_roll == null;
+  const canEndTurn = isMyTurn && gameState?.last_roll != null;
   const boardPack = getBoardPackById(gameMeta?.board_pack_id);
 
   const handleBankAction = useCallback(
     async (action: "ROLL_DICE" | "END_TURN") => {
       if (!session || !gameId) {
         setNotice("Join a game lobby first.");
+        return;
+      }
+
+      if (!isInProgress) {
+        setNotice("Waiting for the host to start the game.");
         return;
       }
 
@@ -242,6 +266,10 @@ export default function PlayPage() {
 
         if (!response.ok) {
           const error = (await response.json()) as { error?: string };
+          if (response.status === 409) {
+            await loadGameData(gameId, session.access_token);
+            throw new Error(error.error ?? "Game updated. Try again.");
+          }
           throw new Error(error.error ?? "Unable to perform action.");
         }
       } catch (error) {
@@ -254,7 +282,7 @@ export default function PlayPage() {
         setActionLoading(null);
       }
     },
-    [gameId, session],
+    [gameId, isInProgress, loadGameData, session],
   );
 
   return (
@@ -323,10 +351,12 @@ export default function PlayPage() {
                 Current turn
               </p>
               <p className="text-2xl font-semibold text-neutral-900">
-                {currentPlayer?.display_name ?? "Waiting for start"}
+                {isInProgress
+                  ? currentPlayer?.display_name ?? "Waiting for start"
+                  : "Waiting for start"}
               </p>
               <p className="text-sm text-neutral-500">
-                Last roll: {gameState?.last_roll ?? "—"}
+                Last roll: {isInProgress ? gameState?.last_roll ?? "—" : "—"}
               </p>
             </div>
             <div className="text-right">
@@ -334,7 +364,7 @@ export default function PlayPage() {
                 Turn status
               </p>
               <p className="text-sm font-semibold text-neutral-700">
-                {isMyTurn ? "Your turn" : "Stand by"}
+                {isInProgress ? (isMyTurn ? "Your turn" : "Stand by") : "Waiting"}
               </p>
             </div>
           </div>
@@ -343,7 +373,7 @@ export default function PlayPage() {
               className="rounded-2xl bg-neutral-900 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
               type="button"
               onClick={() => void handleBankAction("ROLL_DICE")}
-              disabled={!isMyTurn || actionLoading === "ROLL_DICE"}
+              disabled={!canRoll || actionLoading === "ROLL_DICE"}
             >
               {actionLoading === "ROLL_DICE" ? "Rolling…" : "Roll Dice"}
             </button>
@@ -351,7 +381,7 @@ export default function PlayPage() {
               className="rounded-2xl border px-4 py-3 text-sm font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
               type="button"
               onClick={() => void handleBankAction("END_TURN")}
-              disabled={!isMyTurn || actionLoading === "END_TURN"}
+              disabled={!canEndTurn || actionLoading === "END_TURN"}
             >
               {actionLoading === "END_TURN" ? "Ending…" : "End Turn"}
             </button>
@@ -615,10 +645,12 @@ export default function PlayPage() {
                 Current turn
               </p>
               <p className="text-2xl font-semibold text-neutral-900">
-                {currentPlayer?.display_name ?? "Waiting for start"}
+                {isInProgress
+                  ? currentPlayer?.display_name ?? "Waiting for start"
+                  : "Waiting for start"}
               </p>
               <p className="text-sm text-neutral-500">
-                Last roll: {gameState?.last_roll ?? "—"}
+                Last roll: {isInProgress ? gameState?.last_roll ?? "—" : "—"}
               </p>
               <div className="grid gap-3 pt-2 sm:grid-cols-2">
                 <div className="rounded-2xl border border-dashed border-neutral-200 p-3 text-sm text-neutral-600">

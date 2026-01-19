@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { getConfigErrors, SITE_URL } from "@/lib/env";
 import { boardPacks, defaultBoardPackId } from "@/lib/boardPacks";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
@@ -12,6 +13,8 @@ type Game = {
   join_code: string;
   created_at: string | null;
   board_pack_id: string | null;
+  status: string | null;
+  created_by: string | null;
 };
 
 type Player = {
@@ -20,7 +23,13 @@ type Player = {
   created_at: string | null;
 };
 
+type GameState = {
+  game_id: string;
+  version: number;
+};
+
 export default function Home() {
+  const router = useRouter();
   const [session, setSession] = useState<SupabaseSession | null>(null);
   const [authEmail, setAuthEmail] = useState("");
   const [playerName, setPlayerName] = useState("");
@@ -28,6 +37,7 @@ export default function Home() {
   const [boardPackId, setBoardPackId] = useState(defaultBoardPackId);
   const [activeGame, setActiveGame] = useState<Game | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
+  const [gameState, setGameState] = useState<GameState | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -39,7 +49,7 @@ export default function Home() {
   const loadLobby = useCallback(
     async (gameId: string, accessToken: string) => {
       const game = await supabaseClient.fetchFromSupabase<Game[]>(
-        `games?select=id,join_code,created_at,board_pack_id&id=eq.${gameId}&limit=1`,
+        `games?select=id,join_code,created_at,board_pack_id,status,created_by&id=eq.${gameId}&limit=1`,
         { method: "GET" },
         accessToken,
       );
@@ -54,8 +64,15 @@ export default function Home() {
         accessToken,
       );
 
+      const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
+        `game_state?select=game_id,version&game_id=eq.${gameId}&limit=1`,
+        { method: "GET" },
+        accessToken,
+      );
+
       setActiveGame(game[0]);
       setPlayers(playerRows);
+      setGameState(stateRow ?? null);
 
       if (typeof window !== "undefined") {
         window.localStorage.setItem(lastGameKey, gameId);
@@ -117,6 +134,73 @@ export default function Home() {
     };
   }, [isConfigured, restoreLobby]);
 
+  useEffect(() => {
+    if (!isConfigured || !activeGame) {
+      return;
+    }
+
+    const realtimeClient = supabaseClient.getRealtimeClient();
+    if (!realtimeClient) {
+      return;
+    }
+
+    const channel = realtimeClient
+      .channel(`home-lobby:${activeGame.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "players",
+          filter: `game_id=eq.${activeGame.id}`,
+        },
+        () => {
+          if (session) {
+            void loadLobby(activeGame.id, session.access_token);
+          }
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "game_state",
+          filter: `game_id=eq.${activeGame.id}`,
+        },
+        () => {
+          if (session) {
+            void loadLobby(activeGame.id, session.access_token);
+          }
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "games",
+          filter: `id=eq.${activeGame.id}`,
+        },
+        () => {
+          if (session) {
+            void loadLobby(activeGame.id, session.access_token);
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      realtimeClient.removeChannel(channel);
+    };
+  }, [activeGame, isConfigured, loadLobby, session]);
+
+  useEffect(() => {
+    if (activeGame?.status === "in_progress") {
+      router.push("/play");
+    }
+  }, [activeGame?.status, router]);
+
   const handleSendMagicLink = async () => {
     if (!authEmail) {
       setNotice("Enter your email to receive a magic link.");
@@ -157,6 +241,7 @@ export default function Home() {
     setSession(null);
     setActiveGame(null);
     setPlayers([]);
+    setGameState(null);
 
     if (typeof window !== "undefined") {
       window.localStorage.removeItem(lastGameKey);
@@ -264,6 +349,8 @@ export default function Home() {
         join_code?: string | null;
         created_at?: string | null;
         board_pack_id?: string | null;
+        status?: string | null;
+        created_by?: string | null;
         players?: Player[];
       };
 
@@ -276,6 +363,8 @@ export default function Home() {
         join_code: data.join_code,
         created_at: data.created_at ?? null,
         board_pack_id: data.board_pack_id ?? null,
+        status: data.status ?? "lobby",
+        created_by: data.created_by ?? null,
       });
       setPlayers(data.players ?? []);
 
@@ -298,11 +387,60 @@ export default function Home() {
   const handleLeaveLobby = () => {
     setActiveGame(null);
     setPlayers([]);
+    setGameState(null);
 
     if (typeof window !== "undefined") {
       window.localStorage.removeItem(lastGameKey);
     }
   };
+
+  const handleStartGame = async () => {
+    if (!session || !activeGame) {
+      setNotice("Join a lobby before starting.");
+      return;
+    }
+
+    setLoadingAction("start");
+    setNotice(null);
+
+    try {
+      const response = await fetch("/api/bank/action", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          action: "START_GAME",
+          gameId: activeGame.id,
+          expectedVersion: gameState?.version ?? 0,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = (await response.json()) as { error?: string };
+        if (response.status === 409) {
+          await loadLobby(activeGame.id, session.access_token);
+          throw new Error(error.error ?? "Game updated. Try again.");
+        }
+        throw new Error(error.error ?? "Unable to start the game.");
+      }
+
+      router.push("/play");
+    } catch (error) {
+      if (error instanceof Error) {
+        setNotice(error.message);
+      } else {
+        setNotice("Unable to start the game.");
+      }
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
+  const isHost = Boolean(
+    session && activeGame?.created_by && session.user.id === activeGame.created_by,
+  );
 
   return (
     <main className="min-h-dvh bg-neutral-50 p-6 flex items-start justify-center">
@@ -450,7 +588,7 @@ export default function Home() {
               <div>
                 <h2 className="text-base font-semibold">Game lobby</h2>
                 <p className="text-sm text-neutral-500">
-                  Waiting for the board screen to start the session.
+                  Waiting for the host to start the session.
                 </p>
               </div>
               <button
@@ -461,6 +599,16 @@ export default function Home() {
                 Leave
               </button>
             </div>
+            {isHost && activeGame.status === "lobby" ? (
+              <button
+                className="w-full rounded-xl bg-neutral-900 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-400"
+                type="button"
+                onClick={handleStartGame}
+                disabled={loadingAction === "start"}
+              >
+                {loadingAction === "start" ? "Starting…" : "Start game"}
+              </button>
+            ) : null}
             <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-sm">
               <div className="text-xs uppercase text-neutral-500">Join code</div>
               <div className="text-lg font-semibold tracking-[0.3em] text-neutral-900">

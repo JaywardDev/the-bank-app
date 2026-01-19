@@ -19,8 +19,6 @@ const bankHeaders = {
   "Content-Type": "application/json",
 };
 
-const STARTING_BALANCE = 1500;
-
 type ActionRequest = {
   gameId?: string;
   playerName?: string;
@@ -217,10 +215,6 @@ export async function POST(request: Request) {
         );
       }
 
-      const balances: Record<string, number> = {
-        [hostPlayer.id]: STARTING_BALANCE,
-      };
-
       await fetchFromSupabaseWithService<GameStateRow[]>(
         "game_state?select=game_id,version,current_player_id,balances,last_roll",
         {
@@ -232,7 +226,7 @@ export async function POST(request: Request) {
             game_id: game.id,
             version: 0,
             current_player_id: null,
-            balances,
+            balances: {},
             last_roll: null,
             updated_at: new Date().toISOString(),
           }),
@@ -260,7 +254,7 @@ export async function POST(request: Request) {
       const joinCode = body.joinCode.trim().toUpperCase();
 
       const [game] = await fetchFromSupabaseWithService<GameRow[]>(
-        `games?select=id,join_code,status,created_at,board_pack_id&join_code=eq.${joinCode}&limit=1`,
+        `games?select=id,join_code,status,created_at,board_pack_id,created_by&join_code=eq.${joinCode}&limit=1`,
         { method: "GET" },
       );
 
@@ -310,6 +304,8 @@ export async function POST(request: Request) {
         join_code: game.join_code,
         created_at: game.created_at,
         board_pack_id: game.board_pack_id,
+        status: game.status,
+        created_by: game.created_by,
         player,
         players,
       });
@@ -477,6 +473,13 @@ export async function POST(request: Request) {
       );
     }
 
+    if (game.status !== "in_progress") {
+      return NextResponse.json(
+        { error: "Game is not in progress." },
+        { status: 409 },
+      );
+    }
+
     const currentPlayer = players.find(
       (player) => player.user_id === gameState.current_player_id,
     );
@@ -565,6 +568,7 @@ export async function POST(request: Request) {
           body: JSON.stringify({
             version: nextVersion,
             current_player_id: nextPlayer.user_id,
+            last_roll: null,
             updated_at: new Date().toISOString(),
           }),
         },
