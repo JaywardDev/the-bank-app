@@ -340,12 +340,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Game not found." }, { status: 404 });
     }
 
-    const players = await fetchFromSupabase<PlayerRow[]>(
+    const players = await fetchFromSupabaseWithService<PlayerRow[]>(
       `players?select=id,user_id,display_name,created_at&game_id=eq.${gameId}&order=created_at.asc`,
       { method: "GET" },
     );
 
-    const [gameState] = await fetchFromSupabase<GameStateRow[]>(
+    const [gameState] = await fetchFromSupabaseWithService<GameStateRow[]>(
       `game_state?select=game_id,version,current_player_id,balances,last_roll&game_id=eq.${gameId}&limit=1`,
       { method: "GET" },
     );
