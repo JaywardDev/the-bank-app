@@ -331,7 +331,7 @@ export async function POST(request: Request) {
 
     const gameId = body.gameId;
 
-    const [game] = await fetchFromSupabase<GameRow[]>(
+    const [game] = await fetchFromSupabaseWithService<GameRow[]>(
       `games?select=id,join_code,starting_cash,created_by,status&id=eq.${gameId}&limit=1`,
       { method: "GET" },
     );
