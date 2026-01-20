@@ -41,6 +41,22 @@ export default function Home() {
   const configErrors = useMemo(() => getConfigErrors(), []);
   const hasConfigErrors = configErrors.length > 0;
 
+  const clearResumeStorage = useCallback(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const { localStorage } = window;
+    localStorage.removeItem(lastGameKey);
+
+    for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+      const key = localStorage.key(index);
+      if (key?.startsWith("bank.lobby")) {
+        localStorage.removeItem(key);
+      }
+    }
+  }, []);
+
   const loadLobby = useCallback(
     async (gameId: string, accessToken: string) => {
       const game = await supabaseClient.fetchFromSupabase<Game[]>(
@@ -51,6 +67,14 @@ export default function Home() {
 
       if (!game[0]) {
         throw new Error("Game not found.");
+      }
+
+      if (game[0].status === "ended") {
+        clearResumeStorage();
+        setActiveGame(null);
+        setPlayers([]);
+        setNotice("Last session ended.");
+        return;
       }
 
       const playerRows = await supabaseClient.fetchFromSupabase<Player[]>(
@@ -66,7 +90,7 @@ export default function Home() {
         window.localStorage.setItem(lastGameKey, gameId);
       }
     },
-    [],
+    [clearResumeStorage],
   );
 
   const restoreLobby = useCallback(

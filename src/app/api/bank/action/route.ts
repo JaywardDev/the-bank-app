@@ -25,7 +25,13 @@ type ActionRequest = {
   joinCode?: string;
   displayName?: string;
   boardPackId?: string;
-  action?: "CREATE_GAME" | "JOIN_GAME" | "START_GAME" | "ROLL_DICE" | "END_TURN";
+  action?:
+    | "CREATE_GAME"
+    | "JOIN_GAME"
+    | "START_GAME"
+    | "END_GAME"
+    | "ROLL_DICE"
+    | "END_TURN";
   expectedVersion?: number;
 };
 
@@ -490,6 +496,75 @@ export async function POST(request: Request) {
       );
 
       return NextResponse.json({ gameState: updatedState });
+    }
+
+    if (body.action === "END_GAME") {
+      if (game.created_by && game.created_by !== user.id) {
+        return NextResponse.json(
+          { error: "Only the host can end the session." },
+          { status: 403 },
+        );
+      }
+
+      if (game.status === "ended") {
+        return NextResponse.json(
+          { error: "Game already ended." },
+          { status: 409 },
+        );
+      }
+
+      const [endedGame] = await fetchFromSupabaseWithService<GameRow[]>(
+        `games?select=id,status&id=eq.${gameId}&status=in.(lobby,in_progress)`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            status: "ended",
+          }),
+        },
+      );
+
+      if (!endedGame) {
+        const [latestGame] = await fetchFromSupabaseWithService<GameRow[]>(
+          `games?select=id,status&id=eq.${gameId}&limit=1`,
+          { method: "GET" },
+        );
+
+        if (latestGame?.status === "ended") {
+          return NextResponse.json(
+            { error: "Game already ended." },
+            { status: 409 },
+          );
+        }
+
+        return NextResponse.json(
+          { error: "Game is not active." },
+          { status: 409 },
+        );
+      }
+
+      await fetchFromSupabaseWithService(
+        "game_events",
+        {
+          method: "POST",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            game_id: gameId,
+            version: nextVersion,
+            event_type: "END_GAME",
+            payload: {
+              previous_status: game.status,
+            },
+            created_by: user.id,
+          }),
+        },
+      );
+
+      return NextResponse.json({ status: "ended" });
     }
 
     if (!gameState) {

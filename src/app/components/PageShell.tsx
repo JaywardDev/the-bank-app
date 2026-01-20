@@ -22,6 +22,7 @@ type PageShellProps = {
   title: string;
   subtitle?: string;
   variant?: "player" | "board";
+  headerActions?: ReactNode;
   children: ReactNode;
 };
 
@@ -29,6 +30,7 @@ export default function PageShell({
   title,
   subtitle,
   variant = "player",
+  headerActions,
   children,
 }: PageShellProps) {
   const styles = shellStyles[variant];
@@ -37,9 +39,12 @@ export default function PageShell({
     <main className={styles.main}>
       <div className={styles.container}>
         <header className="space-y-2">
-          <Link className={styles.link} href="/">
-            ← Back to home
-          </Link>
+          <div className="flex items-center justify-between gap-3">
+            <Link className={styles.link} href="/">
+              ← Back to home
+            </Link>
+            {headerActions}
+          </div>
           <div className="space-y-1">
             <h1 className={styles.title}>{title}</h1>
             {subtitle ? <p className={styles.subtitle}>{subtitle}</p> : null}

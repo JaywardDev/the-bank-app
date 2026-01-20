@@ -53,6 +53,22 @@ export default function PlayPage() {
 
   const isConfigured = useMemo(() => supabaseClient.isConfigured(), []);
 
+  const clearResumeStorage = useCallback(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const { localStorage } = window;
+    localStorage.removeItem(lastGameKey);
+
+    for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+      const key = localStorage.key(index);
+      if (key?.startsWith("bank.lobby")) {
+        localStorage.removeItem(key);
+      }
+    }
+  }, []);
+
   const loadPlayers = useCallback(async (activeGameId: string, accessToken?: string) => {
     const playerRows = await supabaseClient.fetchFromSupabase<Player[]>(
       `players?select=id,user_id,display_name,created_at&game_id=eq.${activeGameId}&order=created_at.asc`,
@@ -310,10 +326,31 @@ export default function PlayPage() {
     [gameId, isInProgress, loadGameData, session],
   );
 
+  const handleLeaveTable = useCallback(() => {
+    clearResumeStorage();
+    setGameId(null);
+    setGameMeta(null);
+    setGameMetaError(null);
+    setPlayers([]);
+    setGameState(null);
+    setEvents([]);
+    setNotice(null);
+    router.push("/");
+  }, [clearResumeStorage, router]);
+
   return (
     <PageShell
       title="Player Console"
       subtitle="Mobile-first tools for wallet, assets, actions, and trades."
+      headerActions={
+        <button
+          className="text-xs font-medium text-neutral-500 hover:text-neutral-900"
+          type="button"
+          onClick={handleLeaveTable}
+        >
+          Leave table
+        </button>
+      }
     >
       {!isConfigured ? (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
