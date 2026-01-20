@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { getConfigErrors } from "@/lib/env";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 
@@ -28,14 +28,9 @@ type GameState = {
   version: number;
 };
 
-type LobbyPageProps = {
-  params: {
-    gameId: string;
-  };
-};
-
-export default function LobbyPage({ params }: LobbyPageProps) {
+export default function LobbyPage() {
   const router = useRouter();
+  const params = useParams<{ gameId?: string | string[] }>();
   const [session, setSession] = useState<SupabaseSession | null>(null);
   const [activeGame, setActiveGame] = useState<Game | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
@@ -47,6 +42,20 @@ export default function LobbyPage({ params }: LobbyPageProps) {
   const isConfigured = useMemo(() => supabaseClient.isConfigured(), []);
   const configErrors = useMemo(() => getConfigErrors(), []);
   const hasConfigErrors = configErrors.length > 0;
+  const gameId = useMemo(() => {
+    const param = params?.gameId;
+    return Array.isArray(param) ? param[0] : param;
+  }, [params]);
+  const isValidUuid = useMemo(
+    () =>
+      Boolean(
+        gameId &&
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+            gameId,
+          ),
+      ),
+    [gameId],
+  );
 
   const loadLobby = useCallback(
     async (gameId: string, accessToken: string) => {
@@ -92,6 +101,18 @@ export default function LobbyPage({ params }: LobbyPageProps) {
         return;
       }
 
+      if (!gameId) {
+        setNotice("Invalid lobby URL");
+        setAuthLoading(false);
+        return;
+      }
+
+      if (!isValidUuid) {
+        setNotice("Invalid game id");
+        setAuthLoading(false);
+        return;
+      }
+
       const currentSession = await supabaseClient.getSession();
       if (!isMounted) {
         return;
@@ -106,7 +127,7 @@ export default function LobbyPage({ params }: LobbyPageProps) {
       }
 
       try {
-        await loadLobby(params.gameId, currentSession.access_token);
+        await loadLobby(gameId, currentSession.access_token);
       } catch (error) {
         if (error instanceof Error) {
           setNotice(error.message);
@@ -121,10 +142,10 @@ export default function LobbyPage({ params }: LobbyPageProps) {
     return () => {
       isMounted = false;
     };
-  }, [isConfigured, loadLobby, params.gameId]);
+  }, [gameId, isConfigured, isValidUuid, loadLobby]);
 
   useEffect(() => {
-    if (!isConfigured || !params.gameId) {
+    if (!isConfigured || !gameId || !isValidUuid) {
       return;
     }
 
@@ -134,18 +155,18 @@ export default function LobbyPage({ params }: LobbyPageProps) {
     }
 
     const channel = realtimeClient
-      .channel(`lobby:${params.gameId}`)
+      .channel(`lobby:${gameId}`)
       .on(
         "postgres_changes",
         {
           event: "*",
           schema: "public",
           table: "players",
-          filter: `game_id=eq.${params.gameId}`,
+          filter: `game_id=eq.${gameId}`,
         },
         () => {
           if (session) {
-            void loadLobby(params.gameId, session.access_token);
+            void loadLobby(gameId, session.access_token);
           }
         },
       )
@@ -155,11 +176,11 @@ export default function LobbyPage({ params }: LobbyPageProps) {
           event: "*",
           schema: "public",
           table: "game_state",
-          filter: `game_id=eq.${params.gameId}`,
+          filter: `game_id=eq.${gameId}`,
         },
         () => {
           if (session) {
-            void loadLobby(params.gameId, session.access_token);
+            void loadLobby(gameId, session.access_token);
           }
         },
       )
@@ -169,11 +190,11 @@ export default function LobbyPage({ params }: LobbyPageProps) {
           event: "*",
           schema: "public",
           table: "games",
-          filter: `id=eq.${params.gameId}`,
+          filter: `id=eq.${gameId}`,
         },
         () => {
           if (session) {
-            void loadLobby(params.gameId, session.access_token);
+            void loadLobby(gameId, session.access_token);
           }
         },
       )
@@ -182,7 +203,7 @@ export default function LobbyPage({ params }: LobbyPageProps) {
     return () => {
       realtimeClient.removeChannel(channel);
     };
-  }, [isConfigured, loadLobby, params.gameId, session]);
+  }, [gameId, isConfigured, isValidUuid, loadLobby, session]);
 
   useEffect(() => {
     if (activeGame?.status === "in_progress") {
