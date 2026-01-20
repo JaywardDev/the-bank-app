@@ -4,7 +4,7 @@ add column if not exists starting_cash integer not null default 1500;
 create table if not exists public.game_state (
   game_id uuid primary key references public.games(id) on delete cascade,
   version integer not null default 0,
-  current_player_user_id uuid,
+  current_player_id uuid,
   balances jsonb not null default '{}'::jsonb,
   last_roll integer,
   updated_at timestamptz not null default now()
