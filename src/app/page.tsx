@@ -19,6 +19,7 @@ type Game = {
 
 type Player = {
   id: string;
+  user_id: string | null;
   display_name: string | null;
   created_at: string | null;
 };
@@ -59,7 +60,7 @@ export default function Home() {
       }
 
       const playerRows = await supabaseClient.fetchFromSupabase<Player[]>(
-        `players?select=id,display_name,created_at&game_id=eq.${gameId}&order=created_at.asc`,
+        `players?select=id,user_id,display_name,created_at&game_id=eq.${gameId}&order=created_at.asc`,
         { method: "GET" },
         accessToken,
       );
@@ -194,12 +195,6 @@ export default function Home() {
       realtimeClient.removeChannel(channel);
     };
   }, [activeGame, isConfigured, loadLobby, session]);
-
-  useEffect(() => {
-    if (activeGame?.status === "in_progress") {
-      router.push("/play");
-    }
-  }, [activeGame?.status, router]);
 
   const handleSendMagicLink = async () => {
     if (!authEmail) {
@@ -441,6 +436,12 @@ export default function Home() {
   const isHost = Boolean(
     session && activeGame?.created_by && session.user.id === activeGame.created_by,
   );
+  const isMember = useMemo(
+    () =>
+      Boolean(session && players.some((player) => player.user_id === session.user.id)),
+    [players, session],
+  );
+  const showResumeGate = Boolean(activeGame?.status === "in_progress");
 
   return (
     <main className="min-h-dvh bg-neutral-50 p-6 flex items-start justify-center">
@@ -581,6 +582,26 @@ export default function Home() {
             {loadingAction === "join" ? "Joining…" : "Join game"}
           </button>
         </section>
+
+        {showResumeGate ? (
+          <section className="space-y-3 rounded-2xl border bg-white p-4 shadow-sm">
+            <div className="space-y-1">
+              <h2 className="text-base font-semibold">Game in progress</h2>
+              <p className="text-sm text-neutral-500">
+                A saved table is already running.
+              </p>
+            </div>
+            {isMember ? (
+              <button
+                className="w-full rounded-xl bg-neutral-900 px-4 py-3 text-sm font-semibold text-white"
+                type="button"
+                onClick={() => router.push("/play")}
+              >
+                Back to the table
+              </button>
+            ) : null}
+          </section>
+        ) : null}
 
         {activeGame ? (
           <section className="space-y-3 rounded-2xl border bg-white p-4 shadow-sm">
