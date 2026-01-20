@@ -392,7 +392,6 @@ export async function POST(request: Request) {
           },
           body: JSON.stringify({
             status: "in_progress",
-            updated_at: new Date().toISOString(),
           }),
         },
       );
