@@ -24,11 +24,6 @@ type Player = {
   created_at: string | null;
 };
 
-type GameState = {
-  game_id: string;
-  version: number;
-};
-
 export default function Home() {
   const router = useRouter();
   const [session, setSession] = useState<SupabaseSession | null>(null);
@@ -38,7 +33,6 @@ export default function Home() {
   const [boardPackId, setBoardPackId] = useState(defaultBoardPackId);
   const [activeGame, setActiveGame] = useState<Game | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
-  const [gameState, setGameState] = useState<GameState | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -65,15 +59,8 @@ export default function Home() {
         accessToken,
       );
 
-      const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
-        `game_state?select=game_id,version&game_id=eq.${gameId}&limit=1`,
-        { method: "GET" },
-        accessToken,
-      );
-
       setActiveGame(game[0]);
       setPlayers(playerRows);
-      setGameState(stateRow ?? null);
 
       if (typeof window !== "undefined") {
         window.localStorage.setItem(lastGameKey, gameId);
@@ -236,7 +223,6 @@ export default function Home() {
     setSession(null);
     setActiveGame(null);
     setPlayers([]);
-    setGameState(null);
 
     if (typeof window !== "undefined") {
       window.localStorage.removeItem(lastGameKey);
@@ -285,6 +271,7 @@ export default function Home() {
 
       await loadLobby(data.gameId, session.access_token);
       setNotice("Game created. Share the code to invite others.");
+      router.push(`/lobby/${data.gameId}`);
     } catch (error) {
       if (error instanceof Error) {
         setNotice(error.message);
@@ -368,6 +355,7 @@ export default function Home() {
       }
 
       setNotice("You are in the lobby. Waiting for the host.");
+      router.push(`/lobby/${data.gameId}`);
     } catch (error) {
       if (error instanceof Error) {
         setNotice(error.message);
@@ -379,69 +367,13 @@ export default function Home() {
     }
   };
 
-  const handleLeaveLobby = () => {
-    setActiveGame(null);
-    setPlayers([]);
-    setGameState(null);
-
-    if (typeof window !== "undefined") {
-      window.localStorage.removeItem(lastGameKey);
-    }
-  };
-
-  const handleStartGame = async () => {
-    if (!session || !activeGame) {
-      setNotice("Join a lobby before starting.");
-      return;
-    }
-
-    setLoadingAction("start");
-    setNotice(null);
-
-    try {
-      const response = await fetch("/api/bank/action", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          action: "START_GAME",
-          gameId: activeGame.id,
-          expectedVersion: gameState?.version ?? 0,
-        }),
-      });
-
-      if (!response.ok) {
-        const error = (await response.json()) as { error?: string };
-        if (response.status === 409) {
-          await loadLobby(activeGame.id, session.access_token);
-          throw new Error(error.error ?? "Game updated. Try again.");
-        }
-        throw new Error(error.error ?? "Unable to start the game.");
-      }
-
-      router.push("/play");
-    } catch (error) {
-      if (error instanceof Error) {
-        setNotice(error.message);
-      } else {
-        setNotice("Unable to start the game.");
-      }
-    } finally {
-      setLoadingAction(null);
-    }
-  };
-
-  const isHost = Boolean(
-    session && activeGame?.created_by && session.user.id === activeGame.created_by,
-  );
   const isMember = useMemo(
     () =>
       Boolean(session && players.some((player) => player.user_id === session.user.id)),
     [players, session],
   );
-  const showResumeGate = Boolean(activeGame?.status === "in_progress");
+  const showLobbyResumeGate = Boolean(activeGame?.status === "lobby");
+  const showPlayResumeGate = Boolean(activeGame?.status === "in_progress");
 
   return (
     <main className="min-h-dvh bg-neutral-50 p-6 flex items-start justify-center">
@@ -583,7 +515,25 @@ export default function Home() {
           </button>
         </section>
 
-        {showResumeGate ? (
+        {showLobbyResumeGate ? (
+          <section className="space-y-3 rounded-2xl border bg-white p-4 shadow-sm">
+            <div className="space-y-1">
+              <h2 className="text-base font-semibold">Lobby ready</h2>
+              <p className="text-sm text-neutral-500">
+                Resume your waiting room to see who has joined.
+              </p>
+            </div>
+            <button
+              className="w-full rounded-xl bg-neutral-900 px-4 py-3 text-sm font-semibold text-white"
+              type="button"
+              onClick={() => router.push(`/lobby/${activeGame?.id ?? ""}`)}
+            >
+              Enter lobby
+            </button>
+          </section>
+        ) : null}
+
+        {showPlayResumeGate ? (
           <section className="space-y-3 rounded-2xl border bg-white p-4 shadow-sm">
             <div className="space-y-1">
               <h2 className="text-base font-semibold">Game in progress</h2>
@@ -600,57 +550,6 @@ export default function Home() {
                 Back to the table
               </button>
             ) : null}
-          </section>
-        ) : null}
-
-        {activeGame ? (
-          <section className="space-y-3 rounded-2xl border bg-white p-4 shadow-sm">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-base font-semibold">Game lobby</h2>
-                <p className="text-sm text-neutral-500">
-                  Waiting for the host to start the session.
-                </p>
-              </div>
-              <button
-                className="text-xs font-medium text-neutral-500 hover:text-neutral-900"
-                type="button"
-                onClick={handleLeaveLobby}
-              >
-                Leave
-              </button>
-            </div>
-            {isHost && activeGame.status === "lobby" ? (
-              <button
-                className="w-full rounded-xl bg-neutral-900 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-400"
-                type="button"
-                onClick={handleStartGame}
-                disabled={loadingAction === "start"}
-              >
-                {loadingAction === "start" ? "Starting…" : "Start game"}
-              </button>
-            ) : null}
-            <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-sm">
-              <div className="text-xs uppercase text-neutral-500">Join code</div>
-              <div className="text-lg font-semibold tracking-[0.3em] text-neutral-900">
-                {activeGame.join_code}
-              </div>
-            </div>
-            <div className="space-y-2">
-              <div className="text-xs uppercase text-neutral-500">
-                Players ({players.length})
-              </div>
-              <ul className="space-y-2">
-                {players.map((player) => (
-                  <li
-                    key={player.id}
-                    className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm"
-                  >
-                    {player.display_name ?? "Player"}
-                  </li>
-                ))}
-              </ul>
-            </div>
           </section>
         ) : null}
 

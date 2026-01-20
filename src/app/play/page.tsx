@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import PageShell from "../components/PageShell";
 import { getBoardPackById } from "@/lib/boardPacks";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
@@ -37,6 +38,7 @@ type GameEvent = {
 };
 
 export default function PlayPage() {
+  const router = useRouter();
   const [session, setSession] = useState<SupabaseSession | null>(null);
   const [gameId, setGameId] = useState<string | null>(null);
   const [gameMeta, setGameMeta] = useState<GameMeta | null>(null);
@@ -162,6 +164,12 @@ export default function PlayPage() {
       setGameMetaError(null);
     }
   }, [gameId]);
+
+  useEffect(() => {
+    if (gameMeta?.status === "lobby" && gameId) {
+      router.replace(`/lobby/${gameId}`);
+    }
+  }, [gameId, gameMeta?.status, router]);
 
   useEffect(() => {
     if (!isConfigured || !gameId) {
