@@ -389,7 +389,7 @@ export async function POST(request: Request) {
         );
       }
 
-      const startingPlayerId = players[0]?.user_id;
+      const startingPlayerId = players[0]?.id;
       if (!startingPlayerId) {
         return NextResponse.json(
           { error: "Unable to determine the starting player." },
@@ -582,8 +582,9 @@ export async function POST(request: Request) {
     }
 
     const currentPlayer = players.find(
-      (player) => player.user_id === gameState.current_player_id,
+      (player) => player.id === gameState.current_player_id,
     );
+    const currentUserPlayer = players.find((player) => player.user_id === user.id);
 
     if (!currentPlayer) {
       return NextResponse.json(
@@ -592,7 +593,7 @@ export async function POST(request: Request) {
       );
     }
 
-    if (currentPlayer.user_id !== user.id) {
+    if (!currentUserPlayer || currentUserPlayer.id !== gameState.current_player_id) {
       return NextResponse.json(
         { error: "It is not your turn." },
         { status: 403 },
@@ -653,7 +654,7 @@ export async function POST(request: Request) {
 
     if (body.action === "END_TURN") {
       const currentIndex = players.findIndex(
-        (player) => player.user_id === gameState.current_player_id,
+        (player) => player.id === gameState.current_player_id,
       );
       const nextIndex =
         currentIndex === -1 ? 0 : (currentIndex + 1) % players.length;
@@ -668,7 +669,7 @@ export async function POST(request: Request) {
           },
           body: JSON.stringify({
             version: nextVersion,
-            current_player_id: nextPlayer.user_id,
+            current_player_id: nextPlayer.id,
             last_roll: null,
             updated_at: new Date().toISOString(),
           }),
