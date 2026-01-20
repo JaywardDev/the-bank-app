@@ -40,6 +40,7 @@ export default function PlayPage() {
   const [session, setSession] = useState<SupabaseSession | null>(null);
   const [gameId, setGameId] = useState<string | null>(null);
   const [gameMeta, setGameMeta] = useState<GameMeta | null>(null);
+  const [gameMetaError, setGameMetaError] = useState<string | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [events, setEvents] = useState<GameEvent[]>([]);
@@ -66,7 +67,16 @@ export default function PlayPage() {
         { method: "GET" },
         accessToken,
       );
-      setGameMeta(game ?? null);
+      if (!game) {
+        setGameMeta(null);
+        setGameMetaError(
+          "Game exists but is not visible — membership or RLS issue.",
+        );
+        return;
+      }
+
+      setGameMeta(game);
+      setGameMetaError(null);
     },
     [],
   );
@@ -148,6 +158,12 @@ export default function PlayPage() {
   }, [isConfigured, loadGameData]);
 
   useEffect(() => {
+    if (!gameId) {
+      setGameMetaError(null);
+    }
+  }, [gameId]);
+
+  useEffect(() => {
     if (!isConfigured || !gameId) {
       return;
     }
@@ -222,6 +238,7 @@ export default function PlayPage() {
   ]);
 
   const isInProgress = gameMeta?.status === "in_progress";
+  const hasGameMetaError = Boolean(gameMetaError);
   const currentPlayer = players.find(
     (player) => player.user_id === gameState?.current_player_id,
   );
@@ -309,6 +326,12 @@ export default function PlayPage() {
         </div>
       ) : null}
 
+      {gameMetaError ? (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-900">
+          {gameMetaError}
+        </div>
+      ) : null}
+
       <section className="rounded-2xl border bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -351,12 +374,19 @@ export default function PlayPage() {
                 Current turn
               </p>
               <p className="text-2xl font-semibold text-neutral-900">
-                {isInProgress
-                  ? currentPlayer?.display_name ?? "Waiting for start"
-                  : "Waiting for start"}
+                {hasGameMetaError
+                  ? "Game not visible"
+                  : isInProgress
+                    ? currentPlayer?.display_name ?? "Waiting for start"
+                    : "Waiting for start"}
               </p>
               <p className="text-sm text-neutral-500">
-                Last roll: {isInProgress ? gameState?.last_roll ?? "—" : "—"}
+                Last roll:{" "}
+                {hasGameMetaError
+                  ? "—"
+                  : isInProgress
+                    ? gameState?.last_roll ?? "—"
+                    : "—"}
               </p>
             </div>
             <div className="text-right">
@@ -364,7 +394,13 @@ export default function PlayPage() {
                 Turn status
               </p>
               <p className="text-sm font-semibold text-neutral-700">
-                {isInProgress ? (isMyTurn ? "Your turn" : "Stand by") : "Waiting"}
+                {hasGameMetaError
+                  ? "Check access"
+                  : isInProgress
+                    ? isMyTurn
+                      ? "Your turn"
+                      : "Stand by"
+                    : "Waiting"}
               </p>
             </div>
           </div>
@@ -645,12 +681,19 @@ export default function PlayPage() {
                 Current turn
               </p>
               <p className="text-2xl font-semibold text-neutral-900">
-                {isInProgress
-                  ? currentPlayer?.display_name ?? "Waiting for start"
-                  : "Waiting for start"}
+                {hasGameMetaError
+                  ? "Game not visible"
+                  : isInProgress
+                    ? currentPlayer?.display_name ?? "Waiting for start"
+                    : "Waiting for start"}
               </p>
               <p className="text-sm text-neutral-500">
-                Last roll: {isInProgress ? gameState?.last_roll ?? "—" : "—"}
+                Last roll:{" "}
+                {hasGameMetaError
+                  ? "—"
+                  : isInProgress
+                    ? gameState?.last_roll ?? "—"
+                    : "—"}
               </p>
               <div className="grid gap-3 pt-2 sm:grid-cols-2">
                 <div className="rounded-2xl border border-dashed border-neutral-200 p-3 text-sm text-neutral-600">
