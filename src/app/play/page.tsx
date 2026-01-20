@@ -19,6 +19,7 @@ type GameMeta = {
   id: string;
   board_pack_id: string | null;
   status: string | null;
+  created_by: string | null;
 };
 
 type GameState = {
@@ -81,7 +82,7 @@ export default function PlayPage() {
   const loadGameMeta = useCallback(
     async (activeGameId: string, accessToken?: string) => {
       const [game] = await supabaseClient.fetchFromSupabase<GameMeta[]>(
-        `games?select=id,board_pack_id,status&id=eq.${activeGameId}&limit=1`,
+        `games?select=id,board_pack_id,status,created_by&id=eq.${activeGameId}&limit=1`,
         { method: "GET" },
         accessToken,
       );
@@ -188,6 +189,22 @@ export default function PlayPage() {
   }, [gameId, gameMeta?.status, router]);
 
   useEffect(() => {
+    if (gameMeta?.status !== "ended") {
+      return;
+    }
+
+    clearResumeStorage();
+    setGameId(null);
+    setGameMeta(null);
+    setGameMetaError(null);
+    setPlayers([]);
+    setGameState(null);
+    setEvents([]);
+    setNotice("This session has ended.");
+    router.replace("/");
+  }, [clearResumeStorage, gameMeta?.status, router]);
+
+  useEffect(() => {
     if (!isConfigured || !gameId) {
       return;
     }
@@ -275,6 +292,9 @@ export default function PlayPage() {
   const canRoll = isMyTurn && gameState?.last_roll == null;
   const canEndTurn = isMyTurn && gameState?.last_roll != null;
   const boardPack = getBoardPackById(gameMeta?.board_pack_id);
+  const isHost = Boolean(
+    session && gameMeta?.created_by && session.user.id === gameMeta.created_by,
+  );
 
   const handleBankAction = useCallback(
     async (action: "ROLL_DICE" | "END_TURN") => {
@@ -338,18 +358,81 @@ export default function PlayPage() {
     router.push("/");
   }, [clearResumeStorage, router]);
 
+  const handleEndSession = useCallback(async () => {
+    if (!session || !gameId) {
+      setNotice("Join a game lobby first.");
+      return;
+    }
+
+    setActionLoading("END_GAME");
+    setNotice(null);
+
+    try {
+      const response = await fetch("/api/bank/action", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          gameId,
+          action: "END_GAME",
+          expectedVersion: gameState?.version ?? 0,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = (await response.json()) as { error?: string };
+        if (response.status === 409) {
+          await loadGameData(gameId, session.access_token);
+          throw new Error(error.error ?? "Game updated. Try again.");
+        }
+        throw new Error(error.error ?? "Unable to end the session.");
+      }
+
+      clearResumeStorage();
+      setGameId(null);
+      setGameMeta(null);
+      setGameMetaError(null);
+      setPlayers([]);
+      setGameState(null);
+      setEvents([]);
+      router.push("/");
+    } catch (error) {
+      if (error instanceof Error) {
+        setNotice(error.message);
+      } else {
+        setNotice("Unable to end the session.");
+      }
+    } finally {
+      setActionLoading(null);
+    }
+  }, [clearResumeStorage, gameId, gameState?.version, loadGameData, session]);
+
   return (
     <PageShell
       title="Player Console"
       subtitle="Mobile-first tools for wallet, assets, actions, and trades."
       headerActions={
-        <button
-          className="text-xs font-medium text-neutral-500 hover:text-neutral-900"
-          type="button"
-          onClick={handleLeaveTable}
-        >
-          Leave table
-        </button>
+        <div className="flex items-center gap-3">
+          {isHost ? (
+            <button
+              className="text-xs font-medium text-rose-600 hover:text-rose-700"
+              type="button"
+              onClick={handleEndSession}
+              disabled={actionLoading === "END_GAME"}
+            >
+              {actionLoading === "END_GAME" ? "Ending…" : "End session"}
+            </button>
+          ) : null}
+          <button
+            className="text-xs font-medium text-neutral-500 hover:text-neutral-900"
+            type="button"
+            onClick={handleLeaveTable}
+          >
+            Leave table
+          </button>
+        </div>
       }
     >
       {!isConfigured ? (

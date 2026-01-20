@@ -211,6 +211,23 @@ export default function LobbyPage() {
     }
   }, [activeGame?.status, router]);
 
+  useEffect(() => {
+    if (activeGame?.status !== "ended") {
+      return;
+    }
+
+    setActiveGame(null);
+    setPlayers([]);
+    setGameState(null);
+
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(lastGameKey);
+    }
+
+    setNotice("This session has ended.");
+    router.replace("/");
+  }, [activeGame?.status, router]);
+
   const handleLeaveLobby = () => {
     setActiveGame(null);
     setPlayers([]);
@@ -221,6 +238,54 @@ export default function LobbyPage() {
     }
 
     router.push("/");
+  };
+
+  const handleEndSession = async () => {
+    if (!session || !activeGame) {
+      setNotice("Join a lobby before ending the session.");
+      return;
+    }
+
+    setLoadingAction("end");
+    setNotice(null);
+
+    try {
+      const response = await fetch("/api/bank/action", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          action: "END_GAME",
+          gameId: activeGame.id,
+          expectedVersion: gameState?.version ?? 0,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = (await response.json()) as { error?: string };
+        if (response.status === 409) {
+          await loadLobby(activeGame.id, session.access_token);
+          throw new Error(error.error ?? "Game updated. Try again.");
+        }
+        throw new Error(error.error ?? "Unable to end the session.");
+      }
+
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem(lastGameKey);
+      }
+
+      router.push("/");
+    } catch (error) {
+      if (error instanceof Error) {
+        setNotice(error.message);
+      } else {
+        setNotice("Unable to end the session.");
+      }
+    } finally {
+      setLoadingAction(null);
+    }
   };
 
   const handleStartGame = async () => {
@@ -315,6 +380,16 @@ export default function LobbyPage() {
                 Leave
               </button>
             </div>
+            {isHost ? (
+              <button
+                className="w-full rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-900 hover:border-rose-300 disabled:cursor-not-allowed disabled:border-rose-100 disabled:text-rose-300"
+                type="button"
+                onClick={handleEndSession}
+                disabled={loadingAction === "end"}
+              >
+                {loadingAction === "end" ? "Ending…" : "End session"}
+              </button>
+            ) : null}
             {isHost && activeGame.status === "lobby" ? (
               <button
                 className="w-full rounded-xl bg-neutral-900 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-400"
