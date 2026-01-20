@@ -383,6 +383,14 @@ export async function POST(request: Request) {
         );
       }
 
+      const startingPlayerId = players[0]?.user_id;
+      if (!startingPlayerId) {
+        return NextResponse.json(
+          { error: "Unable to determine the starting player." },
+          { status: 500 },
+        );
+      }
+
       const [startedGame] = await fetchFromSupabaseWithService<GameRow[]>(
         `games?select=id,status&id=eq.${gameId}&status=eq.lobby`,
         {
@@ -421,23 +429,42 @@ export async function POST(request: Request) {
         return acc;
       }, {});
 
-      const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
-        "game_state?on_conflict=game_id",
+      const upsertResponse = await fetch(
+        `${supabaseUrl}/rest/v1/game_state?on_conflict=game_id&select=game_id,version,current_player_id,balances,last_roll`,
         {
           method: "POST",
           headers: {
+            ...bankHeaders,
             Prefer: "resolution=merge-duplicates, return=representation",
           },
           body: JSON.stringify({
             game_id: gameId,
             version: nextVersion,
-            current_player_id: players[0].user_id,
+            current_player_id: startingPlayerId,
             balances,
             last_roll: null,
             updated_at: new Date().toISOString(),
           }),
         },
       );
+
+      if (!upsertResponse.ok) {
+        const errorText = await upsertResponse.text();
+        return NextResponse.json(
+          { error: errorText || "Unable to update game state." },
+          { status: 500 },
+        );
+      }
+
+      const [updatedState] =
+        (await upsertResponse.json()) as GameStateRow[];
+
+      if (!updatedState?.current_player_id) {
+        return NextResponse.json(
+          { error: "Unable to persist the starting player." },
+          { status: 500 },
+        );
+      }
 
       await fetchFromSupabaseWithService(
         "game_events",
