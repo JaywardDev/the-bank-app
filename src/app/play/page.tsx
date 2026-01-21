@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 import PageShell from "../components/PageShell";
 import { getBoardPackById } from "@/lib/boardPacks";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
@@ -53,6 +54,9 @@ export default function PlayPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"wallet" | "board">("wallet");
   const [needsAuth, setNeedsAuth] = useState(false);
+  const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshInFlightRef = useRef(false);
+  const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
 
   const isConfigured = useMemo(() => supabaseClient.isConfigured(), []);
 
@@ -134,6 +138,114 @@ export default function PlayPage() {
     },
     [loadEvents, loadGameMeta, loadGameState, loadPlayers],
   );
+
+  const setupRealtimeChannel = useCallback(() => {
+    if (!isConfigured || !gameId || !session?.access_token) {
+      return;
+    }
+
+    const realtimeClient = supabaseClient.getRealtimeClient();
+    if (!realtimeClient) {
+      return;
+    }
+
+    const existingChannel = realtimeChannelRef.current;
+    if (existingChannel && existingChannel.state === "joined") {
+      return;
+    }
+
+    if (existingChannel) {
+      realtimeClient.removeChannel(existingChannel);
+      realtimeChannelRef.current = null;
+    }
+
+    const channel = realtimeClient
+      .channel(`player-console:${gameId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "players",
+          filter: `game_id=eq.${gameId}`,
+        },
+        () => {
+          void loadPlayers(gameId, session?.access_token);
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "game_state",
+          filter: `game_id=eq.${gameId}`,
+        },
+        () => {
+          void loadGameState(gameId, session?.access_token);
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "game_events",
+          filter: `game_id=eq.${gameId}`,
+        },
+        () => {
+          void loadEvents(gameId, session?.access_token);
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "games",
+          filter: `id=eq.${gameId}`,
+        },
+        () => {
+          void loadGameMeta(gameId, session?.access_token);
+        },
+      )
+      .subscribe();
+
+    realtimeChannelRef.current = channel;
+  }, [
+    gameId,
+    isConfigured,
+    loadEvents,
+    loadGameMeta,
+    loadGameState,
+    loadPlayers,
+    session?.access_token,
+  ]);
+
+  const requestRefresh = useCallback(() => {
+    if (!gameId || !session?.access_token) {
+      return;
+    }
+
+    if (refreshTimeoutRef.current) {
+      clearTimeout(refreshTimeoutRef.current);
+    }
+
+    refreshTimeoutRef.current = setTimeout(async () => {
+      if (refreshInFlightRef.current) {
+        return;
+      }
+
+      refreshInFlightRef.current = true;
+
+      try {
+        await loadGameData(gameId, session.access_token);
+        setupRealtimeChannel();
+      } finally {
+        refreshInFlightRef.current = false;
+      }
+    }, 400);
+  }, [gameId, loadGameData, session?.access_token, setupRealtimeChannel]);
 
   useEffect(() => {
     let isMounted = true;
@@ -219,65 +331,18 @@ export default function PlayPage() {
       return;
     }
 
-    const realtimeClient = supabaseClient.getRealtimeClient();
-    if (!realtimeClient) {
-      return;
-    }
-
-    const channel = realtimeClient
-      .channel(`player-console:${gameId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "players",
-          filter: `game_id=eq.${gameId}`,
-        },
-        () => {
-          void loadPlayers(gameId, session?.access_token);
-        },
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "game_state",
-          filter: `game_id=eq.${gameId}`,
-        },
-        () => {
-          void loadGameState(gameId, session?.access_token);
-        },
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "game_events",
-          filter: `game_id=eq.${gameId}`,
-        },
-        () => {
-          void loadEvents(gameId, session?.access_token);
-        },
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "games",
-          filter: `id=eq.${gameId}`,
-        },
-        () => {
-          void loadGameMeta(gameId, session?.access_token);
-        },
-      )
-      .subscribe();
+    setupRealtimeChannel();
 
     return () => {
-      realtimeClient.removeChannel(channel);
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
+      }
+
+      const realtimeClient = supabaseClient.getRealtimeClient();
+      if (realtimeClient && realtimeChannelRef.current) {
+        realtimeClient.removeChannel(realtimeChannelRef.current);
+      }
+      realtimeChannelRef.current = null;
     };
   }, [
     gameId,
@@ -286,7 +351,38 @@ export default function PlayPage() {
     loadGameState,
     loadPlayers,
     session?.access_token,
+    setupRealtimeChannel,
   ]);
+
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        requestRefresh();
+      }
+    };
+
+    const handleFocus = () => {
+      requestRefresh();
+    };
+
+    const handleOnline = () => {
+      requestRefresh();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("online", handleOnline);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("online", handleOnline);
+
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
+      }
+    };
+  }, [requestRefresh]);
 
   const isInProgress = gameMeta?.status === "in_progress";
   const hasGameMetaError = Boolean(gameMetaError);

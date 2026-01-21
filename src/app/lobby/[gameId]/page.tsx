@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 import { getConfigErrors } from "@/lib/env";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 
@@ -39,6 +40,9 @@ export default function LobbyPage() {
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const latestSessionRef = useRef<SupabaseSession | null>(null);
+  const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshInFlightRef = useRef(false);
+  const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
 
   const isConfigured = useMemo(() => supabaseClient.isConfigured(), []);
   const configErrors = useMemo(() => getConfigErrors(), []);
@@ -114,56 +118,7 @@ export default function LobbyPage() {
     }
   }, [gameId, loadLobby]);
 
-  useEffect(() => {
-    latestSessionRef.current = session;
-  }, [session]);
-
-  useEffect(() => {
-    let isMounted = true;
-
-    const hydrateSession = async () => {
-      if (!isConfigured) {
-        setAuthLoading(false);
-        return;
-      }
-
-      if (!gameId) {
-        setNotice("Invalid lobby URL");
-        setAuthLoading(false);
-        return;
-      }
-
-      if (!isValidUuid) {
-        setNotice("Invalid game id");
-        setAuthLoading(false);
-        return;
-      }
-
-      const currentSession = await supabaseClient.getSession();
-      if (!isMounted) {
-        return;
-      }
-
-      setSession(currentSession);
-      latestSessionRef.current = currentSession;
-      setAuthLoading(false);
-
-      if (!currentSession) {
-        setNotice("Sign in on the home page to view this lobby.");
-        return;
-      }
-
-      await refreshLobby();
-    };
-
-    hydrateSession();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [gameId, isConfigured, isValidUuid, loadLobby, refreshLobby]);
-
-  useEffect(() => {
+  const setupRealtimeChannel = useCallback(() => {
     if (!isConfigured || !gameId || !isValidUuid) {
       return;
     }
@@ -173,7 +128,15 @@ export default function LobbyPage() {
       return;
     }
 
-    latestSessionRef.current = session;
+    const existingChannel = realtimeChannelRef.current;
+    if (existingChannel && existingChannel.state === "joined") {
+      return;
+    }
+
+    if (existingChannel) {
+      realtimeClient.removeChannel(existingChannel);
+      realtimeChannelRef.current = null;
+    }
 
     const channel = realtimeClient
       .channel(`lobby:${gameId}`)
@@ -239,11 +202,133 @@ export default function LobbyPage() {
       )
       .subscribe();
 
-    return () => {
-      void channel.unsubscribe();
-      realtimeClient.removeChannel(channel);
+    realtimeChannelRef.current = channel;
+  }, [gameId, isConfigured, isValidUuid, refreshLobby]);
+
+  const requestRefresh = useCallback(() => {
+    if (!gameId || !latestSessionRef.current) {
+      return;
+    }
+
+    if (refreshTimeoutRef.current) {
+      clearTimeout(refreshTimeoutRef.current);
+    }
+
+    refreshTimeoutRef.current = setTimeout(async () => {
+      if (refreshInFlightRef.current) {
+        return;
+      }
+
+      refreshInFlightRef.current = true;
+      try {
+        await refreshLobby();
+        setupRealtimeChannel();
+      } finally {
+        refreshInFlightRef.current = false;
+      }
+    }, 400);
+  }, [gameId, refreshLobby, setupRealtimeChannel]);
+
+  useEffect(() => {
+    latestSessionRef.current = session;
+  }, [session]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const hydrateSession = async () => {
+      if (!isConfigured) {
+        setAuthLoading(false);
+        return;
+      }
+
+      if (!gameId) {
+        setNotice("Invalid lobby URL");
+        setAuthLoading(false);
+        return;
+      }
+
+      if (!isValidUuid) {
+        setNotice("Invalid game id");
+        setAuthLoading(false);
+        return;
+      }
+
+      const currentSession = await supabaseClient.getSession();
+      if (!isMounted) {
+        return;
+      }
+
+      setSession(currentSession);
+      latestSessionRef.current = currentSession;
+      setAuthLoading(false);
+
+      if (!currentSession) {
+        setNotice("Sign in on the home page to view this lobby.");
+        return;
+      }
+
+      await refreshLobby();
     };
-  }, [gameId, isConfigured, isValidUuid, refreshLobby, session]);
+
+    hydrateSession();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [gameId, isConfigured, isValidUuid, loadLobby, refreshLobby]);
+
+  useEffect(() => {
+    if (!isConfigured || !gameId || !isValidUuid) {
+      return;
+    }
+
+    latestSessionRef.current = session;
+    setupRealtimeChannel();
+
+    return () => {
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
+      }
+
+      const realtimeClient = supabaseClient.getRealtimeClient();
+      if (realtimeClient && realtimeChannelRef.current) {
+        void realtimeChannelRef.current.unsubscribe();
+        realtimeClient.removeChannel(realtimeChannelRef.current);
+      }
+      realtimeChannelRef.current = null;
+    };
+  }, [gameId, isConfigured, isValidUuid, refreshLobby, session, setupRealtimeChannel]);
+
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        requestRefresh();
+      }
+    };
+
+    const handleFocus = () => {
+      requestRefresh();
+    };
+
+    const handleOnline = () => {
+      requestRefresh();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("online", handleOnline);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("online", handleOnline);
+
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
+      }
+    };
+  }, [requestRefresh]);
 
   useEffect(() => {
     if (activeGame?.status === "in_progress") {
