@@ -318,6 +318,16 @@ export default function PlayPage() {
         return;
       }
 
+      const snapshotVersion = gameState?.version ?? 0;
+      const snapshotLastRoll = gameState?.last_roll ?? null;
+      console.info("[Play] action request", {
+        action,
+        gameId,
+        expectedVersion: snapshotVersion,
+        currentVersion: gameState?.version ?? null,
+        last_roll: snapshotLastRoll,
+      });
+
       setActionLoading(action);
       setNotice(null);
 
@@ -331,17 +341,37 @@ export default function PlayPage() {
           body: JSON.stringify({
             gameId,
             action,
-            expectedVersion: gameState?.version ?? 0,
+            expectedVersion: snapshotVersion,
           }),
         });
 
+        let responseBody: { error?: string; gameState?: GameState } | null = null;
+        try {
+          responseBody = (await response.json()) as {
+            error?: string;
+            gameState?: GameState;
+          };
+        } catch {
+          responseBody = null;
+        }
+
+        console.info("[Play] action response", {
+          action,
+          status: response.status,
+          body: responseBody,
+        });
+
         if (!response.ok) {
-          const error = (await response.json()) as { error?: string };
           if (response.status === 409) {
+            setNotice("Syncing…");
             await loadGameData(gameId, session.access_token);
-            throw new Error(error.error ?? "Game updated. Try again.");
+            throw new Error(responseBody?.error ?? "Game updated. Try again.");
           }
-          throw new Error(error.error ?? "Unable to perform action.");
+          throw new Error(responseBody?.error ?? "Unable to perform action.");
+        }
+
+        if (responseBody?.gameState) {
+          setGameState(responseBody.gameState);
         }
       } catch (error) {
         if (error instanceof Error) {
@@ -353,7 +383,7 @@ export default function PlayPage() {
         setActionLoading(null);
       }
     },
-    [gameId, isInProgress, loadGameData, session],
+    [gameId, gameState, isInProgress, loadGameData, session],
   );
 
   const handleLeaveTable = useCallback(() => {
