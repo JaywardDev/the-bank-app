@@ -51,6 +51,7 @@ export default function PlayPage() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"wallet" | "board">("wallet");
+  const [needsAuth, setNeedsAuth] = useState(false);
 
   const isConfigured = useMemo(() => supabaseClient.isConfigured(), []);
 
@@ -148,6 +149,7 @@ export default function PlayPage() {
       }
 
       setSession(currentSession);
+      setNeedsAuth(false);
 
       if (typeof window !== "undefined") {
         const storedGameId = window.localStorage.getItem(lastGameKey);
@@ -155,7 +157,7 @@ export default function PlayPage() {
         setGameId(storedGameId);
 
         if (storedGameId && !accessToken) {
-          setNotice("Sign in on the home page to view this game.");
+          setNeedsAuth(true);
           setLoading(false);
           return;
         }
@@ -212,7 +214,7 @@ export default function PlayPage() {
   }, [clearResumeStorage, gameMeta?.status, router]);
 
   useEffect(() => {
-    if (!isConfigured || !gameId) {
+    if (!isConfigured || !gameId || !session?.access_token) {
       return;
     }
 
@@ -365,6 +367,11 @@ export default function PlayPage() {
     router.push("/");
   }, [clearResumeStorage, router]);
 
+  const handleSignInAgain = useCallback(() => {
+    clearResumeStorage();
+    router.push("/");
+  }, [clearResumeStorage, router]);
+
   const handleEndSession = useCallback(async () => {
     if (!session || !gameId) {
       setNotice("Join a game lobby first.");
@@ -458,6 +465,19 @@ export default function PlayPage() {
       {notice ? (
         <div className="rounded-2xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
           {notice}
+        </div>
+      ) : null}
+
+      {needsAuth ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          <p className="font-medium">Please sign in again to load this game.</p>
+          <button
+            className="mt-3 rounded-full bg-amber-900 px-4 py-2 text-xs font-semibold text-white"
+            type="button"
+            onClick={handleSignInAgain}
+          >
+            Please sign in again
+          </button>
         </div>
       ) : null}
 

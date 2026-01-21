@@ -243,7 +243,7 @@ export default function Home() {
     setLoadingAction("signout");
     setNotice(null);
 
-    await supabaseClient.signOut(session.access_token);
+    await supabaseClient.signOut();
     setSession(null);
     setActiveGame(null);
     setPlayers([]);
