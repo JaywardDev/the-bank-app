@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { getConfigErrors } from "@/lib/env";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
@@ -38,6 +38,7 @@ export default function LobbyPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const latestSessionRef = useRef<SupabaseSession | null>(null);
 
   const isConfigured = useMemo(() => supabaseClient.isConfigured(), []);
   const configErrors = useMemo(() => getConfigErrors(), []);
@@ -92,6 +93,31 @@ export default function LobbyPage() {
     [],
   );
 
+  const refreshLobby = useCallback(async () => {
+    if (!gameId) {
+      return;
+    }
+
+    const currentSession = latestSessionRef.current;
+    if (!currentSession) {
+      return;
+    }
+
+    try {
+      await loadLobby(gameId, currentSession.access_token);
+    } catch (error) {
+      if (error instanceof Error) {
+        setNotice(error.message);
+      } else {
+        setNotice("Unable to load the lobby.");
+      }
+    }
+  }, [gameId, loadLobby]);
+
+  useEffect(() => {
+    latestSessionRef.current = session;
+  }, [session]);
+
   useEffect(() => {
     let isMounted = true;
 
@@ -119,6 +145,7 @@ export default function LobbyPage() {
       }
 
       setSession(currentSession);
+      latestSessionRef.current = currentSession;
       setAuthLoading(false);
 
       if (!currentSession) {
@@ -126,15 +153,7 @@ export default function LobbyPage() {
         return;
       }
 
-      try {
-        await loadLobby(gameId, currentSession.access_token);
-      } catch (error) {
-        if (error instanceof Error) {
-          setNotice(error.message);
-        } else {
-          setNotice("Unable to load the lobby.");
-        }
-      }
+      await refreshLobby();
     };
 
     hydrateSession();
@@ -142,7 +161,7 @@ export default function LobbyPage() {
     return () => {
       isMounted = false;
     };
-  }, [gameId, isConfigured, isValidUuid, loadLobby]);
+  }, [gameId, isConfigured, isValidUuid, loadLobby, refreshLobby]);
 
   useEffect(() => {
     if (!isConfigured || !gameId || !isValidUuid) {
@@ -154,56 +173,77 @@ export default function LobbyPage() {
       return;
     }
 
+    latestSessionRef.current = session;
+
     const channel = realtimeClient
       .channel(`lobby:${gameId}`)
       .on(
         "postgres_changes",
         {
-          event: "*",
+          event: "INSERT",
           schema: "public",
           table: "players",
           filter: `game_id=eq.${gameId}`,
         },
         () => {
-          if (session) {
-            void loadLobby(gameId, session.access_token);
-          }
+          void refreshLobby();
         },
       )
       .on(
         "postgres_changes",
         {
-          event: "*",
+          event: "UPDATE",
+          schema: "public",
+          table: "players",
+          filter: `game_id=eq.${gameId}`,
+        },
+        () => {
+          void refreshLobby();
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "DELETE",
+          schema: "public",
+          table: "players",
+          filter: `game_id=eq.${gameId}`,
+        },
+        () => {
+          void refreshLobby();
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
           schema: "public",
           table: "game_state",
           filter: `game_id=eq.${gameId}`,
         },
         () => {
-          if (session) {
-            void loadLobby(gameId, session.access_token);
-          }
+          void refreshLobby();
         },
       )
       .on(
         "postgres_changes",
         {
-          event: "*",
+          event: "UPDATE",
           schema: "public",
           table: "games",
           filter: `id=eq.${gameId}`,
         },
         () => {
-          if (session) {
-            void loadLobby(gameId, session.access_token);
-          }
+          void refreshLobby();
         },
       )
       .subscribe();
 
     return () => {
+      void channel.unsubscribe();
       realtimeClient.removeChannel(channel);
     };
-  }, [gameId, isConfigured, isValidUuid, loadLobby, session]);
+  }, [gameId, isConfigured, isValidUuid, refreshLobby, session]);
 
   useEffect(() => {
     if (activeGame?.status === "in_progress") {
