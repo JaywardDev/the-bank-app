@@ -151,11 +151,18 @@ export default function PlayPage() {
 
       if (typeof window !== "undefined") {
         const storedGameId = window.localStorage.getItem(lastGameKey);
+        const accessToken = currentSession?.access_token;
         setGameId(storedGameId);
 
-        if (storedGameId) {
+        if (storedGameId && !accessToken) {
+          setNotice("Sign in on the home page to view this game.");
+          setLoading(false);
+          return;
+        }
+
+        if (storedGameId && accessToken) {
           try {
-            await loadGameData(storedGameId, currentSession?.access_token);
+            await loadGameData(storedGameId, accessToken);
           } catch (error) {
             if (error instanceof Error) {
               setNotice(error.message);
