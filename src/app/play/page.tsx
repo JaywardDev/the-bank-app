@@ -25,6 +25,7 @@ type GameMeta = {
 type GameState = {
   game_id: string;
   version: number;
+  // References players.id (not auth user_id).
   current_player_id: string | null;
   balances: Record<string, number> | null;
   last_roll: number | null;
@@ -290,7 +291,7 @@ export default function PlayPage() {
   const isInProgress = gameMeta?.status === "in_progress";
   const hasGameMetaError = Boolean(gameMetaError);
   const currentPlayer = players.find(
-    (player) => player.user_id === gameState?.current_player_id,
+    (player) => player.id === gameState?.current_player_id,
   );
   const isMyTurn = Boolean(
     isInProgress &&

@@ -20,6 +20,7 @@ type GameMeta = {
 type GameState = {
   game_id: string;
   version: number;
+  // References players.id (not auth user_id).
   current_player_id: string | null;
   last_roll: number | null;
 };
@@ -194,7 +195,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
   ]);
 
   const currentPlayer = players.find(
-    (player) => player.user_id === gameState?.current_player_id,
+    (player) => player.id === gameState?.current_player_id,
   );
   const boardPack = getBoardPackById(gameMeta?.board_pack_id);
 
