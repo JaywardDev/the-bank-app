@@ -65,6 +65,7 @@ type GameStateRow = {
   current_player_id: string | null;
   balances: Record<string, number> | null;
   last_roll: number | null;
+  doubles_count: number | null;
 };
 
 type TileInfo = {
@@ -290,7 +291,7 @@ export async function POST(request: Request) {
       }
 
       await fetchFromSupabaseWithService<GameStateRow[]>(
-        "game_state?select=game_id,version,current_player_id,balances,last_roll",
+        "game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count",
         {
           method: "POST",
           headers: {
@@ -302,6 +303,7 @@ export async function POST(request: Request) {
             current_player_id: null,
             balances: {},
             last_roll: null,
+            doubles_count: 0,
             updated_at: new Date().toISOString(),
           }),
         },
@@ -420,7 +422,7 @@ export async function POST(request: Request) {
     );
 
     const [gameState] = await fetchFromSupabaseWithService<GameStateRow[]>(
-      `game_state?select=game_id,version,current_player_id,balances,last_roll&game_id=eq.${gameId}&limit=1`,
+      `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count&game_id=eq.${gameId}&limit=1`,
       { method: "GET" },
     );
 
@@ -504,7 +506,7 @@ export async function POST(request: Request) {
       }, {});
 
       const upsertResponse = await fetch(
-        `${supabaseUrl}/rest/v1/game_state?on_conflict=game_id&select=game_id,version,current_player_id,balances,last_roll`,
+        `${supabaseUrl}/rest/v1/game_state?on_conflict=game_id&select=game_id,version,current_player_id,balances,last_roll,doubles_count`,
         {
           method: "POST",
           headers: {
@@ -517,6 +519,7 @@ export async function POST(request: Request) {
             current_player_id: startingPlayerRowId,
             balances,
             last_roll: null,
+            doubles_count: 0,
             updated_at: new Date().toISOString(),
           }),
         },
@@ -669,7 +672,9 @@ export async function POST(request: Request) {
     }
 
     if (body.action === "ROLL_DICE") {
-      if (gameState.last_roll != null) {
+      const doublesCount = gameState?.doubles_count ?? 0;
+
+      if (gameState.last_roll != null && doublesCount === 0) {
         return NextResponse.json(
           { error: "You have already rolled this turn." },
           { status: 409 },
@@ -679,6 +684,8 @@ export async function POST(request: Request) {
       const dieOne = Math.floor(Math.random() * 6) + 1;
       const dieTwo = Math.floor(Math.random() * 6) + 1;
       const rollTotal = dieOne + dieTwo;
+      const isDouble = dieOne === dieTwo;
+      const nextDoublesCount = isDouble ? doublesCount + 1 : 0;
       const boardPack = getBoardPackById(game.board_pack_id);
       const boardTiles = boardPack?.tiles ?? [];
       const boardSize = boardTiles.length > 0 ? boardTiles.length : 40;
@@ -703,6 +710,122 @@ export async function POST(request: Request) {
           }
         : balances;
 
+      if (isDouble && nextDoublesCount >= 3) {
+        const jailTile =
+          boardTiles.find((tile) => tile.type === "JAIL") ?? {
+            index: 10,
+            tile_id: "jail",
+            type: "JAIL",
+            name: "Jail",
+          };
+        const currentIndex = players.findIndex(
+          (player) => player.id === gameState.current_player_id,
+        );
+        const nextIndex =
+          currentIndex === -1 ? 0 : (currentIndex + 1) % players.length;
+        const nextPlayer = players[nextIndex];
+
+        const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
+          `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+          {
+            method: "PATCH",
+            headers: {
+              Prefer: "return=representation",
+            },
+            body: JSON.stringify({
+              version: nextVersion,
+              current_player_id: nextPlayer.id,
+              last_roll: null,
+              doubles_count: 0,
+              updated_at: new Date().toISOString(),
+            }),
+          },
+        );
+
+        if (!updatedState) {
+          return NextResponse.json(
+            { error: "Version mismatch." },
+            { status: 409 },
+          );
+        }
+
+        const [updatedPlayer] = await fetchFromSupabaseWithService<PlayerRow[]>(
+          `players?id=eq.${currentPlayer.id}`,
+          {
+            method: "PATCH",
+            headers: {
+              Prefer: "return=representation",
+            },
+            body: JSON.stringify({
+              position: jailTile.index,
+            }),
+          },
+        );
+
+        if (!updatedPlayer) {
+          return NextResponse.json(
+            { error: "Unable to move player to jail." },
+            { status: 500 },
+          );
+        }
+
+        await emitGameEvent(
+          gameId,
+          nextVersion,
+          "ROLL_DICE",
+          {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.display_name,
+            roll: rollTotal,
+            dice: [dieOne, dieTwo],
+          },
+          user.id,
+        );
+
+        await emitGameEvent(
+          gameId,
+          nextVersion,
+          "ROLLED_DOUBLE",
+          {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.display_name,
+            roll: rollTotal,
+            dice: [dieOne, dieTwo],
+            doubles_count: nextDoublesCount,
+          },
+          user.id,
+        );
+
+        await emitGameEvent(
+          gameId,
+          nextVersion,
+          "GO_TO_JAIL",
+          {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.display_name,
+            tile_id: jailTile.tile_id,
+            tile_name: jailTile.name,
+            tile_index: jailTile.index,
+          },
+          user.id,
+        );
+
+        await emitGameEvent(
+          gameId,
+          nextVersion,
+          "END_TURN",
+          {
+            from_player_id: currentPlayer.id,
+            from_player_name: currentPlayer.display_name,
+            to_player_id: nextPlayer.id,
+            to_player_name: nextPlayer.display_name,
+          },
+          user.id,
+        );
+
+        return NextResponse.json({ gameState: updatedState });
+      }
+
       const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
         `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
         {
@@ -713,6 +836,7 @@ export async function POST(request: Request) {
           body: JSON.stringify({
             version: nextVersion,
             last_roll: rollTotal,
+            doubles_count: nextDoublesCount,
             ...(passedStart ? { balances: updatedBalances } : {}),
             updated_at: new Date().toISOString(),
           }),
@@ -758,6 +882,22 @@ export async function POST(request: Request) {
         },
         user.id,
       );
+
+      if (isDouble) {
+        await emitGameEvent(
+          gameId,
+          nextVersion,
+          "ROLLED_DOUBLE",
+          {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.display_name,
+            roll: rollTotal,
+            dice: [dieOne, dieTwo],
+            doubles_count: nextDoublesCount,
+          },
+          user.id,
+        );
+      }
 
       await emitGameEvent(
         gameId,
@@ -813,6 +953,20 @@ export async function POST(request: Request) {
         user.id,
       );
 
+      if (isDouble) {
+        await emitGameEvent(
+          gameId,
+          nextVersion,
+          "ALLOW_EXTRA_ROLL",
+          {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.display_name,
+            doubles_count: nextDoublesCount,
+          },
+          user.id,
+        );
+      }
+
       return NextResponse.json({ gameState: updatedState });
     }
 
@@ -835,6 +989,7 @@ export async function POST(request: Request) {
             version: nextVersion,
             current_player_id: nextPlayer.id,
             last_roll: null,
+            doubles_count: 0,
             updated_at: new Date().toISOString(),
           }),
         },
