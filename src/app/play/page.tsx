@@ -62,6 +62,119 @@ export default function PlayPage() {
   const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
 
   const isConfigured = useMemo(() => supabaseClient.isConfigured(), []);
+  const latestRollEvent = useMemo(
+    () => events.find((event) => event.event_type === "ROLL_DICE"),
+    [events],
+  );
+  const latestRolledDoubleEvent = useMemo(
+    () => events.find((event) => event.event_type === "ROLLED_DOUBLE"),
+    [events],
+  );
+  const latestRollPayload = useMemo(() => {
+    const payload = latestRollEvent?.payload;
+    return payload && typeof payload === "object"
+      ? (payload as {
+          dice?: unknown;
+          doubles_count?: unknown;
+          roll?: unknown;
+        })
+      : null;
+  }, [latestRollEvent]);
+  const latestDoublePayload = useMemo(() => {
+    const payload = latestRolledDoubleEvent?.payload;
+    return payload && typeof payload === "object"
+      ? (payload as { doubles_count?: unknown })
+      : null;
+  }, [latestRolledDoubleEvent]);
+  const latestDiceValues = useMemo(() => {
+    if (!latestRollPayload) {
+      return null;
+    }
+    const dice = latestRollPayload.dice;
+    if (!Array.isArray(dice) || dice.length < 2) {
+      return null;
+    }
+    const [first, second] = dice;
+    if (typeof first !== "number" || typeof second !== "number") {
+      return null;
+    }
+    return [first, second] as const;
+  }, [latestRollPayload]);
+  const latestDiceDisplay = useMemo(() => {
+    if (!latestDiceValues) {
+      return null;
+    }
+    return `🎲 ${latestDiceValues[0]} + ${latestDiceValues[1]}`;
+  }, [latestDiceValues]);
+  const latestDoubleStreak = useMemo(() => {
+    const candidate =
+      latestRollPayload?.doubles_count ?? latestDoublePayload?.doubles_count;
+    return typeof candidate === "number" ? candidate : null;
+  }, [latestDoublePayload, latestRollPayload]);
+  const latestRolledDoubleConfirmed = useMemo(() => {
+    if (!latestRollEvent || !latestRolledDoubleEvent) {
+      return false;
+    }
+    return latestRolledDoubleEvent.version === latestRollEvent.version + 1;
+  }, [latestRollEvent, latestRolledDoubleEvent]);
+  const latestIsDouble = useMemo(() => {
+    if (latestDiceValues) {
+      return (
+        latestRolledDoubleConfirmed ||
+        latestDiceValues[0] === latestDiceValues[1]
+      );
+    }
+    return false;
+  }, [latestDiceValues, latestRolledDoubleConfirmed]);
+  const formatEventDescription = useCallback((event: GameEvent) => {
+    const payload = event.payload as
+      | {
+          roll?: number;
+          to_player_name?: string;
+          dice?: unknown;
+          doubles_count?: unknown;
+        }
+      | null;
+
+    const dice = payload?.dice;
+    const diceDisplay =
+      Array.isArray(dice) &&
+      dice.length >= 2 &&
+      typeof dice[0] === "number" &&
+      typeof dice[1] === "number"
+        ? `🎲 ${dice[0]} + ${dice[1]}`
+        : null;
+    const doublesCount =
+      typeof payload?.doubles_count === "number"
+        ? payload.doubles_count
+        : null;
+
+    if (event.event_type === "ROLL_DICE") {
+      if (diceDisplay) {
+        return `Rolled ${diceDisplay}`;
+      }
+      if (typeof payload?.roll === "number") {
+        return `Rolled ${payload.roll}`;
+      }
+      return "Dice rolled";
+    }
+
+    if (event.event_type === "ROLLED_DOUBLE") {
+      return doublesCount !== null
+        ? `Double rolled (streak ${doublesCount})`
+        : "Double rolled";
+    }
+
+    if (event.event_type === "END_TURN" && payload?.to_player_name) {
+      return `Turn → ${payload.to_player_name}`;
+    }
+
+    if (event.event_type === "START_GAME") {
+      return "Game started";
+    }
+
+    return "Update received";
+  }, []);
 
   const clearResumeStorage = useCallback(() => {
     if (typeof window === "undefined") {
@@ -673,6 +786,25 @@ export default function PlayPage() {
                     ? gameState?.last_roll ?? "—"
                     : "—"}
               </p>
+              {latestDiceDisplay ? (
+                <div className="mt-2 space-y-1">
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-neutral-600">
+                    <span className="font-semibold text-neutral-900">
+                      {latestDiceDisplay}
+                    </span>
+                    {latestIsDouble ? (
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold uppercase text-amber-800">
+                        DOUBLE!
+                      </span>
+                    ) : null}
+                  </div>
+                  {latestDoubleStreak !== null ? (
+                    <p className="text-xs text-neutral-500">
+                      Double streak: {latestDoubleStreak}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
             <div className="text-right">
               <p className="text-xs uppercase tracking-wide text-neutral-400">
@@ -762,34 +894,17 @@ export default function PlayPage() {
                 Events will appear once the game starts.
               </div>
             ) : (
-              events.map((event) => {
-                const payload = event.payload as
-                  | { roll?: number; to_player_name?: string }
-                  | null;
-
-                return (
-                  <div
-                    key={event.id}
-                    className="rounded-2xl border px-4 py-3"
-                  >
-                    <div className="flex items-center justify-between text-xs uppercase text-neutral-400">
-                      <span>{event.event_type.replaceAll("_", " ")}</span>
-                      <span>v{event.version}</span>
-                    </div>
-                    <p className="mt-2 text-sm font-medium text-neutral-800">
-                      {event.event_type === "ROLL_DICE" &&
-                      typeof payload?.roll === "number"
-                        ? `Rolled ${payload.roll}`
-                        : event.event_type === "END_TURN" &&
-                            payload?.to_player_name
-                          ? `Turn → ${payload.to_player_name}`
-                          : event.event_type === "START_GAME"
-                            ? "Game started"
-                            : "Update received"}
-                    </p>
+              events.map((event) => (
+                <div key={event.id} className="rounded-2xl border px-4 py-3">
+                  <div className="flex items-center justify-between text-xs uppercase text-neutral-400">
+                    <span>{event.event_type.replaceAll("_", " ")}</span>
+                    <span>v{event.version}</span>
                   </div>
-                );
-              })
+                  <p className="mt-2 text-sm font-medium text-neutral-800">
+                    {formatEventDescription(event)}
+                  </p>
+                </div>
+              ))
             )}
           </div>
         </div>
@@ -999,6 +1114,25 @@ export default function PlayPage() {
                     ? gameState?.last_roll ?? "—"
                     : "—"}
               </p>
+              {latestDiceDisplay ? (
+                <div className="mt-2 space-y-1">
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-neutral-600">
+                    <span className="font-semibold text-neutral-900">
+                      {latestDiceDisplay}
+                    </span>
+                    {latestIsDouble ? (
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold uppercase text-amber-800">
+                        DOUBLE!
+                      </span>
+                    ) : null}
+                  </div>
+                  {latestDoubleStreak !== null ? (
+                    <p className="text-xs text-neutral-500">
+                      Double streak: {latestDoubleStreak}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
               <div className="grid gap-3 pt-2 sm:grid-cols-2">
                 <div className="rounded-2xl border border-dashed border-neutral-200 p-3 text-sm text-neutral-600">
                   Active phase placeholder
@@ -1067,7 +1201,7 @@ export default function PlayPage() {
                         <span>v{event.version}</span>
                       </div>
                       <p className="mt-2 text-sm text-neutral-700">
-                        Event details placeholder
+                        {formatEventDescription(event)}
                       </p>
                     </div>
                   ))
