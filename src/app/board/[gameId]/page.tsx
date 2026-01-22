@@ -199,6 +199,23 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
   const currentPlayer = players.find(
     (player) => player.id === gameState?.current_player_id,
   );
+  const lastMoveEvent = events.find(
+    (event) => event.event_type === "MOVE_PLAYER",
+  );
+  const lastMovePayload = lastMoveEvent?.payload ?? {};
+  const lastMovedPlayerId =
+    typeof lastMovePayload.player_id === "string"
+      ? lastMovePayload.player_id
+      : null;
+  const lastMovedTileIndexValue =
+    typeof lastMovePayload.to === "number"
+      ? lastMovePayload.to
+      : typeof lastMovePayload.to === "string"
+        ? Number.parseInt(lastMovePayload.to, 10)
+        : null;
+  const lastMovedTileIndex = Number.isFinite(lastMovedTileIndexValue)
+    ? Number(lastMovedTileIndexValue)
+    : null;
   const boardPack = getBoardPackById(gameMeta?.board_pack_id);
 
   return (
@@ -226,8 +243,8 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
         </div>
       ) : null}
 
-      <section className="grid gap-6 lg:grid-cols-[2fr_1fr]">
-        <div className="rounded-3xl border border-white/10 bg-white/5 p-6 md:p-8 space-y-6">
+      <section className="grid gap-6 lg:grid-cols-[minmax(0,2.4fr)_minmax(0,1fr)]">
+        <div className="rounded-3xl border border-white/10 bg-white/5 p-6 md:p-8 space-y-5 flex flex-col min-h-[360px] lg:min-h-[70vh]">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/60">
@@ -239,34 +256,24 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
             </div>
             <span className="text-xs text-white/50">Projection only</span>
           </div>
-          <div className="rounded-3xl border border-white/10 bg-black/30 p-4 md:p-6">
+          <div className="rounded-3xl border border-white/10 bg-black/30 p-4 md:p-6 flex-1">
             <BoardMiniMap
               tiles={boardPack?.tiles}
               players={players}
               currentPlayerId={currentPlayer?.id}
+              lastMovedPlayerId={lastMovedPlayerId}
+              lastMovedTileIndex={lastMovedTileIndex}
               variant="dark"
+              size="large"
             />
           </div>
-          <div className="grid gap-4 md:grid-cols-3">
-            {[
-              { label: "Bank balance", value: "$205,000" },
-              { label: "Cash in circulation", value: "$74,300" },
-              { label: "Properties owned", value: "16 / 28" },
-            ].map((stat) => (
-              <div
-                key={stat.label}
-                className="rounded-2xl border border-white/10 bg-black/30 p-4"
-              >
-                <p className="text-xs uppercase tracking-wide text-white/50">
-                  {stat.label}
-                </p>
-                <p className="text-2xl font-semibold text-white">{stat.value}</p>
-              </div>
-            ))}
-          </div>
+          <p className="text-xs text-white/50">
+            Live player positions are highlighted for the active turn and the
+            most recent move.
+          </p>
         </div>
 
-        <div className="space-y-4">
+        <div className="space-y-6">
           <div className="rounded-3xl border border-white/10 bg-white/5 p-6 space-y-4">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/60">
@@ -315,81 +322,35 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
               )}
             </ol>
           </div>
-        </div>
-      </section>
-
-      <section className="grid gap-6 lg:grid-cols-[1.2fr_1fr]">
-        <div className="rounded-3xl border border-white/10 bg-white/5 p-6 md:p-8 space-y-4">
-          <div className="flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/60">
-              Event log
-            </p>
-            <span className="text-xs text-white/50">Read-only feed</span>
-          </div>
-          <ul className="space-y-3 text-base">
-            {events.length === 0 ? (
-              <li className="rounded-2xl border border-dashed border-white/20 bg-black/30 px-4 py-5 text-center text-xs text-white/50">
-                Events will appear once the game starts.
-              </li>
-            ) : (
-              events.map((event) => (
-                <li
-                  key={event.id}
-                  className="rounded-2xl border border-white/10 bg-black/30 px-4 py-3"
-                >
-                  <div className="flex items-center justify-between text-xs uppercase tracking-wide text-white/50">
-                    <span>{event.event_type.replaceAll("_", " ")}</span>
-                    <span>v{event.version}</span>
-                  </div>
-                  <p className="mt-2 text-sm text-white/80">
-                    Event details placeholder
-                  </p>
+          <div className="rounded-3xl border border-white/10 bg-white/5 p-6 md:p-7 space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/60">
+                Event log
+              </p>
+              <span className="text-xs text-white/50">Read-only feed</span>
+            </div>
+            <ul className="space-y-3 text-base max-h-[40vh] overflow-y-auto pr-1">
+              {events.length === 0 ? (
+                <li className="rounded-2xl border border-dashed border-white/20 bg-black/30 px-4 py-5 text-center text-xs text-white/50">
+                  Events will appear once the game starts.
                 </li>
-              ))
-            )}
-          </ul>
-        </div>
-
-        <div className="rounded-3xl border border-white/10 bg-white/5 p-6 space-y-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/60">
-            Economy summary
-          </p>
-          <div className="space-y-4">
-            {[
-              {
-                label: "Bank balance",
-                value: "$205,000",
-                note: "Placeholder until live metrics",
-              },
-              {
-                label: "Cash in circulation",
-                value: "$74,300",
-                note: "Placeholder",
-              },
-              {
-                label: "Trades pending",
-                value: "3",
-                note: "Placeholder",
-              },
-              {
-                label: "Auction pressure",
-                value: "Moderate",
-                note: "Placeholder",
-              },
-            ].map((metric) => (
-              <div
-                key={metric.label}
-                className="rounded-2xl border border-white/10 bg-black/30 p-4"
-              >
-                <p className="text-xs uppercase tracking-wide text-white/50">
-                  {metric.label}
-                </p>
-                <p className="text-2xl font-semibold text-white">
-                  {metric.value}
-                </p>
-                <p className="text-sm text-white/60">{metric.note}</p>
-              </div>
-            ))}
+              ) : (
+                events.map((event) => (
+                  <li
+                    key={event.id}
+                    className="rounded-2xl border border-white/10 bg-black/30 px-4 py-3"
+                  >
+                    <div className="flex items-center justify-between text-xs uppercase tracking-wide text-white/50">
+                      <span>{event.event_type.replaceAll("_", " ")}</span>
+                      <span>v{event.version}</span>
+                    </div>
+                    <p className="mt-2 text-sm text-white/80">
+                      Event details placeholder
+                    </p>
+                  </li>
+                ))
+              )}
+            </ul>
           </div>
         </div>
       </section>

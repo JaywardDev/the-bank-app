@@ -55,6 +55,7 @@ export default function PlayPage() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"wallet" | "board">("wallet");
+  const [boardZoomed, setBoardZoomed] = useState(false);
   const [needsAuth, setNeedsAuth] = useState(false);
   const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshInFlightRef = useRef(false);
@@ -952,13 +953,30 @@ export default function PlayPage() {
                   Read-only landscape view
                 </p>
               </div>
-              <span className="text-xs text-neutral-400">Actions hidden</span>
+              <div className="flex items-center gap-3 text-xs text-neutral-400">
+                <button
+                  className="rounded-full border border-neutral-200 px-3 py-1 text-xs font-semibold text-neutral-700 transition hover:border-neutral-300"
+                  type="button"
+                  onClick={() => setBoardZoomed((prev) => !prev)}
+                >
+                  {boardZoomed ? "Reset zoom" : "Zoom board"}
+                </button>
+                <span>Actions hidden</span>
+              </div>
             </div>
-            <BoardMiniMap
-              tiles={boardPack?.tiles}
-              players={players}
-              currentPlayerId={currentPlayer?.id}
-            />
+            <div className="overflow-x-auto pb-2">
+              <div
+                className={`origin-top-left transition-transform ${
+                  boardZoomed ? "scale-[1.12]" : "scale-100"
+                }`}
+              >
+                <BoardMiniMap
+                  tiles={boardPack?.tiles}
+                  players={players}
+                  currentPlayerId={currentPlayer?.id}
+                />
+              </div>
+            </div>
           </div>
 
           <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
