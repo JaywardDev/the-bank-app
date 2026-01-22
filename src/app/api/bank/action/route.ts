@@ -75,6 +75,15 @@ type TileInfo = {
   name: string;
 };
 
+type DiceEventPayload = {
+  player_id: string;
+  player_name: string | null;
+  roll: number;
+  dice: number[];
+  doubles_count?: number;
+  rolls_this_turn?: number;
+};
+
 const PASS_START_SALARY = 200;
 
 const isConfigured = () =>
@@ -166,6 +175,19 @@ const emitGameEvent = async (
       }),
     },
   );
+};
+
+const emitGameEvents = async (
+  gameId: string,
+  startVersion: number,
+  events: Array<{ event_type: string; payload: Record<string, unknown> }>,
+  userId: string,
+) => {
+  let version = startVersion;
+  for (const event of events) {
+    await emitGameEvent(gameId, version, event.event_type, event.payload, userId);
+    version += 1;
+  }
 };
 
 const resolveTile = (tile: TileInfo, player: PlayerRow) => {
@@ -724,6 +746,50 @@ export async function POST(request: Request) {
         const nextIndex =
           currentIndex === -1 ? 0 : (currentIndex + 1) % players.length;
         const nextPlayer = players[nextIndex];
+        const events: Array<{
+          event_type: string;
+          payload: Record<string, unknown>;
+        }> = [
+          {
+            event_type: "ROLL_DICE",
+            payload: {
+              player_id: currentPlayer.id,
+              player_name: currentPlayer.display_name,
+              roll: rollTotal,
+              dice: [dieOne, dieTwo],
+            } satisfies DiceEventPayload,
+          },
+          {
+            event_type: "ROLLED_DOUBLE",
+            payload: {
+              player_id: currentPlayer.id,
+              player_name: currentPlayer.display_name,
+              roll: rollTotal,
+              dice: [dieOne, dieTwo],
+              doubles_count: nextDoublesCount,
+            } satisfies DiceEventPayload,
+          },
+          {
+            event_type: "GO_TO_JAIL",
+            payload: {
+              player_id: currentPlayer.id,
+              player_name: currentPlayer.display_name,
+              tile_id: jailTile.tile_id,
+              tile_name: jailTile.name,
+              tile_index: jailTile.index,
+            },
+          },
+          {
+            event_type: "END_TURN",
+            payload: {
+              from_player_id: currentPlayer.id,
+              from_player_name: currentPlayer.display_name,
+              to_player_id: nextPlayer.id,
+              to_player_name: nextPlayer.display_name,
+            },
+          },
+        ];
+        const finalVersion = currentVersion + events.length;
 
         const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
           `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
@@ -733,7 +799,7 @@ export async function POST(request: Request) {
               Prefer: "return=representation",
             },
             body: JSON.stringify({
-              version: nextVersion,
+              version: finalVersion,
               current_player_id: nextPlayer.id,
               last_roll: null,
               doubles_count: 0,
@@ -769,62 +835,94 @@ export async function POST(request: Request) {
           );
         }
 
-        await emitGameEvent(
-          gameId,
-          nextVersion,
-          "ROLL_DICE",
-          {
+        await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+
+        return NextResponse.json({ gameState: updatedState });
+      }
+
+      const events: Array<{
+        event_type: string;
+        payload: Record<string, unknown>;
+      }> = [
+        {
+          event_type: "ROLL_DICE",
+          payload: {
             player_id: currentPlayer.id,
             player_name: currentPlayer.display_name,
             roll: rollTotal,
             dice: [dieOne, dieTwo],
-          },
-          user.id,
-        );
+          } satisfies DiceEventPayload,
+        },
+      ];
 
-        await emitGameEvent(
-          gameId,
-          nextVersion,
-          "ROLLED_DOUBLE",
-          {
+      if (isDouble) {
+        events.push({
+          event_type: "ROLLED_DOUBLE",
+          payload: {
             player_id: currentPlayer.id,
             player_name: currentPlayer.display_name,
             roll: rollTotal,
             dice: [dieOne, dieTwo],
             doubles_count: nextDoublesCount,
-          },
-          user.id,
-        );
+          } satisfies DiceEventPayload,
+        });
+      }
 
-        await emitGameEvent(
-          gameId,
-          nextVersion,
-          "GO_TO_JAIL",
-          {
+      events.push(
+        {
+          event_type: "MOVE_PLAYER",
+          payload: {
+            player_id: currentPlayer.id,
+            from: currentPosition,
+            to: newPosition,
+            roll_total: rollTotal,
+            dice: [dieOne, dieTwo],
+            passedStart,
+            tile_id: landingTile.tile_id,
+            tile_name: landingTile.name,
+          },
+        },
+        {
+          event_type: "LAND_ON_TILE",
+          payload: {
+            player_id: currentPlayer.id,
+            tile_id: landingTile.tile_id,
+            tile_type: landingTile.type,
+            tile_index: landingTile.index,
+          },
+        },
+      );
+
+      const resolutionEvent = resolveTile(landingTile, currentPlayer);
+      if (resolutionEvent) {
+        events.push({
+          event_type: resolutionEvent.event_type,
+          payload: resolutionEvent.payload,
+        });
+      }
+
+      events.push({
+        event_type: "MOVE_RESOLVED",
+        payload: {
+          player_id: currentPlayer.id,
+          tile_id: landingTile.tile_id,
+          tile_type: landingTile.type,
+          tile_index: landingTile.index,
+        },
+      });
+
+      if (isDouble) {
+        events.push({
+          event_type: "ALLOW_EXTRA_ROLL",
+          payload: {
             player_id: currentPlayer.id,
             player_name: currentPlayer.display_name,
-            tile_id: jailTile.tile_id,
-            tile_name: jailTile.name,
-            tile_index: jailTile.index,
+            doubles_count: nextDoublesCount,
           },
-          user.id,
-        );
-
-        await emitGameEvent(
-          gameId,
-          nextVersion,
-          "END_TURN",
-          {
-            from_player_id: currentPlayer.id,
-            from_player_name: currentPlayer.display_name,
-            to_player_id: nextPlayer.id,
-            to_player_name: nextPlayer.display_name,
-          },
-          user.id,
-        );
-
-        return NextResponse.json({ gameState: updatedState });
+        });
       }
+
+      const finalVersion = currentVersion + events.length;
 
       const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
         `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
@@ -834,7 +932,7 @@ export async function POST(request: Request) {
             Prefer: "return=representation",
           },
           body: JSON.stringify({
-            version: nextVersion,
+            version: finalVersion,
             last_roll: rollTotal,
             doubles_count: nextDoublesCount,
             ...(passedStart ? { balances: updatedBalances } : {}),
@@ -870,102 +968,7 @@ export async function POST(request: Request) {
         );
       }
 
-      await emitGameEvent(
-        gameId,
-        nextVersion,
-        "ROLL_DICE",
-        {
-          player_id: currentPlayer.id,
-          player_name: currentPlayer.display_name,
-          roll: rollTotal,
-          dice: [dieOne, dieTwo],
-        },
-        user.id,
-      );
-
-      if (isDouble) {
-        await emitGameEvent(
-          gameId,
-          nextVersion,
-          "ROLLED_DOUBLE",
-          {
-            player_id: currentPlayer.id,
-            player_name: currentPlayer.display_name,
-            roll: rollTotal,
-            dice: [dieOne, dieTwo],
-            doubles_count: nextDoublesCount,
-          },
-          user.id,
-        );
-      }
-
-      await emitGameEvent(
-        gameId,
-        nextVersion,
-        "MOVE_PLAYER",
-        {
-          player_id: currentPlayer.id,
-          from: currentPosition,
-          to: newPosition,
-          roll_total: rollTotal,
-          dice: [dieOne, dieTwo],
-          passedStart,
-          tile_id: landingTile.tile_id,
-          tile_name: landingTile.name,
-        },
-        user.id,
-      );
-
-      await emitGameEvent(
-        gameId,
-        nextVersion,
-        "LAND_ON_TILE",
-        {
-          player_id: currentPlayer.id,
-          tile_id: landingTile.tile_id,
-          tile_type: landingTile.type,
-          tile_index: landingTile.index,
-        },
-        user.id,
-      );
-
-      const resolutionEvent = resolveTile(landingTile, currentPlayer);
-      if (resolutionEvent) {
-        await emitGameEvent(
-          gameId,
-          nextVersion,
-          resolutionEvent.event_type,
-          resolutionEvent.payload,
-          user.id,
-        );
-      }
-
-      await emitGameEvent(
-        gameId,
-        nextVersion,
-        "MOVE_RESOLVED",
-        {
-          player_id: currentPlayer.id,
-          tile_id: landingTile.tile_id,
-          tile_type: landingTile.type,
-          tile_index: landingTile.index,
-        },
-        user.id,
-      );
-
-      if (isDouble) {
-        await emitGameEvent(
-          gameId,
-          nextVersion,
-          "ALLOW_EXTRA_ROLL",
-          {
-            player_id: currentPlayer.id,
-            player_name: currentPlayer.display_name,
-            doubles_count: nextDoublesCount,
-          },
-          user.id,
-        );
-      }
+      await emitGameEvents(gameId, currentVersion + 1, events, user.id);
 
       return NextResponse.json({ gameState: updatedState });
     }
