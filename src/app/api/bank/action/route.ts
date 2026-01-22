@@ -67,6 +67,13 @@ type GameStateRow = {
   last_roll: number | null;
 };
 
+type TileInfo = {
+  tile_id: string;
+  type: string;
+  index: number;
+  name: string;
+};
+
 const PASS_START_SALARY = 200;
 
 const isConfigured = () =>
@@ -134,6 +141,63 @@ const fetchFromSupabaseWithService = async <T>(
 
   return (await response.json()) as T;
 };
+
+const emitGameEvent = async (
+  gameId: string,
+  version: number,
+  eventType: string,
+  payload: Record<string, unknown>,
+  userId: string,
+) => {
+  await fetchFromSupabaseWithService(
+    "game_events",
+    {
+      method: "POST",
+      headers: {
+        Prefer: "return=representation",
+      },
+      body: JSON.stringify({
+        game_id: gameId,
+        version,
+        event_type: eventType,
+        payload,
+        created_by: userId,
+      }),
+    },
+  );
+};
+
+const resolveTile = (tile: TileInfo, player: PlayerRow) => {
+  const basePayload = {
+    player_id: player.id,
+    tile_id: tile.tile_id,
+    tile_type: tile.type,
+    tile_index: tile.index,
+  };
+
+  switch (tile.type) {
+    case "PROPERTY":
+    case "RAIL":
+    case "UTILITY":
+      return { event_type: "LAND_PROPERTY", payload: basePayload };
+    case "TAX":
+      return { event_type: "LAND_TAX", payload: basePayload };
+    case "EVENT":
+      return { event_type: "LAND_EVENT", payload: basePayload };
+    case "JAIL":
+      return { event_type: "LAND_JAIL", payload: basePayload };
+    case "GO_TO_JAIL":
+      return { event_type: "LAND_GO_TO_JAIL", payload: basePayload };
+    case "START":
+      return { event_type: "LAND_START", payload: basePayload };
+    case "FREE_PARKING":
+      return { event_type: "LAND_FREE_PARKING", payload: basePayload };
+    default:
+      console.info("[Bank] Unhandled tile type", tile);
+      return null;
+  }
+};
+
 const parseBearerToken = (authorization: string | null) => {
   if (!authorization) {
     return null;
@@ -605,6 +669,13 @@ export async function POST(request: Request) {
     }
 
     if (body.action === "ROLL_DICE") {
+      if (gameState.last_roll != null) {
+        return NextResponse.json(
+          { error: "You have already rolled this turn." },
+          { status: 409 },
+        );
+      }
+
       const dieOne = Math.floor(Math.random() * 6) + 1;
       const dieTwo = Math.floor(Math.random() * 6) + 1;
       const rollTotal = dieOne + dieTwo;
@@ -675,52 +746,71 @@ export async function POST(request: Request) {
         );
       }
 
-      await fetchFromSupabaseWithService(
-        "game_events",
+      await emitGameEvent(
+        gameId,
+        nextVersion,
+        "ROLL_DICE",
         {
-          method: "POST",
-          headers: {
-            Prefer: "return=representation",
-          },
-          body: JSON.stringify({
-            game_id: gameId,
-            version: nextVersion,
-            event_type: "ROLL_DICE",
-            payload: {
-              player_id: currentPlayer.id,
-              player_name: currentPlayer.display_name,
-              roll: rollTotal,
-              dice: [dieOne, dieTwo],
-            },
-            created_by: user.id,
-          }),
+          player_id: currentPlayer.id,
+          player_name: currentPlayer.display_name,
+          roll: rollTotal,
+          dice: [dieOne, dieTwo],
         },
+        user.id,
       );
 
-      await fetchFromSupabaseWithService(
-        "game_events",
+      await emitGameEvent(
+        gameId,
+        nextVersion,
+        "MOVE_PLAYER",
         {
-          method: "POST",
-          headers: {
-            Prefer: "return=representation",
-          },
-          body: JSON.stringify({
-            game_id: gameId,
-            version: nextVersion,
-            event_type: "MOVE_PLAYER",
-            payload: {
-              player_id: currentPlayer.id,
-              from: currentPosition,
-              to: newPosition,
-              roll_total: rollTotal,
-              dice: [dieOne, dieTwo],
-              passedStart,
-              tile_id: landingTile.tile_id,
-              tile_name: landingTile.name,
-            },
-            created_by: user.id,
-          }),
+          player_id: currentPlayer.id,
+          from: currentPosition,
+          to: newPosition,
+          roll_total: rollTotal,
+          dice: [dieOne, dieTwo],
+          passedStart,
+          tile_id: landingTile.tile_id,
+          tile_name: landingTile.name,
         },
+        user.id,
+      );
+
+      await emitGameEvent(
+        gameId,
+        nextVersion,
+        "LAND_ON_TILE",
+        {
+          player_id: currentPlayer.id,
+          tile_id: landingTile.tile_id,
+          tile_type: landingTile.type,
+          tile_index: landingTile.index,
+        },
+        user.id,
+      );
+
+      const resolutionEvent = resolveTile(landingTile, currentPlayer);
+      if (resolutionEvent) {
+        await emitGameEvent(
+          gameId,
+          nextVersion,
+          resolutionEvent.event_type,
+          resolutionEvent.payload,
+          user.id,
+        );
+      }
+
+      await emitGameEvent(
+        gameId,
+        nextVersion,
+        "MOVE_RESOLVED",
+        {
+          player_id: currentPlayer.id,
+          tile_id: landingTile.tile_id,
+          tile_type: landingTile.type,
+          tile_index: landingTile.index,
+        },
+        user.id,
       );
 
       return NextResponse.json({ gameState: updatedState });
