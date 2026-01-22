@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import PageShell from "../components/PageShell";
+import BoardMiniMap from "../components/BoardMiniMap";
 import { getBoardPackById } from "@/lib/boardPacks";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 
@@ -14,6 +15,7 @@ type Player = {
   user_id: string;
   display_name: string | null;
   created_at: string | null;
+  position: number;
 };
 
 type GameMeta = {
@@ -78,7 +80,7 @@ export default function PlayPage() {
 
   const loadPlayers = useCallback(async (activeGameId: string, accessToken?: string) => {
     const playerRows = await supabaseClient.fetchFromSupabase<Player[]>(
-      `players?select=id,user_id,display_name,created_at&game_id=eq.${activeGameId}&order=created_at.asc`,
+      `players?select=id,user_id,display_name,created_at,position&game_id=eq.${activeGameId}&order=created_at.asc`,
       { method: "GET" },
       accessToken,
     );
@@ -952,9 +954,11 @@ export default function PlayPage() {
               </div>
               <span className="text-xs text-neutral-400">Actions hidden</span>
             </div>
-            <div className="flex h-56 items-center justify-center rounded-2xl border border-dashed border-neutral-200 bg-neutral-50 text-center text-sm text-neutral-500">
-              Board map placeholder (properties, tokens, and auctions)
-            </div>
+            <BoardMiniMap
+              tiles={boardPack?.tiles}
+              players={players}
+              currentPlayerId={currentPlayer?.id}
+            />
           </div>
 
           <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">

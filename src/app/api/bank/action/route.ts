@@ -55,6 +55,7 @@ type PlayerRow = {
   user_id: string;
   display_name: string | null;
   created_at: string | null;
+  position: number;
 };
 
 type GameStateRow = {
@@ -65,6 +66,8 @@ type GameStateRow = {
   balances: Record<string, number> | null;
   last_roll: number | null;
 };
+
+const PASS_START_SALARY = 200;
 
 const isConfigured = () =>
   Boolean(supabaseUrl && supabaseAnonKey && supabaseServiceRoleKey);
@@ -201,7 +204,7 @@ export async function POST(request: Request) {
       }
 
       const [hostPlayer] = await fetchFromSupabaseWithService<PlayerRow[]>(
-        "players?select=id,user_id,display_name,created_at",
+        "players?select=id,user_id,display_name,created_at,position",
         {
           method: "POST",
           headers: {
@@ -280,7 +283,7 @@ export async function POST(request: Request) {
       }
 
       const [player] = await fetchFromSupabaseWithService<PlayerRow[]>(
-        "players?select=id,user_id,display_name,created_at&on_conflict=game_id,user_id",
+        "players?select=id,user_id,display_name,created_at,position&on_conflict=game_id,user_id",
         {
           method: "POST",
           headers: {
@@ -302,7 +305,7 @@ export async function POST(request: Request) {
       }
 
       const players = await fetchFromSupabaseWithService<PlayerRow[]>(
-        `players?select=id,user_id,display_name,created_at&game_id=eq.${game.id}&order=created_at.asc`,
+        `players?select=id,user_id,display_name,created_at,position&game_id=eq.${game.id}&order=created_at.asc`,
         { method: "GET" },
       );
 
@@ -339,7 +342,7 @@ export async function POST(request: Request) {
     const gameId = body.gameId;
 
     const [game] = await fetchFromSupabaseWithService<GameRow[]>(
-      `games?select=id,join_code,starting_cash,created_by,status&id=eq.${gameId}&limit=1`,
+      `games?select=id,join_code,starting_cash,created_by,status,board_pack_id&id=eq.${gameId}&limit=1`,
       { method: "GET" },
     );
 
@@ -348,7 +351,7 @@ export async function POST(request: Request) {
     }
 
     const players = await fetchFromSupabaseWithService<PlayerRow[]>(
-      `players?select=id,user_id,display_name,created_at&game_id=eq.${gameId}&order=created_at.asc`,
+      `players?select=id,user_id,display_name,created_at,position&game_id=eq.${gameId}&order=created_at.asc`,
       { method: "GET" },
     );
 
@@ -605,6 +608,29 @@ export async function POST(request: Request) {
       const dieOne = Math.floor(Math.random() * 6) + 1;
       const dieTwo = Math.floor(Math.random() * 6) + 1;
       const rollTotal = dieOne + dieTwo;
+      const boardPack = getBoardPackById(game.board_pack_id);
+      const boardTiles = boardPack?.tiles ?? [];
+      const boardSize = boardTiles.length > 0 ? boardTiles.length : 40;
+      const currentPosition = Number.isFinite(currentPlayer.position)
+        ? currentPlayer.position
+        : 0;
+      const newPosition = (currentPosition + rollTotal) % boardSize;
+      const passedStart = currentPosition + rollTotal >= boardSize;
+      const landingTile = boardTiles[newPosition] ?? {
+        index: newPosition,
+        tile_id: `tile-${newPosition}`,
+        type: "PROPERTY",
+        name: `Tile ${newPosition}`,
+      };
+      const balances = gameState?.balances ?? {};
+      const updatedBalances = passedStart
+        ? {
+            ...balances,
+            [currentPlayer.id]:
+              (balances[currentPlayer.id] ?? game.starting_cash ?? 0) +
+              PASS_START_SALARY,
+          }
+        : balances;
 
       const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
         `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
@@ -616,6 +642,7 @@ export async function POST(request: Request) {
           body: JSON.stringify({
             version: nextVersion,
             last_roll: rollTotal,
+            ...(passedStart ? { balances: updatedBalances } : {}),
             updated_at: new Date().toISOString(),
           }),
         },
@@ -625,6 +652,26 @@ export async function POST(request: Request) {
         return NextResponse.json(
           { error: "Version mismatch." },
           { status: 409 },
+        );
+      }
+
+      const [updatedPlayer] = await fetchFromSupabaseWithService<PlayerRow[]>(
+        `players?id=eq.${currentPlayer.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            position: newPosition,
+          }),
+        },
+      );
+
+      if (!updatedPlayer) {
+        return NextResponse.json(
+          { error: "Unable to update player position." },
+          { status: 500 },
         );
       }
 
@@ -644,6 +691,32 @@ export async function POST(request: Request) {
               player_name: currentPlayer.display_name,
               roll: rollTotal,
               dice: [dieOne, dieTwo],
+            },
+            created_by: user.id,
+          }),
+        },
+      );
+
+      await fetchFromSupabaseWithService(
+        "game_events",
+        {
+          method: "POST",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            game_id: gameId,
+            version: nextVersion,
+            event_type: "MOVE_PLAYER",
+            payload: {
+              player_id: currentPlayer.id,
+              from: currentPosition,
+              to: newPosition,
+              roll_total: rollTotal,
+              dice: [dieOne, dieTwo],
+              passedStart,
+              tile_id: landingTile.tile_id,
+              tile_name: landingTile.name,
             },
             created_by: user.id,
           }),

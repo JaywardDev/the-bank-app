@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import PageShell from "@/app/components/PageShell";
+import BoardMiniMap from "@/app/components/BoardMiniMap";
 import { getBoardPackById } from "@/lib/boardPacks";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 
@@ -10,6 +11,7 @@ type Player = {
   user_id: string;
   display_name: string | null;
   created_at: string | null;
+  position: number;
 };
 
 type GameMeta = {
@@ -53,7 +55,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
   const loadPlayers = useCallback(
     async (accessToken?: string) => {
       const playerRows = await supabaseClient.fetchFromSupabase<Player[]>(
-        `players?select=id,user_id,display_name,created_at&game_id=eq.${params.gameId}&order=created_at.asc`,
+        `players?select=id,user_id,display_name,created_at,position&game_id=eq.${params.gameId}&order=created_at.asc`,
         { method: "GET" },
         accessToken,
       );
@@ -237,8 +239,13 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
             </div>
             <span className="text-xs text-white/50">Projection only</span>
           </div>
-          <div className="flex h-[320px] items-center justify-center rounded-3xl border border-dashed border-white/20 bg-black/30 text-center text-sm text-white/60 md:h-[420px]">
-            Board map placeholder (properties, tokens, and auctions)
+          <div className="rounded-3xl border border-white/10 bg-black/30 p-4 md:p-6">
+            <BoardMiniMap
+              tiles={boardPack?.tiles}
+              players={players}
+              currentPlayerId={currentPlayer?.id}
+              variant="dark"
+            />
           </div>
           <div className="grid gap-4 md:grid-cols-3">
             {[

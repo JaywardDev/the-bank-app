@@ -14,6 +14,7 @@
  * - user_id (uuid)
  * - display_name (text)
  * - created_at (timestamptz)
+ * - position (integer)
  */
 export {};
 // This file is intentionally left empty as a placeholder for database schema notes.
