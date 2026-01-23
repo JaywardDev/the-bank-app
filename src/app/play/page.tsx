@@ -59,10 +59,15 @@ export default function PlayPage() {
   const [needsAuth, setNeedsAuth] = useState(false);
   const [initialSnapshotReady, setInitialSnapshotReady] = useState(false);
   const [realtimeReady, setRealtimeReady] = useState(false);
+  const [firstRoundResyncEnabled, setFirstRoundResyncEnabled] = useState(true);
   const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshInFlightRef = useRef(false);
   const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
   const realtimeReconciledRef = useRef(false);
+  const firstRoundEndTurnsRef = useRef<Set<string>>(new Set());
+  const firstRoundResyncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const realtimeContextRef = useRef<{
     gameId: string;
     accessToken: string;
@@ -405,6 +410,31 @@ export default function PlayPage() {
     }, 400);
   }, [gameId, loadGameData, session?.access_token, setupRealtimeChannel]);
 
+  const requestFirstRoundResync = useCallback(() => {
+    if (!firstRoundResyncEnabled || !gameId || !session?.access_token) {
+      return;
+    }
+
+    if (firstRoundResyncTimeoutRef.current) {
+      clearTimeout(firstRoundResyncTimeoutRef.current);
+    }
+
+    firstRoundResyncTimeoutRef.current = setTimeout(async () => {
+      await Promise.all([
+        loadPlayers(gameId, session.access_token),
+        loadGameState(gameId, session.access_token),
+        loadEvents(gameId, session.access_token),
+      ]);
+    }, 350);
+  }, [
+    firstRoundResyncEnabled,
+    gameId,
+    loadEvents,
+    loadGameState,
+    loadPlayers,
+    session?.access_token,
+  ]);
+
   useEffect(() => {
     let isMounted = true;
 
@@ -465,6 +495,8 @@ export default function PlayPage() {
   useEffect(() => {
     activeGameIdRef.current = gameId;
     setInitialSnapshotReady(false);
+    setFirstRoundResyncEnabled(true);
+    firstRoundEndTurnsRef.current = new Set();
   }, [gameId]);
 
   useEffect(() => {
@@ -552,8 +584,38 @@ export default function PlayPage() {
       if (refreshTimeoutRef.current) {
         clearTimeout(refreshTimeoutRef.current);
       }
+
+      if (firstRoundResyncTimeoutRef.current) {
+        clearTimeout(firstRoundResyncTimeoutRef.current);
+      }
     };
   }, [requestRefresh]);
+
+  useEffect(() => {
+    if (!firstRoundResyncEnabled || players.length === 0) {
+      return;
+    }
+
+    events.forEach((event) => {
+      if (event.event_type !== "END_TURN") {
+        return;
+      }
+
+      const payload = event.payload as { from_player_id?: unknown } | null;
+      const fromPlayerId =
+        typeof payload?.from_player_id === "string"
+          ? payload.from_player_id
+          : null;
+
+      if (fromPlayerId && !firstRoundEndTurnsRef.current.has(fromPlayerId)) {
+        firstRoundEndTurnsRef.current.add(fromPlayerId);
+      }
+    });
+
+    if (firstRoundEndTurnsRef.current.size >= players.length) {
+      setFirstRoundResyncEnabled(false);
+    }
+  }, [events, firstRoundResyncEnabled, players.length]);
 
   const isInProgress = gameMeta?.status === "in_progress";
   const hasGameMetaError = Boolean(gameMetaError);
@@ -685,6 +747,10 @@ export default function PlayPage() {
           loadPlayers(gameId, session.access_token),
           loadEvents(gameId, session.access_token),
         ]);
+
+        if (firstRoundResyncEnabled) {
+          requestFirstRoundResync();
+        }
       } catch (error) {
         if (error instanceof Error) {
           setNotice(error.message);
@@ -695,7 +761,17 @@ export default function PlayPage() {
         setActionLoading(null);
       }
     },
-    [gameId, gameState, isInProgress, loadEvents, loadGameData, loadPlayers, session],
+    [
+      firstRoundResyncEnabled,
+      gameId,
+      gameState,
+      isInProgress,
+      loadEvents,
+      loadGameData,
+      loadPlayers,
+      requestFirstRoundResync,
+      session,
+    ],
   );
 
   const handleLeaveTable = useCallback(() => {
