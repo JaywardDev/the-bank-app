@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "The Bank",
-  description: "Mobile-first companion app",
+  description: "A strategy board game about investing and managing finances.",
 };
 
 export default function RootLayout({

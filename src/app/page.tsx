@@ -406,7 +406,7 @@ export default function Home() {
         <header className="space-y-2">
           <h1 className="text-2xl font-semibold text-neutral-900">The Bank</h1>
           <p className="text-sm text-neutral-600">
-            A strategy game about money, decisions, and economic reality.
+            A strategy board game about money, decision-making, and managing finances.
           </p>
         </header>
 
