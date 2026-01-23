@@ -57,11 +57,17 @@ export default function PlayPage() {
   const [viewMode, setViewMode] = useState<"wallet" | "board">("wallet");
   const [boardZoomed, setBoardZoomed] = useState(false);
   const [needsAuth, setNeedsAuth] = useState(false);
+  const [initialSnapshotReady, setInitialSnapshotReady] = useState(false);
   const [realtimeReady, setRealtimeReady] = useState(false);
   const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshInFlightRef = useRef(false);
   const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
   const realtimeReconciledRef = useRef(false);
+  const realtimeContextRef = useRef<{
+    gameId: string;
+    accessToken: string;
+  } | null>(null);
+  const activeGameIdRef = useRef<string | null>(null);
 
   const isConfigured = useMemo(() => supabaseClient.isConfigured(), []);
   const latestRollEvent = useMemo(
@@ -253,6 +259,9 @@ export default function PlayPage() {
         loadGameState(activeGameId, accessToken),
         loadEvents(activeGameId, accessToken),
       ]);
+      if (!activeGameIdRef.current || activeGameIdRef.current === activeGameId) {
+        setInitialSnapshotReady(true);
+      }
     },
     [loadEvents, loadGameMeta, loadGameState, loadPlayers],
   );
@@ -268,15 +277,28 @@ export default function PlayPage() {
     }
 
     const existingChannel = realtimeChannelRef.current;
-    if (existingChannel && existingChannel.state === "joined") {
+    const existingContext = realtimeContextRef.current;
+    const hasMatchingContext =
+      existingContext?.gameId === gameId &&
+      existingContext.accessToken === session.access_token;
+    const channelIsClosedOrErrored =
+      existingChannel?.state === "closed" ||
+      existingChannel?.state === "errored";
+
+    if (existingChannel && hasMatchingContext && !channelIsClosedOrErrored) {
+      if (existingChannel.state === "joined") {
+        setRealtimeReady(true);
+      }
       return;
     }
 
-    if (existingChannel) {
+    if (existingChannel && (!hasMatchingContext || channelIsClosedOrErrored)) {
       realtimeClient.removeChannel(existingChannel);
       realtimeChannelRef.current = null;
+      realtimeContextRef.current = null;
     }
 
+    setRealtimeReady(false);
     const channel = realtimeClient
       .channel(`player-console:${gameId}`)
       .on(
@@ -338,6 +360,10 @@ export default function PlayPage() {
       });
 
     realtimeChannelRef.current = channel;
+    realtimeContextRef.current = {
+      gameId,
+      accessToken: session.access_token,
+    };
   }, [
     gameId,
     isConfigured,
@@ -367,7 +393,12 @@ export default function PlayPage() {
 
       try {
         await loadGameData(gameId, session.access_token);
-        setupRealtimeChannel();
+        const channel = realtimeChannelRef.current;
+        const channelIsClosedOrErrored =
+          channel?.state === "closed" || channel?.state === "errored";
+        if (!channel || channelIsClosedOrErrored) {
+          setupRealtimeChannel();
+        }
       } finally {
         refreshInFlightRef.current = false;
       }
@@ -432,6 +463,11 @@ export default function PlayPage() {
   }, [gameId]);
 
   useEffect(() => {
+    activeGameIdRef.current = gameId;
+    setInitialSnapshotReady(false);
+  }, [gameId]);
+
+  useEffect(() => {
     if (gameMeta?.status === "lobby" && gameId) {
       router.replace(`/lobby/${gameId}`);
     }
@@ -470,6 +506,7 @@ export default function PlayPage() {
         realtimeClient.removeChannel(realtimeChannelRef.current);
       }
       realtimeChannelRef.current = null;
+      realtimeContextRef.current = null;
       setRealtimeReady(false);
       realtimeReconciledRef.current = false;
     };
@@ -566,11 +603,11 @@ export default function PlayPage() {
       latestRollDiceForMe &&
       latestAllowExtraRollForMe.version > latestRollDiceForMe.version,
   );
+  const canAct = initialSnapshotReady && isMyTurn;
   const canRoll =
-    isMyTurn && (gameState?.last_roll == null || canTakeExtraRoll);
-  const canEndTurn = isMyTurn && gameState?.last_roll != null;
-  const isRealtimeBlocked = !realtimeReady;
-  const actionHint = isRealtimeBlocked ? "Connecting…" : null;
+    canAct && (gameState?.last_roll == null || canTakeExtraRoll);
+  const canEndTurn = canAct && gameState?.last_roll != null;
+  const realtimeStatusLabel = realtimeReady ? "Live" : "Syncing…";
   const boardPack = getBoardPackById(gameMeta?.board_pack_id);
   const isHost = Boolean(
     session && gameMeta?.created_by && session.user.id === gameMeta.created_by,
@@ -882,6 +919,9 @@ export default function PlayPage() {
                       : "Stand by"
                     : "Waiting"}
               </p>
+              <p className="text-[11px] font-medium uppercase tracking-wide text-neutral-400">
+                {realtimeStatusLabel}
+              </p>
             </div>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -890,7 +930,6 @@ export default function PlayPage() {
               type="button"
               onClick={() => void handleBankAction("ROLL_DICE")}
               disabled={
-                isRealtimeBlocked ||
                 !canRoll ||
                 actionLoading === "ROLL_DICE"
               }
@@ -902,7 +941,6 @@ export default function PlayPage() {
               type="button"
               onClick={() => void handleBankAction("END_TURN")}
               disabled={
-                isRealtimeBlocked ||
                 !canEndTurn ||
                 actionLoading === "END_TURN"
               }
@@ -910,8 +948,8 @@ export default function PlayPage() {
               {actionLoading === "END_TURN" ? "Ending…" : "End Turn"}
             </button>
           </div>
-          {actionHint ? (
-            <p className="text-xs text-neutral-400">{actionHint}</p>
+          {!initialSnapshotReady ? (
+            <p className="text-xs text-neutral-400">Loading snapshot…</p>
           ) : null}
         </div>
 
