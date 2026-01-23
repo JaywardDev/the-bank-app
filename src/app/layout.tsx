@@ -3,7 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Monopoly Bank",
+  title: "The Bank",
   description: "Mobile-first companion app",
 };
 
