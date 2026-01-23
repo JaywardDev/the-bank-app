@@ -511,7 +511,31 @@ export default function PlayPage() {
       currentPlayer &&
       currentPlayer.user_id === session.user.id,
   );
-  const canRoll = isMyTurn && gameState?.last_roll == null;
+  const latestExtraRollDecision = useMemo(() => {
+    if (!currentPlayer?.id) {
+      return null;
+    }
+
+    return (
+      events.find((event) => {
+        if (event.event_type === "ALLOW_EXTRA_ROLL") {
+          const payload = event.payload as { player_id?: unknown } | null;
+          return payload?.player_id === currentPlayer.id;
+        }
+
+        if (event.event_type === "END_TURN") {
+          const payload = event.payload as { from_player_id?: unknown } | null;
+          return payload?.from_player_id === currentPlayer.id;
+        }
+
+        return false;
+      }) ?? null
+    );
+  }, [currentPlayer?.id, events]);
+  const canTakeExtraRoll =
+    latestExtraRollDecision?.event_type === "ALLOW_EXTRA_ROLL";
+  const canRoll =
+    isMyTurn && (gameState?.last_roll == null || canTakeExtraRoll);
   const canEndTurn = isMyTurn && gameState?.last_roll != null;
   const boardPack = getBoardPackById(gameMeta?.board_pack_id);
   const isHost = Boolean(
