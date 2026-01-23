@@ -57,9 +57,11 @@ export default function PlayPage() {
   const [viewMode, setViewMode] = useState<"wallet" | "board">("wallet");
   const [boardZoomed, setBoardZoomed] = useState(false);
   const [needsAuth, setNeedsAuth] = useState(false);
+  const [realtimeReady, setRealtimeReady] = useState(false);
   const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshInFlightRef = useRef(false);
   const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
+  const realtimeReconciledRef = useRef(false);
 
   const isConfigured = useMemo(() => supabaseClient.isConfigured(), []);
   const latestRollEvent = useMemo(
@@ -325,7 +327,15 @@ export default function PlayPage() {
           void loadGameMeta(gameId, session?.access_token);
         },
       )
-      .subscribe();
+      .subscribe((status) => {
+        const isReady = status === "SUBSCRIBED";
+        setRealtimeReady(isReady);
+
+        if (isReady && !realtimeReconciledRef.current) {
+          realtimeReconciledRef.current = true;
+          void loadGameData(gameId, session.access_token);
+        }
+      });
 
     realtimeChannelRef.current = channel;
   }, [
@@ -335,6 +345,7 @@ export default function PlayPage() {
     loadGameMeta,
     loadGameState,
     loadPlayers,
+    loadGameData,
     session?.access_token,
   ]);
 
@@ -459,6 +470,8 @@ export default function PlayPage() {
         realtimeClient.removeChannel(realtimeChannelRef.current);
       }
       realtimeChannelRef.current = null;
+      setRealtimeReady(false);
+      realtimeReconciledRef.current = false;
     };
   }, [
     gameId,
@@ -469,6 +482,11 @@ export default function PlayPage() {
     session?.access_token,
     setupRealtimeChannel,
   ]);
+
+  useEffect(() => {
+    setRealtimeReady(false);
+    realtimeReconciledRef.current = false;
+  }, [gameId]);
 
   useEffect(() => {
     const handleVisibility = () => {
@@ -551,6 +569,8 @@ export default function PlayPage() {
   const canRoll =
     isMyTurn && (gameState?.last_roll == null || canTakeExtraRoll);
   const canEndTurn = isMyTurn && gameState?.last_roll != null;
+  const isRealtimeBlocked = !realtimeReady;
+  const actionHint = isRealtimeBlocked ? "Connecting…" : null;
   const boardPack = getBoardPackById(gameMeta?.board_pack_id);
   const isHost = Boolean(
     session && gameMeta?.created_by && session.user.id === gameMeta.created_by,
@@ -623,6 +643,11 @@ export default function PlayPage() {
         if (responseBody?.gameState) {
           setGameState(responseBody.gameState);
         }
+
+        await Promise.all([
+          loadPlayers(gameId, session.access_token),
+          loadEvents(gameId, session.access_token),
+        ]);
       } catch (error) {
         if (error instanceof Error) {
           setNotice(error.message);
@@ -633,7 +658,7 @@ export default function PlayPage() {
         setActionLoading(null);
       }
     },
-    [gameId, gameState, isInProgress, loadGameData, session],
+    [gameId, gameState, isInProgress, loadEvents, loadGameData, loadPlayers, session],
   );
 
   const handleLeaveTable = useCallback(() => {
@@ -864,7 +889,11 @@ export default function PlayPage() {
               className="rounded-2xl bg-neutral-900 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
               type="button"
               onClick={() => void handleBankAction("ROLL_DICE")}
-              disabled={!canRoll || actionLoading === "ROLL_DICE"}
+              disabled={
+                isRealtimeBlocked ||
+                !canRoll ||
+                actionLoading === "ROLL_DICE"
+              }
             >
               {actionLoading === "ROLL_DICE" ? "Rolling…" : "Roll Dice"}
             </button>
@@ -872,11 +901,18 @@ export default function PlayPage() {
               className="rounded-2xl border px-4 py-3 text-sm font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
               type="button"
               onClick={() => void handleBankAction("END_TURN")}
-              disabled={!canEndTurn || actionLoading === "END_TURN"}
+              disabled={
+                isRealtimeBlocked ||
+                !canEndTurn ||
+                actionLoading === "END_TURN"
+              }
             >
               {actionLoading === "END_TURN" ? "Ending…" : "End Turn"}
             </button>
           </div>
+          {actionHint ? (
+            <p className="text-xs text-neutral-400">{actionHint}</p>
+          ) : null}
         </div>
 
         <div className="rounded-2xl border bg-white p-5 shadow-sm space-y-4">
