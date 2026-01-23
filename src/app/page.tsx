@@ -406,7 +406,7 @@ export default function Home() {
         <header className="space-y-2">
           <h1 className="text-2xl font-semibold text-neutral-900">The Bank</h1>
           <p className="text-sm text-neutral-600">
-            Mobile-first companion for managing wallet, assets, and trades.
+            A strategy game about money, decisions, and economic reality.
           </p>
         </header>
 
