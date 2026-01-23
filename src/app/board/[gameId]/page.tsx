@@ -35,6 +35,13 @@ type GameEvent = {
   version: number;
 };
 
+type OwnershipRow = {
+  tile_index: number;
+  owner_player_id: string;
+};
+
+type OwnershipByTile = Record<number, { owner_player_id: string }>;
+
 type BoardDisplayPageProps = {
   params: {
     gameId: string;
@@ -47,6 +54,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
   const [players, setPlayers] = useState<Player[]>([]);
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [events, setEvents] = useState<GameEvent[]>([]);
+  const [ownershipByTile, setOwnershipByTile] = useState<OwnershipByTile>({});
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -100,6 +108,24 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
     [params.gameId],
   );
 
+  const loadOwnership = useCallback(
+    async (accessToken?: string) => {
+      const ownershipRows = await supabaseClient.fetchFromSupabase<
+        OwnershipRow[]
+      >(
+        `property_ownership?select=tile_index,owner_player_id&game_id=eq.${params.gameId}`,
+        { method: "GET" },
+        accessToken,
+      );
+      const mapped = ownershipRows.reduce<OwnershipByTile>((acc, row) => {
+        acc[row.tile_index] = { owner_player_id: row.owner_player_id };
+        return acc;
+      }, {});
+      setOwnershipByTile(mapped);
+    },
+    [params.gameId],
+  );
+
   const loadBoardData = useCallback(async () => {
     if (!isConfigured) {
       setLoading(false);
@@ -118,6 +144,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
         loadPlayers(currentSession?.access_token),
         loadGameState(currentSession?.access_token),
         loadEvents(currentSession?.access_token),
+        loadOwnership(currentSession?.access_token),
       ]);
     } catch (error) {
       if (error instanceof Error) {
@@ -128,7 +155,14 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
     } finally {
       setLoading(false);
     }
-  }, [isConfigured, loadEvents, loadGameMeta, loadGameState, loadPlayers]);
+  }, [
+    isConfigured,
+    loadEvents,
+    loadGameMeta,
+    loadGameState,
+    loadOwnership,
+    loadPlayers,
+  ]);
 
   useEffect(() => {
     void loadBoardData();
@@ -182,6 +216,18 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
           void loadEvents(session?.access_token);
         },
       )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "property_ownership",
+          filter: `game_id=eq.${params.gameId}`,
+        },
+        () => {
+          void loadOwnership(session?.access_token);
+        },
+      )
       .subscribe();
 
     return () => {
@@ -191,6 +237,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
     isConfigured,
     loadEvents,
     loadGameState,
+    loadOwnership,
     loadPlayers,
     params.gameId,
     session?.access_token,
@@ -217,6 +264,62 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
     ? Number(lastMovedTileIndexValue)
     : null;
   const boardPack = getBoardPackById(gameMeta?.board_pack_id);
+  const getOwnershipLabel = useCallback(
+    (tileIndex: number | null) => {
+      if (tileIndex === null || Number.isNaN(tileIndex)) {
+        return null;
+      }
+
+      const ownership = ownershipByTile[tileIndex];
+      if (!ownership) {
+        return "Unowned";
+      }
+
+      const owner = players.find(
+        (player) => player.id === ownership.owner_player_id,
+      );
+      return `Owned by ${owner?.display_name ?? "Player"}`;
+    },
+    [ownershipByTile, players],
+  );
+  const formatEventDescription = useCallback(
+    (event: GameEvent) => {
+      if (event.event_type === "LAND_ON_TILE") {
+        const payload = event.payload as { tile_index?: unknown } | null;
+        const tileIndexRaw = payload?.tile_index;
+        const tileIndex =
+          typeof tileIndexRaw === "number"
+            ? tileIndexRaw
+            : typeof tileIndexRaw === "string"
+              ? Number.parseInt(tileIndexRaw, 10)
+              : null;
+        const tile = boardPack?.tiles?.find((entry) => entry.index === tileIndex);
+        const tileLabel = tile
+          ? `${tile.index} ${tile.name}`
+          : tileIndex !== null
+            ? `Tile ${tileIndex}`
+            : "Tile";
+        const ownershipLabel = getOwnershipLabel(tileIndex);
+        return ownershipLabel
+          ? `Landed on ${tileLabel} · ${ownershipLabel}`
+          : `Landed on ${tileLabel}`;
+      }
+
+      if (event.event_type === "START_GAME") {
+        return "Game started";
+      }
+
+      if (event.event_type === "END_TURN") {
+        const payload = event.payload as { to_player_name?: unknown } | null;
+        return typeof payload?.to_player_name === "string"
+          ? `Turn → ${payload.to_player_name}`
+          : "Turn ended";
+      }
+
+      return "Update received";
+    },
+    [boardPack?.tiles, getOwnershipLabel],
+  );
 
   return (
     <PageShell
@@ -345,7 +448,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
                       <span>v{event.version}</span>
                     </div>
                     <p className="mt-2 text-sm text-white/80">
-                      Event details placeholder
+                      {formatEventDescription(event)}
                     </p>
                   </li>
                 ))

@@ -42,6 +42,13 @@ type GameEvent = {
   version: number;
 };
 
+type OwnershipRow = {
+  tile_index: number;
+  owner_player_id: string;
+};
+
+type OwnershipByTile = Record<number, { owner_player_id: string }>;
+
 export default function PlayPage() {
   const router = useRouter();
   const [session, setSession] = useState<SupabaseSession | null>(null);
@@ -51,6 +58,7 @@ export default function PlayPage() {
   const [players, setPlayers] = useState<Player[]>([]);
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [events, setEvents] = useState<GameEvent[]>([]);
+  const [ownershipByTile, setOwnershipByTile] = useState<OwnershipByTile>({});
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -124,6 +132,7 @@ export default function PlayPage() {
       latestRollPayload?.doubles_count ?? latestDoublePayload?.doubles_count;
     return typeof candidate === "number" ? candidate : null;
   }, [latestDoublePayload, latestRollPayload]);
+  const boardPack = getBoardPackById(gameMeta?.board_pack_id);
   const latestRolledDoubleConfirmed = useMemo(() => {
     if (!latestRollEvent || !latestRolledDoubleEvent) {
       return false;
@@ -139,6 +148,25 @@ export default function PlayPage() {
     }
     return false;
   }, [latestDiceValues, latestRolledDoubleConfirmed]);
+  const getOwnershipLabel = useCallback(
+    (tileIndex: number | null) => {
+      if (tileIndex === null || Number.isNaN(tileIndex)) {
+        return null;
+      }
+
+      const ownership = ownershipByTile[tileIndex];
+      if (!ownership) {
+        return "Unowned";
+      }
+
+      const owner = players.find(
+        (player) => player.id === ownership.owner_player_id,
+      );
+      return `Owned by ${owner?.display_name ?? "Player"}`;
+    },
+    [ownershipByTile, players],
+  );
+
   const formatEventDescription = useCallback((event: GameEvent) => {
     const payload = event.payload as
       | {
@@ -146,6 +174,7 @@ export default function PlayPage() {
           to_player_name?: string;
           dice?: unknown;
           doubles_count?: unknown;
+          tile_index?: unknown;
         }
       | null;
 
@@ -186,8 +215,28 @@ export default function PlayPage() {
       return "Game started";
     }
 
+    if (event.event_type === "LAND_ON_TILE") {
+      const tileIndexRaw = payload?.tile_index;
+      const tileIndex =
+        typeof tileIndexRaw === "number"
+          ? tileIndexRaw
+          : typeof tileIndexRaw === "string"
+            ? Number.parseInt(tileIndexRaw, 10)
+            : null;
+      const tile = boardPack?.tiles?.find((entry) => entry.index === tileIndex);
+      const tileLabel = tile
+        ? `${tile.index} ${tile.name}`
+        : tileIndex !== null
+          ? `Tile ${tileIndex}`
+          : "Tile";
+      const ownershipLabel = getOwnershipLabel(tileIndex);
+      return ownershipLabel
+        ? `Landed on ${tileLabel} · ${ownershipLabel}`
+        : `Landed on ${tileLabel}`;
+    }
+
     return "Update received";
-  }, []);
+  }, [boardPack?.tiles, getOwnershipLabel]);
 
   const clearResumeStorage = useCallback(() => {
     if (typeof window === "undefined") {
@@ -213,6 +262,24 @@ export default function PlayPage() {
     );
     setPlayers(playerRows);
   }, []);
+
+  const loadOwnership = useCallback(
+    async (activeGameId: string, accessToken?: string) => {
+      const ownershipRows = await supabaseClient.fetchFromSupabase<
+        OwnershipRow[]
+      >(
+        `property_ownership?select=tile_index,owner_player_id&game_id=eq.${activeGameId}`,
+        { method: "GET" },
+        accessToken,
+      );
+      const mapped = ownershipRows.reduce<OwnershipByTile>((acc, row) => {
+        acc[row.tile_index] = { owner_player_id: row.owner_player_id };
+        return acc;
+      }, {});
+      setOwnershipByTile(mapped);
+    },
+    [],
+  );
 
   const loadGameMeta = useCallback(
     async (activeGameId: string, accessToken?: string) => {
@@ -263,6 +330,7 @@ export default function PlayPage() {
         loadPlayers(activeGameId, accessToken),
         loadGameState(activeGameId, accessToken),
         loadEvents(activeGameId, accessToken),
+        loadOwnership(activeGameId, accessToken),
       ]);
       if (!activeGameIdRef.current || activeGameIdRef.current === activeGameId) {
         setInitialSnapshotReady(true);
@@ -347,6 +415,18 @@ export default function PlayPage() {
         {
           event: "*",
           schema: "public",
+          table: "property_ownership",
+          filter: `game_id=eq.${gameId}`,
+        },
+        () => {
+          void loadOwnership(gameId, session?.access_token);
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
           table: "games",
           filter: `id=eq.${gameId}`,
         },
@@ -376,6 +456,7 @@ export default function PlayPage() {
     loadGameMeta,
     loadGameState,
     loadPlayers,
+    loadOwnership,
     loadGameData,
     session?.access_token,
   ]);
@@ -424,6 +505,7 @@ export default function PlayPage() {
         loadPlayers(gameId, session.access_token),
         loadGameState(gameId, session.access_token),
         loadEvents(gameId, session.access_token),
+        loadOwnership(gameId, session.access_token),
       ]);
     }, 350);
   }, [
@@ -432,6 +514,7 @@ export default function PlayPage() {
     loadEvents,
     loadGameState,
     loadPlayers,
+    loadOwnership,
     session?.access_token,
   ]);
 
@@ -497,6 +580,7 @@ export default function PlayPage() {
     setInitialSnapshotReady(false);
     setFirstRoundResyncEnabled(true);
     firstRoundEndTurnsRef.current = new Set();
+    setOwnershipByTile({});
   }, [gameId]);
 
   useEffect(() => {
@@ -517,6 +601,7 @@ export default function PlayPage() {
     setPlayers([]);
     setGameState(null);
     setEvents([]);
+    setOwnershipByTile({});
     setNotice("This session has ended.");
     router.replace("/");
   }, [clearResumeStorage, gameMeta?.status, router]);
@@ -700,7 +785,6 @@ export default function PlayPage() {
     canAct && (gameState?.last_roll == null || canTakeExtraRoll);
   const canEndTurn = canAct && gameState?.last_roll != null;
   const realtimeStatusLabel = realtimeReady ? "Live" : "Syncing…";
-  const boardPack = getBoardPackById(gameMeta?.board_pack_id);
   const isHost = Boolean(
     session && gameMeta?.created_by && session.user.id === gameMeta.created_by,
   );
@@ -812,6 +896,7 @@ export default function PlayPage() {
     setPlayers([]);
     setGameState(null);
     setEvents([]);
+    setOwnershipByTile({});
     setNotice(null);
     router.push("/");
   }, [clearResumeStorage, router]);
@@ -860,6 +945,7 @@ export default function PlayPage() {
       setPlayers([]);
       setGameState(null);
       setEvents([]);
+      setOwnershipByTile({});
       router.push("/");
     } catch (error) {
       if (error instanceof Error) {

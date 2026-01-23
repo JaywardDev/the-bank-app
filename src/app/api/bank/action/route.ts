@@ -68,6 +68,13 @@ type GameStateRow = {
   doubles_count: number | null;
 };
 
+type OwnershipRow = {
+  tile_index: number;
+  owner_player_id: string;
+};
+
+type OwnershipByTile = Record<number, { owner_player_id: string }>;
+
 type TileInfo = {
   tile_id: string;
   type: string;
@@ -150,6 +157,20 @@ const fetchFromSupabaseWithService = async <T>(
   }
 
   return (await response.json()) as T;
+};
+
+const loadOwnershipByTile = async (
+  gameId: string,
+): Promise<OwnershipByTile> => {
+  const ownershipRows = await fetchFromSupabaseWithService<OwnershipRow[]>(
+    `property_ownership?select=tile_index,owner_player_id&game_id=eq.${gameId}`,
+    { method: "GET" },
+  );
+
+  return ownershipRows.reduce<OwnershipByTile>((acc, row) => {
+    acc[row.tile_index] = { owner_player_id: row.owner_player_id };
+    return acc;
+  }, {});
 };
 
 const emitGameEvent = async (
@@ -396,6 +417,7 @@ export async function POST(request: Request) {
         `players?select=id,user_id,display_name,created_at,position&game_id=eq.${game.id}&order=created_at.asc`,
         { method: "GET" },
       );
+      const ownershipByTile = await loadOwnershipByTile(game.id);
 
       return NextResponse.json({
         gameId: game.id,
@@ -406,6 +428,7 @@ export async function POST(request: Request) {
         created_by: game.created_by,
         player,
         players,
+        ownership: ownershipByTile,
       });
     }
 
