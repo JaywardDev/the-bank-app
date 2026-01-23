@@ -592,6 +592,36 @@ export default function PlayPage() {
   }, [requestRefresh]);
 
   useEffect(() => {
+    if (!initialSnapshotReady || !gameId) {
+      return;
+    }
+
+    if (realtimeReady || !firstRoundResyncEnabled) {
+      return;
+    }
+
+    const refreshIntervalMs = 1750;
+    const maxDurationMs = 20000;
+    const intervalId = setInterval(() => {
+      requestRefresh();
+    }, refreshIntervalMs);
+    const timeoutId = setTimeout(() => {
+      clearInterval(intervalId);
+    }, maxDurationMs);
+
+    return () => {
+      clearInterval(intervalId);
+      clearTimeout(timeoutId);
+    };
+  }, [
+    firstRoundResyncEnabled,
+    gameId,
+    initialSnapshotReady,
+    realtimeReady,
+    requestRefresh,
+  ]);
+
+  useEffect(() => {
     if (!firstRoundResyncEnabled || players.length === 0) {
       return;
     }
