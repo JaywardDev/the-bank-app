@@ -33,7 +33,8 @@ type ActionRequest = {
     | "END_GAME"
     | "ROLL_DICE"
     | "END_TURN"
-    | "DECLINE_PROPERTY";
+    | "DECLINE_PROPERTY"
+    | "BUY_PROPERTY";
   expectedVersion?: number;
 };
 
@@ -1116,6 +1117,168 @@ export async function POST(request: Request) {
             current_player_id: nextPlayer.id,
             last_roll: null,
             doubles_count: 0,
+            turn_phase: "AWAITING_ROLL",
+            pending_action: null,
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      );
+
+      if (!updatedState) {
+        return NextResponse.json(
+          { error: "Version mismatch." },
+          { status: 409 },
+        );
+      }
+
+      await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+
+      return NextResponse.json({ gameState: updatedState });
+    }
+
+    if (body.action === "BUY_PROPERTY") {
+      const pendingAction = gameState.pending_action as
+        | {
+            type?: unknown;
+            tile_index?: unknown;
+          }
+        | null;
+
+      if (!pendingAction || pendingAction.type !== "BUY_PROPERTY") {
+        return NextResponse.json(
+          { error: "No pending property purchase." },
+          { status: 409 },
+        );
+      }
+
+      if (!Number.isInteger(body.tileIndex)) {
+        return NextResponse.json(
+          { error: "Invalid tileIndex." },
+          { status: 400 },
+        );
+      }
+
+      if (pendingAction.tile_index !== body.tileIndex) {
+        return NextResponse.json(
+          { error: "Pending decision does not match that tile." },
+          { status: 409 },
+        );
+      }
+
+      const boardPack = getBoardPackById(game.board_pack_id);
+      const boardTiles = boardPack?.tiles ?? [];
+      const landingTile = boardTiles.find(
+        (tile) => tile.index === body.tileIndex,
+      );
+
+      if (!landingTile) {
+        return NextResponse.json(
+          { error: "Tile not found on this board." },
+          { status: 404 },
+        );
+      }
+
+      if (!OWNABLE_TILE_TYPES.has(landingTile.type)) {
+        return NextResponse.json(
+          { error: "Tile is not ownable." },
+          { status: 409 },
+        );
+      }
+
+      const ownershipByTile = await loadOwnershipByTile(gameId);
+      if (ownershipByTile[body.tileIndex]) {
+        return NextResponse.json(
+          { error: "Property already owned." },
+          { status: 409 },
+        );
+      }
+
+      const price = landingTile.price ?? 0;
+      const balances = gameState.balances ?? {};
+      const currentBalance =
+        balances[currentPlayer.id] ?? game.starting_cash ?? 0;
+
+      if (currentBalance < price) {
+        return NextResponse.json(
+          { error: "Insufficient cash to buy this property." },
+          { status: 409 },
+        );
+      }
+
+      const updatedBalances = {
+        ...balances,
+        [currentPlayer.id]: currentBalance - price,
+      };
+
+      const ownershipResponse = await fetch(
+        `${supabaseUrl}/rest/v1/property_ownership`,
+        {
+          method: "POST",
+          headers: {
+            ...bankHeaders,
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            game_id: gameId,
+            tile_index: body.tileIndex,
+            owner_player_id: currentPlayer.id,
+          }),
+        },
+      );
+
+      if (!ownershipResponse.ok) {
+        const errorText = await ownershipResponse.text();
+        if (
+          ownershipResponse.status === 409 ||
+          errorText.includes("duplicate key value") ||
+          errorText.includes("23505")
+        ) {
+          return NextResponse.json(
+            { error: "Property already owned." },
+            { status: 409 },
+          );
+        }
+
+        return NextResponse.json(
+          { error: errorText || "Unable to record ownership." },
+          { status: 500 },
+        );
+      }
+
+      const events: Array<{
+        event_type: string;
+        payload: Record<string, unknown>;
+      }> = [
+        {
+          event_type: "BUY_PROPERTY",
+          payload: {
+            tile_index: body.tileIndex,
+            price,
+            owner_player_id: currentPlayer.id,
+          },
+        },
+        {
+          event_type: "CASH_DEBIT",
+          payload: {
+            player_id: currentPlayer.id,
+            amount: price,
+            reason: "BUY_PROPERTY",
+            tile_index: body.tileIndex,
+          },
+        },
+      ];
+      const finalVersion = currentVersion + events.length;
+
+      const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            version: finalVersion,
+            balances: updatedBalances,
             turn_phase: "AWAITING_ROLL",
             pending_action: null,
             updated_at: new Date().toISOString(),

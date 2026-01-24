@@ -396,7 +396,7 @@ export default function PlayPage() {
         setInitialSnapshotReady(true);
       }
     },
-    [loadEvents, loadGameMeta, loadGameState, loadPlayers],
+    [loadEvents, loadGameMeta, loadGameState, loadOwnership, loadPlayers],
   );
 
   const setupRealtimeChannel = useCallback(() => {
@@ -986,6 +986,13 @@ export default function PlayPage() {
   const hasPendingDecision = Boolean(pendingPurchase);
   const showPendingDecisionCard = hasPendingDecision && isMyTurn;
   const showPendingDecisionBanner = hasPendingDecision && !isMyTurn;
+  const currentPlayerBalance =
+    gameState?.balances && currentPlayer
+      ? gameState.balances[currentPlayer.id] ?? 0
+      : 0;
+  const canAffordPendingPurchase = pendingPurchase
+    ? currentPlayerBalance >= pendingPurchase.price
+    : false;
   const canAct = initialSnapshotReady && isMyTurn;
   const canRoll =
     canAct &&
@@ -1000,8 +1007,8 @@ export default function PlayPage() {
 
   const handleBankAction = useCallback(
     async (
-      action: "ROLL_DICE" | "END_TURN" | "DECLINE_PROPERTY",
-      tileIndex?: number,
+      action: "ROLL_DICE" | "END_TURN" | "DECLINE_PROPERTY" | "BUY_PROPERTY",
+      payload?: { tileIndex?: number },
     ) => {
       if (!session || !gameId) {
         setNotice("Join a game lobby first.");
@@ -1018,7 +1025,7 @@ export default function PlayPage() {
       console.info("[Play] action request", {
         action,
         gameId,
-        tileIndex,
+        tileIndex: payload?.tileIndex ?? null,
         expectedVersion: snapshotVersion,
         currentVersion: gameState?.version ?? null,
         last_roll: snapshotLastRoll,
@@ -1037,7 +1044,7 @@ export default function PlayPage() {
           body: JSON.stringify({
             gameId,
             action,
-            tileIndex,
+            tileIndex: payload?.tileIndex,
             expectedVersion: snapshotVersion,
           }),
         });
@@ -1074,6 +1081,7 @@ export default function PlayPage() {
         await Promise.all([
           loadPlayers(gameId, session.access_token),
           loadEvents(gameId, session.access_token),
+          loadOwnership(gameId, session.access_token),
         ]);
 
         if (firstRoundResyncEnabled) {
@@ -1096,6 +1104,7 @@ export default function PlayPage() {
       isInProgress,
       loadEvents,
       loadGameData,
+      loadOwnership,
       loadPlayers,
       requestFirstRoundResync,
       session,
@@ -1107,7 +1116,19 @@ export default function PlayPage() {
       return;
     }
 
-    void handleBankAction("DECLINE_PROPERTY", pendingPurchase.tile_index);
+    void handleBankAction("DECLINE_PROPERTY", {
+      tileIndex: pendingPurchase.tile_index,
+    });
+  }, [handleBankAction, pendingPurchase]);
+
+  const handleBuyProperty = useCallback(() => {
+    if (!pendingPurchase) {
+      return;
+    }
+
+    void handleBankAction("BUY_PROPERTY", {
+      tileIndex: pendingPurchase.tile_index,
+    });
   }, [handleBankAction, pendingPurchase]);
 
   const handleLeaveTable = useCallback(() => {
@@ -1178,7 +1199,14 @@ export default function PlayPage() {
     } finally {
       setActionLoading(null);
     }
-  }, [clearResumeStorage, gameId, gameState?.version, loadGameData, session]);
+  }, [
+    clearResumeStorage,
+    gameId,
+    gameState?.version,
+    loadGameData,
+    router,
+    session,
+  ]);
 
   return (
     <PageShell
@@ -1382,10 +1410,17 @@ export default function PlayPage() {
                 <button
                   className="rounded-2xl bg-amber-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-amber-300"
                   type="button"
-                  disabled
-                  title="Phase 7D not implemented"
+                  onClick={handleBuyProperty}
+                  disabled={
+                    actionLoading === "BUY_PROPERTY" || !canAffordPendingPurchase
+                  }
+                  title={
+                    canAffordPendingPurchase
+                      ? "Buy this property"
+                      : "Not enough cash to buy"
+                  }
                 >
-                  Buy (Phase 7D)
+                  {actionLoading === "BUY_PROPERTY" ? "Buying…" : "Buy"}
                 </button>
                 <button
                   className="rounded-2xl border border-amber-300 px-4 py-2 text-sm font-semibold text-amber-900 disabled:cursor-not-allowed disabled:border-amber-200 disabled:text-amber-400"
@@ -1399,9 +1434,12 @@ export default function PlayPage() {
                     : "Auction"}
                 </button>
               </div>
-              <p className="mt-2 text-[11px] text-amber-700">
-                Buying remains disabled until Phase 7D.
-              </p>
+              {!canAffordPendingPurchase ? (
+                <p className="mt-2 text-[11px] text-amber-700">
+                  You need ${pendingPurchase.price - currentPlayerBalance} more to
+                  buy this property.
+                </p>
+              ) : null}
             </div>
           ) : null}
           {showPendingDecisionBanner ? (
@@ -1422,11 +1460,7 @@ export default function PlayPage() {
                 Balance
               </p>
               <p className="text-3xl font-semibold text-neutral-900">
-                ${
-                  gameState?.balances && currentPlayer
-                    ? gameState.balances[currentPlayer.id] ?? 0
-                    : 0
-                }
+                ${currentPlayerBalance}
               </p>
               <p className="text-sm text-neutral-500">Available to spend</p>
             </div>
