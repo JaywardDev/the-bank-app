@@ -401,9 +401,49 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
           : "Turn ended";
       }
 
+      if (event.event_type === "PAY_RENT") {
+        const payload = event.payload as
+          | {
+              tile_index?: unknown;
+              amount?: unknown;
+              to_player_id?: unknown;
+            }
+          | null;
+        const tileIndexRaw = payload?.tile_index;
+        const tileIndex =
+          typeof tileIndexRaw === "number"
+            ? tileIndexRaw
+            : typeof tileIndexRaw === "string"
+              ? Number.parseInt(tileIndexRaw, 10)
+              : null;
+        const tileNameFromBoard =
+          tileIndex !== null
+            ? boardPack?.tiles?.find((entry) => entry.index === tileIndex)?.name
+            : null;
+        const tileLabel =
+          tileNameFromBoard ?? (tileIndex !== null ? `Tile ${tileIndex}` : "tile");
+        const rentAmount =
+          typeof payload?.amount === "number"
+            ? payload.amount
+            : typeof payload?.amount === "string"
+              ? Number.parseInt(payload.amount, 10)
+              : null;
+        const ownerId =
+          typeof payload?.to_player_id === "string"
+            ? payload.to_player_id
+            : null;
+        const ownerName =
+          players.find((player) => player.id === ownerId)?.display_name ??
+          "Player";
+
+        return rentAmount !== null
+          ? `Paid $${rentAmount} rent to ${ownerName} (${tileLabel})`
+          : `Paid rent to ${ownerName} (${tileLabel})`;
+      }
+
       return "Update received";
     },
-    [boardPack?.tiles, getOwnershipLabel],
+    [boardPack?.tiles, getOwnershipLabel, players],
   );
 
   return (

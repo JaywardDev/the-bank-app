@@ -777,16 +777,39 @@ export async function POST(request: Request) {
       const ownershipByTile = await loadOwnershipByTile(gameId);
       const ownership = ownershipByTile[landingTile.index];
       const isOwnableTile = OWNABLE_TILE_TYPES.has(landingTile.type);
+      const rentOwnerId =
+        isOwnableTile && ownership ? ownership.owner_player_id : null;
+      const rentAmount =
+        rentOwnerId && rentOwnerId !== currentPlayer.id
+          ? landingTile.baseRent ?? 0
+          : 0;
+      const shouldPayRent = rentAmount > 0 && Boolean(rentOwnerId);
       const isUnownedOwnableTile = isOwnableTile && !ownership;
       const balances = gameState?.balances ?? {};
-      const updatedBalances = passedStart
-        ? {
-            ...balances,
-            [currentPlayer.id]:
-              (balances[currentPlayer.id] ?? game.starting_cash ?? 0) +
-              PASS_START_SALARY,
-          }
-        : balances;
+      const updatedBalances = (() => {
+        let nextBalances = passedStart
+          ? {
+              ...balances,
+              [currentPlayer.id]:
+                (balances[currentPlayer.id] ?? game.starting_cash ?? 0) +
+                PASS_START_SALARY,
+            }
+          : balances;
+
+        if (shouldPayRent && rentOwnerId && rentOwnerId !== currentPlayer.id) {
+          const payerBalance =
+            nextBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
+          const ownerBalance =
+            nextBalances[rentOwnerId] ?? game.starting_cash ?? 0;
+          nextBalances = {
+            ...nextBalances,
+            [currentPlayer.id]: payerBalance - rentAmount,
+            [rentOwnerId]: ownerBalance + rentAmount,
+          };
+        }
+
+        return nextBalances;
+      })();
 
       if (isDouble && nextDoublesCount >= 3) {
         const jailTile =
@@ -957,6 +980,18 @@ export async function POST(request: Request) {
         });
       }
 
+      if (shouldPayRent && rentOwnerId && rentOwnerId !== currentPlayer.id) {
+        events.push({
+          event_type: "PAY_RENT",
+          payload: {
+            tile_index: landingTile.index,
+            from_player_id: currentPlayer.id,
+            to_player_id: rentOwnerId,
+            amount: rentAmount,
+          },
+        });
+      }
+
       const pendingPurchaseAction = isUnownedOwnableTile
         ? {
             type: "BUY_PROPERTY",
@@ -1000,6 +1035,7 @@ export async function POST(request: Request) {
       }
 
       const finalVersion = currentVersion + events.length;
+      const balancesChanged = passedStart || shouldPayRent;
 
       const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
         `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
@@ -1012,7 +1048,7 @@ export async function POST(request: Request) {
             version: finalVersion,
             last_roll: rollTotal,
             doubles_count: nextDoublesCount,
-            ...(passedStart ? { balances: updatedBalances } : {}),
+            ...(balancesChanged ? { balances: updatedBalances } : {}),
             ...(pendingPurchaseAction
               ? {
                   turn_phase: "AWAITING_DECISION",
