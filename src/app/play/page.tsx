@@ -194,6 +194,11 @@ export default function PlayPage() {
           from_player_id?: unknown;
           to_player_id?: unknown;
           amount?: unknown;
+          payer_display_name?: unknown;
+          display_name?: unknown;
+          from_tile_index?: unknown;
+          to_jail_tile_index?: unknown;
+          player_name?: unknown;
         }
       | null;
 
@@ -330,6 +335,65 @@ export default function PlayPage() {
       return rentAmount !== null
         ? `Paid $${rentAmount} rent to ${ownerName} (${tileLabel})`
         : `Paid rent to ${ownerName} (${tileLabel})`;
+    }
+
+    if (event.event_type === "PAY_TAX") {
+      const tileIndexRaw = payload?.tile_index;
+      const tileIndex =
+        typeof tileIndexRaw === "number"
+          ? tileIndexRaw
+          : typeof tileIndexRaw === "string"
+            ? Number.parseInt(tileIndexRaw, 10)
+            : null;
+      const tileNameFromBoard =
+        tileIndex !== null
+          ? boardPack?.tiles?.find((entry) => entry.index === tileIndex)?.name
+          : null;
+      const tileLabel =
+        tileNameFromBoard ?? (tileIndex !== null ? `Tile ${tileIndex}` : "tile");
+      const taxAmount =
+        typeof payload?.amount === "number"
+          ? payload.amount
+          : typeof payload?.amount === "string"
+            ? Number.parseInt(payload.amount, 10)
+            : null;
+      const payerName =
+        typeof payload?.payer_display_name === "string"
+          ? payload.payer_display_name
+          : "Player";
+
+      return taxAmount !== null
+        ? `${payerName} paid $${taxAmount} tax (${tileLabel})`
+        : `${payerName} paid tax (${tileLabel})`;
+    }
+
+    if (event.event_type === "GO_TO_JAIL") {
+      const fromIndexRaw = payload?.from_tile_index;
+      const fromIndex =
+        typeof fromIndexRaw === "number"
+          ? fromIndexRaw
+          : typeof fromIndexRaw === "string"
+            ? Number.parseInt(fromIndexRaw, 10)
+            : null;
+      const toIndexRaw = payload?.to_jail_tile_index;
+      const toIndexCandidate =
+        toIndexRaw ?? (payload?.tile_index as typeof toIndexRaw);
+      const toIndex =
+        typeof toIndexCandidate === "number"
+          ? toIndexCandidate
+          : typeof toIndexCandidate === "string"
+            ? Number.parseInt(toIndexCandidate, 10)
+            : null;
+      const fromLabel =
+        fromIndex !== null ? `tile ${fromIndex}` : "Go To Jail";
+      const toLabel = toIndex !== null ? `jail ${toIndex}` : "jail";
+      const playerName =
+        typeof payload?.display_name === "string"
+          ? payload.display_name
+          : typeof payload?.player_name === "string"
+            ? payload.player_name
+            : "Player";
+      return `${playerName} went to ${toLabel} from ${fromLabel}`;
     }
 
     return "Update received";

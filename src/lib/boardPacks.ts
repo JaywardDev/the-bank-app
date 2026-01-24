@@ -24,6 +24,7 @@ export type BoardTile = {
   name: string;
   price?: number;
   baseRent?: number;
+  taxAmount?: number;
 };
 
 export const boardPacks: BoardPack[] = [
@@ -56,7 +57,13 @@ export const boardPacks: BoardPack[] = [
         price: 60,
         baseRent: 4,
       },
-      { index: 4, tile_id: "income-tax", type: "TAX", name: "Income Tax" },
+      {
+        index: 4,
+        tile_id: "income-tax",
+        type: "TAX",
+        name: "Income Tax",
+        taxAmount: 100,
+      },
       {
         index: 5,
         tile_id: "reading-railroad",
@@ -283,7 +290,13 @@ export const boardPacks: BoardPack[] = [
         price: 350,
         baseRent: 35,
       },
-      { index: 38, tile_id: "luxury-tax", type: "TAX", name: "Luxury Tax" },
+      {
+        index: 38,
+        tile_id: "luxury-tax",
+        type: "TAX",
+        name: "Luxury Tax",
+        taxAmount: 200,
+      },
       {
         index: 39,
         tile_id: "boardwalk",

@@ -97,6 +97,7 @@ type TileInfo = {
   name: string;
   price?: number;
   baseRent?: number;
+  taxAmount?: number;
 };
 
 type DiceEventPayload = {
@@ -785,6 +786,20 @@ export async function POST(request: Request) {
           : 0;
       const shouldPayRent = rentAmount > 0 && Boolean(rentOwnerId);
       const isUnownedOwnableTile = isOwnableTile && !ownership;
+      const isTaxTile = landingTile.type === "TAX";
+      const taxAmount = isTaxTile ? landingTile.taxAmount ?? 0 : 0;
+      const shouldPayTax = isTaxTile && taxAmount > 0;
+      const jailTile =
+        landingTile.type === "GO_TO_JAIL"
+          ? boardTiles.find((tile) => tile.type === "JAIL") ?? {
+              index: 10,
+              tile_id: "jail",
+              type: "JAIL",
+              name: "Jail",
+            }
+          : null;
+      const resolvedTile = jailTile ?? landingTile;
+      const finalPosition = resolvedTile.index;
       const balances = gameState?.balances ?? {};
       const updatedBalances = (() => {
         let nextBalances = passedStart
@@ -805,6 +820,15 @@ export async function POST(request: Request) {
             ...nextBalances,
             [currentPlayer.id]: payerBalance - rentAmount,
             [rentOwnerId]: ownerBalance + rentAmount,
+          };
+        }
+
+        if (shouldPayTax) {
+          const payerBalance =
+            nextBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
+          nextBalances = {
+            ...nextBalances,
+            [currentPlayer.id]: payerBalance - taxAmount,
           };
         }
 
@@ -980,6 +1004,18 @@ export async function POST(request: Request) {
         });
       }
 
+      if (landingTile.type === "GO_TO_JAIL" && jailTile) {
+        events.push({
+          event_type: "GO_TO_JAIL",
+          payload: {
+            from_tile_index: landingTile.index,
+            to_jail_tile_index: jailTile.index,
+            player_id: currentPlayer.id,
+            display_name: currentPlayer.display_name,
+          },
+        });
+      }
+
       if (shouldPayRent && rentOwnerId && rentOwnerId !== currentPlayer.id) {
         events.push({
           event_type: "PAY_RENT",
@@ -990,6 +1026,30 @@ export async function POST(request: Request) {
             amount: rentAmount,
           },
         });
+      }
+
+      if (shouldPayTax) {
+        events.push(
+          {
+            event_type: "PAY_TAX",
+            payload: {
+              tile_index: landingTile.index,
+              tile_name: landingTile.name,
+              amount: taxAmount,
+              payer_player_id: currentPlayer.id,
+              payer_display_name: currentPlayer.display_name,
+            },
+          },
+          {
+            event_type: "CASH_DEBIT",
+            payload: {
+              player_id: currentPlayer.id,
+              amount: taxAmount,
+              reason: "PAY_TAX",
+              tile_index: landingTile.index,
+            },
+          },
+        );
       }
 
       const pendingPurchaseAction = isUnownedOwnableTile
@@ -1017,13 +1077,17 @@ export async function POST(request: Request) {
         event_type: "MOVE_RESOLVED",
         payload: {
           player_id: currentPlayer.id,
-          tile_id: landingTile.tile_id,
-          tile_type: landingTile.type,
-          tile_index: landingTile.index,
+          tile_id: resolvedTile.tile_id,
+          tile_type: resolvedTile.type,
+          tile_index: resolvedTile.index,
         },
       });
 
-      if (isDouble && !pendingPurchaseAction) {
+      if (
+        isDouble &&
+        !pendingPurchaseAction &&
+        landingTile.type !== "GO_TO_JAIL"
+      ) {
         events.push({
           event_type: "ALLOW_EXTRA_ROLL",
           payload: {
@@ -1035,7 +1099,7 @@ export async function POST(request: Request) {
       }
 
       const finalVersion = currentVersion + events.length;
-      const balancesChanged = passedStart || shouldPayRent;
+      const balancesChanged = passedStart || shouldPayRent || shouldPayTax;
 
       const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
         `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
@@ -1075,7 +1139,7 @@ export async function POST(request: Request) {
             Prefer: "return=representation",
           },
           body: JSON.stringify({
-            position: newPosition,
+            position: finalPosition,
           }),
         },
       );
