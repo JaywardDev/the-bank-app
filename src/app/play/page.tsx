@@ -1666,6 +1666,8 @@ export default function PlayPage() {
                   tiles={boardPack?.tiles}
                   players={players}
                   currentPlayerId={currentPlayer?.id}
+                  ownershipByTile={ownershipByTile}
+                  showOwnership
                 />
               </div>
             </div>

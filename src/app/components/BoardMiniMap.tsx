@@ -6,6 +6,8 @@ type PlayerMarker = {
   position: number;
 };
 
+type OwnershipByTile = Record<number, { owner_player_id: string }>;
+
 type BoardMiniMapProps = {
   tiles?: BoardTile[];
   players: PlayerMarker[];
@@ -14,6 +16,13 @@ type BoardMiniMapProps = {
   lastMovedTileIndex?: number | null;
   variant?: "light" | "dark";
   size?: "compact" | "default" | "large";
+  ownershipByTile?: OwnershipByTile;
+  showOwnership?: boolean;
+};
+
+type OwnershipColor = {
+  border: string;
+  inset: string;
 };
 
 const fallbackTiles: BoardTile[] = Array.from({ length: 40 }, (_, index) => ({
@@ -36,6 +45,15 @@ const getInitials = (name: string | null) => {
   return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
 };
 
+const ownershipPalette: OwnershipColor[] = [
+  { border: "rgba(37, 99, 235, 0.9)", inset: "rgba(37, 99, 235, 0.28)" },
+  { border: "rgba(220, 38, 38, 0.9)", inset: "rgba(220, 38, 38, 0.26)" },
+  { border: "rgba(5, 150, 105, 0.9)", inset: "rgba(5, 150, 105, 0.25)" },
+  { border: "rgba(124, 58, 237, 0.9)", inset: "rgba(124, 58, 237, 0.26)" },
+  { border: "rgba(217, 119, 6, 0.9)", inset: "rgba(217, 119, 6, 0.24)" },
+  { border: "rgba(8, 145, 178, 0.9)", inset: "rgba(8, 145, 178, 0.24)" },
+];
+
 export default function BoardMiniMap({
   tiles,
   players,
@@ -44,12 +62,21 @@ export default function BoardMiniMap({
   lastMovedTileIndex,
   variant = "light",
   size = "default",
+  ownershipByTile,
+  showOwnership = false,
 }: BoardMiniMapProps) {
   const boardTiles = tiles && tiles.length > 0 ? tiles : fallbackTiles;
   const playersByTile = players.reduce<Record<number, PlayerMarker[]>>(
     (acc, player) => {
       const position = Number.isFinite(player.position) ? player.position : 0;
       acc[position] = acc[position] ? [...acc[position], player] : [player];
+      return acc;
+    },
+    {},
+  );
+  const ownershipColorsByPlayer = players.reduce<Record<string, OwnershipColor>>(
+    (acc, player, index) => {
+      acc[player.id] = ownershipPalette[index % ownershipPalette.length];
       return acc;
     },
     {},
@@ -118,10 +145,20 @@ export default function BoardMiniMap({
           const isLastMovedPlayerHere = tilePlayers.some(
             (player) => player.id === lastMovedPlayerId,
           );
+          const ownerId = ownershipByTile?.[tile.index]?.owner_player_id;
+          const ownershipColor =
+            showOwnership && ownerId ? ownershipColorsByPlayer[ownerId] : undefined;
+          const ownershipStyle = ownershipColor
+            ? {
+                borderColor: ownershipColor.border,
+                boxShadow: `inset 0 0 0 2px ${ownershipColor.inset}`,
+              }
+            : undefined;
 
           return (
             <div
               key={tile.tile_id}
+              style={ownershipStyle}
               className={`border leading-tight ${sizing.tile} ${
                 isDark
                   ? "border-white/10 bg-black/30"
