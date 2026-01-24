@@ -25,13 +25,15 @@ type ActionRequest = {
   joinCode?: string;
   displayName?: string;
   boardPackId?: string;
+  tileIndex?: number;
   action?:
     | "CREATE_GAME"
     | "JOIN_GAME"
     | "START_GAME"
     | "END_GAME"
     | "ROLL_DICE"
-    | "END_TURN";
+    | "END_TURN"
+    | "DECLINE_PROPERTY";
   expectedVersion?: number;
 };
 
@@ -1043,7 +1045,104 @@ export async function POST(request: Request) {
       return NextResponse.json({ gameState: updatedState });
     }
 
+    if (body.action === "DECLINE_PROPERTY") {
+      const pendingAction = gameState.pending_action as
+        | {
+            type?: unknown;
+            tile_index?: unknown;
+          }
+        | null;
+
+      if (!pendingAction || pendingAction.type !== "BUY_PROPERTY") {
+        return NextResponse.json(
+          { error: "No pending property decision." },
+          { status: 409 },
+        );
+      }
+
+      if (!Number.isInteger(body.tileIndex)) {
+        return NextResponse.json(
+          { error: "Invalid tileIndex." },
+          { status: 400 },
+        );
+      }
+
+      if (pendingAction.tile_index !== body.tileIndex) {
+        return NextResponse.json(
+          { error: "Pending decision does not match that tile." },
+          { status: 409 },
+        );
+      }
+
+      const currentIndex = players.findIndex(
+        (player) => player.id === gameState.current_player_id,
+      );
+      const nextIndex =
+        currentIndex === -1 ? 0 : (currentIndex + 1) % players.length;
+      const nextPlayer = players[nextIndex];
+      const events: Array<{
+        event_type: string;
+        payload: Record<string, unknown>;
+      }> = [
+        {
+          event_type: "DECLINE_PROPERTY",
+          payload: {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.display_name,
+            tile_index: body.tileIndex,
+          },
+        },
+        {
+          event_type: "END_TURN",
+          payload: {
+            from_player_id: currentPlayer.id,
+            from_player_name: currentPlayer.display_name,
+            to_player_id: nextPlayer.id,
+            to_player_name: nextPlayer.display_name,
+          },
+        },
+      ];
+      const finalVersion = currentVersion + events.length;
+
+      const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            version: finalVersion,
+            current_player_id: nextPlayer.id,
+            last_roll: null,
+            doubles_count: 0,
+            turn_phase: "AWAITING_ROLL",
+            pending_action: null,
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      );
+
+      if (!updatedState) {
+        return NextResponse.json(
+          { error: "Version mismatch." },
+          { status: 409 },
+        );
+      }
+
+      await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+
+      return NextResponse.json({ gameState: updatedState });
+    }
+
     if (body.action === "END_TURN") {
+      if (gameState.pending_action) {
+        return NextResponse.json(
+          { error: "Pending decision must be resolved." },
+          { status: 409 },
+        );
+      }
+
       const currentIndex = players.findIndex(
         (player) => player.id === gameState.current_player_id,
       );

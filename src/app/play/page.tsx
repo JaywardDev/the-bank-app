@@ -278,6 +278,23 @@ export default function PlayPage() {
         : `Offer: Buy ${tileLabel}`;
     }
 
+    if (event.event_type === "DECLINE_PROPERTY") {
+      const tileIndexRaw = payload?.tile_index;
+      const tileIndex =
+        typeof tileIndexRaw === "number"
+          ? tileIndexRaw
+          : typeof tileIndexRaw === "string"
+            ? Number.parseInt(tileIndexRaw, 10)
+            : null;
+      const tileNameFromBoard =
+        tileIndex !== null
+          ? boardPack?.tiles?.find((entry) => entry.index === tileIndex)?.name
+          : null;
+      const tileLabel =
+        tileNameFromBoard ?? (tileIndex !== null ? `Tile ${tileIndex}` : "tile");
+      return `Auction: ${tileLabel}`;
+    }
+
     return "Update received";
   }, [boardPack?.tiles, getOwnershipLabel]);
 
@@ -875,11 +892,14 @@ export default function PlayPage() {
   const currentPlayer = players.find(
     (player) => player.id === gameState?.current_player_id,
   );
+  const currentUserPlayer = players.find(
+    (player) => session && player.user_id === session.user.id,
+  );
   const isMyTurn = Boolean(
     isInProgress &&
       session &&
-      currentPlayer &&
-      currentPlayer.user_id === session.user.id,
+      currentUserPlayer &&
+      gameState?.current_player_id === currentUserPlayer.id,
   );
   const latestAllowExtraRollForMe = useMemo(() => {
     if (!currentPlayer?.id) {
@@ -960,19 +980,29 @@ export default function PlayPage() {
     pendingTile && typeof pendingTile.baseRent === "number"
       ? pendingTile.baseRent
       : null;
+  const pendingTileLabel =
+    pendingTile?.name ??
+    (pendingPurchase ? `Tile ${pendingPurchase.tile_index}` : null);
+  const hasPendingDecision = Boolean(pendingPurchase);
+  const showPendingDecisionCard = hasPendingDecision && isMyTurn;
+  const showPendingDecisionBanner = hasPendingDecision && !isMyTurn;
   const canAct = initialSnapshotReady && isMyTurn;
   const canRoll =
     canAct &&
-    !pendingPurchase &&
+    !hasPendingDecision &&
     (gameState?.last_roll == null || canTakeExtraRoll);
-  const canEndTurn = canAct && gameState?.last_roll != null;
+  const canEndTurn =
+    canAct && !hasPendingDecision && gameState?.last_roll != null;
   const realtimeStatusLabel = realtimeReady ? "Live" : "Syncing…";
   const isHost = Boolean(
     session && gameMeta?.created_by && session.user.id === gameMeta.created_by,
   );
 
   const handleBankAction = useCallback(
-    async (action: "ROLL_DICE" | "END_TURN") => {
+    async (
+      action: "ROLL_DICE" | "END_TURN" | "DECLINE_PROPERTY",
+      tileIndex?: number,
+    ) => {
       if (!session || !gameId) {
         setNotice("Join a game lobby first.");
         return;
@@ -988,6 +1018,7 @@ export default function PlayPage() {
       console.info("[Play] action request", {
         action,
         gameId,
+        tileIndex,
         expectedVersion: snapshotVersion,
         currentVersion: gameState?.version ?? null,
         last_roll: snapshotLastRoll,
@@ -1006,6 +1037,7 @@ export default function PlayPage() {
           body: JSON.stringify({
             gameId,
             action,
+            tileIndex,
             expectedVersion: snapshotVersion,
           }),
         });
@@ -1069,6 +1101,14 @@ export default function PlayPage() {
       session,
     ],
   );
+
+  const handleDeclineProperty = useCallback(() => {
+    if (!pendingPurchase) {
+      return;
+    }
+
+    void handleBankAction("DECLINE_PROPERTY", pendingPurchase.tile_index);
+  }, [handleBankAction, pendingPurchase]);
 
   const handleLeaveTable = useCallback(() => {
     clearResumeStorage();
@@ -1322,13 +1362,13 @@ export default function PlayPage() {
               {actionLoading === "END_TURN" ? "Ending…" : "End Turn"}
             </button>
           </div>
-          {pendingPurchase ? (
+          {showPendingDecisionCard && pendingPurchase ? (
             <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
               <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
                 Pending decision
               </p>
               <p className="mt-1 text-base font-semibold text-amber-900">
-                {pendingTile?.name ?? `Tile ${pendingPurchase.tile_index}`}
+                {pendingTileLabel}
               </p>
               <p className="text-sm text-amber-800">
                 Price: ${pendingPurchase.price}
@@ -1350,15 +1390,24 @@ export default function PlayPage() {
                 <button
                   className="rounded-2xl border border-amber-300 px-4 py-2 text-sm font-semibold text-amber-900 disabled:cursor-not-allowed disabled:border-amber-200 disabled:text-amber-400"
                   type="button"
-                  disabled
-                  title="Phase 7D not implemented"
+                  onClick={handleDeclineProperty}
+                  disabled={actionLoading === "DECLINE_PROPERTY"}
+                  title="Phase 7C: treat as decline/auction placeholder"
                 >
-                  Skip (Phase 7D)
+                  {actionLoading === "DECLINE_PROPERTY"
+                    ? "Auctioning…"
+                    : "Auction"}
                 </button>
               </div>
               <p className="mt-2 text-[11px] text-amber-700">
-                Phase 7D will wire these actions to the server.
+                Buying remains disabled until Phase 7D.
               </p>
+            </div>
+          ) : null}
+          {showPendingDecisionBanner ? (
+            <div className="rounded-2xl border border-amber-100 bg-amber-50/60 p-4 text-sm text-amber-900">
+              Waiting for {currentPlayer?.display_name ?? "the current player"} to
+              decide on {pendingTileLabel ?? "this tile"}…
             </div>
           ) : null}
           {!initialSnapshotReady ? (
