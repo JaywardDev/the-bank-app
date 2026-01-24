@@ -986,12 +986,12 @@ export default function PlayPage() {
   const hasPendingDecision = Boolean(pendingPurchase);
   const showPendingDecisionCard = hasPendingDecision && isMyTurn;
   const showPendingDecisionBanner = hasPendingDecision && !isMyTurn;
-  const currentPlayerBalance =
-    gameState?.balances && currentPlayer
-      ? gameState.balances[currentPlayer.id] ?? 0
+  const myPlayerBalance =
+    gameState?.balances && currentUserPlayer
+      ? gameState.balances[currentUserPlayer.id] ?? 0
       : 0;
   const canAffordPendingPurchase = pendingPurchase
-    ? currentPlayerBalance >= pendingPurchase.price
+    ? myPlayerBalance >= pendingPurchase.price
     : false;
   const canAct = initialSnapshotReady && isMyTurn;
   const canRoll =
@@ -1441,8 +1441,8 @@ export default function PlayPage() {
               </div>
               {!canAffordPendingPurchase ? (
                 <p className="mt-2 text-[11px] text-amber-700">
-                  You need ${pendingPurchase.price - currentPlayerBalance} more to
-                  buy this property.
+                  You need ${pendingPurchase.price - myPlayerBalance} more to buy
+                  this property.
                 </p>
               ) : null}
             </div>
@@ -1465,7 +1465,7 @@ export default function PlayPage() {
                 Balance
               </p>
               <p className="text-3xl font-semibold text-neutral-900">
-                ${currentPlayerBalance}
+                ${myPlayerBalance}
               </p>
               <p className="text-sm text-neutral-500">Available to spend</p>
             </div>
