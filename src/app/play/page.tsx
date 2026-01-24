@@ -33,6 +33,7 @@ type GameState = {
   current_player_id: string | null;
   balances: Record<string, number> | null;
   last_roll: number | null;
+  doubles_count: number | null;
   turn_phase: string | null;
   pending_action: Record<string, unknown> | null;
 };
@@ -365,7 +366,7 @@ export default function PlayPage() {
   const loadGameState = useCallback(
     async (activeGameId: string, accessToken?: string) => {
       const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
-        `game_state?select=game_id,version,current_player_id,balances,last_roll,turn_phase,pending_action&game_id=eq.${activeGameId}&limit=1`,
+        `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action&game_id=eq.${activeGameId}&limit=1`,
         { method: "GET" },
         accessToken,
       );
@@ -901,43 +902,6 @@ export default function PlayPage() {
       currentUserPlayer &&
       gameState?.current_player_id === currentUserPlayer.id,
   );
-  const latestAllowExtraRollForMe = useMemo(() => {
-    if (!currentPlayer?.id) {
-      return null;
-    }
-
-    return (
-      events.find((event) => {
-        if (event.event_type !== "ALLOW_EXTRA_ROLL") {
-          return false;
-        }
-
-        const payload = event.payload as { player_id?: unknown } | null;
-        return payload?.player_id === currentPlayer.id;
-      }) ?? null
-    );
-  }, [currentPlayer?.id, events]);
-  const latestRollDiceForMe = useMemo(() => {
-    if (!currentPlayer?.id) {
-      return null;
-    }
-
-    return (
-      events.find((event) => {
-        if (event.event_type !== "ROLL_DICE") {
-          return false;
-        }
-
-        const payload = event.payload as { player_id?: unknown } | null;
-        return payload?.player_id === currentPlayer.id;
-      }) ?? null
-    );
-  }, [currentPlayer?.id, events]);
-  const canTakeExtraRoll = Boolean(
-    latestAllowExtraRollForMe &&
-      latestRollDiceForMe &&
-      latestAllowExtraRollForMe.version > latestRollDiceForMe.version,
-  );
   const pendingPurchase = useMemo<PendingPurchaseAction | null>(() => {
     const pendingAction = gameState?.pending_action;
     if (!pendingAction || typeof pendingAction !== "object") {
@@ -997,7 +961,7 @@ export default function PlayPage() {
   const canRoll =
     canAct &&
     !hasPendingDecision &&
-    (gameState?.last_roll == null || canTakeExtraRoll);
+    (gameState?.last_roll == null || (gameState?.doubles_count ?? 0) > 0);
   const canEndTurn =
     canAct && !hasPendingDecision && gameState?.last_roll != null;
   const realtimeStatusLabel = realtimeReady ? "Live" : "Syncing…";
