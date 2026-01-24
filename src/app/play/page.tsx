@@ -33,6 +33,8 @@ type GameState = {
   current_player_id: string | null;
   balances: Record<string, number> | null;
   last_roll: number | null;
+  turn_phase: string | null;
+  pending_action: Record<string, unknown> | null;
 };
 
 type GameEvent = {
@@ -49,6 +51,12 @@ type OwnershipRow = {
 };
 
 type OwnershipByTile = Record<number, { owner_player_id: string }>;
+
+type PendingPurchaseAction = {
+  type: "BUY_PROPERTY";
+  tile_index: number;
+  price: number;
+};
 
 export default function PlayPage() {
   const router = useRouter();
@@ -178,6 +186,8 @@ export default function PlayPage() {
           dice?: unknown;
           doubles_count?: unknown;
           tile_index?: unknown;
+          tile_name?: unknown;
+          price?: unknown;
         }
       | null;
 
@@ -236,6 +246,36 @@ export default function PlayPage() {
       return ownershipLabel
         ? `Landed on ${tileLabel} · ${ownershipLabel}`
         : `Landed on ${tileLabel}`;
+    }
+
+    if (event.event_type === "OFFER_PURCHASE") {
+      const tileIndexRaw = payload?.tile_index;
+      const tileIndex =
+        typeof tileIndexRaw === "number"
+          ? tileIndexRaw
+          : typeof tileIndexRaw === "string"
+            ? Number.parseInt(tileIndexRaw, 10)
+            : null;
+      const tileNameFromPayload =
+        typeof payload?.tile_name === "string" ? payload.tile_name : null;
+      const tileNameFromBoard =
+        tileIndex !== null
+          ? boardPack?.tiles?.find((entry) => entry.index === tileIndex)?.name
+          : null;
+      const tileLabel =
+        tileNameFromBoard ??
+        tileNameFromPayload ??
+        (tileIndex !== null ? `Tile ${tileIndex}` : "this tile");
+      const price =
+        typeof payload?.price === "number"
+          ? payload.price
+          : typeof payload?.price === "string"
+            ? Number.parseInt(payload.price, 10)
+            : null;
+
+      return price !== null
+        ? `Offer: Buy ${tileLabel} for $${price}`
+        : `Offer: Buy ${tileLabel}`;
     }
 
     return "Update received";
@@ -308,7 +348,7 @@ export default function PlayPage() {
   const loadGameState = useCallback(
     async (activeGameId: string, accessToken?: string) => {
       const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
-        `game_state?select=game_id,version,current_player_id,balances,last_roll&game_id=eq.${activeGameId}&limit=1`,
+        `game_state?select=game_id,version,current_player_id,balances,last_roll,turn_phase,pending_action&game_id=eq.${activeGameId}&limit=1`,
         { method: "GET" },
         accessToken,
       );
@@ -878,9 +918,53 @@ export default function PlayPage() {
       latestRollDiceForMe &&
       latestAllowExtraRollForMe.version > latestRollDiceForMe.version,
   );
+  const pendingPurchase = useMemo<PendingPurchaseAction | null>(() => {
+    const pendingAction = gameState?.pending_action;
+    if (!pendingAction || typeof pendingAction !== "object") {
+      return null;
+    }
+
+    const candidate = pendingAction as {
+      type?: unknown;
+      tile_index?: unknown;
+      price?: unknown;
+    };
+
+    if (candidate.type !== "BUY_PROPERTY") {
+      return null;
+    }
+
+    if (
+      typeof candidate.tile_index !== "number" ||
+      typeof candidate.price !== "number"
+    ) {
+      return null;
+    }
+
+    return {
+      type: "BUY_PROPERTY",
+      tile_index: candidate.tile_index,
+      price: candidate.price,
+    };
+  }, [gameState?.pending_action]);
+  const pendingTile = useMemo(() => {
+    if (!pendingPurchase) {
+      return null;
+    }
+    return (
+      boardPack?.tiles?.find((tile) => tile.index === pendingPurchase.tile_index) ??
+      null
+    );
+  }, [boardPack?.tiles, pendingPurchase]);
+  const pendingBaseRent =
+    pendingTile && typeof pendingTile.baseRent === "number"
+      ? pendingTile.baseRent
+      : null;
   const canAct = initialSnapshotReady && isMyTurn;
   const canRoll =
-    canAct && (gameState?.last_roll == null || canTakeExtraRoll);
+    canAct &&
+    !pendingPurchase &&
+    (gameState?.last_roll == null || canTakeExtraRoll);
   const canEndTurn = canAct && gameState?.last_roll != null;
   const realtimeStatusLabel = realtimeReady ? "Live" : "Syncing…";
   const isHost = Boolean(
@@ -1238,6 +1322,45 @@ export default function PlayPage() {
               {actionLoading === "END_TURN" ? "Ending…" : "End Turn"}
             </button>
           </div>
+          {pendingPurchase ? (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+              <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
+                Pending decision
+              </p>
+              <p className="mt-1 text-base font-semibold text-amber-900">
+                {pendingTile?.name ?? `Tile ${pendingPurchase.tile_index}`}
+              </p>
+              <p className="text-sm text-amber-800">
+                Price: ${pendingPurchase.price}
+              </p>
+              {pendingBaseRent !== null ? (
+                <p className="text-xs text-amber-700">
+                  Base rent preview: ${pendingBaseRent}
+                </p>
+              ) : null}
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                <button
+                  className="rounded-2xl bg-amber-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-amber-300"
+                  type="button"
+                  disabled
+                  title="Phase 7D not implemented"
+                >
+                  Buy (Phase 7D)
+                </button>
+                <button
+                  className="rounded-2xl border border-amber-300 px-4 py-2 text-sm font-semibold text-amber-900 disabled:cursor-not-allowed disabled:border-amber-200 disabled:text-amber-400"
+                  type="button"
+                  disabled
+                  title="Phase 7D not implemented"
+                >
+                  Skip (Phase 7D)
+                </button>
+              </div>
+              <p className="mt-2 text-[11px] text-amber-700">
+                Phase 7D will wire these actions to the server.
+              </p>
+            </div>
+          ) : null}
           {!initialSnapshotReady ? (
             <p className="text-xs text-neutral-400">Loading snapshot…</p>
           ) : null}

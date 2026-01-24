@@ -66,6 +66,8 @@ type GameStateRow = {
   balances: Record<string, number> | null;
   last_roll: number | null;
   doubles_count: number | null;
+  turn_phase: string | null;
+  pending_action: Record<string, unknown> | null;
 };
 
 type OwnershipRow = {
@@ -80,6 +82,8 @@ type TileInfo = {
   type: string;
   index: number;
   name: string;
+  price?: number;
+  baseRent?: number;
 };
 
 type DiceEventPayload = {
@@ -92,6 +96,7 @@ type DiceEventPayload = {
 };
 
 const PASS_START_SALARY = 200;
+const OWNABLE_TILE_TYPES = new Set(["PROPERTY", "RAIL", "UTILITY"]);
 
 const isConfigured = () =>
   Boolean(supabaseUrl && supabaseAnonKey && supabaseServiceRoleKey);
@@ -334,7 +339,7 @@ export async function POST(request: Request) {
       }
 
       await fetchFromSupabaseWithService<GameStateRow[]>(
-        "game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count",
+        "game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action",
         {
           method: "POST",
           headers: {
@@ -347,6 +352,8 @@ export async function POST(request: Request) {
             balances: {},
             last_roll: null,
             doubles_count: 0,
+            turn_phase: "AWAITING_ROLL",
+            pending_action: null,
             updated_at: new Date().toISOString(),
           }),
         },
@@ -467,7 +474,7 @@ export async function POST(request: Request) {
     );
 
     const [gameState] = await fetchFromSupabaseWithService<GameStateRow[]>(
-      `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count&game_id=eq.${gameId}&limit=1`,
+      `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action&game_id=eq.${gameId}&limit=1`,
       { method: "GET" },
     );
 
@@ -551,7 +558,7 @@ export async function POST(request: Request) {
       }, {});
 
       const upsertResponse = await fetch(
-        `${supabaseUrl}/rest/v1/game_state?on_conflict=game_id&select=game_id,version,current_player_id,balances,last_roll,doubles_count`,
+        `${supabaseUrl}/rest/v1/game_state?on_conflict=game_id&select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action`,
         {
           method: "POST",
           headers: {
@@ -565,6 +572,8 @@ export async function POST(request: Request) {
             balances,
             last_roll: null,
             doubles_count: 0,
+            turn_phase: "AWAITING_ROLL",
+            pending_action: null,
             updated_at: new Date().toISOString(),
           }),
         },
@@ -717,6 +726,13 @@ export async function POST(request: Request) {
     }
 
     if (body.action === "ROLL_DICE") {
+      if (gameState.pending_action) {
+        return NextResponse.json(
+          { error: "Pending decision must be resolved." },
+          { status: 409 },
+        );
+      }
+
       const doublesCount = gameState?.doubles_count ?? 0;
 
       if (gameState.last_roll != null && doublesCount === 0) {
@@ -745,6 +761,10 @@ export async function POST(request: Request) {
         type: "PROPERTY",
         name: `Tile ${newPosition}`,
       };
+      const ownershipByTile = await loadOwnershipByTile(gameId);
+      const ownership = ownershipByTile[landingTile.index];
+      const isOwnableTile = OWNABLE_TILE_TYPES.has(landingTile.type);
+      const isUnownedOwnableTile = isOwnableTile && !ownership;
       const balances = gameState?.balances ?? {};
       const updatedBalances = passedStart
         ? {
@@ -924,6 +944,27 @@ export async function POST(request: Request) {
         });
       }
 
+      const pendingPurchaseAction = isUnownedOwnableTile
+        ? {
+            type: "BUY_PROPERTY",
+            tile_index: landingTile.index,
+            price: landingTile.price ?? 0,
+          }
+        : null;
+
+      if (pendingPurchaseAction) {
+        events.push({
+          event_type: "OFFER_PURCHASE",
+          payload: {
+            player_id: currentPlayer.id,
+            tile_id: landingTile.tile_id,
+            tile_name: landingTile.name,
+            tile_index: landingTile.index,
+            price: pendingPurchaseAction.price,
+          },
+        });
+      }
+
       events.push({
         event_type: "MOVE_RESOLVED",
         payload: {
@@ -934,7 +975,7 @@ export async function POST(request: Request) {
         },
       });
 
-      if (isDouble) {
+      if (isDouble && !pendingPurchaseAction) {
         events.push({
           event_type: "ALLOW_EXTRA_ROLL",
           payload: {
@@ -959,6 +1000,12 @@ export async function POST(request: Request) {
             last_roll: rollTotal,
             doubles_count: nextDoublesCount,
             ...(passedStart ? { balances: updatedBalances } : {}),
+            ...(pendingPurchaseAction
+              ? {
+                  turn_phase: "AWAITING_DECISION",
+                  pending_action: pendingPurchaseAction,
+                }
+              : {}),
             updated_at: new Date().toISOString(),
           }),
         },
