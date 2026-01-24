@@ -9,6 +9,7 @@ import { getBoardPackById } from "@/lib/boardPacks";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 
 const lastGameKey = "bank.lastGameId";
+const DEBUG = process.env.NEXT_PUBLIC_DEBUG === "true";
 
 type Player = {
   id: string;
@@ -79,8 +80,10 @@ export default function PlayPage() {
   const realtimeContextRef = useRef<{
     gameId: string;
     accessToken: string;
+    channelName: string;
   } | null>(null);
   const activeGameIdRef = useRef<string | null>(null);
+  const unmountingRef = useRef(false);
 
   const isConfigured = useMemo(() => supabaseClient.isConfigured(), []);
   const latestRollEvent = useMemo(
@@ -372,8 +375,16 @@ export default function PlayPage() {
     }
 
     setRealtimeReady(false);
+    const channelName = `player-console:${gameId}`;
+    if (DEBUG) {
+      console.info("[Play][Realtime] create channel", {
+        channel: channelName,
+        gameId,
+        hasAccessToken: Boolean(session?.access_token),
+      });
+    }
     const channel = realtimeClient
-      .channel(`player-console:${gameId}`)
+      .channel(channelName)
       .on(
         "postgres_changes",
         {
@@ -382,8 +393,21 @@ export default function PlayPage() {
           table: "players",
           filter: `game_id=eq.${gameId}`,
         },
-        () => {
-          void loadPlayers(gameId, session?.access_token);
+        async (payload) => {
+          if (DEBUG) {
+            console.info("[Play][Realtime] payload", {
+              table: "players",
+              eventType: payload.eventType,
+              gameId,
+            });
+          }
+          try {
+            await loadPlayers(gameId, session?.access_token);
+          } catch (error) {
+            if (DEBUG) {
+              console.error("[Play][Realtime] players handler error", error);
+            }
+          }
         },
       )
       .on(
@@ -394,8 +418,21 @@ export default function PlayPage() {
           table: "game_state",
           filter: `game_id=eq.${gameId}`,
         },
-        () => {
-          void loadGameState(gameId, session?.access_token);
+        async (payload) => {
+          if (DEBUG) {
+            console.info("[Play][Realtime] payload", {
+              table: "game_state",
+              eventType: payload.eventType,
+              gameId,
+            });
+          }
+          try {
+            await loadGameState(gameId, session?.access_token);
+          } catch (error) {
+            if (DEBUG) {
+              console.error("[Play][Realtime] game_state handler error", error);
+            }
+          }
         },
       )
       .on(
@@ -406,8 +443,21 @@ export default function PlayPage() {
           table: "game_events",
           filter: `game_id=eq.${gameId}`,
         },
-        () => {
-          void loadEvents(gameId, session?.access_token);
+        async (payload) => {
+          if (DEBUG) {
+            console.info("[Play][Realtime] payload", {
+              table: "game_events",
+              eventType: payload.eventType,
+              gameId,
+            });
+          }
+          try {
+            await loadEvents(gameId, session?.access_token);
+          } catch (error) {
+            if (DEBUG) {
+              console.error("[Play][Realtime] game_events handler error", error);
+            }
+          }
         },
       )
       .on(
@@ -418,8 +468,24 @@ export default function PlayPage() {
           table: "property_ownership",
           filter: `game_id=eq.${gameId}`,
         },
-        () => {
-          void loadOwnership(gameId, session?.access_token);
+        async (payload) => {
+          if (DEBUG) {
+            console.info("[Play][Realtime] payload", {
+              table: "property_ownership",
+              eventType: payload.eventType,
+              gameId,
+            });
+          }
+          try {
+            await loadOwnership(gameId, session?.access_token);
+          } catch (error) {
+            if (DEBUG) {
+              console.error(
+                "[Play][Realtime] property_ownership handler error",
+                error,
+              );
+            }
+          }
         },
       )
       .on(
@@ -430,11 +496,27 @@ export default function PlayPage() {
           table: "games",
           filter: `id=eq.${gameId}`,
         },
-        () => {
-          void loadGameMeta(gameId, session?.access_token);
+        async (payload) => {
+          if (DEBUG) {
+            console.info("[Play][Realtime] payload", {
+              table: "games",
+              eventType: payload.eventType,
+              gameId,
+            });
+          }
+          try {
+            await loadGameMeta(gameId, session?.access_token);
+          } catch (error) {
+            if (DEBUG) {
+              console.error("[Play][Realtime] games handler error", error);
+            }
+          }
         },
       )
       .subscribe((status) => {
+        if (DEBUG) {
+          console.info("[Play][Realtime] status", { status, gameId });
+        }
         const isReady = status === "SUBSCRIBED";
         setRealtimeReady(isReady);
 
@@ -448,6 +530,7 @@ export default function PlayPage() {
     realtimeContextRef.current = {
       gameId,
       accessToken: session.access_token,
+      channelName,
     };
   }, [
     gameId,
@@ -622,6 +705,15 @@ export default function PlayPage() {
       if (realtimeClient && realtimeChannelRef.current) {
         realtimeClient.removeChannel(realtimeChannelRef.current);
       }
+      if (DEBUG) {
+        const channelName =
+          realtimeContextRef.current?.channelName ??
+          (gameId ? `player-console:${gameId}` : "player-console:unknown");
+        console.info("[Play][Realtime] cleanup", {
+          channel: channelName,
+          reason: unmountingRef.current ? "unmount" : "dependency change",
+        });
+      }
       realtimeChannelRef.current = null;
       realtimeContextRef.current = null;
       setRealtimeReady(false);
@@ -731,6 +823,12 @@ export default function PlayPage() {
       setFirstRoundResyncEnabled(false);
     }
   }, [events, firstRoundResyncEnabled, players.length]);
+
+  useEffect(() => {
+    return () => {
+      unmountingRef.current = true;
+    };
+  }, []);
 
   const isInProgress = gameMeta?.status === "in_progress";
   const hasGameMetaError = Boolean(gameMetaError);

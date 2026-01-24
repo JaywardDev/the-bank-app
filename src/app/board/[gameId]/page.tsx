@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageShell from "@/app/components/PageShell";
 import BoardMiniMap from "@/app/components/BoardMiniMap";
 import { getBoardPackById } from "@/lib/boardPacks";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
+
+const DEBUG = process.env.NEXT_PUBLIC_DEBUG === "true";
 
 type Player = {
   id: string;
@@ -57,6 +59,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
   const [ownershipByTile, setOwnershipByTile] = useState<OwnershipByTile>({});
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const unmountingRef = useRef(false);
 
   const isConfigured = useMemo(() => supabaseClient.isConfigured(), []);
 
@@ -178,8 +181,16 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
       return;
     }
 
+    const channelName = `board-display:${params.gameId}`;
+    if (DEBUG) {
+      console.info("[Board][Realtime] create channel", {
+        channel: channelName,
+        gameId: params.gameId,
+        hasAccessToken: Boolean(session?.access_token),
+      });
+    }
     const channel = realtimeClient
-      .channel(`board-display:${params.gameId}`)
+      .channel(channelName)
       .on(
         "postgres_changes",
         {
@@ -188,8 +199,21 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
           table: "players",
           filter: `game_id=eq.${params.gameId}`,
         },
-        () => {
-          void loadPlayers(session?.access_token);
+        async (payload) => {
+          if (DEBUG) {
+            console.info("[Board][Realtime] payload", {
+              table: "players",
+              eventType: payload.eventType,
+              gameId: params.gameId,
+            });
+          }
+          try {
+            await loadPlayers(session?.access_token);
+          } catch (error) {
+            if (DEBUG) {
+              console.error("[Board][Realtime] players handler error", error);
+            }
+          }
         },
       )
       .on(
@@ -200,8 +224,21 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
           table: "game_state",
           filter: `game_id=eq.${params.gameId}`,
         },
-        () => {
-          void loadGameState(session?.access_token);
+        async (payload) => {
+          if (DEBUG) {
+            console.info("[Board][Realtime] payload", {
+              table: "game_state",
+              eventType: payload.eventType,
+              gameId: params.gameId,
+            });
+          }
+          try {
+            await loadGameState(session?.access_token);
+          } catch (error) {
+            if (DEBUG) {
+              console.error("[Board][Realtime] game_state handler error", error);
+            }
+          }
         },
       )
       .on(
@@ -212,8 +249,21 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
           table: "game_events",
           filter: `game_id=eq.${params.gameId}`,
         },
-        () => {
-          void loadEvents(session?.access_token);
+        async (payload) => {
+          if (DEBUG) {
+            console.info("[Board][Realtime] payload", {
+              table: "game_events",
+              eventType: payload.eventType,
+              gameId: params.gameId,
+            });
+          }
+          try {
+            await loadEvents(session?.access_token);
+          } catch (error) {
+            if (DEBUG) {
+              console.error("[Board][Realtime] game_events handler error", error);
+            }
+          }
         },
       )
       .on(
@@ -224,13 +274,42 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
           table: "property_ownership",
           filter: `game_id=eq.${params.gameId}`,
         },
-        () => {
-          void loadOwnership(session?.access_token);
+        async (payload) => {
+          if (DEBUG) {
+            console.info("[Board][Realtime] payload", {
+              table: "property_ownership",
+              eventType: payload.eventType,
+              gameId: params.gameId,
+            });
+          }
+          try {
+            await loadOwnership(session?.access_token);
+          } catch (error) {
+            if (DEBUG) {
+              console.error(
+                "[Board][Realtime] property_ownership handler error",
+                error,
+              );
+            }
+          }
         },
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (DEBUG) {
+          console.info("[Board][Realtime] status", {
+            status,
+            gameId: params.gameId,
+          });
+        }
+      });
 
     return () => {
+      if (DEBUG) {
+        console.info("[Board][Realtime] cleanup", {
+          channel: channelName,
+          reason: unmountingRef.current ? "unmount" : "dependency change",
+        });
+      }
       realtimeClient.removeChannel(channel);
     };
   }, [
@@ -242,6 +321,12 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
     params.gameId,
     session?.access_token,
   ]);
+
+  useEffect(() => {
+    return () => {
+      unmountingRef.current = true;
+    };
+  }, []);
 
   const currentPlayer = players.find(
     (player) => player.id === gameState?.current_player_id,
