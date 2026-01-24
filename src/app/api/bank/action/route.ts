@@ -19,24 +19,34 @@ const bankHeaders = {
   "Content-Type": "application/json",
 };
 
-type ActionRequest = {
+type BaseActionRequest = {
   gameId?: string;
   playerName?: string;
   joinCode?: string;
   displayName?: string;
   boardPackId?: string;
-  tileIndex?: number;
-  action?:
-    | "CREATE_GAME"
-    | "JOIN_GAME"
-    | "START_GAME"
-    | "END_GAME"
-    | "ROLL_DICE"
-    | "END_TURN"
-    | "DECLINE_PROPERTY"
-    | "BUY_PROPERTY";
   expectedVersion?: number;
 };
+
+type BankActionRequest =
+  | (BaseActionRequest & {
+      action?: Exclude<
+        | "CREATE_GAME"
+        | "JOIN_GAME"
+        | "START_GAME"
+        | "END_GAME"
+        | "ROLL_DICE"
+        | "END_TURN"
+        | "DECLINE_PROPERTY"
+        | "BUY_PROPERTY",
+        "DECLINE_PROPERTY" | "BUY_PROPERTY"
+      >;
+      tileIndex?: number;
+    })
+  | (BaseActionRequest & {
+      action: "DECLINE_PROPERTY" | "BUY_PROPERTY";
+      tileIndex: number;
+    });
 
 type SupabaseUser = {
   id: string;
@@ -282,7 +292,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid session." }, { status: 401 });
     }
 
-    const body = (await request.json()) as ActionRequest;
+    const body = (await request.json()) as BankActionRequest;
     if (!body.action) {
       return NextResponse.json({ error: "Missing action." }, { status: 400 });
     }
@@ -1151,14 +1161,15 @@ export async function POST(request: Request) {
         );
       }
 
-      if (!Number.isInteger(body.tileIndex)) {
+      const tileIndex = body.tileIndex;
+      if (typeof tileIndex !== "number" || !Number.isInteger(tileIndex)) {
         return NextResponse.json(
           { error: "Invalid tileIndex." },
           { status: 400 },
         );
       }
 
-      if (pendingAction.tile_index !== body.tileIndex) {
+      if (pendingAction.tile_index !== tileIndex) {
         return NextResponse.json(
           { error: "Pending decision does not match that tile." },
           { status: 409 },
@@ -1167,9 +1178,7 @@ export async function POST(request: Request) {
 
       const boardPack = getBoardPackById(game.board_pack_id);
       const boardTiles = boardPack?.tiles ?? [];
-      const landingTile = boardTiles.find(
-        (tile) => tile.index === body.tileIndex,
-      );
+      const landingTile = boardTiles.find((tile) => tile.index === tileIndex);
 
       if (!landingTile) {
         return NextResponse.json(
@@ -1186,7 +1195,7 @@ export async function POST(request: Request) {
       }
 
       const ownershipByTile = await loadOwnershipByTile(gameId);
-      if (ownershipByTile[body.tileIndex]) {
+      if (ownershipByTile[tileIndex]) {
         return NextResponse.json(
           { error: "Property already owned." },
           { status: 409 },
@@ -1220,7 +1229,7 @@ export async function POST(request: Request) {
           },
           body: JSON.stringify({
             game_id: gameId,
-            tile_index: body.tileIndex,
+            tile_index: tileIndex,
             owner_player_id: currentPlayer.id,
           }),
         },
@@ -1252,7 +1261,7 @@ export async function POST(request: Request) {
         {
           event_type: "BUY_PROPERTY",
           payload: {
-            tile_index: body.tileIndex,
+            tile_index: tileIndex,
             price,
             owner_player_id: currentPlayer.id,
           },
@@ -1263,7 +1272,7 @@ export async function POST(request: Request) {
             player_id: currentPlayer.id,
             amount: price,
             reason: "BUY_PROPERTY",
-            tile_index: body.tileIndex,
+            tile_index: tileIndex,
           },
         },
       ];

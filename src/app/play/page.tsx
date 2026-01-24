@@ -1007,9 +1007,12 @@ export default function PlayPage() {
 
   const handleBankAction = useCallback(
     async (
-      action: "ROLL_DICE" | "END_TURN" | "DECLINE_PROPERTY" | "BUY_PROPERTY",
-      payload?: { tileIndex?: number },
+      request:
+        | { action: "ROLL_DICE" | "END_TURN" }
+        | { action: "DECLINE_PROPERTY" | "BUY_PROPERTY"; tileIndex: number },
     ) => {
+      const { action } = request;
+      const tileIndex = "tileIndex" in request ? request.tileIndex : undefined;
       if (!session || !gameId) {
         setNotice("Join a game lobby first.");
         return;
@@ -1025,7 +1028,7 @@ export default function PlayPage() {
       console.info("[Play] action request", {
         action,
         gameId,
-        tileIndex: payload?.tileIndex ?? null,
+        tileIndex: tileIndex ?? null,
         expectedVersion: snapshotVersion,
         currentVersion: gameState?.version ?? null,
         last_roll: snapshotLastRoll,
@@ -1044,7 +1047,7 @@ export default function PlayPage() {
           body: JSON.stringify({
             gameId,
             action,
-            tileIndex: payload?.tileIndex,
+            tileIndex,
             expectedVersion: snapshotVersion,
           }),
         });
@@ -1116,7 +1119,8 @@ export default function PlayPage() {
       return;
     }
 
-    void handleBankAction("DECLINE_PROPERTY", {
+    void handleBankAction({
+      action: "DECLINE_PROPERTY",
       tileIndex: pendingPurchase.tile_index,
     });
   }, [handleBankAction, pendingPurchase]);
@@ -1126,7 +1130,8 @@ export default function PlayPage() {
       return;
     }
 
-    void handleBankAction("BUY_PROPERTY", {
+    void handleBankAction({
+      action: "BUY_PROPERTY",
       tileIndex: pendingPurchase.tile_index,
     });
   }, [handleBankAction, pendingPurchase]);
@@ -1370,7 +1375,7 @@ export default function PlayPage() {
             <button
               className="rounded-2xl bg-neutral-900 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
               type="button"
-              onClick={() => void handleBankAction("ROLL_DICE")}
+              onClick={() => void handleBankAction({ action: "ROLL_DICE" })}
               disabled={
                 !canRoll ||
                 actionLoading === "ROLL_DICE"
@@ -1381,7 +1386,7 @@ export default function PlayPage() {
             <button
               className="rounded-2xl border px-4 py-3 text-sm font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
               type="button"
-              onClick={() => void handleBankAction("END_TURN")}
+              onClick={() => void handleBankAction({ action: "END_TURN" })}
               disabled={
                 !canEndTurn ||
                 actionLoading === "END_TURN"
