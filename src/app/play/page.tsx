@@ -78,6 +78,7 @@ export default function PlayPage() {
   const [initialSnapshotReady, setInitialSnapshotReady] = useState(false);
   const [realtimeReady, setRealtimeReady] = useState(false);
   const [firstRoundResyncEnabled, setFirstRoundResyncEnabled] = useState(true);
+  const [sessionInvalid, setSessionInvalid] = useState(false);
   const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshInFlightRef = useRef(false);
   const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
@@ -93,6 +94,7 @@ export default function PlayPage() {
   } | null>(null);
   const activeGameIdRef = useRef<string | null>(null);
   const unmountingRef = useRef(false);
+  const invalidTokenRef = useRef<string | null>(null);
 
   const isConfigured = useMemo(() => supabaseClient.isConfigured(), []);
   const latestRollEvent = useMemo(
@@ -435,7 +437,7 @@ export default function PlayPage() {
   );
 
   const setupRealtimeChannel = useCallback(() => {
-    if (!isConfigured || !gameId || !session?.access_token) {
+    if (!isConfigured || !gameId || !session?.access_token || sessionInvalid) {
       return;
     }
 
@@ -637,7 +639,7 @@ export default function PlayPage() {
   ]);
 
   const requestRefresh = useCallback(() => {
-    if (!gameId || !session?.access_token) {
+    if (!gameId || !session?.access_token || sessionInvalid) {
       return;
     }
 
@@ -664,34 +666,45 @@ export default function PlayPage() {
         refreshInFlightRef.current = false;
       }
     }, 400);
-  }, [gameId, loadGameData, session?.access_token, setupRealtimeChannel]);
-
-  const requestFirstRoundResync = useCallback(() => {
-    if (!firstRoundResyncEnabled || !gameId || !session?.access_token) {
-      return;
-    }
-
-    if (firstRoundResyncTimeoutRef.current) {
-      clearTimeout(firstRoundResyncTimeoutRef.current);
-    }
-
-    firstRoundResyncTimeoutRef.current = setTimeout(async () => {
-      await Promise.all([
-        loadPlayers(gameId, session.access_token),
-        loadGameState(gameId, session.access_token),
-        loadEvents(gameId, session.access_token),
-        loadOwnership(gameId, session.access_token),
-      ]);
-    }, 350);
   }, [
-    firstRoundResyncEnabled,
     gameId,
-    loadEvents,
-    loadGameState,
-    loadPlayers,
-    loadOwnership,
+    loadGameData,
     session?.access_token,
+    sessionInvalid,
+    setupRealtimeChannel,
   ]);
+
+  const requestFirstRoundResync = useCallback(
+    (accessTokenOverride?: string) => {
+      const accessToken = accessTokenOverride ?? session?.access_token;
+      if (!firstRoundResyncEnabled || !gameId || !accessToken || sessionInvalid) {
+        return;
+      }
+
+      if (firstRoundResyncTimeoutRef.current) {
+        clearTimeout(firstRoundResyncTimeoutRef.current);
+      }
+
+      firstRoundResyncTimeoutRef.current = setTimeout(async () => {
+        await Promise.all([
+          loadPlayers(gameId, accessToken),
+          loadGameState(gameId, accessToken),
+          loadEvents(gameId, accessToken),
+          loadOwnership(gameId, accessToken),
+        ]);
+      }, 350);
+    },
+    [
+      firstRoundResyncEnabled,
+      gameId,
+      loadEvents,
+      loadGameState,
+      loadPlayers,
+      loadOwnership,
+      session?.access_token,
+      sessionInvalid,
+    ],
+  );
 
   useEffect(() => {
     let isMounted = true;
@@ -818,6 +831,7 @@ export default function PlayPage() {
     loadGameState,
     loadPlayers,
     session?.access_token,
+    sessionInvalid,
     setupRealtimeChannel,
   ]);
 
@@ -921,6 +935,21 @@ export default function PlayPage() {
       unmountingRef.current = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!sessionInvalid) {
+      return;
+    }
+
+    if (
+      session?.access_token &&
+      session.access_token !== invalidTokenRef.current
+    ) {
+      invalidTokenRef.current = null;
+      setSessionInvalid(false);
+      setNotice(null);
+    }
+  }, [session?.access_token, sessionInvalid]);
 
   const isInProgress = gameMeta?.status === "in_progress";
   const hasGameMetaError = Boolean(gameMetaError);
@@ -1036,40 +1065,116 @@ export default function PlayPage() {
       setNotice(null);
 
       try {
-        const response = await fetch("/api/bank/action", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({
-            gameId,
+        let accessToken = session.access_token;
+        const logAuthState = (context: {
+          action: string;
+          status: number;
+          responseError?: string | null;
+          phase: string;
+          sessionSnapshot?: SupabaseSession | null;
+        }) => {
+          const sessionSnapshot = context.sessionSnapshot ?? session;
+          const expiresAt =
+            typeof sessionSnapshot?.expires_at === "number"
+              ? new Date(sessionSnapshot.expires_at * 1000).toISOString()
+              : null;
+
+          console.info("[Play][Auth] 401 response", {
+            action: context.action,
+            phase: context.phase,
+            status: context.status,
+            responseError: context.responseError ?? null,
+            hasSession: Boolean(sessionSnapshot),
+            hasAccessToken: Boolean(sessionSnapshot?.access_token),
+            expiresAt,
+          });
+        };
+
+        const performBankAction = async (accessToken: string) => {
+          const response = await fetch("/api/bank/action", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify({
+              gameId,
+              action,
+              tileIndex,
+              expectedVersion: snapshotVersion,
+            }),
+          });
+
+          let responseBody: { error?: string; gameState?: GameState } | null =
+            null;
+          try {
+            responseBody = (await response.json()) as {
+              error?: string;
+              gameState?: GameState;
+            };
+          } catch {
+            responseBody = null;
+          }
+
+          console.info("[Play] action response", {
             action,
-            tileIndex,
-            expectedVersion: snapshotVersion,
-          }),
-        });
+            status: response.status,
+            body: responseBody,
+          });
 
-        let responseBody: { error?: string; gameState?: GameState } | null = null;
-        try {
-          responseBody = (await response.json()) as {
-            error?: string;
-            gameState?: GameState;
-          };
-        } catch {
-          responseBody = null;
+          return { response, responseBody };
+        };
+
+        let { response, responseBody } = await performBankAction(accessToken);
+
+        if (response.status === 401) {
+          logAuthState({
+            action,
+            status: response.status,
+            responseError: responseBody?.error ?? null,
+            phase: "initial",
+          });
+
+          const refreshedSession = await supabaseClient.getSession();
+          setSession(refreshedSession);
+
+          if (!refreshedSession?.access_token) {
+            invalidTokenRef.current = session.access_token ?? null;
+            setSessionInvalid(true);
+            setNotice("Invalid session. Tap to re-auth.");
+            return;
+          }
+
+          accessToken = refreshedSession.access_token;
+          const retryResult = await performBankAction(
+            accessToken,
+          );
+
+          if (retryResult.response.status === 401) {
+            logAuthState({
+              action,
+              status: retryResult.response.status,
+              responseError: retryResult.responseBody?.error ?? null,
+              phase: "retry",
+              sessionSnapshot: refreshedSession,
+            });
+            invalidTokenRef.current = accessToken;
+            setSessionInvalid(true);
+            setNotice("Invalid session. Tap to re-auth.");
+            return;
+          }
+
+          response = retryResult.response;
+          responseBody = retryResult.responseBody;
+          invalidTokenRef.current = null;
+          setSessionInvalid(false);
+          setNotice(null);
         }
-
-        console.info("[Play] action response", {
-          action,
-          status: response.status,
-          body: responseBody,
-        });
 
         if (!response.ok) {
           if (response.status === 409) {
             setNotice("Syncing…");
-            await loadGameData(gameId, session.access_token);
+            await loadGameData(gameId, accessToken);
             throw new Error(responseBody?.error ?? "Game updated. Try again.");
           }
           throw new Error(responseBody?.error ?? "Unable to perform action.");
@@ -1080,13 +1185,13 @@ export default function PlayPage() {
         }
 
         await Promise.all([
-          loadPlayers(gameId, session.access_token),
-          loadEvents(gameId, session.access_token),
-          loadOwnership(gameId, session.access_token),
+          loadPlayers(gameId, accessToken),
+          loadEvents(gameId, accessToken),
+          loadOwnership(gameId, accessToken),
         ]);
 
         if (firstRoundResyncEnabled) {
-          requestFirstRoundResync();
+          requestFirstRoundResync(accessToken);
         }
       } catch (error) {
         if (error instanceof Error) {
