@@ -1228,6 +1228,8 @@ export default function PlayPage() {
   const canAct = initialSnapshotReady && isMyTurn;
   const isAwaitingJailDecision =
     isMyTurn && gameState?.turn_phase === "AWAITING_JAIL_DECISION";
+  const showJailDecisionPanel =
+    isAwaitingJailDecision && currentUserPlayer?.is_in_jail;
   const canRollForDoubles =
     isAwaitingJailDecision && currentUserPlayer?.is_in_jail;
   const canRoll =
@@ -1698,7 +1700,7 @@ export default function PlayPage() {
               </p>
             </div>
           </div>
-          {isAwaitingJailDecision ? (
+          {showJailDecisionPanel ? (
             <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
               <p className="text-xs font-semibold uppercase tracking-wide text-rose-700">
                 Jail decision

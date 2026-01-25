@@ -1450,9 +1450,8 @@ export async function POST(request: Request) {
           },
           body: JSON.stringify({
             position: finalPosition,
-            ...(shouldSendToJail && jailTile
-              ? { is_in_jail: true, jail_turns_remaining: 3 }
-              : {}),
+            is_in_jail: Boolean(shouldSendToJail && jailTile),
+            jail_turns_remaining: shouldSendToJail && jailTile ? 3 : 0,
           }),
         },
       );
