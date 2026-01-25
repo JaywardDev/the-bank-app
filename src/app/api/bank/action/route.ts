@@ -832,7 +832,7 @@ export async function POST(request: Request) {
         name: `Tile ${newPosition}`,
       };
       const ownershipByTile = await loadOwnershipByTile(gameId);
-      const jailTile =
+      let jailTile =
         landingTile.type === "GO_TO_JAIL"
           ? boardTiles.find((tile) => tile.type === "JAIL") ?? {
               index: 10,
@@ -843,7 +843,7 @@ export async function POST(request: Request) {
           : null;
       const resolvedTile = jailTile ?? landingTile;
       let finalPosition = resolvedTile.index;
-      let shouldSendToJail = landingTile.type === "GO_TO_JAIL" && jailTile;
+      let shouldSendToJail = landingTile.type === "GO_TO_JAIL" && Boolean(jailTile);
       let activeLandingTile = landingTile;
       let activeResolvedTile = resolvedTile;
       const balances = gameState?.balances ?? {};
@@ -1128,8 +1128,9 @@ export async function POST(request: Request) {
                   }
                 : null;
             const cardResolvedTile = cardJailTile ?? cardLandingTile;
+            jailTile = cardJailTile ?? jailTile;
             shouldSendToJail =
-              cardLandingTile.type === "GO_TO_JAIL" && cardJailTile;
+              cardLandingTile.type === "GO_TO_JAIL" && Boolean(cardJailTile);
             activeLandingTile = cardLandingTile;
             activeResolvedTile = cardResolvedTile;
             finalPosition = cardResolvedTile.index;
@@ -1221,6 +1222,7 @@ export async function POST(request: Request) {
           activeResolvedTile = cardJailTile;
           finalPosition = cardJailTile.index;
           shouldSendToJail = true;
+          jailTile = cardJailTile;
           cardTriggeredGoToJail = true;
 
           events.push({
@@ -1359,7 +1361,8 @@ export async function POST(request: Request) {
         );
       }
 
-      const pendingPurchaseAction = isUnownedOwnableTile && !shouldSendToJail
+      const pendingPurchaseAction =
+        isUnownedOwnableTile && !(shouldSendToJail && jailTile)
         ? {
             type: "BUY_PROPERTY",
             tile_index: activeLandingTile.index,
@@ -1390,7 +1393,7 @@ export async function POST(request: Request) {
         },
       });
 
-      if (isDouble && !pendingPurchaseAction && !shouldSendToJail) {
+      if (isDouble && !pendingPurchaseAction && !(shouldSendToJail && jailTile)) {
         events.push({
           event_type: "ALLOW_EXTRA_ROLL",
           payload: {
@@ -1447,7 +1450,7 @@ export async function POST(request: Request) {
           },
           body: JSON.stringify({
             position: finalPosition,
-            ...(shouldSendToJail
+            ...(shouldSendToJail && jailTile
               ? { is_in_jail: true, jail_turns_remaining: 3 }
               : {}),
           }),
@@ -1854,7 +1857,7 @@ export async function POST(request: Request) {
         name: `Tile ${newPosition}`,
       };
       const ownershipByTile = await loadOwnershipByTile(gameId);
-      const jailTile =
+      let jailTile =
         landingTile.type === "GO_TO_JAIL"
           ? boardTiles.find((tile) => tile.type === "JAIL") ?? {
               index: 10,
@@ -1865,7 +1868,7 @@ export async function POST(request: Request) {
           : null;
       const resolvedTile = jailTile ?? landingTile;
       let finalPosition = resolvedTile.index;
-      let shouldSendToJail = landingTile.type === "GO_TO_JAIL" && jailTile;
+      let shouldSendToJail = landingTile.type === "GO_TO_JAIL" && Boolean(jailTile);
       let activeLandingTile = landingTile;
       let activeResolvedTile = resolvedTile;
       const balances = gameState?.balances ?? {};
@@ -2042,8 +2045,9 @@ export async function POST(request: Request) {
                   }
                 : null;
             const cardResolvedTile = cardJailTile ?? cardLandingTile;
+            jailTile = cardJailTile ?? jailTile;
             shouldSendToJail =
-              cardLandingTile.type === "GO_TO_JAIL" && cardJailTile;
+              cardLandingTile.type === "GO_TO_JAIL" && Boolean(cardJailTile);
             activeLandingTile = cardLandingTile;
             activeResolvedTile = cardResolvedTile;
             finalPosition = cardResolvedTile.index;
@@ -2135,6 +2139,7 @@ export async function POST(request: Request) {
           activeResolvedTile = cardJailTile;
           finalPosition = cardJailTile.index;
           shouldSendToJail = true;
+          jailTile = cardJailTile;
           cardTriggeredGoToJail = true;
 
           events.push({
@@ -2273,7 +2278,8 @@ export async function POST(request: Request) {
         );
       }
 
-      const pendingPurchaseAction = isUnownedOwnableTile && !shouldSendToJail
+      const pendingPurchaseAction =
+        isUnownedOwnableTile && !(shouldSendToJail && jailTile)
         ? {
             type: "BUY_PROPERTY",
             tile_index: activeLandingTile.index,
@@ -2304,7 +2310,7 @@ export async function POST(request: Request) {
         },
       });
 
-      if (!pendingPurchaseAction && !shouldSendToJail) {
+      if (!pendingPurchaseAction && !(shouldSendToJail && jailTile)) {
         events.push({
           event_type: "ALLOW_EXTRA_ROLL",
           payload: {
@@ -2359,8 +2365,8 @@ export async function POST(request: Request) {
           },
           body: JSON.stringify({
             position: finalPosition,
-            is_in_jail: Boolean(shouldSendToJail),
-            jail_turns_remaining: shouldSendToJail ? 3 : 0,
+            is_in_jail: Boolean(shouldSendToJail && jailTile),
+            jail_turns_remaining: shouldSendToJail && jailTile ? 3 : 0,
           }),
         },
       );
