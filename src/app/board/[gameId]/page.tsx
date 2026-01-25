@@ -388,6 +388,15 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
   );
   const formatEventDescription = useCallback(
     (event: GameEvent) => {
+      const payload = (event.payload ?? {}) as Partial<{
+        amount: number | string;
+        dice_total: number | string;
+        multiplier: number | string;
+        player_name: string;
+        reason: string;
+        rent: number | string;
+      }>;
+
       if (event.event_type === "LAND_ON_TILE") {
         const payload = event.payload as { tile_index?: unknown } | null;
         const tileIndexRaw = payload?.tile_index;
@@ -562,6 +571,9 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
           | {
               tile_index?: unknown;
               amount?: unknown;
+              dice_total?: unknown;
+              multiplier?: unknown;
+              rent_type?: unknown;
               to_player_id?: unknown;
             }
           | null;
