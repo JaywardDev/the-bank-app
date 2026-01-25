@@ -1742,13 +1742,16 @@ export async function POST(request: Request) {
       const dice = [dieOne, dieTwo];
       const isDouble = dieOne === dieTwo;
       const doublesCount = gameState?.doubles_count ?? 0;
-      const nextDoublesCount = isDouble ? doublesCount + 1 : 0;
+      const allowDoublesBonus = false;
+      const nextDoublesCount =
+        isDouble && allowDoublesBonus ? doublesCount + 1 : 0;
+      const turnsRemaining = Math.max(
+        0,
+        currentPlayer.jail_turns_remaining - 1,
+      );
+      const shouldReleaseFromJail = isDouble || turnsRemaining === 0;
 
-      if (!isDouble) {
-        const turnsRemaining = Math.max(
-          0,
-          currentPlayer.jail_turns_remaining - 1,
-        );
+      if (!shouldReleaseFromJail) {
         const currentIndex = players.findIndex(
           (player) => player.id === gameState.current_player_id,
         );
@@ -1870,16 +1873,28 @@ export async function POST(request: Request) {
       let shouldSendToJail = landingTile.type === "GO_TO_JAIL" && Boolean(jailTile);
       let activeLandingTile = landingTile;
       let activeResolvedTile = resolvedTile;
+      const forcedFine = !isDouble;
       const balances = gameState?.balances ?? {};
-      let updatedBalances = passedStart
-        ? {
-            ...balances,
-            [currentPlayer.id]:
-              (balances[currentPlayer.id] ?? game.starting_cash ?? 0) +
-              PASS_START_SALARY,
-          }
-        : balances;
-      let balancesChanged = passedStart;
+      let updatedBalances = balances;
+      let balancesChanged = false;
+      if (forcedFine) {
+        const currentBalance =
+          updatedBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
+        updatedBalances = {
+          ...updatedBalances,
+          [currentPlayer.id]: currentBalance - JAIL_FINE_AMOUNT,
+        };
+        balancesChanged = true;
+      }
+      if (passedStart) {
+        const currentBalance =
+          updatedBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
+        updatedBalances = {
+          ...updatedBalances,
+          [currentPlayer.id]: currentBalance + PASS_START_SALARY,
+        };
+        balancesChanged = true;
+      }
       let nextChanceIndex = gameState?.chance_index ?? 0;
       let nextCommunityIndex = gameState?.community_index ?? 0;
 
@@ -1896,25 +1911,62 @@ export async function POST(request: Request) {
             dice,
           } satisfies DiceEventPayload,
         },
-        {
-          event_type: "ROLLED_DOUBLE",
-          payload: {
-            player_id: currentPlayer.id,
-            player_name: currentPlayer.display_name,
-            roll: rollTotal,
-            dice,
-            doubles_count: nextDoublesCount,
-          } satisfies DiceEventPayload,
-        },
-        {
-          event_type: "JAIL_DOUBLES_SUCCESS",
-          payload: {
-            player_id: currentPlayer.id,
-            player_name: currentPlayer.display_name,
-            dice,
-          },
-        },
       ];
+
+      if (isDouble) {
+        events.push(
+          {
+            event_type: "ROLLED_DOUBLE",
+            payload: {
+              player_id: currentPlayer.id,
+              player_name: currentPlayer.display_name,
+              roll: rollTotal,
+              dice,
+              doubles_count: nextDoublesCount,
+            } satisfies DiceEventPayload,
+          },
+          {
+            event_type: "JAIL_DOUBLES_SUCCESS",
+            payload: {
+              player_id: currentPlayer.id,
+              player_name: currentPlayer.display_name,
+              dice,
+            },
+          },
+        );
+      } else {
+        events.push({
+          event_type: "JAIL_DOUBLES_FAIL",
+          payload: {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.display_name,
+            dice,
+            turns_remaining: turnsRemaining,
+          },
+        });
+      }
+
+      if (forcedFine) {
+        events.push(
+          {
+            event_type: "JAIL_PAY_FINE",
+            payload: {
+              player_id: currentPlayer.id,
+              player_name: currentPlayer.display_name,
+              amount: JAIL_FINE_AMOUNT,
+              forced: true,
+            },
+          },
+          {
+            event_type: "CASH_DEBIT",
+            payload: {
+              player_id: currentPlayer.id,
+              amount: JAIL_FINE_AMOUNT,
+              reason: "JAIL_PAY_FINE",
+            },
+          },
+        );
+      }
 
       events.push(
         {
@@ -2309,7 +2361,12 @@ export async function POST(request: Request) {
         },
       });
 
-      if (!pendingPurchaseAction && !(shouldSendToJail && jailTile)) {
+      if (
+        allowDoublesBonus &&
+        isDouble &&
+        !pendingPurchaseAction &&
+        !(shouldSendToJail && jailTile)
+      ) {
         events.push({
           event_type: "ALLOW_EXTRA_ROLL",
           payload: {
