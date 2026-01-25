@@ -2432,6 +2432,7 @@ export async function POST(request: Request) {
       const isTaxTile = activeLandingTile.type === "TAX";
       const taxAmount = isTaxTile ? activeLandingTile.taxAmount ?? 0 : 0;
       const shouldPayTax = isTaxTile && taxAmount > 0;
+      const isFreeParking = activeLandingTile.type === "FREE_PARKING";
 
       if (activeLandingTile.type === "GO_TO_JAIL" && jailTile && !cardTriggeredGoToJail) {
         events.push({
