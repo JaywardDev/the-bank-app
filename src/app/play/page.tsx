@@ -41,6 +41,8 @@ type GameState = {
   pending_action: Record<string, unknown> | null;
   chance_index: number | null;
   community_index: number | null;
+  free_parking_pot: number | null;
+  rules: { freeParkingJackpotEnabled?: boolean } | null;
 };
 
 type GameEvent = {
@@ -242,6 +244,25 @@ export default function PlayPage() {
       return "Game started";
     }
 
+    if (event.event_type === "COLLECT_GO") {
+      const amount =
+        typeof payload?.amount === "number"
+          ? payload.amount
+          : typeof payload?.amount === "string"
+            ? Number.parseInt(payload.amount, 10)
+            : null;
+      const playerName =
+        typeof payload?.player_name === "string"
+          ? payload.player_name
+          : "Player";
+      const reason =
+        typeof payload?.reason === "string" ? payload.reason : "PASS_START";
+      const reasonLabel = reason === "LAND_GO" ? "for landing on GO" : "for passing GO";
+      return amount !== null
+        ? `${playerName} collected $${amount} ${reasonLabel}`
+        : `${playerName} collected GO salary`;
+    }
+
     if (event.event_type === "LAND_ON_TILE") {
       const tileIndexRaw = payload?.tile_index;
       const tileIndex =
@@ -418,9 +439,27 @@ export default function PlayPage() {
       const ownerName =
         players.find((player) => player.id === ownerId)?.display_name ??
         "Player";
+      const diceTotal =
+        typeof payload?.dice_total === "number"
+          ? payload.dice_total
+          : typeof payload?.dice_total === "string"
+            ? Number.parseInt(payload.dice_total, 10)
+            : null;
+      const multiplier =
+        typeof payload?.multiplier === "number"
+          ? payload.multiplier
+          : typeof payload?.multiplier === "string"
+            ? Number.parseInt(payload.multiplier, 10)
+            : null;
+      const rentType =
+        typeof payload?.rent_type === "string" ? payload.rent_type : null;
+      const detailLabel =
+        rentType === "UTILITY" && diceTotal !== null && multiplier !== null
+          ? ` (dice ${diceTotal} × ${multiplier})`
+          : "";
 
       return rentAmount !== null
-        ? `Paid $${rentAmount} rent to ${ownerName} (${tileLabel})`
+        ? `Paid $${rentAmount} rent to ${ownerName} (${tileLabel})${detailLabel}`
         : `Paid rent to ${ownerName} (${tileLabel})`;
     }
 
@@ -607,7 +646,7 @@ export default function PlayPage() {
   const loadGameState = useCallback(
     async (activeGameId: string, accessToken?: string) => {
       const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
-        `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,chance_index,community_index&game_id=eq.${activeGameId}&limit=1`,
+        `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,chance_index,community_index,free_parking_pot,rules&game_id=eq.${activeGameId}&limit=1`,
         { method: "GET" },
         accessToken,
       );

@@ -92,6 +92,8 @@ type GameStateRow = {
   pending_action: Record<string, unknown> | null;
   chance_index: number | null;
   community_index: number | null;
+  free_parking_pot: number | null;
+  rules: { freeParkingJackpotEnabled?: boolean } | null;
 };
 
 type OwnershipRow = {
@@ -123,6 +125,8 @@ type DiceEventPayload = {
 const PASS_START_SALARY = 200;
 const JAIL_FINE_AMOUNT = 50;
 const OWNABLE_TILE_TYPES = new Set(["PROPERTY", "RAIL", "UTILITY"]);
+const DEFAULT_RULES = { freeParkingJackpotEnabled: false };
+const RAIL_RENT_BY_COUNT = [0, 25, 50, 100, 200];
 
 const isConfigured = () =>
   Boolean(supabaseUrl && supabaseAnonKey && supabaseServiceRoleKey);
@@ -308,6 +312,122 @@ const getNumberPayload = (
   return null;
 };
 
+const getRules = (rules: GameStateRow["rules"]) => ({
+  ...DEFAULT_RULES,
+  ...(rules ?? {}),
+});
+
+const countOwnedTilesByType = (
+  boardTiles: TileInfo[],
+  ownershipByTile: OwnershipByTile,
+  ownerId: string,
+  tileType: string,
+) =>
+  boardTiles.filter(
+    (tile) =>
+      tile.type === tileType &&
+      ownershipByTile[tile.index]?.owner_player_id === ownerId,
+  ).length;
+
+const calculateRent = ({
+  tile,
+  ownerId,
+  currentPlayerId,
+  boardTiles,
+  ownershipByTile,
+  diceTotal,
+}: {
+  tile: TileInfo;
+  ownerId: string | null;
+  currentPlayerId: string;
+  boardTiles: TileInfo[];
+  ownershipByTile: OwnershipByTile;
+  diceTotal?: number | null;
+}) => {
+  if (!ownerId || ownerId === currentPlayerId) {
+    return { amount: 0, meta: null };
+  }
+
+  if (tile.type === "RAIL") {
+    const railCount = countOwnedTilesByType(
+      boardTiles,
+      ownershipByTile,
+      ownerId,
+      "RAIL",
+    );
+    const amount = RAIL_RENT_BY_COUNT[railCount] ?? 0;
+    return {
+      amount,
+      meta: {
+        rent_type: "RAIL",
+        railroads_owned: railCount,
+      },
+    };
+  }
+
+  if (tile.type === "UTILITY") {
+    const utilityCount = countOwnedTilesByType(
+      boardTiles,
+      ownershipByTile,
+      ownerId,
+      "UTILITY",
+    );
+    const multiplier = utilityCount >= 2 ? 10 : 4;
+    const total = diceTotal ?? 0;
+    return {
+      amount: multiplier * total,
+      meta: {
+        rent_type: "UTILITY",
+        utilities_owned: utilityCount,
+        dice_total: total,
+        multiplier,
+      },
+    };
+  }
+
+  return {
+    amount: tile.baseRent ?? 0,
+    meta: {
+      rent_type: "PROPERTY",
+    },
+  };
+};
+
+const applyGoSalary = ({
+  player,
+  balances,
+  startingCash,
+  events,
+  alreadyCollected,
+  reason,
+}: {
+  player: PlayerRow;
+  balances: Record<string, number>;
+  startingCash: number;
+  events: Array<{ event_type: string; payload: Record<string, unknown> }>;
+  alreadyCollected: boolean;
+  reason: "PASS_START" | "LAND_GO";
+}) => {
+  if (alreadyCollected) {
+    return { balances, balancesChanged: false, alreadyCollected };
+  }
+  const currentBalance = balances[player.id] ?? startingCash;
+  const updatedBalances = {
+    ...balances,
+    [player.id]: currentBalance + PASS_START_SALARY,
+  };
+  events.push({
+    event_type: "COLLECT_GO",
+    payload: {
+      player_id: player.id,
+      player_name: player.display_name,
+      amount: PASS_START_SALARY,
+      reason,
+    },
+  });
+  return { balances: updatedBalances, balancesChanged: true, alreadyCollected: true };
+};
+
 const parseBearerToken = (authorization: string | null) => {
   if (!authorization) {
     return null;
@@ -400,7 +520,7 @@ export async function POST(request: Request) {
       }
 
       await fetchFromSupabaseWithService<GameStateRow[]>(
-        "game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,chance_index,community_index",
+        "game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,chance_index,community_index,free_parking_pot,rules",
         {
           method: "POST",
           headers: {
@@ -415,6 +535,8 @@ export async function POST(request: Request) {
             doubles_count: 0,
             turn_phase: "AWAITING_ROLL",
             pending_action: null,
+            free_parking_pot: 0,
+            rules: DEFAULT_RULES,
             updated_at: new Date().toISOString(),
           }),
         },
@@ -535,7 +657,7 @@ export async function POST(request: Request) {
     );
 
     const [gameState] = await fetchFromSupabaseWithService<GameStateRow[]>(
-      `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,chance_index,community_index&game_id=eq.${gameId}&limit=1`,
+      `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,chance_index,community_index,free_parking_pot,rules&game_id=eq.${gameId}&limit=1`,
       { method: "GET" },
     );
 
@@ -556,6 +678,7 @@ export async function POST(request: Request) {
     }
 
     const nextVersion = currentVersion + 1;
+    const rules = getRules(gameState?.rules);
 
     if (body.action === "START_GAME") {
       if (game.created_by && game.created_by !== user.id) {
@@ -847,15 +970,9 @@ export async function POST(request: Request) {
       let activeLandingTile = landingTile;
       let activeResolvedTile = resolvedTile;
       const balances = gameState?.balances ?? {};
-      let updatedBalances = passedStart
-        ? {
-            ...balances,
-            [currentPlayer.id]:
-              (balances[currentPlayer.id] ?? game.starting_cash ?? 0) +
-              PASS_START_SALARY,
-          }
-        : balances;
-      let balancesChanged = passedStart;
+      let updatedBalances = balances;
+      let balancesChanged = false;
+      let goSalaryAwarded = false;
       let nextChanceIndex = gameState?.chance_index ?? 0;
       let nextCommunityIndex = gameState?.community_index ?? 0;
 
@@ -1000,30 +1117,44 @@ export async function POST(request: Request) {
         });
       }
 
-      events.push(
-        {
-          event_type: "MOVE_PLAYER",
-          payload: {
-            player_id: currentPlayer.id,
-            from: currentPosition,
-            to: newPosition,
-            roll_total: rollTotal,
-            dice: [dieOne, dieTwo],
-            passedStart,
-            tile_id: landingTile.tile_id,
-            tile_name: landingTile.name,
-          },
+      events.push({
+        event_type: "MOVE_PLAYER",
+        payload: {
+          player_id: currentPlayer.id,
+          from: currentPosition,
+          to: newPosition,
+          roll_total: rollTotal,
+          dice: [dieOne, dieTwo],
+          passedStart,
+          tile_id: landingTile.tile_id,
+          tile_name: landingTile.name,
         },
-        {
-          event_type: "LAND_ON_TILE",
-          payload: {
-            player_id: currentPlayer.id,
-            tile_id: landingTile.tile_id,
-            tile_type: landingTile.type,
-            tile_index: landingTile.index,
-          },
+      });
+
+      if (passedStart || landingTile.type === "START") {
+        const reason = passedStart ? "PASS_START" : "LAND_GO";
+        const goResult = applyGoSalary({
+          player: currentPlayer,
+          balances: updatedBalances,
+          startingCash: game.starting_cash ?? 0,
+          events,
+          alreadyCollected: goSalaryAwarded,
+          reason,
+        });
+        updatedBalances = goResult.balances;
+        balancesChanged = balancesChanged || goResult.balancesChanged;
+        goSalaryAwarded = goResult.alreadyCollected;
+      }
+
+      events.push({
+        event_type: "LAND_ON_TILE",
+        payload: {
+          player_id: currentPlayer.id,
+          tile_id: landingTile.tile_id,
+          tile_type: landingTile.type,
+          tile_index: landingTile.index,
         },
-      );
+      });
 
       const resolutionEvent = resolveTile(landingTile, currentPlayer);
       if (resolutionEvent) {
@@ -1134,16 +1265,6 @@ export async function POST(request: Request) {
             activeLandingTile = cardLandingTile;
             activeResolvedTile = cardResolvedTile;
             finalPosition = cardResolvedTile.index;
-            if (cardPassedStart) {
-              const currentBalance =
-                updatedBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
-              updatedBalances = {
-                ...updatedBalances,
-                [currentPlayer.id]: currentBalance + PASS_START_SALARY,
-              };
-              balancesChanged = true;
-            }
-
             events.push({
               event_type: card.kind === "MOVE_TO" ? "CARD_MOVE_TO" : "CARD_MOVE_REL",
               payload: {
@@ -1158,30 +1279,44 @@ export async function POST(request: Request) {
               },
             });
 
-            events.push(
-              {
-                event_type: "MOVE_PLAYER",
-                payload: {
-                  player_id: currentPlayer.id,
-                  from: cardFromIndex,
-                  to: cardLandingTile.index,
-                  passedStart: cardPassedStart,
-                  tile_id: cardLandingTile.tile_id,
-                  tile_name: cardLandingTile.name,
-                  reason: "CARD",
-                  card_id: card.id,
-                },
+            events.push({
+              event_type: "MOVE_PLAYER",
+              payload: {
+                player_id: currentPlayer.id,
+                from: cardFromIndex,
+                to: cardLandingTile.index,
+                passedStart: cardPassedStart,
+                tile_id: cardLandingTile.tile_id,
+                tile_name: cardLandingTile.name,
+                reason: "CARD",
+                card_id: card.id,
               },
-              {
-                event_type: "LAND_ON_TILE",
-                payload: {
-                  player_id: currentPlayer.id,
-                  tile_id: cardLandingTile.tile_id,
-                  tile_type: cardLandingTile.type,
-                  tile_index: cardLandingTile.index,
-                },
+            });
+
+            if (cardPassedStart || cardLandingTile.type === "START") {
+              const reason = cardPassedStart ? "PASS_START" : "LAND_GO";
+              const goResult = applyGoSalary({
+                player: currentPlayer,
+                balances: updatedBalances,
+                startingCash: game.starting_cash ?? 0,
+                events,
+                alreadyCollected: goSalaryAwarded,
+                reason,
+              });
+              updatedBalances = goResult.balances;
+              balancesChanged = balancesChanged || goResult.balancesChanged;
+              goSalaryAwarded = goResult.alreadyCollected;
+            }
+
+            events.push({
+              event_type: "LAND_ON_TILE",
+              payload: {
+                player_id: currentPlayer.id,
+                tile_id: cardLandingTile.tile_id,
+                tile_type: cardLandingTile.type,
+                tile_index: cardLandingTile.index,
               },
-            );
+            });
 
             const cardResolutionEvent = resolveTile(
               cardLandingTile,
@@ -1286,15 +1421,22 @@ export async function POST(request: Request) {
       const isOwnableTile = OWNABLE_TILE_TYPES.has(activeLandingTile.type);
       const rentOwnerId =
         isOwnableTile && ownership ? ownership.owner_player_id : null;
-      const rentAmount =
-        rentOwnerId && rentOwnerId !== currentPlayer.id
-          ? activeLandingTile.baseRent ?? 0
-          : 0;
+      const rentCalculation = calculateRent({
+        tile: activeLandingTile,
+        ownerId: rentOwnerId,
+        currentPlayerId: currentPlayer.id,
+        boardTiles,
+        ownershipByTile,
+        // TODO: allow card-triggered utility rolls to override this dice total.
+        diceTotal: rollTotal,
+      });
+      const rentAmount = rentCalculation.amount;
       const shouldPayRent = rentAmount > 0 && Boolean(rentOwnerId);
       const isUnownedOwnableTile = isOwnableTile && !ownership;
       const isTaxTile = activeLandingTile.type === "TAX";
       const taxAmount = isTaxTile ? activeLandingTile.taxAmount ?? 0 : 0;
       const shouldPayTax = isTaxTile && taxAmount > 0;
+      const isFreeParking = activeLandingTile.type === "FREE_PARKING";
 
       if (activeLandingTile.type === "GO_TO_JAIL" && jailTile && !cardTriggeredGoToJail) {
         events.push({
@@ -1319,14 +1461,20 @@ export async function POST(request: Request) {
           [rentOwnerId]: ownerBalance + rentAmount,
         };
         balancesChanged = true;
+        const rentPayload: Record<string, unknown> = {
+          tile_index: activeLandingTile.index,
+          tile_id: activeLandingTile.tile_id,
+          tile_type: activeLandingTile.type,
+          from_player_id: currentPlayer.id,
+          to_player_id: rentOwnerId,
+          amount: rentAmount,
+        };
+        if (rentCalculation.meta) {
+          Object.assign(rentPayload, rentCalculation.meta);
+        }
         events.push({
           event_type: "PAY_RENT",
-          payload: {
-            tile_index: activeLandingTile.index,
-            from_player_id: currentPlayer.id,
-            to_player_id: rentOwnerId,
-            amount: rentAmount,
-          },
+          payload: rentPayload,
         });
       }
 
@@ -1359,6 +1507,11 @@ export async function POST(request: Request) {
             },
           },
         );
+        // TODO: If rules.freeParkingJackpotEnabled, route taxAmount into free_parking_pot.
+      }
+
+      if (isFreeParking && rules.freeParkingJackpotEnabled) {
+        // TODO: Pay out free_parking_pot and reset to 0 when jackpot is enabled.
       }
 
       const pendingPurchaseAction =
@@ -1877,21 +2030,13 @@ export async function POST(request: Request) {
       const balances = gameState?.balances ?? {};
       let updatedBalances = balances;
       let balancesChanged = false;
+      let goSalaryAwarded = false;
       if (forcedFine) {
         const currentBalance =
           updatedBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
         updatedBalances = {
           ...updatedBalances,
           [currentPlayer.id]: currentBalance - JAIL_FINE_AMOUNT,
-        };
-        balancesChanged = true;
-      }
-      if (passedStart) {
-        const currentBalance =
-          updatedBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
-        updatedBalances = {
-          ...updatedBalances,
-          [currentPlayer.id]: currentBalance + PASS_START_SALARY,
         };
         balancesChanged = true;
       }
@@ -1968,30 +2113,44 @@ export async function POST(request: Request) {
         );
       }
 
-      events.push(
-        {
-          event_type: "MOVE_PLAYER",
-          payload: {
-            player_id: currentPlayer.id,
-            from: currentPosition,
-            to: newPosition,
-            roll_total: rollTotal,
-            dice,
-            passedStart,
-            tile_id: landingTile.tile_id,
-            tile_name: landingTile.name,
-          },
+      events.push({
+        event_type: "MOVE_PLAYER",
+        payload: {
+          player_id: currentPlayer.id,
+          from: currentPosition,
+          to: newPosition,
+          roll_total: rollTotal,
+          dice,
+          passedStart,
+          tile_id: landingTile.tile_id,
+          tile_name: landingTile.name,
         },
-        {
-          event_type: "LAND_ON_TILE",
-          payload: {
-            player_id: currentPlayer.id,
-            tile_id: landingTile.tile_id,
-            tile_type: landingTile.type,
-            tile_index: landingTile.index,
-          },
+      });
+
+      if (passedStart || landingTile.type === "START") {
+        const reason = passedStart ? "PASS_START" : "LAND_GO";
+        const goResult = applyGoSalary({
+          player: currentPlayer,
+          balances: updatedBalances,
+          startingCash: game.starting_cash ?? 0,
+          events,
+          alreadyCollected: goSalaryAwarded,
+          reason,
+        });
+        updatedBalances = goResult.balances;
+        balancesChanged = balancesChanged || goResult.balancesChanged;
+        goSalaryAwarded = goResult.alreadyCollected;
+      }
+
+      events.push({
+        event_type: "LAND_ON_TILE",
+        payload: {
+          player_id: currentPlayer.id,
+          tile_id: landingTile.tile_id,
+          tile_type: landingTile.type,
+          tile_index: landingTile.index,
         },
-      );
+      });
 
       const resolutionEvent = resolveTile(landingTile, currentPlayer);
       if (resolutionEvent) {
@@ -2102,16 +2261,6 @@ export async function POST(request: Request) {
             activeLandingTile = cardLandingTile;
             activeResolvedTile = cardResolvedTile;
             finalPosition = cardResolvedTile.index;
-            if (cardPassedStart) {
-              const currentBalance =
-                updatedBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
-              updatedBalances = {
-                ...updatedBalances,
-                [currentPlayer.id]: currentBalance + PASS_START_SALARY,
-              };
-              balancesChanged = true;
-            }
-
             events.push({
               event_type: card.kind === "MOVE_TO" ? "CARD_MOVE_TO" : "CARD_MOVE_REL",
               payload: {
@@ -2126,30 +2275,44 @@ export async function POST(request: Request) {
               },
             });
 
-            events.push(
-              {
-                event_type: "MOVE_PLAYER",
-                payload: {
-                  player_id: currentPlayer.id,
-                  from: cardFromIndex,
-                  to: cardLandingTile.index,
-                  passedStart: cardPassedStart,
-                  tile_id: cardLandingTile.tile_id,
-                  tile_name: cardLandingTile.name,
-                  reason: "CARD",
-                  card_id: card.id,
-                },
+            events.push({
+              event_type: "MOVE_PLAYER",
+              payload: {
+                player_id: currentPlayer.id,
+                from: cardFromIndex,
+                to: cardLandingTile.index,
+                passedStart: cardPassedStart,
+                tile_id: cardLandingTile.tile_id,
+                tile_name: cardLandingTile.name,
+                reason: "CARD",
+                card_id: card.id,
               },
-              {
-                event_type: "LAND_ON_TILE",
-                payload: {
-                  player_id: currentPlayer.id,
-                  tile_id: cardLandingTile.tile_id,
-                  tile_type: cardLandingTile.type,
-                  tile_index: cardLandingTile.index,
-                },
+            });
+
+            if (cardPassedStart || cardLandingTile.type === "START") {
+              const reason = cardPassedStart ? "PASS_START" : "LAND_GO";
+              const goResult = applyGoSalary({
+                player: currentPlayer,
+                balances: updatedBalances,
+                startingCash: game.starting_cash ?? 0,
+                events,
+                alreadyCollected: goSalaryAwarded,
+                reason,
+              });
+              updatedBalances = goResult.balances;
+              balancesChanged = balancesChanged || goResult.balancesChanged;
+              goSalaryAwarded = goResult.alreadyCollected;
+            }
+
+            events.push({
+              event_type: "LAND_ON_TILE",
+              payload: {
+                player_id: currentPlayer.id,
+                tile_id: cardLandingTile.tile_id,
+                tile_type: cardLandingTile.type,
+                tile_index: cardLandingTile.index,
               },
-            );
+            });
 
             const cardResolutionEvent = resolveTile(
               cardLandingTile,
@@ -2254,10 +2417,16 @@ export async function POST(request: Request) {
       const isOwnableTile = OWNABLE_TILE_TYPES.has(activeLandingTile.type);
       const rentOwnerId =
         isOwnableTile && ownership ? ownership.owner_player_id : null;
-      const rentAmount =
-        rentOwnerId && rentOwnerId !== currentPlayer.id
-          ? activeLandingTile.baseRent ?? 0
-          : 0;
+      const rentCalculation = calculateRent({
+        tile: activeLandingTile,
+        ownerId: rentOwnerId,
+        currentPlayerId: currentPlayer.id,
+        boardTiles,
+        ownershipByTile,
+        // TODO: allow card-triggered utility rolls to override this dice total.
+        diceTotal: rollTotal,
+      });
+      const rentAmount = rentCalculation.amount;
       const shouldPayRent = rentAmount > 0 && Boolean(rentOwnerId);
       const isUnownedOwnableTile = isOwnableTile && !ownership;
       const isTaxTile = activeLandingTile.type === "TAX";
@@ -2287,14 +2456,20 @@ export async function POST(request: Request) {
           [rentOwnerId]: ownerBalance + rentAmount,
         };
         balancesChanged = true;
+        const rentPayload: Record<string, unknown> = {
+          tile_index: activeLandingTile.index,
+          tile_id: activeLandingTile.tile_id,
+          tile_type: activeLandingTile.type,
+          from_player_id: currentPlayer.id,
+          to_player_id: rentOwnerId,
+          amount: rentAmount,
+        };
+        if (rentCalculation.meta) {
+          Object.assign(rentPayload, rentCalculation.meta);
+        }
         events.push({
           event_type: "PAY_RENT",
-          payload: {
-            tile_index: activeLandingTile.index,
-            from_player_id: currentPlayer.id,
-            to_player_id: rentOwnerId,
-            amount: rentAmount,
-          },
+          payload: rentPayload,
         });
       }
 
@@ -2327,6 +2502,11 @@ export async function POST(request: Request) {
             },
           },
         );
+        // TODO: If rules.freeParkingJackpotEnabled, route taxAmount into free_parking_pot.
+      }
+
+      if (isFreeParking && rules.freeParkingJackpotEnabled) {
+        // TODO: Pay out free_parking_pot and reset to 0 when jackpot is enabled.
       }
 
       const pendingPurchaseAction =
