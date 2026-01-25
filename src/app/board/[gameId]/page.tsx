@@ -478,6 +478,28 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
           : `${payerName} paid tax (${tileLabel})`;
       }
 
+      if (event.event_type === "JAIL_PAY_FINE") {
+        const payload = event.payload as
+          | {
+              amount?: unknown;
+              player_name?: unknown;
+            }
+          | null;
+        const fineAmount =
+          typeof payload?.amount === "number"
+            ? payload.amount
+            : typeof payload?.amount === "string"
+              ? Number.parseInt(payload.amount, 10)
+              : null;
+        const playerName =
+          typeof payload?.player_name === "string"
+            ? payload.player_name
+            : "Player";
+        return fineAmount !== null
+          ? `${playerName} paid $${fineAmount} to get out of jail`
+          : `${playerName} paid a jail fine`;
+      }
+
       if (event.event_type === "GO_TO_JAIL") {
         const payload = event.payload as
           | {

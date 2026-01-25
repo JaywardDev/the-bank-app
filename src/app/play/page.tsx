@@ -10,6 +10,7 @@ import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 
 const lastGameKey = "bank.lastGameId";
 const DEBUG = process.env.NEXT_PUBLIC_DEBUG === "true";
+const JAIL_FINE_AMOUNT = 50;
 
 type Player = {
   id: string;
@@ -17,6 +18,8 @@ type Player = {
   display_name: string | null;
   created_at: string | null;
   position: number;
+  is_in_jail: boolean;
+  jail_turns_remaining: number;
 };
 
 type GameMeta = {
@@ -367,6 +370,22 @@ export default function PlayPage() {
         : `${payerName} paid tax (${tileLabel})`;
     }
 
+    if (event.event_type === "JAIL_PAY_FINE") {
+      const fineAmount =
+        typeof payload?.amount === "number"
+          ? payload.amount
+          : typeof payload?.amount === "string"
+            ? Number.parseInt(payload.amount, 10)
+            : null;
+      const playerName =
+        typeof payload?.player_name === "string"
+          ? payload.player_name
+          : "Player";
+      return fineAmount !== null
+        ? `${playerName} paid $${fineAmount} to get out of jail`
+        : `${playerName} paid a jail fine`;
+    }
+
     if (event.event_type === "GO_TO_JAIL") {
       const fromIndexRaw = payload?.from_tile_index;
       const fromIndex =
@@ -415,14 +434,17 @@ export default function PlayPage() {
     }
   }, []);
 
-  const loadPlayers = useCallback(async (activeGameId: string, accessToken?: string) => {
-    const playerRows = await supabaseClient.fetchFromSupabase<Player[]>(
-      `players?select=id,user_id,display_name,created_at,position&game_id=eq.${activeGameId}&order=created_at.asc`,
-      { method: "GET" },
-      accessToken,
-    );
-    setPlayers(playerRows);
-  }, []);
+  const loadPlayers = useCallback(
+    async (activeGameId: string, accessToken?: string) => {
+      const playerRows = await supabaseClient.fetchFromSupabase<Player[]>(
+        `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining&game_id=eq.${activeGameId}&order=created_at.asc`,
+        { method: "GET" },
+        accessToken,
+      );
+      setPlayers(playerRows);
+    },
+    [],
+  );
 
   const loadOwnership = useCallback(
     async (activeGameId: string, accessToken?: string) => {
@@ -1085,9 +1107,12 @@ export default function PlayPage() {
     ? myPlayerBalance >= pendingPurchase.price
     : false;
   const canAct = initialSnapshotReady && isMyTurn;
+  const isAwaitingJailDecision =
+    isMyTurn && gameState?.turn_phase === "AWAITING_JAIL_DECISION";
   const canRoll =
     canAct &&
     !hasPendingDecision &&
+    !isAwaitingJailDecision &&
     (gameState?.last_roll == null || (gameState?.doubles_count ?? 0) > 0);
   const canEndTurn =
     canAct && !hasPendingDecision && gameState?.last_roll != null;
@@ -1099,7 +1124,7 @@ export default function PlayPage() {
   const handleBankAction = useCallback(
     async (
       request:
-        | { action: "ROLL_DICE" | "END_TURN" }
+        | { action: "ROLL_DICE" | "END_TURN" | "JAIL_PAY_FINE" }
         | { action: "DECLINE_PROPERTY" | "BUY_PROPERTY"; tileIndex: number },
     ) => {
       const { action } = request;
@@ -1302,6 +1327,10 @@ export default function PlayPage() {
       tileIndex: pendingPurchase.tile_index,
     });
   }, [handleBankAction, pendingPurchase]);
+
+  const handlePayJailFine = useCallback(() => {
+    void handleBankAction({ action: "JAIL_PAY_FINE" });
+  }, [handleBankAction]);
 
   const handleLeaveTable = useCallback(() => {
     clearResumeStorage();
@@ -1538,6 +1567,39 @@ export default function PlayPage() {
               </p>
             </div>
           </div>
+          {isAwaitingJailDecision ? (
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
+              <p className="text-xs font-semibold uppercase tracking-wide text-rose-700">
+                Jail decision
+              </p>
+              <p className="mt-1 text-base font-semibold text-rose-900">
+                You are in jail.
+              </p>
+              <p className="text-sm text-rose-800">
+                Turns remaining: {currentUserPlayer?.jail_turns_remaining ?? 0}
+              </p>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                <button
+                  className="rounded-2xl bg-rose-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-rose-300"
+                  type="button"
+                  onClick={handlePayJailFine}
+                  disabled={actionLoading === "JAIL_PAY_FINE"}
+                >
+                  {actionLoading === "JAIL_PAY_FINE"
+                    ? "Paying…"
+                    : `Pay $${JAIL_FINE_AMOUNT} fine`}
+                </button>
+                <button
+                  className="rounded-2xl border border-rose-300 px-4 py-2 text-sm font-semibold text-rose-900 disabled:cursor-not-allowed disabled:border-rose-200 disabled:text-rose-400"
+                  type="button"
+                  disabled
+                  title="Roll for doubles (coming soon)"
+                >
+                  Roll for doubles
+                </button>
+              </div>
+            </div>
+          ) : null}
           <div className="grid gap-3 sm:grid-cols-2">
             <button
               className="rounded-2xl bg-neutral-900 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"

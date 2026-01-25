@@ -38,7 +38,8 @@ type BankActionRequest =
         | "ROLL_DICE"
         | "END_TURN"
         | "DECLINE_PROPERTY"
-        | "BUY_PROPERTY",
+        | "BUY_PROPERTY"
+        | "JAIL_PAY_FINE",
         "DECLINE_PROPERTY" | "BUY_PROPERTY"
       >;
       tileIndex?: number;
@@ -69,6 +70,8 @@ type PlayerRow = {
   display_name: string | null;
   created_at: string | null;
   position: number;
+  is_in_jail: boolean;
+  jail_turns_remaining: number;
 };
 
 type GameStateRow = {
@@ -110,6 +113,7 @@ type DiceEventPayload = {
 };
 
 const PASS_START_SALARY = 200;
+const JAIL_FINE_AMOUNT = 50;
 const OWNABLE_TILE_TYPES = new Set(["PROPERTY", "RAIL", "UTILITY"]);
 
 const isConfigured = () =>
@@ -331,7 +335,7 @@ export async function POST(request: Request) {
       }
 
       const [hostPlayer] = await fetchFromSupabaseWithService<PlayerRow[]>(
-        "players?select=id,user_id,display_name,created_at,position",
+        "players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining",
         {
           method: "POST",
           headers: {
@@ -413,7 +417,7 @@ export async function POST(request: Request) {
       }
 
       const [player] = await fetchFromSupabaseWithService<PlayerRow[]>(
-        "players?select=id,user_id,display_name,created_at,position&on_conflict=game_id,user_id",
+        "players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining&on_conflict=game_id,user_id",
         {
           method: "POST",
           headers: {
@@ -435,7 +439,7 @@ export async function POST(request: Request) {
       }
 
       const players = await fetchFromSupabaseWithService<PlayerRow[]>(
-        `players?select=id,user_id,display_name,created_at,position&game_id=eq.${game.id}&order=created_at.asc`,
+        `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining&game_id=eq.${game.id}&order=created_at.asc`,
         { method: "GET" },
       );
       const ownershipByTile = await loadOwnershipByTile(game.id);
@@ -483,7 +487,7 @@ export async function POST(request: Request) {
     }
 
     const players = await fetchFromSupabaseWithService<PlayerRow[]>(
-      `players?select=id,user_id,display_name,created_at,position&game_id=eq.${gameId}&order=created_at.asc`,
+      `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining&game_id=eq.${gameId}&order=created_at.asc`,
       { method: "GET" },
     );
 
@@ -747,6 +751,13 @@ export async function POST(request: Request) {
         );
       }
 
+      if (gameState.turn_phase === "AWAITING_JAIL_DECISION") {
+        return NextResponse.json(
+          { error: "Resolve jail before rolling." },
+          { status: 409 },
+        );
+      }
+
       const doublesCount = gameState?.doubles_count ?? 0;
 
       if (gameState.last_roll != null && doublesCount === 0) {
@@ -800,6 +811,7 @@ export async function POST(request: Request) {
           : null;
       const resolvedTile = jailTile ?? landingTile;
       const finalPosition = resolvedTile.index;
+      const shouldSendToJail = landingTile.type === "GO_TO_JAIL" && jailTile;
       const balances = gameState?.balances ?? {};
       const updatedBalances = (() => {
         let nextBalances = passedStart
@@ -906,6 +918,9 @@ export async function POST(request: Request) {
               current_player_id: nextPlayer.id,
               last_roll: null,
               doubles_count: 0,
+              turn_phase: nextPlayer.is_in_jail
+                ? "AWAITING_JAIL_DECISION"
+                : "AWAITING_ROLL",
               updated_at: new Date().toISOString(),
             }),
           },
@@ -927,6 +942,8 @@ export async function POST(request: Request) {
             },
             body: JSON.stringify({
               position: jailTile.index,
+              is_in_jail: true,
+              jail_turns_remaining: 3,
             }),
           },
         );
@@ -1140,6 +1157,9 @@ export async function POST(request: Request) {
           },
           body: JSON.stringify({
             position: finalPosition,
+            ...(shouldSendToJail
+              ? { is_in_jail: true, jail_turns_remaining: 3 }
+              : {}),
           }),
         },
       );
@@ -1227,7 +1247,9 @@ export async function POST(request: Request) {
             current_player_id: nextPlayer.id,
             last_roll: null,
             doubles_count: 0,
-            turn_phase: "AWAITING_ROLL",
+            turn_phase: nextPlayer.is_in_jail
+              ? "AWAITING_JAIL_DECISION"
+              : "AWAITING_ROLL",
             pending_action: null,
             updated_at: new Date().toISOString(),
           }),
@@ -1407,6 +1429,100 @@ export async function POST(request: Request) {
       return NextResponse.json({ gameState: updatedState });
     }
 
+    if (body.action === "JAIL_PAY_FINE") {
+      if (gameState.turn_phase !== "AWAITING_JAIL_DECISION") {
+        return NextResponse.json(
+          { error: "No jail decision required right now." },
+          { status: 409 },
+        );
+      }
+
+      if (!currentPlayer.is_in_jail) {
+        return NextResponse.json(
+          { error: "You are not in jail." },
+          { status: 409 },
+        );
+      }
+
+      const balances = gameState.balances ?? {};
+      const currentBalance =
+        balances[currentPlayer.id] ?? game.starting_cash ?? 0;
+      const updatedBalances = {
+        ...balances,
+        [currentPlayer.id]: currentBalance - JAIL_FINE_AMOUNT,
+      };
+      const events: Array<{
+        event_type: string;
+        payload: Record<string, unknown>;
+      }> = [
+        {
+          event_type: "JAIL_PAY_FINE",
+          payload: {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.display_name,
+            amount: JAIL_FINE_AMOUNT,
+          },
+        },
+        {
+          event_type: "CASH_DEBIT",
+          payload: {
+            player_id: currentPlayer.id,
+            amount: JAIL_FINE_AMOUNT,
+            reason: "JAIL_PAY_FINE",
+          },
+        },
+      ];
+      const finalVersion = currentVersion + events.length;
+
+      const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            version: finalVersion,
+            balances: updatedBalances,
+            turn_phase: "AWAITING_ROLL",
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      );
+
+      if (!updatedState) {
+        return NextResponse.json(
+          { error: "Version mismatch." },
+          { status: 409 },
+        );
+      }
+
+      const [updatedPlayer] = await fetchFromSupabaseWithService<PlayerRow[]>(
+        `players?id=eq.${currentPlayer.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            is_in_jail: false,
+            jail_turns_remaining: 0,
+          }),
+        },
+      );
+
+      if (!updatedPlayer) {
+        return NextResponse.json(
+          { error: "Unable to release player from jail." },
+          { status: 500 },
+        );
+      }
+
+      await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+
+      return NextResponse.json({ gameState: updatedState });
+    }
+
     if (body.action === "END_TURN") {
       if (gameState.pending_action) {
         return NextResponse.json(
@@ -1434,6 +1550,9 @@ export async function POST(request: Request) {
             current_player_id: nextPlayer.id,
             last_roll: null,
             doubles_count: 0,
+            turn_phase: nextPlayer.is_in_jail
+              ? "AWAITING_JAIL_DECISION"
+              : "AWAITING_ROLL",
             updated_at: new Date().toISOString(),
           }),
         },
