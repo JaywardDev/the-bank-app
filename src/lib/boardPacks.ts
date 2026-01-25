@@ -6,6 +6,15 @@ export type BoardPack = {
   tiles: BoardTile[];
 };
 
+export type CardKind = "PAY" | "RECEIVE" | "MOVE_TO" | "MOVE_REL" | "GO_TO_JAIL";
+
+export type CardDefinition = {
+  id: string;
+  title: string;
+  kind: CardKind;
+  payload: Record<string, number | string | boolean | null>;
+};
+
 export type BoardTileType =
   | "START"
   | "PROPERTY"
@@ -26,6 +35,84 @@ export type BoardTile = {
   baseRent?: number;
   taxAmount?: number;
 };
+
+export const chanceCards: CardDefinition[] = [
+  {
+    id: "chance-advance-go",
+    title: "Advance to Go (Collect $200)",
+    kind: "MOVE_TO",
+    payload: { tile_index: 0 },
+  },
+  {
+    id: "chance-dividend",
+    title: "Bank pays you dividend of $50",
+    kind: "RECEIVE",
+    payload: { amount: 50 },
+  },
+  {
+    id: "chance-go-to-jail",
+    title: "Go to Jail",
+    kind: "GO_TO_JAIL",
+    payload: {},
+  },
+  {
+    id: "chance-go-back",
+    title: "Go back 3 spaces",
+    kind: "MOVE_REL",
+    payload: { spaces: -3 },
+  },
+  {
+    id: "chance-poor-tax",
+    title: "Pay poor tax of $15",
+    kind: "PAY",
+    payload: { amount: 15 },
+  },
+  {
+    id: "chance-illinois",
+    title: "Advance to Illinois Avenue",
+    kind: "MOVE_TO",
+    payload: { tile_index: 24 },
+  },
+];
+
+export const communityCards: CardDefinition[] = [
+  {
+    id: "community-advance-go",
+    title: "Advance to Go (Collect $200)",
+    kind: "MOVE_TO",
+    payload: { tile_index: 0 },
+  },
+  {
+    id: "community-bank-error",
+    title: "Bank error in your favor. Collect $200",
+    kind: "RECEIVE",
+    payload: { amount: 200 },
+  },
+  {
+    id: "community-doctor",
+    title: "Doctor's fees. Pay $50",
+    kind: "PAY",
+    payload: { amount: 50 },
+  },
+  {
+    id: "community-go-to-jail",
+    title: "Go to Jail",
+    kind: "GO_TO_JAIL",
+    payload: {},
+  },
+  {
+    id: "community-stock",
+    title: "From sale of stock you get $50",
+    kind: "RECEIVE",
+    payload: { amount: 50 },
+  },
+  {
+    id: "community-hospital",
+    title: "Pay hospital fees of $100",
+    kind: "PAY",
+    payload: { amount: 100 },
+  },
+];
 
 export const boardPacks: BoardPack[] = [
   {

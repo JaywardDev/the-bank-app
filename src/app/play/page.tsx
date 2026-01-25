@@ -39,6 +39,8 @@ type GameState = {
   doubles_count: number | null;
   turn_phase: string | null;
   pending_action: Record<string, unknown> | null;
+  chance_index: number | null;
+  community_index: number | null;
 };
 
 type GameEvent = {
@@ -258,6 +260,90 @@ export default function PlayPage() {
       return ownershipLabel
         ? `Landed on ${tileLabel} · ${ownershipLabel}`
         : `Landed on ${tileLabel}`;
+    }
+
+    if (event.event_type === "DRAW_CARD") {
+      const deck =
+        typeof payload?.deck === "string" ? payload.deck : "Card";
+      const cardTitle =
+        typeof payload?.card_title === "string" ? payload.card_title : "Card";
+      const playerName =
+        typeof payload?.player_name === "string"
+          ? payload.player_name
+          : "Player";
+      return `${playerName} drew ${deck}: ${cardTitle}`;
+    }
+
+    if (event.event_type === "CARD_PAY") {
+      const amount =
+        typeof payload?.amount === "number"
+          ? payload.amount
+          : typeof payload?.amount === "string"
+            ? Number.parseInt(payload.amount, 10)
+            : null;
+      const cardTitle =
+        typeof payload?.card_title === "string" ? payload.card_title : "Card";
+      const playerName =
+        typeof payload?.player_name === "string"
+          ? payload.player_name
+          : "Player";
+      return amount !== null
+        ? `${playerName} paid $${amount} (${cardTitle})`
+        : `${playerName} paid (${cardTitle})`;
+    }
+
+    if (event.event_type === "CARD_RECEIVE") {
+      const amount =
+        typeof payload?.amount === "number"
+          ? payload.amount
+          : typeof payload?.amount === "string"
+            ? Number.parseInt(payload.amount, 10)
+            : null;
+      const cardTitle =
+        typeof payload?.card_title === "string" ? payload.card_title : "Card";
+      const playerName =
+        typeof payload?.player_name === "string"
+          ? payload.player_name
+          : "Player";
+      return amount !== null
+        ? `${playerName} received $${amount} (${cardTitle})`
+        : `${playerName} received (${cardTitle})`;
+    }
+
+    if (
+      event.event_type === "CARD_MOVE_TO" ||
+      event.event_type === "CARD_MOVE_REL"
+    ) {
+      const toIndexRaw = payload?.to_tile_index;
+      const toIndex =
+        typeof toIndexRaw === "number"
+          ? toIndexRaw
+          : typeof toIndexRaw === "string"
+            ? Number.parseInt(toIndexRaw, 10)
+            : null;
+      const tileNameFromBoard =
+        toIndex !== null
+          ? boardPack?.tiles?.find((entry) => entry.index === toIndex)?.name
+          : null;
+      const tileLabel =
+        tileNameFromBoard ?? (toIndex !== null ? `Tile ${toIndex}` : "tile");
+      const cardTitle =
+        typeof payload?.card_title === "string" ? payload.card_title : "Card";
+      const playerName =
+        typeof payload?.player_name === "string"
+          ? payload.player_name
+          : "Player";
+      return `${playerName} moved to ${tileLabel} (${cardTitle})`;
+    }
+
+    if (event.event_type === "CARD_GO_TO_JAIL") {
+      const cardTitle =
+        typeof payload?.card_title === "string" ? payload.card_title : "Card";
+      const playerName =
+        typeof payload?.player_name === "string"
+          ? payload.player_name
+          : "Player";
+      return `${playerName} went to jail (${cardTitle})`;
     }
 
     if (event.event_type === "OFFER_PURCHASE") {
@@ -521,7 +607,7 @@ export default function PlayPage() {
   const loadGameState = useCallback(
     async (activeGameId: string, accessToken?: string) => {
       const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
-        `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action&game_id=eq.${activeGameId}&limit=1`,
+        `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,chance_index,community_index&game_id=eq.${activeGameId}&limit=1`,
         { method: "GET" },
         accessToken,
       );

@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { defaultBoardPackId, getBoardPackById } from "@/lib/boardPacks";
+import {
+  chanceCards,
+  communityCards,
+  defaultBoardPackId,
+  getBoardPackById,
+} from "@/lib/boardPacks";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "@/lib/env";
 
 const supabaseUrl = (process.env.SUPABASE_URL ?? SUPABASE_URL ?? "").trim();
@@ -85,6 +90,8 @@ type GameStateRow = {
   doubles_count: number | null;
   turn_phase: string | null;
   pending_action: Record<string, unknown> | null;
+  chance_index: number | null;
+  community_index: number | null;
 };
 
 type OwnershipRow = {
@@ -266,6 +273,41 @@ const resolveTile = (tile: TileInfo, player: PlayerRow) => {
   }
 };
 
+const getEventDeckForTile = (tile: TileInfo) => {
+  const tileId = tile.tile_id.toLowerCase();
+  const tileName = tile.name.toLowerCase();
+  if (tileId.includes("chance") || tileName.includes("chance")) {
+    return {
+      deck: "CHANCE",
+      cards: chanceCards,
+      indexKey: "chance_index" as const,
+    };
+  }
+  if (tileId.includes("community") || tileName.includes("community")) {
+    return {
+      deck: "COMMUNITY",
+      cards: communityCards,
+      indexKey: "community_index" as const,
+    };
+  }
+  return null;
+};
+
+const getNumberPayload = (
+  payload: Record<string, unknown>,
+  key: string,
+): number | null => {
+  const value = payload[key];
+  if (typeof value === "number") {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
+};
+
 const parseBearerToken = (authorization: string | null) => {
   if (!authorization) {
     return null;
@@ -358,7 +400,7 @@ export async function POST(request: Request) {
       }
 
       await fetchFromSupabaseWithService<GameStateRow[]>(
-        "game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action",
+        "game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,chance_index,community_index",
         {
           method: "POST",
           headers: {
@@ -493,7 +535,7 @@ export async function POST(request: Request) {
     );
 
     const [gameState] = await fetchFromSupabaseWithService<GameStateRow[]>(
-      `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action&game_id=eq.${gameId}&limit=1`,
+      `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,chance_index,community_index&game_id=eq.${gameId}&limit=1`,
       { method: "GET" },
     );
 
@@ -577,7 +619,7 @@ export async function POST(request: Request) {
       }, {});
 
       const upsertResponse = await fetch(
-        `${supabaseUrl}/rest/v1/game_state?on_conflict=game_id&select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action`,
+        `${supabaseUrl}/rest/v1/game_state?on_conflict=game_id&select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,chance_index,community_index`,
         {
           method: "POST",
           headers: {
@@ -593,6 +635,8 @@ export async function POST(request: Request) {
             doubles_count: 0,
             turn_phase: "AWAITING_ROLL",
             pending_action: null,
+            chance_index: 0,
+            community_index: 0,
             updated_at: new Date().toISOString(),
           }),
         },
@@ -788,19 +832,6 @@ export async function POST(request: Request) {
         name: `Tile ${newPosition}`,
       };
       const ownershipByTile = await loadOwnershipByTile(gameId);
-      const ownership = ownershipByTile[landingTile.index];
-      const isOwnableTile = OWNABLE_TILE_TYPES.has(landingTile.type);
-      const rentOwnerId =
-        isOwnableTile && ownership ? ownership.owner_player_id : null;
-      const rentAmount =
-        rentOwnerId && rentOwnerId !== currentPlayer.id
-          ? landingTile.baseRent ?? 0
-          : 0;
-      const shouldPayRent = rentAmount > 0 && Boolean(rentOwnerId);
-      const isUnownedOwnableTile = isOwnableTile && !ownership;
-      const isTaxTile = landingTile.type === "TAX";
-      const taxAmount = isTaxTile ? landingTile.taxAmount ?? 0 : 0;
-      const shouldPayTax = isTaxTile && taxAmount > 0;
       const jailTile =
         landingTile.type === "GO_TO_JAIL"
           ? boardTiles.find((tile) => tile.type === "JAIL") ?? {
@@ -811,42 +842,22 @@ export async function POST(request: Request) {
             }
           : null;
       const resolvedTile = jailTile ?? landingTile;
-      const finalPosition = resolvedTile.index;
-      const shouldSendToJail = landingTile.type === "GO_TO_JAIL" && jailTile;
+      let finalPosition = resolvedTile.index;
+      let shouldSendToJail = landingTile.type === "GO_TO_JAIL" && jailTile;
+      let activeLandingTile = landingTile;
+      let activeResolvedTile = resolvedTile;
       const balances = gameState?.balances ?? {};
-      const updatedBalances = (() => {
-        let nextBalances = passedStart
-          ? {
-              ...balances,
-              [currentPlayer.id]:
-                (balances[currentPlayer.id] ?? game.starting_cash ?? 0) +
-                PASS_START_SALARY,
-            }
-          : balances;
-
-        if (shouldPayRent && rentOwnerId && rentOwnerId !== currentPlayer.id) {
-          const payerBalance =
-            nextBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
-          const ownerBalance =
-            nextBalances[rentOwnerId] ?? game.starting_cash ?? 0;
-          nextBalances = {
-            ...nextBalances,
-            [currentPlayer.id]: payerBalance - rentAmount,
-            [rentOwnerId]: ownerBalance + rentAmount,
-          };
-        }
-
-        if (shouldPayTax) {
-          const payerBalance =
-            nextBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
-          nextBalances = {
-            ...nextBalances,
-            [currentPlayer.id]: payerBalance - taxAmount,
-          };
-        }
-
-        return nextBalances;
-      })();
+      let updatedBalances = passedStart
+        ? {
+            ...balances,
+            [currentPlayer.id]:
+              (balances[currentPlayer.id] ?? game.starting_cash ?? 0) +
+              PASS_START_SALARY,
+          }
+        : balances;
+      let balancesChanged = passedStart;
+      let nextChanceIndex = gameState?.chance_index ?? 0;
+      let nextCommunityIndex = gameState?.community_index ?? 0;
 
       if (isDouble && nextDoublesCount >= 3) {
         const jailTile =
@@ -1021,12 +1032,273 @@ export async function POST(request: Request) {
           payload: resolutionEvent.payload,
         });
       }
+      let cardTriggeredGoToJail = false;
+      const eventDeck =
+        landingTile.type === "EVENT" ? getEventDeckForTile(landingTile) : null;
+      if (eventDeck && eventDeck.cards.length > 0) {
+        const currentIndex =
+          eventDeck.indexKey === "chance_index"
+            ? nextChanceIndex
+            : nextCommunityIndex;
+        const card = eventDeck.cards[currentIndex % eventDeck.cards.length];
+        if (eventDeck.indexKey === "chance_index") {
+          nextChanceIndex = currentIndex + 1;
+        } else {
+          nextCommunityIndex = currentIndex + 1;
+        }
 
-      if (landingTile.type === "GO_TO_JAIL" && jailTile) {
+        events.push({
+          event_type: "DRAW_CARD",
+          payload: {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.display_name,
+            deck: eventDeck.deck,
+            card_id: card.id,
+            card_title: card.title,
+            card_kind: card.kind,
+            draw_index: currentIndex,
+          },
+        });
+
+        if (card.kind === "PAY" || card.kind === "RECEIVE") {
+          const amount =
+            getNumberPayload(card.payload as Record<string, unknown>, "amount") ?? 0;
+          const currentBalance =
+            updatedBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
+          updatedBalances = {
+            ...updatedBalances,
+            [currentPlayer.id]:
+              card.kind === "PAY"
+                ? currentBalance - amount
+                : currentBalance + amount,
+          };
+          if (amount !== 0) {
+            balancesChanged = true;
+          }
+          events.push({
+            event_type: card.kind === "PAY" ? "CARD_PAY" : "CARD_RECEIVE",
+            payload: {
+              player_id: currentPlayer.id,
+              player_name: currentPlayer.display_name,
+              card_id: card.id,
+              card_title: card.title,
+              card_kind: card.kind,
+              amount,
+            },
+          });
+        }
+
+        if (card.kind === "MOVE_TO" || card.kind === "MOVE_REL") {
+          const payload = card.payload as Record<string, unknown>;
+          const targetIndex =
+            card.kind === "MOVE_TO"
+              ? getNumberPayload(payload, "tile_index")
+              : null;
+          const spaces =
+            card.kind === "MOVE_REL" ? getNumberPayload(payload, "spaces") : null;
+          const cardFromIndex = activeResolvedTile.index;
+          const rawIndex =
+            card.kind === "MOVE_TO" && targetIndex !== null
+              ? targetIndex
+              : card.kind === "MOVE_REL" && spaces !== null
+                ? cardFromIndex + spaces
+                : null;
+          if (rawIndex !== null) {
+            const normalizedIndex =
+              ((rawIndex % boardSize) + boardSize) % boardSize;
+            const cardLandingTile = boardTiles[normalizedIndex] ?? {
+              index: normalizedIndex,
+              tile_id: `tile-${normalizedIndex}`,
+              type: "PROPERTY",
+              name: `Tile ${normalizedIndex}`,
+            };
+            const cardPassedStart =
+              card.kind === "MOVE_TO"
+                ? normalizedIndex < cardFromIndex
+                : spaces !== null
+                  ? spaces > 0 && cardFromIndex + spaces >= boardSize
+                  : false;
+            const cardJailTile =
+              cardLandingTile.type === "GO_TO_JAIL"
+                ? boardTiles.find((tile) => tile.type === "JAIL") ?? {
+                    index: 10,
+                    tile_id: "jail",
+                    type: "JAIL",
+                    name: "Jail",
+                  }
+                : null;
+            const cardResolvedTile = cardJailTile ?? cardLandingTile;
+            shouldSendToJail =
+              cardLandingTile.type === "GO_TO_JAIL" && cardJailTile;
+            activeLandingTile = cardLandingTile;
+            activeResolvedTile = cardResolvedTile;
+            finalPosition = cardResolvedTile.index;
+            if (cardPassedStart) {
+              const currentBalance =
+                updatedBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
+              updatedBalances = {
+                ...updatedBalances,
+                [currentPlayer.id]: currentBalance + PASS_START_SALARY,
+              };
+              balancesChanged = true;
+            }
+
+            events.push({
+              event_type: card.kind === "MOVE_TO" ? "CARD_MOVE_TO" : "CARD_MOVE_REL",
+              payload: {
+                player_id: currentPlayer.id,
+                player_name: currentPlayer.display_name,
+                card_id: card.id,
+                card_title: card.title,
+                card_kind: card.kind,
+                from_tile_index: cardFromIndex,
+                to_tile_index: cardLandingTile.index,
+                passed_start: cardPassedStart,
+              },
+            });
+
+            events.push(
+              {
+                event_type: "MOVE_PLAYER",
+                payload: {
+                  player_id: currentPlayer.id,
+                  from: cardFromIndex,
+                  to: cardLandingTile.index,
+                  passedStart: cardPassedStart,
+                  tile_id: cardLandingTile.tile_id,
+                  tile_name: cardLandingTile.name,
+                  reason: "CARD",
+                  card_id: card.id,
+                },
+              },
+              {
+                event_type: "LAND_ON_TILE",
+                payload: {
+                  player_id: currentPlayer.id,
+                  tile_id: cardLandingTile.tile_id,
+                  tile_type: cardLandingTile.type,
+                  tile_index: cardLandingTile.index,
+                },
+              },
+            );
+
+            const cardResolutionEvent = resolveTile(
+              cardLandingTile,
+              currentPlayer,
+            );
+            if (cardResolutionEvent) {
+              events.push({
+                event_type: cardResolutionEvent.event_type,
+                payload: cardResolutionEvent.payload,
+              });
+            }
+
+            if (cardLandingTile.type === "GO_TO_JAIL" && cardJailTile) {
+              cardTriggeredGoToJail = true;
+              events.push({
+                event_type: "GO_TO_JAIL",
+                payload: {
+                  from_tile_index: cardLandingTile.index,
+                  to_jail_tile_index: cardJailTile.index,
+                  player_id: currentPlayer.id,
+                  display_name: currentPlayer.display_name,
+                },
+              });
+            }
+          }
+        }
+
+        if (card.kind === "GO_TO_JAIL") {
+          const cardFromIndex = activeResolvedTile.index;
+          const cardJailTile =
+            boardTiles.find((tile) => tile.type === "JAIL") ?? {
+              index: 10,
+              tile_id: "jail",
+              type: "JAIL",
+              name: "Jail",
+            };
+          activeLandingTile = cardJailTile;
+          activeResolvedTile = cardJailTile;
+          finalPosition = cardJailTile.index;
+          shouldSendToJail = true;
+          cardTriggeredGoToJail = true;
+
+          events.push({
+            event_type: "CARD_GO_TO_JAIL",
+            payload: {
+              player_id: currentPlayer.id,
+              player_name: currentPlayer.display_name,
+              card_id: card.id,
+              card_title: card.title,
+              card_kind: card.kind,
+              from_tile_index: cardFromIndex,
+              to_jail_tile_index: cardJailTile.index,
+            },
+          });
+
+          events.push(
+            {
+              event_type: "MOVE_PLAYER",
+              payload: {
+                player_id: currentPlayer.id,
+                from: cardFromIndex,
+                to: cardJailTile.index,
+                tile_id: cardJailTile.tile_id,
+                tile_name: cardJailTile.name,
+                reason: "CARD",
+                card_id: card.id,
+              },
+            },
+            {
+              event_type: "LAND_ON_TILE",
+              payload: {
+                player_id: currentPlayer.id,
+                tile_id: cardJailTile.tile_id,
+                tile_type: cardJailTile.type,
+                tile_index: cardJailTile.index,
+              },
+            },
+          );
+
+          const cardResolutionEvent = resolveTile(cardJailTile, currentPlayer);
+          if (cardResolutionEvent) {
+            events.push({
+              event_type: cardResolutionEvent.event_type,
+              payload: cardResolutionEvent.payload,
+            });
+          }
+
+          events.push({
+            event_type: "GO_TO_JAIL",
+            payload: {
+              from_tile_index: cardFromIndex,
+              to_jail_tile_index: cardJailTile.index,
+              player_id: currentPlayer.id,
+              display_name: currentPlayer.display_name,
+            },
+          });
+        }
+      }
+
+      const ownership = ownershipByTile[activeLandingTile.index];
+      const isOwnableTile = OWNABLE_TILE_TYPES.has(activeLandingTile.type);
+      const rentOwnerId =
+        isOwnableTile && ownership ? ownership.owner_player_id : null;
+      const rentAmount =
+        rentOwnerId && rentOwnerId !== currentPlayer.id
+          ? activeLandingTile.baseRent ?? 0
+          : 0;
+      const shouldPayRent = rentAmount > 0 && Boolean(rentOwnerId);
+      const isUnownedOwnableTile = isOwnableTile && !ownership;
+      const isTaxTile = activeLandingTile.type === "TAX";
+      const taxAmount = isTaxTile ? activeLandingTile.taxAmount ?? 0 : 0;
+      const shouldPayTax = isTaxTile && taxAmount > 0;
+
+      if (activeLandingTile.type === "GO_TO_JAIL" && jailTile && !cardTriggeredGoToJail) {
         events.push({
           event_type: "GO_TO_JAIL",
           payload: {
-            from_tile_index: landingTile.index,
+            from_tile_index: activeLandingTile.index,
             to_jail_tile_index: jailTile.index,
             player_id: currentPlayer.id,
             display_name: currentPlayer.display_name,
@@ -1035,10 +1307,20 @@ export async function POST(request: Request) {
       }
 
       if (shouldPayRent && rentOwnerId && rentOwnerId !== currentPlayer.id) {
+        const payerBalance =
+          updatedBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
+        const ownerBalance =
+          updatedBalances[rentOwnerId] ?? game.starting_cash ?? 0;
+        updatedBalances = {
+          ...updatedBalances,
+          [currentPlayer.id]: payerBalance - rentAmount,
+          [rentOwnerId]: ownerBalance + rentAmount,
+        };
+        balancesChanged = true;
         events.push({
           event_type: "PAY_RENT",
           payload: {
-            tile_index: landingTile.index,
+            tile_index: activeLandingTile.index,
             from_player_id: currentPlayer.id,
             to_player_id: rentOwnerId,
             amount: rentAmount,
@@ -1047,12 +1329,19 @@ export async function POST(request: Request) {
       }
 
       if (shouldPayTax) {
+        const payerBalance =
+          updatedBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
+        updatedBalances = {
+          ...updatedBalances,
+          [currentPlayer.id]: payerBalance - taxAmount,
+        };
+        balancesChanged = true;
         events.push(
           {
             event_type: "PAY_TAX",
             payload: {
-              tile_index: landingTile.index,
-              tile_name: landingTile.name,
+              tile_index: activeLandingTile.index,
+              tile_name: activeLandingTile.name,
               amount: taxAmount,
               payer_player_id: currentPlayer.id,
               payer_display_name: currentPlayer.display_name,
@@ -1064,17 +1353,17 @@ export async function POST(request: Request) {
               player_id: currentPlayer.id,
               amount: taxAmount,
               reason: "PAY_TAX",
-              tile_index: landingTile.index,
+              tile_index: activeLandingTile.index,
             },
           },
         );
       }
 
-      const pendingPurchaseAction = isUnownedOwnableTile
+      const pendingPurchaseAction = isUnownedOwnableTile && !shouldSendToJail
         ? {
             type: "BUY_PROPERTY",
-            tile_index: landingTile.index,
-            price: landingTile.price ?? 0,
+            tile_index: activeLandingTile.index,
+            price: activeLandingTile.price ?? 0,
           }
         : null;
 
@@ -1083,9 +1372,9 @@ export async function POST(request: Request) {
           event_type: "OFFER_PURCHASE",
           payload: {
             player_id: currentPlayer.id,
-            tile_id: landingTile.tile_id,
-            tile_name: landingTile.name,
-            tile_index: landingTile.index,
+            tile_id: activeLandingTile.tile_id,
+            tile_name: activeLandingTile.name,
+            tile_index: activeLandingTile.index,
             price: pendingPurchaseAction.price,
           },
         });
@@ -1095,17 +1384,13 @@ export async function POST(request: Request) {
         event_type: "MOVE_RESOLVED",
         payload: {
           player_id: currentPlayer.id,
-          tile_id: resolvedTile.tile_id,
-          tile_type: resolvedTile.type,
-          tile_index: resolvedTile.index,
+          tile_id: activeResolvedTile.tile_id,
+          tile_type: activeResolvedTile.type,
+          tile_index: activeResolvedTile.index,
         },
       });
 
-      if (
-        isDouble &&
-        !pendingPurchaseAction &&
-        landingTile.type !== "GO_TO_JAIL"
-      ) {
+      if (isDouble && !pendingPurchaseAction && !shouldSendToJail) {
         events.push({
           event_type: "ALLOW_EXTRA_ROLL",
           payload: {
@@ -1117,8 +1402,6 @@ export async function POST(request: Request) {
       }
 
       const finalVersion = currentVersion + events.length;
-      const balancesChanged = passedStart || shouldPayRent || shouldPayTax;
-
       const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
         `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
         {
@@ -1131,6 +1414,12 @@ export async function POST(request: Request) {
             last_roll: rollTotal,
             doubles_count: nextDoublesCount,
             ...(balancesChanged ? { balances: updatedBalances } : {}),
+            ...(nextChanceIndex !== (gameState?.chance_index ?? 0)
+              ? { chance_index: nextChanceIndex }
+              : {}),
+            ...(nextCommunityIndex !== (gameState?.community_index ?? 0)
+              ? { community_index: nextCommunityIndex }
+              : {}),
             ...(pendingPurchaseAction
               ? {
                   turn_phase: "AWAITING_DECISION",
@@ -1565,19 +1854,6 @@ export async function POST(request: Request) {
         name: `Tile ${newPosition}`,
       };
       const ownershipByTile = await loadOwnershipByTile(gameId);
-      const ownership = ownershipByTile[landingTile.index];
-      const isOwnableTile = OWNABLE_TILE_TYPES.has(landingTile.type);
-      const rentOwnerId =
-        isOwnableTile && ownership ? ownership.owner_player_id : null;
-      const rentAmount =
-        rentOwnerId && rentOwnerId !== currentPlayer.id
-          ? landingTile.baseRent ?? 0
-          : 0;
-      const shouldPayRent = rentAmount > 0 && Boolean(rentOwnerId);
-      const isUnownedOwnableTile = isOwnableTile && !ownership;
-      const isTaxTile = landingTile.type === "TAX";
-      const taxAmount = isTaxTile ? landingTile.taxAmount ?? 0 : 0;
-      const shouldPayTax = isTaxTile && taxAmount > 0;
       const jailTile =
         landingTile.type === "GO_TO_JAIL"
           ? boardTiles.find((tile) => tile.type === "JAIL") ?? {
@@ -1588,42 +1864,22 @@ export async function POST(request: Request) {
             }
           : null;
       const resolvedTile = jailTile ?? landingTile;
-      const finalPosition = resolvedTile.index;
-      const shouldSendToJail = landingTile.type === "GO_TO_JAIL" && jailTile;
+      let finalPosition = resolvedTile.index;
+      let shouldSendToJail = landingTile.type === "GO_TO_JAIL" && jailTile;
+      let activeLandingTile = landingTile;
+      let activeResolvedTile = resolvedTile;
       const balances = gameState?.balances ?? {};
-      const updatedBalances = (() => {
-        let nextBalances = passedStart
-          ? {
-              ...balances,
-              [currentPlayer.id]:
-                (balances[currentPlayer.id] ?? game.starting_cash ?? 0) +
-                PASS_START_SALARY,
-            }
-          : balances;
-
-        if (shouldPayRent && rentOwnerId && rentOwnerId !== currentPlayer.id) {
-          const payerBalance =
-            nextBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
-          const ownerBalance =
-            nextBalances[rentOwnerId] ?? game.starting_cash ?? 0;
-          nextBalances = {
-            ...nextBalances,
-            [currentPlayer.id]: payerBalance - rentAmount,
-            [rentOwnerId]: ownerBalance + rentAmount,
-          };
-        }
-
-        if (shouldPayTax) {
-          const payerBalance =
-            nextBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
-          nextBalances = {
-            ...nextBalances,
-            [currentPlayer.id]: payerBalance - taxAmount,
-          };
-        }
-
-        return nextBalances;
-      })();
+      let updatedBalances = passedStart
+        ? {
+            ...balances,
+            [currentPlayer.id]:
+              (balances[currentPlayer.id] ?? game.starting_cash ?? 0) +
+              PASS_START_SALARY,
+          }
+        : balances;
+      let balancesChanged = passedStart;
+      let nextChanceIndex = gameState?.chance_index ?? 0;
+      let nextCommunityIndex = gameState?.community_index ?? 0;
 
       const events: Array<{
         event_type: string;
@@ -1690,12 +1946,273 @@ export async function POST(request: Request) {
           payload: resolutionEvent.payload,
         });
       }
+      let cardTriggeredGoToJail = false;
+      const eventDeck =
+        landingTile.type === "EVENT" ? getEventDeckForTile(landingTile) : null;
+      if (eventDeck && eventDeck.cards.length > 0) {
+        const currentIndex =
+          eventDeck.indexKey === "chance_index"
+            ? nextChanceIndex
+            : nextCommunityIndex;
+        const card = eventDeck.cards[currentIndex % eventDeck.cards.length];
+        if (eventDeck.indexKey === "chance_index") {
+          nextChanceIndex = currentIndex + 1;
+        } else {
+          nextCommunityIndex = currentIndex + 1;
+        }
 
-      if (landingTile.type === "GO_TO_JAIL" && jailTile) {
+        events.push({
+          event_type: "DRAW_CARD",
+          payload: {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.display_name,
+            deck: eventDeck.deck,
+            card_id: card.id,
+            card_title: card.title,
+            card_kind: card.kind,
+            draw_index: currentIndex,
+          },
+        });
+
+        if (card.kind === "PAY" || card.kind === "RECEIVE") {
+          const amount =
+            getNumberPayload(card.payload as Record<string, unknown>, "amount") ?? 0;
+          const currentBalance =
+            updatedBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
+          updatedBalances = {
+            ...updatedBalances,
+            [currentPlayer.id]:
+              card.kind === "PAY"
+                ? currentBalance - amount
+                : currentBalance + amount,
+          };
+          if (amount !== 0) {
+            balancesChanged = true;
+          }
+          events.push({
+            event_type: card.kind === "PAY" ? "CARD_PAY" : "CARD_RECEIVE",
+            payload: {
+              player_id: currentPlayer.id,
+              player_name: currentPlayer.display_name,
+              card_id: card.id,
+              card_title: card.title,
+              card_kind: card.kind,
+              amount,
+            },
+          });
+        }
+
+        if (card.kind === "MOVE_TO" || card.kind === "MOVE_REL") {
+          const payload = card.payload as Record<string, unknown>;
+          const targetIndex =
+            card.kind === "MOVE_TO"
+              ? getNumberPayload(payload, "tile_index")
+              : null;
+          const spaces =
+            card.kind === "MOVE_REL" ? getNumberPayload(payload, "spaces") : null;
+          const cardFromIndex = activeResolvedTile.index;
+          const rawIndex =
+            card.kind === "MOVE_TO" && targetIndex !== null
+              ? targetIndex
+              : card.kind === "MOVE_REL" && spaces !== null
+                ? cardFromIndex + spaces
+                : null;
+          if (rawIndex !== null) {
+            const normalizedIndex =
+              ((rawIndex % boardSize) + boardSize) % boardSize;
+            const cardLandingTile = boardTiles[normalizedIndex] ?? {
+              index: normalizedIndex,
+              tile_id: `tile-${normalizedIndex}`,
+              type: "PROPERTY",
+              name: `Tile ${normalizedIndex}`,
+            };
+            const cardPassedStart =
+              card.kind === "MOVE_TO"
+                ? normalizedIndex < cardFromIndex
+                : spaces !== null
+                  ? spaces > 0 && cardFromIndex + spaces >= boardSize
+                  : false;
+            const cardJailTile =
+              cardLandingTile.type === "GO_TO_JAIL"
+                ? boardTiles.find((tile) => tile.type === "JAIL") ?? {
+                    index: 10,
+                    tile_id: "jail",
+                    type: "JAIL",
+                    name: "Jail",
+                  }
+                : null;
+            const cardResolvedTile = cardJailTile ?? cardLandingTile;
+            shouldSendToJail =
+              cardLandingTile.type === "GO_TO_JAIL" && cardJailTile;
+            activeLandingTile = cardLandingTile;
+            activeResolvedTile = cardResolvedTile;
+            finalPosition = cardResolvedTile.index;
+            if (cardPassedStart) {
+              const currentBalance =
+                updatedBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
+              updatedBalances = {
+                ...updatedBalances,
+                [currentPlayer.id]: currentBalance + PASS_START_SALARY,
+              };
+              balancesChanged = true;
+            }
+
+            events.push({
+              event_type: card.kind === "MOVE_TO" ? "CARD_MOVE_TO" : "CARD_MOVE_REL",
+              payload: {
+                player_id: currentPlayer.id,
+                player_name: currentPlayer.display_name,
+                card_id: card.id,
+                card_title: card.title,
+                card_kind: card.kind,
+                from_tile_index: cardFromIndex,
+                to_tile_index: cardLandingTile.index,
+                passed_start: cardPassedStart,
+              },
+            });
+
+            events.push(
+              {
+                event_type: "MOVE_PLAYER",
+                payload: {
+                  player_id: currentPlayer.id,
+                  from: cardFromIndex,
+                  to: cardLandingTile.index,
+                  passedStart: cardPassedStart,
+                  tile_id: cardLandingTile.tile_id,
+                  tile_name: cardLandingTile.name,
+                  reason: "CARD",
+                  card_id: card.id,
+                },
+              },
+              {
+                event_type: "LAND_ON_TILE",
+                payload: {
+                  player_id: currentPlayer.id,
+                  tile_id: cardLandingTile.tile_id,
+                  tile_type: cardLandingTile.type,
+                  tile_index: cardLandingTile.index,
+                },
+              },
+            );
+
+            const cardResolutionEvent = resolveTile(
+              cardLandingTile,
+              currentPlayer,
+            );
+            if (cardResolutionEvent) {
+              events.push({
+                event_type: cardResolutionEvent.event_type,
+                payload: cardResolutionEvent.payload,
+              });
+            }
+
+            if (cardLandingTile.type === "GO_TO_JAIL" && cardJailTile) {
+              cardTriggeredGoToJail = true;
+              events.push({
+                event_type: "GO_TO_JAIL",
+                payload: {
+                  from_tile_index: cardLandingTile.index,
+                  to_jail_tile_index: cardJailTile.index,
+                  player_id: currentPlayer.id,
+                  display_name: currentPlayer.display_name,
+                },
+              });
+            }
+          }
+        }
+
+        if (card.kind === "GO_TO_JAIL") {
+          const cardFromIndex = activeResolvedTile.index;
+          const cardJailTile =
+            boardTiles.find((tile) => tile.type === "JAIL") ?? {
+              index: 10,
+              tile_id: "jail",
+              type: "JAIL",
+              name: "Jail",
+            };
+          activeLandingTile = cardJailTile;
+          activeResolvedTile = cardJailTile;
+          finalPosition = cardJailTile.index;
+          shouldSendToJail = true;
+          cardTriggeredGoToJail = true;
+
+          events.push({
+            event_type: "CARD_GO_TO_JAIL",
+            payload: {
+              player_id: currentPlayer.id,
+              player_name: currentPlayer.display_name,
+              card_id: card.id,
+              card_title: card.title,
+              card_kind: card.kind,
+              from_tile_index: cardFromIndex,
+              to_jail_tile_index: cardJailTile.index,
+            },
+          });
+
+          events.push(
+            {
+              event_type: "MOVE_PLAYER",
+              payload: {
+                player_id: currentPlayer.id,
+                from: cardFromIndex,
+                to: cardJailTile.index,
+                tile_id: cardJailTile.tile_id,
+                tile_name: cardJailTile.name,
+                reason: "CARD",
+                card_id: card.id,
+              },
+            },
+            {
+              event_type: "LAND_ON_TILE",
+              payload: {
+                player_id: currentPlayer.id,
+                tile_id: cardJailTile.tile_id,
+                tile_type: cardJailTile.type,
+                tile_index: cardJailTile.index,
+              },
+            },
+          );
+
+          const cardResolutionEvent = resolveTile(cardJailTile, currentPlayer);
+          if (cardResolutionEvent) {
+            events.push({
+              event_type: cardResolutionEvent.event_type,
+              payload: cardResolutionEvent.payload,
+            });
+          }
+
+          events.push({
+            event_type: "GO_TO_JAIL",
+            payload: {
+              from_tile_index: cardFromIndex,
+              to_jail_tile_index: cardJailTile.index,
+              player_id: currentPlayer.id,
+              display_name: currentPlayer.display_name,
+            },
+          });
+        }
+      }
+
+      const ownership = ownershipByTile[activeLandingTile.index];
+      const isOwnableTile = OWNABLE_TILE_TYPES.has(activeLandingTile.type);
+      const rentOwnerId =
+        isOwnableTile && ownership ? ownership.owner_player_id : null;
+      const rentAmount =
+        rentOwnerId && rentOwnerId !== currentPlayer.id
+          ? activeLandingTile.baseRent ?? 0
+          : 0;
+      const shouldPayRent = rentAmount > 0 && Boolean(rentOwnerId);
+      const isUnownedOwnableTile = isOwnableTile && !ownership;
+      const isTaxTile = activeLandingTile.type === "TAX";
+      const taxAmount = isTaxTile ? activeLandingTile.taxAmount ?? 0 : 0;
+      const shouldPayTax = isTaxTile && taxAmount > 0;
+
+      if (activeLandingTile.type === "GO_TO_JAIL" && jailTile && !cardTriggeredGoToJail) {
         events.push({
           event_type: "GO_TO_JAIL",
           payload: {
-            from_tile_index: landingTile.index,
+            from_tile_index: activeLandingTile.index,
             to_jail_tile_index: jailTile.index,
             player_id: currentPlayer.id,
             display_name: currentPlayer.display_name,
@@ -1704,10 +2221,20 @@ export async function POST(request: Request) {
       }
 
       if (shouldPayRent && rentOwnerId && rentOwnerId !== currentPlayer.id) {
+        const payerBalance =
+          updatedBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
+        const ownerBalance =
+          updatedBalances[rentOwnerId] ?? game.starting_cash ?? 0;
+        updatedBalances = {
+          ...updatedBalances,
+          [currentPlayer.id]: payerBalance - rentAmount,
+          [rentOwnerId]: ownerBalance + rentAmount,
+        };
+        balancesChanged = true;
         events.push({
           event_type: "PAY_RENT",
           payload: {
-            tile_index: landingTile.index,
+            tile_index: activeLandingTile.index,
             from_player_id: currentPlayer.id,
             to_player_id: rentOwnerId,
             amount: rentAmount,
@@ -1716,12 +2243,19 @@ export async function POST(request: Request) {
       }
 
       if (shouldPayTax) {
+        const payerBalance =
+          updatedBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
+        updatedBalances = {
+          ...updatedBalances,
+          [currentPlayer.id]: payerBalance - taxAmount,
+        };
+        balancesChanged = true;
         events.push(
           {
             event_type: "PAY_TAX",
             payload: {
-              tile_index: landingTile.index,
-              tile_name: landingTile.name,
+              tile_index: activeLandingTile.index,
+              tile_name: activeLandingTile.name,
               amount: taxAmount,
               payer_player_id: currentPlayer.id,
               payer_display_name: currentPlayer.display_name,
@@ -1733,17 +2267,17 @@ export async function POST(request: Request) {
               player_id: currentPlayer.id,
               amount: taxAmount,
               reason: "PAY_TAX",
-              tile_index: landingTile.index,
+              tile_index: activeLandingTile.index,
             },
           },
         );
       }
 
-      const pendingPurchaseAction = isUnownedOwnableTile
+      const pendingPurchaseAction = isUnownedOwnableTile && !shouldSendToJail
         ? {
             type: "BUY_PROPERTY",
-            tile_index: landingTile.index,
-            price: landingTile.price ?? 0,
+            tile_index: activeLandingTile.index,
+            price: activeLandingTile.price ?? 0,
           }
         : null;
 
@@ -1752,9 +2286,9 @@ export async function POST(request: Request) {
           event_type: "OFFER_PURCHASE",
           payload: {
             player_id: currentPlayer.id,
-            tile_id: landingTile.tile_id,
-            tile_name: landingTile.name,
-            tile_index: landingTile.index,
+            tile_id: activeLandingTile.tile_id,
+            tile_name: activeLandingTile.name,
+            tile_index: activeLandingTile.index,
             price: pendingPurchaseAction.price,
           },
         });
@@ -1764,16 +2298,13 @@ export async function POST(request: Request) {
         event_type: "MOVE_RESOLVED",
         payload: {
           player_id: currentPlayer.id,
-          tile_id: resolvedTile.tile_id,
-          tile_type: resolvedTile.type,
-          tile_index: resolvedTile.index,
+          tile_id: activeResolvedTile.tile_id,
+          tile_type: activeResolvedTile.type,
+          tile_index: activeResolvedTile.index,
         },
       });
 
-      if (
-        !pendingPurchaseAction &&
-        landingTile.type !== "GO_TO_JAIL"
-      ) {
+      if (!pendingPurchaseAction && !shouldSendToJail) {
         events.push({
           event_type: "ALLOW_EXTRA_ROLL",
           payload: {
@@ -1785,8 +2316,6 @@ export async function POST(request: Request) {
       }
 
       const finalVersion = currentVersion + events.length;
-      const balancesChanged = passedStart || shouldPayRent || shouldPayTax;
-
       const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
         `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
         {
@@ -1799,6 +2328,12 @@ export async function POST(request: Request) {
             last_roll: rollTotal,
             doubles_count: nextDoublesCount,
             ...(balancesChanged ? { balances: updatedBalances } : {}),
+            ...(nextChanceIndex !== (gameState?.chance_index ?? 0)
+              ? { chance_index: nextChanceIndex }
+              : {}),
+            ...(nextCommunityIndex !== (gameState?.community_index ?? 0)
+              ? { community_index: nextCommunityIndex }
+              : {}),
             turn_phase: pendingPurchaseAction
               ? "AWAITING_DECISION"
               : "AWAITING_ROLL",

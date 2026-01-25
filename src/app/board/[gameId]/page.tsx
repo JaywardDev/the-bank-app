@@ -27,6 +27,8 @@ type GameState = {
   // References players.id (not auth user_id).
   current_player_id: string | null;
   last_roll: number | null;
+  chance_index: number | null;
+  community_index: number | null;
 };
 
 type GameEvent = {
@@ -105,7 +107,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
   const loadGameState = useCallback(
     async (accessToken?: string) => {
       const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
-        `game_state?select=game_id,version,current_player_id,last_roll&game_id=eq.${params.gameId}&limit=1`,
+        `game_state?select=game_id,version,current_player_id,last_roll,chance_index,community_index&game_id=eq.${params.gameId}&limit=1`,
         { method: "GET" },
         accessToken,
       );
@@ -403,6 +405,123 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
         return ownershipLabel
           ? `Landed on ${tileLabel} · ${ownershipLabel}`
           : `Landed on ${tileLabel}`;
+      }
+
+      if (event.event_type === "DRAW_CARD") {
+        const payload = event.payload as
+          | {
+              deck?: unknown;
+              card_title?: unknown;
+              player_name?: unknown;
+            }
+          | null;
+        const deck = typeof payload?.deck === "string" ? payload.deck : "Card";
+        const cardTitle =
+          typeof payload?.card_title === "string" ? payload.card_title : "Card";
+        const playerName =
+          typeof payload?.player_name === "string"
+            ? payload.player_name
+            : "Player";
+        return `${playerName} drew ${deck}: ${cardTitle}`;
+      }
+
+      if (event.event_type === "CARD_PAY") {
+        const payload = event.payload as
+          | {
+              amount?: unknown;
+              card_title?: unknown;
+              player_name?: unknown;
+            }
+          | null;
+        const amount =
+          typeof payload?.amount === "number"
+            ? payload.amount
+            : typeof payload?.amount === "string"
+              ? Number.parseInt(payload.amount, 10)
+              : null;
+        const cardTitle =
+          typeof payload?.card_title === "string" ? payload.card_title : "Card";
+        const playerName =
+          typeof payload?.player_name === "string"
+            ? payload.player_name
+            : "Player";
+        return amount !== null
+          ? `${playerName} paid $${amount} (${cardTitle})`
+          : `${playerName} paid (${cardTitle})`;
+      }
+
+      if (event.event_type === "CARD_RECEIVE") {
+        const payload = event.payload as
+          | {
+              amount?: unknown;
+              card_title?: unknown;
+              player_name?: unknown;
+            }
+          | null;
+        const amount =
+          typeof payload?.amount === "number"
+            ? payload.amount
+            : typeof payload?.amount === "string"
+              ? Number.parseInt(payload.amount, 10)
+              : null;
+        const cardTitle =
+          typeof payload?.card_title === "string" ? payload.card_title : "Card";
+        const playerName =
+          typeof payload?.player_name === "string"
+            ? payload.player_name
+            : "Player";
+        return amount !== null
+          ? `${playerName} received $${amount} (${cardTitle})`
+          : `${playerName} received (${cardTitle})`;
+      }
+
+      if (
+        event.event_type === "CARD_MOVE_TO" ||
+        event.event_type === "CARD_MOVE_REL"
+      ) {
+        const payload = event.payload as
+          | {
+              to_tile_index?: unknown;
+              card_title?: unknown;
+              player_name?: unknown;
+            }
+          | null;
+        const toIndexRaw = payload?.to_tile_index;
+        const toIndex =
+          typeof toIndexRaw === "number"
+            ? toIndexRaw
+            : typeof toIndexRaw === "string"
+              ? Number.parseInt(toIndexRaw, 10)
+              : null;
+        const tileNameFromBoard =
+          toIndex !== null
+            ? boardPack?.tiles?.find((entry) => entry.index === toIndex)?.name
+            : null;
+        const tileLabel =
+          tileNameFromBoard ?? (toIndex !== null ? `Tile ${toIndex}` : "tile");
+        const cardTitle =
+          typeof payload?.card_title === "string" ? payload.card_title : "Card";
+        const playerName =
+          typeof payload?.player_name === "string"
+            ? payload.player_name
+            : "Player";
+        return `${playerName} moved to ${tileLabel} (${cardTitle})`;
+      }
+
+      if (event.event_type === "CARD_GO_TO_JAIL") {
+        const payload = event.payload as
+          | {
+              card_title?: unknown;
+              player_name?: unknown;
+            }
+          | null;
+        const cardTitle =
+          typeof payload?.card_title === "string" ? payload.card_title : "Card";
+        const playerName =
+          typeof payload?.player_name === "string"
+            ? payload.player_name
+            : "Player";
+        return `${playerName} went to jail (${cardTitle})`;
       }
 
       if (event.event_type === "START_GAME") {
