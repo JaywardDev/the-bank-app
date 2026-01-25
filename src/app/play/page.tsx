@@ -62,6 +62,21 @@ type PendingPurchaseAction = {
   price: number;
 };
 
+const getTurnsRemainingFromPayload = (payload: unknown): number | null => {
+  if (!payload || typeof payload !== "object" || !("turns_remaining" in payload)) {
+    return null;
+  }
+  const value = (payload as Record<string, unknown>).turns_remaining;
+  if (typeof value === "number") {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
+};
+
 export default function PlayPage() {
   const router = useRouter();
   const [session, setSession] = useState<SupabaseSession | null>(null);
@@ -185,25 +200,8 @@ export default function PlayPage() {
   );
 
   const formatEventDescription = useCallback((event: GameEvent) => {
-    const payload = event.payload as
-      | {
-          roll?: number;
-          to_player_name?: string;
-          dice?: unknown;
-          doubles_count?: unknown;
-          tile_index?: unknown;
-          tile_name?: unknown;
-          price?: unknown;
-          from_player_id?: unknown;
-          to_player_id?: unknown;
-          amount?: unknown;
-          payer_display_name?: unknown;
-          display_name?: unknown;
-          from_tile_index?: unknown;
-          to_jail_tile_index?: unknown;
-          player_name?: unknown;
-        }
-      | null;
+    const payload =
+      event.payload && typeof event.payload === "object" ? event.payload : null;
 
     const dice = payload?.dice;
     const diceDisplay =
@@ -407,12 +405,7 @@ export default function PlayPage() {
         dice && dice.length >= 2 && dice.every((value) => typeof value === "number")
           ? dice.slice(0, 2)
           : null;
-      const turnsRemaining =
-        typeof payload?.turns_remaining === "number"
-          ? payload.turns_remaining
-          : typeof payload?.turns_remaining === "string"
-            ? Number.parseInt(payload.turns_remaining, 10)
-            : null;
+      const turnsRemaining = getTurnsRemainingFromPayload(payload);
       const playerName =
         typeof payload?.player_name === "string"
           ? payload.player_name

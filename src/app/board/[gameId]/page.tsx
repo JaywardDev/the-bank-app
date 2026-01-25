@@ -37,6 +37,21 @@ type GameEvent = {
   version: number;
 };
 
+const getTurnsRemainingFromPayload = (payload: unknown): number | null => {
+  if (!payload || typeof payload !== "object" || !("turns_remaining" in payload)) {
+    return null;
+  }
+  const value = (payload as Record<string, unknown>).turns_remaining;
+  if (typeof value === "number") {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
+};
+
 type OwnershipRow = {
   tile_index: number;
   owner_player_id: string;
@@ -522,24 +537,14 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
       }
 
       if (event.event_type === "JAIL_DOUBLES_FAIL") {
-        const payload = event.payload as
-          | {
-              dice?: unknown;
-              turns_remaining?: unknown;
-              player_name?: unknown;
-            }
-          | null;
+        const payload =
+          event.payload && typeof event.payload === "object" ? event.payload : null;
         const dice = Array.isArray(payload?.dice) ? payload?.dice : null;
         const diceValues =
           dice && dice.length >= 2 && dice.every((value) => typeof value === "number")
             ? dice.slice(0, 2)
             : null;
-        const turnsRemaining =
-          typeof payload?.turns_remaining === "number"
-            ? payload.turns_remaining
-            : typeof payload?.turns_remaining === "string"
-              ? Number.parseInt(payload.turns_remaining, 10)
-              : null;
+        const turnsRemaining = getTurnsRemainingFromPayload(payload);
         const playerName =
           typeof payload?.player_name === "string"
             ? payload.player_name
