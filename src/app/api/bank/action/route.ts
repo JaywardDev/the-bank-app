@@ -39,7 +39,8 @@ type BankActionRequest =
         | "END_TURN"
         | "DECLINE_PROPERTY"
         | "BUY_PROPERTY"
-        | "JAIL_PAY_FINE",
+        | "JAIL_PAY_FINE"
+        | "JAIL_ROLL_FOR_DOUBLES",
         "DECLINE_PROPERTY" | "BUY_PROPERTY"
       >;
       tileIndex?: number;
@@ -1421,6 +1422,418 @@ export async function POST(request: Request) {
         return NextResponse.json(
           { error: "Version mismatch." },
           { status: 409 },
+        );
+      }
+
+      await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+
+      return NextResponse.json({ gameState: updatedState });
+    }
+
+    if (body.action === "JAIL_ROLL_FOR_DOUBLES") {
+      if (gameState.turn_phase !== "AWAITING_JAIL_DECISION") {
+        return NextResponse.json(
+          { error: "No jail decision required right now." },
+          { status: 409 },
+        );
+      }
+
+      if (!currentPlayer.is_in_jail) {
+        return NextResponse.json(
+          { error: "You are not in jail." },
+          { status: 409 },
+        );
+      }
+
+      const dieOne = Math.floor(Math.random() * 6) + 1;
+      const dieTwo = Math.floor(Math.random() * 6) + 1;
+      const rollTotal = dieOne + dieTwo;
+      const dice = [dieOne, dieTwo];
+      const isDouble = dieOne === dieTwo;
+      const doublesCount = gameState?.doubles_count ?? 0;
+      const nextDoublesCount = isDouble ? doublesCount + 1 : 0;
+
+      if (!isDouble) {
+        const turnsRemaining = Math.max(
+          0,
+          currentPlayer.jail_turns_remaining - 1,
+        );
+        const currentIndex = players.findIndex(
+          (player) => player.id === gameState.current_player_id,
+        );
+        const nextIndex =
+          currentIndex === -1 ? 0 : (currentIndex + 1) % players.length;
+        const nextPlayer = players[nextIndex];
+        const events: Array<{
+          event_type: string;
+          payload: Record<string, unknown>;
+        }> = [
+          {
+            event_type: "ROLL_DICE",
+            payload: {
+              player_id: currentPlayer.id,
+              player_name: currentPlayer.display_name,
+              roll: rollTotal,
+              dice,
+            } satisfies DiceEventPayload,
+          },
+          {
+            event_type: "JAIL_DOUBLES_FAIL",
+            payload: {
+              player_id: currentPlayer.id,
+              player_name: currentPlayer.display_name,
+              dice,
+              turns_remaining: turnsRemaining,
+            },
+          },
+          {
+            event_type: "END_TURN",
+            payload: {
+              from_player_id: currentPlayer.id,
+              from_player_name: currentPlayer.display_name,
+              to_player_id: nextPlayer.id,
+              to_player_name: nextPlayer.display_name,
+            },
+          },
+        ];
+        const finalVersion = currentVersion + events.length;
+
+        const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
+          `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+          {
+            method: "PATCH",
+            headers: {
+              Prefer: "return=representation",
+            },
+            body: JSON.stringify({
+              version: finalVersion,
+              current_player_id: nextPlayer.id,
+              last_roll: null,
+              doubles_count: 0,
+              turn_phase: nextPlayer.is_in_jail
+                ? "AWAITING_JAIL_DECISION"
+                : "AWAITING_ROLL",
+              updated_at: new Date().toISOString(),
+            }),
+          },
+        );
+
+        if (!updatedState) {
+          return NextResponse.json(
+            { error: "Version mismatch." },
+            { status: 409 },
+          );
+        }
+
+        const [updatedPlayer] = await fetchFromSupabaseWithService<PlayerRow[]>(
+          `players?id=eq.${currentPlayer.id}`,
+          {
+            method: "PATCH",
+            headers: {
+              Prefer: "return=representation",
+            },
+            body: JSON.stringify({
+              jail_turns_remaining: turnsRemaining,
+            }),
+          },
+        );
+
+        if (!updatedPlayer) {
+          return NextResponse.json(
+            { error: "Unable to update jail turns." },
+            { status: 500 },
+          );
+        }
+
+        await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+
+        return NextResponse.json({ gameState: updatedState });
+      }
+
+      const boardPack = getBoardPackById(game.board_pack_id);
+      const boardTiles = boardPack?.tiles ?? [];
+      const boardSize = boardTiles.length > 0 ? boardTiles.length : 40;
+      const currentPosition = Number.isFinite(currentPlayer.position)
+        ? currentPlayer.position
+        : 0;
+      const newPosition = (currentPosition + rollTotal) % boardSize;
+      const passedStart = currentPosition + rollTotal >= boardSize;
+      const landingTile = boardTiles[newPosition] ?? {
+        index: newPosition,
+        tile_id: `tile-${newPosition}`,
+        type: "PROPERTY",
+        name: `Tile ${newPosition}`,
+      };
+      const ownershipByTile = await loadOwnershipByTile(gameId);
+      const ownership = ownershipByTile[landingTile.index];
+      const isOwnableTile = OWNABLE_TILE_TYPES.has(landingTile.type);
+      const rentOwnerId =
+        isOwnableTile && ownership ? ownership.owner_player_id : null;
+      const rentAmount =
+        rentOwnerId && rentOwnerId !== currentPlayer.id
+          ? landingTile.baseRent ?? 0
+          : 0;
+      const shouldPayRent = rentAmount > 0 && Boolean(rentOwnerId);
+      const isUnownedOwnableTile = isOwnableTile && !ownership;
+      const isTaxTile = landingTile.type === "TAX";
+      const taxAmount = isTaxTile ? landingTile.taxAmount ?? 0 : 0;
+      const shouldPayTax = isTaxTile && taxAmount > 0;
+      const jailTile =
+        landingTile.type === "GO_TO_JAIL"
+          ? boardTiles.find((tile) => tile.type === "JAIL") ?? {
+              index: 10,
+              tile_id: "jail",
+              type: "JAIL",
+              name: "Jail",
+            }
+          : null;
+      const resolvedTile = jailTile ?? landingTile;
+      const finalPosition = resolvedTile.index;
+      const shouldSendToJail = landingTile.type === "GO_TO_JAIL" && jailTile;
+      const balances = gameState?.balances ?? {};
+      const updatedBalances = (() => {
+        let nextBalances = passedStart
+          ? {
+              ...balances,
+              [currentPlayer.id]:
+                (balances[currentPlayer.id] ?? game.starting_cash ?? 0) +
+                PASS_START_SALARY,
+            }
+          : balances;
+
+        if (shouldPayRent && rentOwnerId && rentOwnerId !== currentPlayer.id) {
+          const payerBalance =
+            nextBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
+          const ownerBalance =
+            nextBalances[rentOwnerId] ?? game.starting_cash ?? 0;
+          nextBalances = {
+            ...nextBalances,
+            [currentPlayer.id]: payerBalance - rentAmount,
+            [rentOwnerId]: ownerBalance + rentAmount,
+          };
+        }
+
+        if (shouldPayTax) {
+          const payerBalance =
+            nextBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
+          nextBalances = {
+            ...nextBalances,
+            [currentPlayer.id]: payerBalance - taxAmount,
+          };
+        }
+
+        return nextBalances;
+      })();
+
+      const events: Array<{
+        event_type: string;
+        payload: Record<string, unknown>;
+      }> = [
+        {
+          event_type: "ROLL_DICE",
+          payload: {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.display_name,
+            roll: rollTotal,
+            dice,
+          } satisfies DiceEventPayload,
+        },
+        {
+          event_type: "ROLLED_DOUBLE",
+          payload: {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.display_name,
+            roll: rollTotal,
+            dice,
+            doubles_count: nextDoublesCount,
+          } satisfies DiceEventPayload,
+        },
+        {
+          event_type: "JAIL_DOUBLES_SUCCESS",
+          payload: {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.display_name,
+            dice,
+          },
+        },
+      ];
+
+      events.push(
+        {
+          event_type: "MOVE_PLAYER",
+          payload: {
+            player_id: currentPlayer.id,
+            from: currentPosition,
+            to: newPosition,
+            roll_total: rollTotal,
+            dice,
+            passedStart,
+            tile_id: landingTile.tile_id,
+            tile_name: landingTile.name,
+          },
+        },
+        {
+          event_type: "LAND_ON_TILE",
+          payload: {
+            player_id: currentPlayer.id,
+            tile_id: landingTile.tile_id,
+            tile_type: landingTile.type,
+            tile_index: landingTile.index,
+          },
+        },
+      );
+
+      const resolutionEvent = resolveTile(landingTile, currentPlayer);
+      if (resolutionEvent) {
+        events.push({
+          event_type: resolutionEvent.event_type,
+          payload: resolutionEvent.payload,
+        });
+      }
+
+      if (landingTile.type === "GO_TO_JAIL" && jailTile) {
+        events.push({
+          event_type: "GO_TO_JAIL",
+          payload: {
+            from_tile_index: landingTile.index,
+            to_jail_tile_index: jailTile.index,
+            player_id: currentPlayer.id,
+            display_name: currentPlayer.display_name,
+          },
+        });
+      }
+
+      if (shouldPayRent && rentOwnerId && rentOwnerId !== currentPlayer.id) {
+        events.push({
+          event_type: "PAY_RENT",
+          payload: {
+            tile_index: landingTile.index,
+            from_player_id: currentPlayer.id,
+            to_player_id: rentOwnerId,
+            amount: rentAmount,
+          },
+        });
+      }
+
+      if (shouldPayTax) {
+        events.push(
+          {
+            event_type: "PAY_TAX",
+            payload: {
+              tile_index: landingTile.index,
+              tile_name: landingTile.name,
+              amount: taxAmount,
+              payer_player_id: currentPlayer.id,
+              payer_display_name: currentPlayer.display_name,
+            },
+          },
+          {
+            event_type: "CASH_DEBIT",
+            payload: {
+              player_id: currentPlayer.id,
+              amount: taxAmount,
+              reason: "PAY_TAX",
+              tile_index: landingTile.index,
+            },
+          },
+        );
+      }
+
+      const pendingPurchaseAction = isUnownedOwnableTile
+        ? {
+            type: "BUY_PROPERTY",
+            tile_index: landingTile.index,
+            price: landingTile.price ?? 0,
+          }
+        : null;
+
+      if (pendingPurchaseAction) {
+        events.push({
+          event_type: "OFFER_PURCHASE",
+          payload: {
+            player_id: currentPlayer.id,
+            tile_id: landingTile.tile_id,
+            tile_name: landingTile.name,
+            tile_index: landingTile.index,
+            price: pendingPurchaseAction.price,
+          },
+        });
+      }
+
+      events.push({
+        event_type: "MOVE_RESOLVED",
+        payload: {
+          player_id: currentPlayer.id,
+          tile_id: resolvedTile.tile_id,
+          tile_type: resolvedTile.type,
+          tile_index: resolvedTile.index,
+        },
+      });
+
+      if (
+        !pendingPurchaseAction &&
+        landingTile.type !== "GO_TO_JAIL"
+      ) {
+        events.push({
+          event_type: "ALLOW_EXTRA_ROLL",
+          payload: {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.display_name,
+            doubles_count: nextDoublesCount,
+          },
+        });
+      }
+
+      const finalVersion = currentVersion + events.length;
+      const balancesChanged = passedStart || shouldPayRent || shouldPayTax;
+
+      const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            version: finalVersion,
+            last_roll: rollTotal,
+            doubles_count: nextDoublesCount,
+            ...(balancesChanged ? { balances: updatedBalances } : {}),
+            turn_phase: pendingPurchaseAction
+              ? "AWAITING_DECISION"
+              : "AWAITING_ROLL",
+            pending_action: pendingPurchaseAction,
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      );
+
+      if (!updatedState) {
+        return NextResponse.json(
+          { error: "Version mismatch." },
+          { status: 409 },
+        );
+      }
+
+      const [updatedPlayer] = await fetchFromSupabaseWithService<PlayerRow[]>(
+        `players?id=eq.${currentPlayer.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            position: finalPosition,
+            is_in_jail: Boolean(shouldSendToJail),
+            jail_turns_remaining: shouldSendToJail ? 3 : 0,
+          }),
+        },
+      );
+
+      if (!updatedPlayer) {
+        return NextResponse.json(
+          { error: "Unable to update player position." },
+          { status: 500 },
         );
       }
 

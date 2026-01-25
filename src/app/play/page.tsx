@@ -386,6 +386,46 @@ export default function PlayPage() {
         : `${playerName} paid a jail fine`;
     }
 
+    if (event.event_type === "JAIL_DOUBLES_SUCCESS") {
+      const dice = Array.isArray(payload?.dice) ? payload?.dice : null;
+      const diceValues =
+        dice && dice.length >= 2 && dice.every((value) => typeof value === "number")
+          ? dice.slice(0, 2)
+          : null;
+      const playerName =
+        typeof payload?.player_name === "string"
+          ? payload.player_name
+          : "Player";
+      return diceValues
+        ? `${playerName} rolled doubles to leave jail (${diceValues[0]} + ${diceValues[1]})`
+        : `${playerName} rolled doubles to leave jail`;
+    }
+
+    if (event.event_type === "JAIL_DOUBLES_FAIL") {
+      const dice = Array.isArray(payload?.dice) ? payload?.dice : null;
+      const diceValues =
+        dice && dice.length >= 2 && dice.every((value) => typeof value === "number")
+          ? dice.slice(0, 2)
+          : null;
+      const turnsRemaining =
+        typeof payload?.turns_remaining === "number"
+          ? payload.turns_remaining
+          : typeof payload?.turns_remaining === "string"
+            ? Number.parseInt(payload.turns_remaining, 10)
+            : null;
+      const playerName =
+        typeof payload?.player_name === "string"
+          ? payload.player_name
+          : "Player";
+      if (diceValues && turnsRemaining !== null) {
+        return `${playerName} missed doubles (${diceValues[0]} + ${diceValues[1]}). Turns remaining: ${turnsRemaining}`;
+      }
+      if (diceValues) {
+        return `${playerName} missed doubles (${diceValues[0]} + ${diceValues[1]})`;
+      }
+      return `${playerName} missed doubles in jail`;
+    }
+
     if (event.event_type === "GO_TO_JAIL") {
       const fromIndexRaw = payload?.from_tile_index;
       const fromIndex =
@@ -1109,6 +1149,8 @@ export default function PlayPage() {
   const canAct = initialSnapshotReady && isMyTurn;
   const isAwaitingJailDecision =
     isMyTurn && gameState?.turn_phase === "AWAITING_JAIL_DECISION";
+  const canRollForDoubles =
+    isAwaitingJailDecision && currentUserPlayer?.is_in_jail;
   const canRoll =
     canAct &&
     !hasPendingDecision &&
@@ -1124,7 +1166,13 @@ export default function PlayPage() {
   const handleBankAction = useCallback(
     async (
       request:
-        | { action: "ROLL_DICE" | "END_TURN" | "JAIL_PAY_FINE" }
+        | {
+            action:
+              | "ROLL_DICE"
+              | "END_TURN"
+              | "JAIL_PAY_FINE"
+              | "JAIL_ROLL_FOR_DOUBLES";
+          }
         | { action: "DECLINE_PROPERTY" | "BUY_PROPERTY"; tileIndex: number },
     ) => {
       const { action } = request;
@@ -1330,6 +1378,10 @@ export default function PlayPage() {
 
   const handlePayJailFine = useCallback(() => {
     void handleBankAction({ action: "JAIL_PAY_FINE" });
+  }, [handleBankAction]);
+
+  const handleRollForDoubles = useCallback(() => {
+    void handleBankAction({ action: "JAIL_ROLL_FOR_DOUBLES" });
   }, [handleBankAction]);
 
   const handleLeaveTable = useCallback(() => {
@@ -1592,10 +1644,15 @@ export default function PlayPage() {
                 <button
                   className="rounded-2xl border border-rose-300 px-4 py-2 text-sm font-semibold text-rose-900 disabled:cursor-not-allowed disabled:border-rose-200 disabled:text-rose-400"
                   type="button"
-                  disabled
-                  title="Roll for doubles (coming soon)"
+                  onClick={handleRollForDoubles}
+                  disabled={
+                    !canRollForDoubles ||
+                    actionLoading === "JAIL_ROLL_FOR_DOUBLES"
+                  }
                 >
-                  Roll for doubles
+                  {actionLoading === "JAIL_ROLL_FOR_DOUBLES"
+                    ? "Rolling…"
+                    : "Roll for doubles"}
                 </button>
               </div>
             </div>

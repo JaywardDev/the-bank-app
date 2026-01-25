@@ -500,6 +500,59 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
           : `${playerName} paid a jail fine`;
       }
 
+      if (event.event_type === "JAIL_DOUBLES_SUCCESS") {
+        const payload = event.payload as
+          | {
+              dice?: unknown;
+              player_name?: unknown;
+            }
+          | null;
+        const dice = Array.isArray(payload?.dice) ? payload?.dice : null;
+        const diceValues =
+          dice && dice.length >= 2 && dice.every((value) => typeof value === "number")
+            ? dice.slice(0, 2)
+            : null;
+        const playerName =
+          typeof payload?.player_name === "string"
+            ? payload.player_name
+            : "Player";
+        return diceValues
+          ? `${playerName} rolled doubles to leave jail (${diceValues[0]} + ${diceValues[1]})`
+          : `${playerName} rolled doubles to leave jail`;
+      }
+
+      if (event.event_type === "JAIL_DOUBLES_FAIL") {
+        const payload = event.payload as
+          | {
+              dice?: unknown;
+              turns_remaining?: unknown;
+              player_name?: unknown;
+            }
+          | null;
+        const dice = Array.isArray(payload?.dice) ? payload?.dice : null;
+        const diceValues =
+          dice && dice.length >= 2 && dice.every((value) => typeof value === "number")
+            ? dice.slice(0, 2)
+            : null;
+        const turnsRemaining =
+          typeof payload?.turns_remaining === "number"
+            ? payload.turns_remaining
+            : typeof payload?.turns_remaining === "string"
+              ? Number.parseInt(payload.turns_remaining, 10)
+              : null;
+        const playerName =
+          typeof payload?.player_name === "string"
+            ? payload.player_name
+            : "Player";
+        if (diceValues && turnsRemaining !== null) {
+          return `${playerName} missed doubles (${diceValues[0]} + ${diceValues[1]}). Turns remaining: ${turnsRemaining}`;
+        }
+        if (diceValues) {
+          return `${playerName} missed doubles (${diceValues[0]} + ${diceValues[1]})`;
+        }
+        return `${playerName} missed doubles in jail`;
+      }
+
       if (event.event_type === "GO_TO_JAIL") {
         const payload = event.payload as
           | {
