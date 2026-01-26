@@ -6,6 +6,7 @@ import type { RealtimeChannel } from "@supabase/supabase-js";
 import PageShell from "../components/PageShell";
 import BoardMiniMap from "../components/BoardMiniMap";
 import { getBoardPackById } from "@/lib/boardPacks";
+import { getRules } from "@/lib/rules";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 
 const lastGameKey = "bank.lastGameId";
@@ -44,7 +45,7 @@ type GameState = {
   chance_index: number | null;
   community_index: number | null;
   free_parking_pot: number | null;
-  rules: { freeParkingJackpotEnabled?: boolean } | null;
+  rules: Partial<ReturnType<typeof getRules>> | null;
 };
 
 type GameEvent = {
@@ -58,9 +59,25 @@ type GameEvent = {
 type OwnershipRow = {
   tile_index: number;
   owner_player_id: string | null;
+  collateral_loan_id: string | null;
 };
 
-type OwnershipByTile = Record<number, { owner_player_id: string }>;
+type OwnershipByTile = Record<
+  number,
+  { owner_player_id: string; collateral_loan_id: string | null }
+>;
+
+type PlayerLoan = {
+  id: string;
+  player_id: string;
+  collateral_tile_index: number;
+  principal: number;
+  rate_per_turn: number;
+  term_turns: number;
+  turns_remaining: number;
+  payment_per_turn: number;
+  status: string;
+};
 
 type PendingPurchaseAction = {
   type: "BUY_PROPERTY";
@@ -69,10 +86,14 @@ type PendingPurchaseAction = {
 };
 
 const getTurnsRemainingFromPayload = (payload: unknown): number | null => {
-  if (!payload || typeof payload !== "object" || !("turns_remaining" in payload)) {
+  if (!payload || typeof payload !== "object") {
     return null;
   }
-  const value = (payload as Record<string, unknown>).turns_remaining;
+  const record = payload as Record<string, unknown>;
+  const value =
+    "turns_remaining" in record
+      ? record.turns_remaining
+      : record.turns_remaining_after;
   if (typeof value === "number") {
     return value;
   }
@@ -93,6 +114,7 @@ export default function PlayPage() {
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [events, setEvents] = useState<GameEvent[]>([]);
   const [ownershipByTile, setOwnershipByTile] = useState<OwnershipByTile>({});
+  const [playerLoans, setPlayerLoans] = useState<PlayerLoan[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -170,7 +192,12 @@ export default function PlayPage() {
       latestRollPayload?.doubles_count ?? latestDoublePayload?.doubles_count;
     return typeof candidate === "number" ? candidate : null;
   }, [latestDoublePayload, latestRollPayload]);
+  const currentUserPlayer = useMemo(
+    () => players.find((player) => session && player.user_id === session.user.id),
+    [players, session],
+  );
   const boardPack = getBoardPackById(gameMeta?.board_pack_id);
+  const rules = useMemo(() => getRules(gameState?.rules), [gameState?.rules]);
   const latestRolledDoubleConfirmed = useMemo(() => {
     if (!latestRollEvent || !latestRolledDoubleEvent) {
       return false;
@@ -465,6 +492,111 @@ export default function PlayPage() {
         : `Paid rent to ${ownerName} (${tileLabel})`;
     }
 
+    if (event.event_type === "RENT_SKIPPED_COLLATERAL") {
+      const tileIndexRaw = payload?.tile_index;
+      const tileIndex =
+        typeof tileIndexRaw === "number"
+          ? tileIndexRaw
+          : typeof tileIndexRaw === "string"
+            ? Number.parseInt(tileIndexRaw, 10)
+            : null;
+      const tileNameFromBoard =
+        tileIndex !== null
+          ? boardPack?.tiles?.find((entry) => entry.index === tileIndex)?.name
+          : null;
+      const tileLabel =
+        tileNameFromBoard ?? (tileIndex !== null ? `Tile ${tileIndex}` : "tile");
+      return `Rent skipped on ${tileLabel} (collateralized)`;
+    }
+
+    if (event.event_type === "COLLATERAL_LOAN_TAKEN") {
+      const tileIndexRaw = payload?.tile_index;
+      const tileIndex =
+        typeof tileIndexRaw === "number"
+          ? tileIndexRaw
+          : typeof tileIndexRaw === "string"
+            ? Number.parseInt(tileIndexRaw, 10)
+            : null;
+      const tileNameFromBoard =
+        tileIndex !== null
+          ? boardPack?.tiles?.find((entry) => entry.index === tileIndex)?.name
+          : null;
+      const tileLabel =
+        tileNameFromBoard ?? (tileIndex !== null ? `Tile ${tileIndex}` : "tile");
+      const principal =
+        typeof payload?.principal === "number"
+          ? payload.principal
+          : typeof payload?.principal === "string"
+            ? Number.parseInt(payload.principal, 10)
+            : null;
+      const payment =
+        typeof payload?.payment_per_turn === "number"
+          ? payload.payment_per_turn
+          : typeof payload?.payment_per_turn === "string"
+            ? Number.parseInt(payload.payment_per_turn, 10)
+            : null;
+      const termTurns =
+        typeof payload?.term_turns === "number"
+          ? payload.term_turns
+          : typeof payload?.term_turns === "string"
+            ? Number.parseInt(payload.term_turns, 10)
+            : null;
+      const principalLabel =
+        principal !== null ? ` for $${principal}` : "";
+      const paymentLabel =
+        payment !== null && termTurns !== null
+          ? ` · $${payment}/turn × ${termTurns}`
+          : "";
+      return `Collateral loan on ${tileLabel}${principalLabel}${paymentLabel}`;
+    }
+
+    if (event.event_type === "COLLATERAL_LOAN_PAYMENT") {
+      const tileIndexRaw = payload?.tile_index;
+      const tileIndex =
+        typeof tileIndexRaw === "number"
+          ? tileIndexRaw
+          : typeof tileIndexRaw === "string"
+            ? Number.parseInt(tileIndexRaw, 10)
+            : null;
+      const tileNameFromBoard =
+        tileIndex !== null
+          ? boardPack?.tiles?.find((entry) => entry.index === tileIndex)?.name
+          : null;
+      const tileLabel =
+        tileNameFromBoard ?? (tileIndex !== null ? `Tile ${tileIndex}` : "tile");
+      const payment =
+        typeof payload?.amount === "number"
+          ? payload.amount
+          : typeof payload?.amount === "string"
+            ? Number.parseInt(payload.amount, 10)
+            : null;
+      const turnsRemaining = getTurnsRemainingFromPayload(payload);
+      if (payment !== null && turnsRemaining !== null) {
+        return `Loan payment $${payment} on ${tileLabel} · ${turnsRemaining} turns left`;
+      }
+      if (payment !== null) {
+        return `Loan payment $${payment} on ${tileLabel}`;
+      }
+      return `Loan payment on ${tileLabel}`;
+    }
+
+    if (event.event_type === "COLLATERAL_LOAN_PAID") {
+      const tileIndexRaw = payload?.tile_index;
+      const tileIndex =
+        typeof tileIndexRaw === "number"
+          ? tileIndexRaw
+          : typeof tileIndexRaw === "string"
+            ? Number.parseInt(tileIndexRaw, 10)
+            : null;
+      const tileNameFromBoard =
+        tileIndex !== null
+          ? boardPack?.tiles?.find((entry) => entry.index === tileIndex)?.name
+          : null;
+      const tileLabel =
+        tileNameFromBoard ?? (tileIndex !== null ? `Tile ${tileIndex}` : "tile");
+      return `Loan paid off on ${tileLabel}`;
+    }
+
     if (event.event_type === "PAY_TAX") {
       const tileIndexRaw = payload?.tile_index;
       const tileIndex =
@@ -635,17 +767,40 @@ export default function PlayPage() {
       const ownershipRows = await supabaseClient.fetchFromSupabase<
         OwnershipRow[]
       >(
-        `property_ownership?select=tile_index,owner_player_id&game_id=eq.${activeGameId}`,
+        `property_ownership?select=tile_index,owner_player_id,collateral_loan_id&game_id=eq.${activeGameId}`,
         { method: "GET" },
         accessToken,
       );
       const mapped = ownershipRows.reduce<OwnershipByTile>((acc, row) => {
         if (row.owner_player_id) {
-          acc[row.tile_index] = { owner_player_id: row.owner_player_id };
+          acc[row.tile_index] = {
+            owner_player_id: row.owner_player_id,
+            collateral_loan_id: row.collateral_loan_id ?? null,
+          };
         }
         return acc;
       }, {});
       setOwnershipByTile(mapped);
+    },
+    [],
+  );
+
+  const loadLoans = useCallback(
+    async (
+      activeGameId: string,
+      accessToken?: string,
+      playerId?: string | null,
+    ) => {
+      if (!playerId) {
+        setPlayerLoans([]);
+        return;
+      }
+      const loanRows = await supabaseClient.fetchFromSupabase<PlayerLoan[]>(
+        `player_loans?select=id,player_id,collateral_tile_index,principal,rate_per_turn,term_turns,turns_remaining,payment_per_turn,status&game_id=eq.${activeGameId}&player_id=eq.${playerId}`,
+        { method: "GET" },
+        accessToken,
+      );
+      setPlayerLoans(loanRows);
     },
     [],
   );
@@ -859,6 +1014,24 @@ export default function PlayPage() {
         {
           event: "*",
           schema: "public",
+          table: "player_loans",
+          filter: `game_id=eq.${gameId}`,
+        },
+        async () => {
+          try {
+            await loadLoans(gameId, session?.access_token, currentUserPlayer?.id);
+          } catch (error) {
+            if (DEBUG) {
+              console.error("[Play][Realtime] player_loans handler error", error);
+            }
+          }
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
           table: "games",
           filter: `id=eq.${gameId}`,
         },
@@ -901,9 +1074,11 @@ export default function PlayPage() {
   }, [
     gameId,
     isConfigured,
+    currentUserPlayer?.id,
     loadEvents,
     loadGameMeta,
     loadGameState,
+    loadLoans,
     loadPlayers,
     loadOwnership,
     loadGameData,
@@ -963,14 +1138,17 @@ export default function PlayPage() {
           loadGameState(gameId, accessToken),
           loadEvents(gameId, accessToken),
           loadOwnership(gameId, accessToken),
+          loadLoans(gameId, accessToken, currentUserPlayer?.id),
         ]);
       }, 350);
     },
     [
+      currentUserPlayer?.id,
       firstRoundResyncEnabled,
       gameId,
       loadEvents,
       loadGameState,
+      loadLoans,
       loadPlayers,
       loadOwnership,
       session?.access_token,
@@ -1228,9 +1406,6 @@ export default function PlayPage() {
   const currentPlayer = players.find(
     (player) => player.id === gameState?.current_player_id,
   );
-  const currentUserPlayer = players.find(
-    (player) => session && player.user_id === session.user.id,
-  );
   const isEliminated = Boolean(currentUserPlayer?.is_eliminated);
   const isMyTurn = Boolean(
     isInProgress &&
@@ -1312,6 +1487,34 @@ export default function PlayPage() {
   const isHost = Boolean(
     session && gameMeta?.created_by && session.user.id === gameMeta.created_by,
   );
+  const ownedProperties = useMemo(() => {
+    if (!boardPack?.tiles || !currentUserPlayer) {
+      return [];
+    }
+    return boardPack.tiles
+      .filter(
+        (tile) =>
+          ["PROPERTY", "RAIL", "UTILITY"].includes(tile.type) &&
+          ownershipByTile[tile.index]?.owner_player_id === currentUserPlayer.id,
+      )
+      .map((tile) => ({
+        tile,
+        isCollateralized: Boolean(
+          ownershipByTile[tile.index]?.collateral_loan_id,
+        ),
+      }));
+  }, [boardPack?.tiles, currentUserPlayer, ownershipByTile]);
+  const eligibleCollateralTiles = ownedProperties.filter(
+    (entry) => !entry.isCollateralized,
+  );
+  const activeLoans = playerLoans.filter((loan) => loan.status === "active");
+
+  useEffect(() => {
+    if (!gameId || !session?.access_token) {
+      return;
+    }
+    void loadLoans(gameId, session.access_token, currentUserPlayer?.id);
+  }, [currentUserPlayer?.id, gameId, loadLoans, session?.access_token]);
 
   const handleBankAction = useCallback(
     async (
@@ -1323,7 +1526,8 @@ export default function PlayPage() {
               | "JAIL_PAY_FINE"
               | "JAIL_ROLL_FOR_DOUBLES";
           }
-        | { action: "DECLINE_PROPERTY" | "BUY_PROPERTY"; tileIndex: number },
+        | { action: "DECLINE_PROPERTY" | "BUY_PROPERTY"; tileIndex: number }
+        | { action: "TAKE_COLLATERAL_LOAN"; tileIndex: number },
     ) => {
       const { action } = request;
       const tileIndex = "tileIndex" in request ? request.tileIndex : undefined;
@@ -2005,6 +2209,107 @@ export default function PlayPage() {
         </div>
       </section>
 
+      <section className="rounded-2xl border bg-white p-5 shadow-sm space-y-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+            Loan with Collateral
+          </p>
+          <p className="text-sm text-neutral-600">
+            Raise cash by collateralizing an owned property. Rent is paused while
+            the loan is active.
+          </p>
+        </div>
+        <div className="rounded-2xl border border-dashed border-neutral-200 p-3 text-xs text-neutral-600">
+          <p className="font-semibold text-neutral-700">Terms</p>
+          <p>
+            LTV: {Math.round(rules.collateralLtv * 100)}% · Rate:{" "}
+            {(rules.loanRatePerTurn * 100).toFixed(2)}% per turn · Term:{" "}
+            {rules.loanTermTurns} turns
+          </p>
+        </div>
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+            Eligible collateral
+          </p>
+          {eligibleCollateralTiles.length === 0 ? (
+            <p className="text-sm text-neutral-500">
+              No eligible properties available.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {eligibleCollateralTiles.map(({ tile }) => {
+                const principalPreview = Math.round(
+                  (tile.price ?? 0) * rules.collateralLtv,
+                );
+                return (
+                  <div
+                    key={tile.index}
+                    className="flex items-center justify-between rounded-2xl border px-4 py-3 text-sm"
+                  >
+                    <div>
+                      <p className="font-semibold text-neutral-900">
+                        {tile.name}
+                      </p>
+                      <p className="text-xs text-neutral-500">
+                        Principal: ${principalPreview}
+                      </p>
+                    </div>
+                    <button
+                      className="rounded-full bg-neutral-900 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
+                      type="button"
+                      onClick={() =>
+                        void handleBankAction({
+                          action: "TAKE_COLLATERAL_LOAN",
+                          tileIndex: tile.index,
+                        })
+                      }
+                      disabled={!canAct || !rules.loanCollateralEnabled}
+                    >
+                      {actionLoading === "TAKE_COLLATERAL_LOAN"
+                        ? "Collateralizing…"
+                        : "Collateralize"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+            Active loans
+          </p>
+          {activeLoans.length === 0 ? (
+            <p className="text-sm text-neutral-500">No active loans.</p>
+          ) : (
+            <div className="space-y-2">
+              {activeLoans.map((loan) => {
+                const tileName =
+                  boardPack?.tiles?.find(
+                    (entry) => entry.index === loan.collateral_tile_index,
+                  )?.name ?? `Tile ${loan.collateral_tile_index}`;
+                return (
+                  <div
+                    key={loan.id}
+                    className="flex items-center justify-between rounded-2xl border px-4 py-3 text-sm"
+                  >
+                    <div>
+                      <p className="font-semibold text-neutral-900">
+                        {tileName}
+                      </p>
+                      <p className="text-xs text-neutral-500">
+                        Payment: ${loan.payment_per_turn} · Turns remaining:{" "}
+                        {loan.turns_remaining}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </section>
+
       <section className="space-y-3">
         <div className="flex items-center justify-between">
           <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
@@ -2016,7 +2321,7 @@ export default function PlayPage() {
           {[
             "Pay Bank",
             "Receive from Bank",
-            "Mortgage / Unmortgage",
+            "Loan with Collateral",
             "Build / Sell Houses",
           ].map((label) => (
             <button

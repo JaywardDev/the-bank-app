@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageShell from "@/app/components/PageShell";
 import BoardMiniMap from "@/app/components/BoardMiniMap";
 import { getBoardPackById } from "@/lib/boardPacks";
+import { getRules } from "@/lib/rules";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 
 const DEBUG = process.env.NEXT_PUBLIC_DEBUG === "true";
@@ -32,7 +33,7 @@ type GameState = {
   chance_index: number | null;
   community_index: number | null;
   free_parking_pot: number | null;
-  rules: { freeParkingJackpotEnabled?: boolean } | null;
+  rules: Partial<ReturnType<typeof getRules>> | null;
 };
 
 type GameEvent = {
@@ -44,10 +45,14 @@ type GameEvent = {
 };
 
 const getTurnsRemainingFromPayload = (payload: unknown): number | null => {
-  if (!payload || typeof payload !== "object" || !("turns_remaining" in payload)) {
+  if (!payload || typeof payload !== "object") {
     return null;
   }
-  const value = (payload as Record<string, unknown>).turns_remaining;
+  const record = payload as Record<string, unknown>;
+  const value =
+    "turns_remaining" in record
+      ? record.turns_remaining
+      : record.turns_remaining_after;
   if (typeof value === "number") {
     return value;
   }
@@ -61,9 +66,13 @@ const getTurnsRemainingFromPayload = (payload: unknown): number | null => {
 type OwnershipRow = {
   tile_index: number;
   owner_player_id: string | null;
+  collateral_loan_id: string | null;
 };
 
-type OwnershipByTile = Record<number, { owner_player_id: string }>;
+type OwnershipByTile = Record<
+  number,
+  { owner_player_id: string; collateral_loan_id: string | null }
+>;
 
 type BoardDisplayPageProps = {
   params: {
@@ -137,13 +146,16 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
       const ownershipRows = await supabaseClient.fetchFromSupabase<
         OwnershipRow[]
       >(
-        `property_ownership?select=tile_index,owner_player_id&game_id=eq.${params.gameId}`,
+        `property_ownership?select=tile_index,owner_player_id,collateral_loan_id&game_id=eq.${params.gameId}`,
         { method: "GET" },
         accessToken,
       );
       const mapped = ownershipRows.reduce<OwnershipByTile>((acc, row) => {
         if (row.owner_player_id) {
-          acc[row.tile_index] = { owner_player_id: row.owner_player_id };
+          acc[row.tile_index] = {
+            owner_player_id: row.owner_player_id,
+            collateral_loan_id: row.collateral_loan_id ?? null,
+          };
         }
         return acc;
       }, {});
@@ -629,6 +641,128 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
         return rentAmount !== null
           ? `Paid $${rentAmount} rent to ${ownerName} (${tileLabel})${detailLabel}`
           : `Paid rent to ${ownerName} (${tileLabel})`;
+      }
+
+      if (event.event_type === "RENT_SKIPPED_COLLATERAL") {
+        const payload = event.payload as { tile_index?: unknown } | null;
+        const tileIndexRaw = payload?.tile_index;
+        const tileIndex =
+          typeof tileIndexRaw === "number"
+            ? tileIndexRaw
+            : typeof tileIndexRaw === "string"
+              ? Number.parseInt(tileIndexRaw, 10)
+              : null;
+        const tileNameFromBoard =
+          tileIndex !== null
+            ? boardPack?.tiles?.find((entry) => entry.index === tileIndex)?.name
+            : null;
+        const tileLabel =
+          tileNameFromBoard ?? (tileIndex !== null ? `Tile ${tileIndex}` : "tile");
+        return `Rent skipped on ${tileLabel} (collateralized)`;
+      }
+
+      if (event.event_type === "COLLATERAL_LOAN_TAKEN") {
+        const payload = event.payload as
+          | {
+              tile_index?: unknown;
+              principal?: unknown;
+              payment_per_turn?: unknown;
+              term_turns?: unknown;
+            }
+          | null;
+        const tileIndexRaw = payload?.tile_index;
+        const tileIndex =
+          typeof tileIndexRaw === "number"
+            ? tileIndexRaw
+            : typeof tileIndexRaw === "string"
+              ? Number.parseInt(tileIndexRaw, 10)
+              : null;
+        const tileNameFromBoard =
+          tileIndex !== null
+            ? boardPack?.tiles?.find((entry) => entry.index === tileIndex)?.name
+            : null;
+        const tileLabel =
+          tileNameFromBoard ?? (tileIndex !== null ? `Tile ${tileIndex}` : "tile");
+        const principal =
+          typeof payload?.principal === "number"
+            ? payload.principal
+            : typeof payload?.principal === "string"
+              ? Number.parseInt(payload.principal, 10)
+              : null;
+        const payment =
+          typeof payload?.payment_per_turn === "number"
+            ? payload.payment_per_turn
+            : typeof payload?.payment_per_turn === "string"
+              ? Number.parseInt(payload.payment_per_turn, 10)
+              : null;
+        const termTurns =
+          typeof payload?.term_turns === "number"
+            ? payload.term_turns
+            : typeof payload?.term_turns === "string"
+              ? Number.parseInt(payload.term_turns, 10)
+              : null;
+        const principalLabel =
+          principal !== null ? ` for $${principal}` : "";
+        const paymentLabel =
+          payment !== null && termTurns !== null
+            ? ` · $${payment}/turn × ${termTurns}`
+            : "";
+        return `Collateral loan on ${tileLabel}${principalLabel}${paymentLabel}`;
+      }
+
+      if (event.event_type === "COLLATERAL_LOAN_PAYMENT") {
+        const payload = event.payload as
+          | {
+              tile_index?: unknown;
+              amount?: unknown;
+              turns_remaining_after?: unknown;
+            }
+          | null;
+        const tileIndexRaw = payload?.tile_index;
+        const tileIndex =
+          typeof tileIndexRaw === "number"
+            ? tileIndexRaw
+            : typeof tileIndexRaw === "string"
+              ? Number.parseInt(tileIndexRaw, 10)
+              : null;
+        const tileNameFromBoard =
+          tileIndex !== null
+            ? boardPack?.tiles?.find((entry) => entry.index === tileIndex)?.name
+            : null;
+        const tileLabel =
+          tileNameFromBoard ?? (tileIndex !== null ? `Tile ${tileIndex}` : "tile");
+        const payment =
+          typeof payload?.amount === "number"
+            ? payload.amount
+            : typeof payload?.amount === "string"
+              ? Number.parseInt(payload.amount, 10)
+              : null;
+        const turnsRemaining = getTurnsRemainingFromPayload(payload);
+        if (payment !== null && turnsRemaining !== null) {
+          return `Loan payment $${payment} on ${tileLabel} · ${turnsRemaining} turns left`;
+        }
+        if (payment !== null) {
+          return `Loan payment $${payment} on ${tileLabel}`;
+        }
+        return `Loan payment on ${tileLabel}`;
+      }
+
+      if (event.event_type === "COLLATERAL_LOAN_PAID") {
+        const payload = event.payload as { tile_index?: unknown } | null;
+        const tileIndexRaw = payload?.tile_index;
+        const tileIndex =
+          typeof tileIndexRaw === "number"
+            ? tileIndexRaw
+            : typeof tileIndexRaw === "string"
+              ? Number.parseInt(tileIndexRaw, 10)
+              : null;
+        const tileNameFromBoard =
+          tileIndex !== null
+            ? boardPack?.tiles?.find((entry) => entry.index === tileIndex)?.name
+            : null;
+        const tileLabel =
+          tileNameFromBoard ?? (tileIndex !== null ? `Tile ${tileIndex}` : "tile");
+        return `Loan paid off on ${tileLabel}`;
       }
 
       if (event.event_type === "PAY_TAX") {

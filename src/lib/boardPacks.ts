@@ -116,8 +116,8 @@ export const communityCards: CardDefinition[] = [
 
 export const boardPacks: BoardPack[] = [
   {
-    id: "classic",
-    displayName: "Classic",
+    id: "classic-us",
+    displayName: "Classic (US)",
     properties: [],
     eventDecks: [],
     tiles: [
@@ -395,8 +395,8 @@ export const boardPacks: BoardPack[] = [
     ],
   },
   {
-    id: "monopoly-uk",
-    displayName: "Monopoly UK",
+    id: "classic-uk",
+    displayName: "Classic (UK)",
     properties: [],
     eventDecks: [],
     tiles: [

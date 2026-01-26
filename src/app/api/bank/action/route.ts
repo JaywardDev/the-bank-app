@@ -6,6 +6,7 @@ import {
   getBoardPackById,
 } from "@/lib/boardPacks";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "@/lib/env";
+import { DEFAULT_RULES, getRules } from "@/lib/rules";
 
 const supabaseUrl = (process.env.SUPABASE_URL ?? SUPABASE_URL ?? "").trim();
 const supabaseAnonKey = (
@@ -53,6 +54,10 @@ type BankActionRequest =
   | (BaseActionRequest & {
       action: "DECLINE_PROPERTY" | "BUY_PROPERTY";
       tileIndex: number;
+    })
+  | (BaseActionRequest & {
+      action: "TAKE_COLLATERAL_LOAN";
+      tileIndex: number;
     });
 
 type SupabaseUser = {
@@ -95,15 +100,32 @@ type GameStateRow = {
   chance_index: number | null;
   community_index: number | null;
   free_parking_pot: number | null;
-  rules: { freeParkingJackpotEnabled?: boolean } | null;
+  rules: Partial<ReturnType<typeof getRules>> | null;
 };
 
 type OwnershipRow = {
   tile_index: number;
   owner_player_id: string | null;
+  collateral_loan_id: string | null;
 };
 
-type OwnershipByTile = Record<number, { owner_player_id: string }>;
+type OwnershipByTile = Record<
+  number,
+  { owner_player_id: string; collateral_loan_id: string | null }
+>;
+
+type PlayerLoanRow = {
+  id: string;
+  game_id: string;
+  player_id: string;
+  collateral_tile_index: number;
+  principal: number;
+  rate_per_turn: number;
+  term_turns: number;
+  turns_remaining: number;
+  payment_per_turn: number;
+  status: string;
+};
 
 type TileInfo = {
   tile_id: string;
@@ -127,7 +149,6 @@ type DiceEventPayload = {
 const PASS_START_SALARY = 200;
 const JAIL_FINE_AMOUNT = 50;
 const OWNABLE_TILE_TYPES = new Set(["PROPERTY", "RAIL", "UTILITY"]);
-const DEFAULT_RULES = { freeParkingJackpotEnabled: false };
 const RAIL_RENT_BY_COUNT = [0, 25, 50, 100, 200];
 
 const isConfigured = () =>
@@ -200,13 +221,16 @@ const loadOwnershipByTile = async (
   gameId: string,
 ): Promise<OwnershipByTile> => {
   const ownershipRows = await fetchFromSupabaseWithService<OwnershipRow[]>(
-    `property_ownership?select=tile_index,owner_player_id&game_id=eq.${gameId}`,
+    `property_ownership?select=tile_index,owner_player_id,collateral_loan_id&game_id=eq.${gameId}`,
     { method: "GET" },
   );
 
   return ownershipRows.reduce<OwnershipByTile>((acc, row) => {
     if (row.owner_player_id) {
-      acc[row.tile_index] = { owner_player_id: row.owner_player_id };
+      acc[row.tile_index] = {
+        owner_player_id: row.owner_player_id,
+        collateral_loan_id: row.collateral_loan_id ?? null,
+      };
     }
     return acc;
   }, {});
@@ -316,11 +340,6 @@ const getNumberPayload = (
   return null;
 };
 
-const getRules = (rules: GameStateRow["rules"]) => ({
-  ...DEFAULT_RULES,
-  ...(rules ?? {}),
-});
-
 const getNextActivePlayer = (
   players: PlayerRow[],
   currentPlayerId: string | null,
@@ -414,10 +433,22 @@ const resolveBankruptcyIfNeeded = async ({
         method: "PATCH",
         body: JSON.stringify({
           owner_player_id: null,
+          collateral_loan_id: null,
         }),
       },
     );
   }
+
+  await fetchFromSupabaseWithService(
+    `player_loans?game_id=eq.${gameId}&player_id=eq.${player.id}&status=eq.active`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        status: "defaulted",
+        updated_at: now,
+      }),
+    },
+  );
 
   await fetchFromSupabaseWithService(`players?id=eq.${player.id}`, {
     method: "PATCH",
@@ -597,6 +628,29 @@ const calculateRent = ({
   };
 };
 
+const calculateAmortizedPayment = ({
+  principal,
+  ratePerTurn,
+  termTurns,
+}: {
+  principal: number;
+  ratePerTurn: number;
+  termTurns: number;
+}) => {
+  if (!Number.isFinite(principal) || principal <= 0 || termTurns <= 0) {
+    return 0;
+  }
+  if (ratePerTurn <= 0) {
+    return Math.round(principal / termTurns);
+  }
+  const numerator = principal * ratePerTurn;
+  const denominator = 1 - (1 + ratePerTurn) ** -termTurns;
+  if (denominator <= 0) {
+    return Math.round(principal / termTurns);
+  }
+  return Math.round(numerator / denominator);
+};
+
 const applyGoSalary = ({
   player,
   balances,
@@ -630,6 +684,104 @@ const applyGoSalary = ({
     },
   });
   return { balances: updatedBalances, balancesChanged: true, alreadyCollected: true };
+};
+
+const applyLoanPaymentsForPlayer = async ({
+  gameId,
+  player,
+  balances,
+  startingCash,
+}: {
+  gameId: string;
+  player: PlayerRow;
+  balances: Record<string, number>;
+  startingCash: number;
+}) => {
+  const activeLoans = await fetchFromSupabaseWithService<PlayerLoanRow[]>(
+    `player_loans?select=id,collateral_tile_index,principal,rate_per_turn,term_turns,turns_remaining,payment_per_turn,status&game_id=eq.${gameId}&player_id=eq.${player.id}&status=eq.active`,
+    { method: "GET" },
+  );
+
+  if (activeLoans.length === 0) {
+    return {
+      balances,
+      balancesChanged: false,
+      events: [] as Array<{ event_type: string; payload: Record<string, unknown> }>,
+      bankruptcyCandidate: null as
+        | { reason: string; cashBefore: number; cashAfter: number }
+        | null,
+    };
+  }
+
+  let updatedBalances = balances;
+  let balancesChanged = false;
+  let bankruptcyCandidate: { reason: string; cashBefore: number; cashAfter: number } | null =
+    null;
+  const events: Array<{ event_type: string; payload: Record<string, unknown> }> = [];
+
+  for (const loan of activeLoans) {
+    const paymentAmount = loan.payment_per_turn;
+    const currentBalance = updatedBalances[player.id] ?? startingCash;
+    const nextBalance = currentBalance - paymentAmount;
+    updatedBalances = {
+      ...updatedBalances,
+      [player.id]: nextBalance,
+    };
+    if (paymentAmount !== 0) {
+      balancesChanged = true;
+    }
+    if (nextBalance < 0 && !bankruptcyCandidate) {
+      bankruptcyCandidate = {
+        reason: "COLLATERAL_LOAN_PAYMENT",
+        cashBefore: currentBalance,
+        cashAfter: nextBalance,
+      };
+    }
+
+    const turnsRemainingAfter = Math.max(0, loan.turns_remaining - 1);
+    const status = turnsRemainingAfter === 0 ? "paid" : "active";
+
+    await fetchFromSupabaseWithService(`player_loans?id=eq.${loan.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        turns_remaining: turnsRemainingAfter,
+        status,
+        updated_at: new Date().toISOString(),
+      }),
+    });
+
+    events.push({
+      event_type: "COLLATERAL_LOAN_PAYMENT",
+      payload: {
+        player_id: player.id,
+        tile_index: loan.collateral_tile_index,
+        amount: paymentAmount,
+        turns_remaining_after: turnsRemainingAfter,
+      },
+    });
+
+    if (status === "paid") {
+      await fetchFromSupabaseWithService(
+        `property_ownership?game_id=eq.${gameId}&tile_index=eq.${loan.collateral_tile_index}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            collateral_loan_id: null,
+          }),
+        },
+      );
+      events.push({
+        event_type: "COLLATERAL_LOAN_PAID",
+        payload: {
+          player_id: player.id,
+          tile_index: loan.collateral_tile_index,
+          principal: loan.principal,
+        },
+      });
+    }
+  }
+
+  return { balances: updatedBalances, balancesChanged, events, bankruptcyCandidate };
 };
 
 const parseBearerToken = (authorization: string | null) => {
@@ -1252,6 +1404,47 @@ export async function POST(request: Request) {
             },
           },
         ];
+        const balances = gameState.balances ?? {};
+        let updatedBalances = balances;
+        let balancesChanged = false;
+
+        const loanResult = await applyLoanPaymentsForPlayer({
+          gameId,
+          player: nextPlayer,
+          balances: updatedBalances,
+          startingCash: game.starting_cash ?? 0,
+        });
+        updatedBalances = loanResult.balances;
+        balancesChanged = balancesChanged || loanResult.balancesChanged;
+        events.push(...loanResult.events);
+
+        if (loanResult.bankruptcyCandidate) {
+          const bankruptcyResult = await resolveBankruptcyIfNeeded({
+            gameId,
+            gameState,
+            players,
+            player: nextPlayer,
+            updatedBalances,
+            cashBefore: loanResult.bankruptcyCandidate.cashBefore,
+            cashAfter: loanResult.bankruptcyCandidate.cashAfter,
+            reason: loanResult.bankruptcyCandidate.reason,
+            events,
+            currentVersion,
+            userId: user.id,
+            playerPosition: nextPlayer.position ?? null,
+          });
+
+          if (bankruptcyResult.handled) {
+            if (bankruptcyResult.error) {
+              return NextResponse.json(
+                { error: bankruptcyResult.error },
+                { status: 409 },
+              );
+            }
+            return NextResponse.json({ gameState: bankruptcyResult.updatedState });
+          }
+        }
+
         const finalVersion = currentVersion + events.length;
 
         const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
@@ -1266,6 +1459,7 @@ export async function POST(request: Request) {
               current_player_id: nextPlayer.id,
               last_roll: null,
               doubles_count: 0,
+              ...(balancesChanged ? { balances: updatedBalances } : {}),
               turn_phase: nextPlayer.is_in_jail
                 ? "AWAITING_JAIL_DECISION"
                 : "AWAITING_ROLL",
@@ -1650,17 +1844,20 @@ export async function POST(request: Request) {
       const isOwnableTile = OWNABLE_TILE_TYPES.has(activeLandingTile.type);
       const rentOwnerId =
         isOwnableTile && ownership ? ownership.owner_player_id : null;
-      const rentCalculation = calculateRent({
-        tile: activeLandingTile,
-        ownerId: rentOwnerId,
-        currentPlayerId: currentPlayer.id,
-        boardTiles,
-        ownershipByTile,
-        // TODO: allow card-triggered utility rolls to override this dice total.
-        diceTotal: rollTotal,
-      });
+      const isCollateralized = Boolean(ownership?.collateral_loan_id);
+      const rentCalculation = isCollateralized
+        ? { amount: 0, meta: null }
+        : calculateRent({
+            tile: activeLandingTile,
+            ownerId: rentOwnerId,
+            currentPlayerId: currentPlayer.id,
+            boardTiles,
+            ownershipByTile,
+            // TODO: allow card-triggered utility rolls to override this dice total.
+            diceTotal: rollTotal,
+          });
       const rentAmount = rentCalculation.amount;
-      const shouldPayRent = rentAmount > 0 && Boolean(rentOwnerId);
+      let shouldPayRent = rentAmount > 0 && Boolean(rentOwnerId);
       const isUnownedOwnableTile = isOwnableTile && !ownership;
       const isTaxTile = activeLandingTile.type === "TAX";
       const taxAmount = isTaxTile ? activeLandingTile.taxAmount ?? 0 : 0;
@@ -1675,6 +1872,23 @@ export async function POST(request: Request) {
             to_jail_tile_index: jailTile.index,
             player_id: currentPlayer.id,
             display_name: currentPlayer.display_name,
+          },
+        });
+      }
+
+      if (
+        isCollateralized &&
+        rentOwnerId &&
+        rentOwnerId !== currentPlayer.id
+      ) {
+        shouldPayRent = false;
+        events.push({
+          event_type: "RENT_SKIPPED_COLLATERAL",
+          payload: {
+            tile_index: activeLandingTile.index,
+            tile_id: activeLandingTile.tile_id,
+            owner_player_id: rentOwnerId,
+            reason: "collateralized",
           },
         });
       }
@@ -2159,6 +2373,167 @@ export async function POST(request: Request) {
       return NextResponse.json({ gameState: updatedState });
     }
 
+    if (body.action === "TAKE_COLLATERAL_LOAN") {
+      if (!rules.loanCollateralEnabled) {
+        return NextResponse.json(
+          { error: "Collateral loans are disabled." },
+          { status: 409 },
+        );
+      }
+
+      if (!Number.isInteger(body.tileIndex)) {
+        return NextResponse.json(
+          { error: "Missing collateral tile." },
+          { status: 400 },
+        );
+      }
+
+      const tileIndex = body.tileIndex;
+      const boardPack = getBoardPackById(game.board_pack_id);
+      const tile = boardPack?.tiles?.find((entry) => entry.index === tileIndex);
+
+      if (!tile) {
+        return NextResponse.json(
+          { error: "Collateral tile not found." },
+          { status: 404 },
+        );
+      }
+
+      if (!OWNABLE_TILE_TYPES.has(tile.type)) {
+        return NextResponse.json(
+          { error: "Tile cannot be collateralized." },
+          { status: 409 },
+        );
+      }
+
+      const ownershipByTile = await loadOwnershipByTile(gameId);
+      const ownership = ownershipByTile[tileIndex];
+
+      if (!ownership || ownership.owner_player_id !== currentPlayer.id) {
+        return NextResponse.json(
+          { error: "You do not own this property." },
+          { status: 409 },
+        );
+      }
+
+      if (ownership.collateral_loan_id) {
+        return NextResponse.json(
+          { error: "Property already collateralized." },
+          { status: 409 },
+        );
+      }
+
+      const purchasePrice = tile.price ?? 0;
+      if (purchasePrice <= 0) {
+        return NextResponse.json(
+          { error: "Collateral value unavailable for this tile." },
+          { status: 409 },
+        );
+      }
+
+      const principal = Math.round(purchasePrice * rules.collateralLtv);
+      const paymentPerTurn = calculateAmortizedPayment({
+        principal,
+        ratePerTurn: rules.loanRatePerTurn,
+        termTurns: rules.loanTermTurns,
+      });
+
+      // TODO: Reuse this loan engine for 50% down + 50% purchase mortgages.
+      const now = new Date().toISOString();
+      const [loanRow] = await fetchFromSupabaseWithService<PlayerLoanRow[]>(
+        "player_loans",
+        {
+          method: "POST",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            game_id: gameId,
+            player_id: currentPlayer.id,
+            collateral_tile_index: tileIndex,
+            principal,
+            rate_per_turn: rules.loanRatePerTurn,
+            term_turns: rules.loanTermTurns,
+            turns_remaining: rules.loanTermTurns,
+            payment_per_turn: paymentPerTurn,
+            status: "active",
+            created_at: now,
+            updated_at: now,
+          }),
+        },
+      );
+
+      if (!loanRow) {
+        return NextResponse.json(
+          { error: "Unable to create collateral loan." },
+          { status: 500 },
+        );
+      }
+
+      await fetchFromSupabaseWithService(
+        `property_ownership?game_id=eq.${gameId}&tile_index=eq.${tileIndex}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            collateral_loan_id: loanRow.id,
+          }),
+        },
+      );
+
+      const balances = gameState.balances ?? {};
+      const currentBalance =
+        balances[currentPlayer.id] ?? game.starting_cash ?? 0;
+      const updatedBalances = {
+        ...balances,
+        [currentPlayer.id]: currentBalance + principal,
+      };
+
+      const events: Array<{
+        event_type: string;
+        payload: Record<string, unknown>;
+      }> = [
+        {
+          event_type: "COLLATERAL_LOAN_TAKEN",
+          payload: {
+            player_id: currentPlayer.id,
+            tile_index: tileIndex,
+            tile_id: tile.tile_id,
+            principal,
+            rate_per_turn: rules.loanRatePerTurn,
+            term_turns: rules.loanTermTurns,
+            payment_per_turn: paymentPerTurn,
+          },
+        },
+      ];
+      const finalVersion = currentVersion + events.length;
+
+      const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            version: finalVersion,
+            balances: updatedBalances,
+            updated_at: now,
+          }),
+        },
+      );
+
+      if (!updatedState) {
+        return NextResponse.json(
+          { error: "Version mismatch." },
+          { status: 409 },
+        );
+      }
+
+      await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+
+      return NextResponse.json({ gameState: updatedState });
+    }
+
     if (body.action === "JAIL_ROLL_FOR_DOUBLES") {
       if (gameState.turn_phase !== "AWAITING_JAIL_DECISION") {
         return NextResponse.json(
@@ -2233,6 +2608,47 @@ export async function POST(request: Request) {
             },
           },
         ];
+        const balances = gameState.balances ?? {};
+        let updatedBalances = balances;
+        let balancesChanged = false;
+
+        const loanResult = await applyLoanPaymentsForPlayer({
+          gameId,
+          player: nextPlayer,
+          balances: updatedBalances,
+          startingCash: game.starting_cash ?? 0,
+        });
+        updatedBalances = loanResult.balances;
+        balancesChanged = balancesChanged || loanResult.balancesChanged;
+        events.push(...loanResult.events);
+
+        if (loanResult.bankruptcyCandidate) {
+          const bankruptcyResult = await resolveBankruptcyIfNeeded({
+            gameId,
+            gameState,
+            players,
+            player: nextPlayer,
+            updatedBalances,
+            cashBefore: loanResult.bankruptcyCandidate.cashBefore,
+            cashAfter: loanResult.bankruptcyCandidate.cashAfter,
+            reason: loanResult.bankruptcyCandidate.reason,
+            events,
+            currentVersion,
+            userId: user.id,
+            playerPosition: nextPlayer.position ?? null,
+          });
+
+          if (bankruptcyResult.handled) {
+            if (bankruptcyResult.error) {
+              return NextResponse.json(
+                { error: bankruptcyResult.error },
+                { status: 409 },
+              );
+            }
+            return NextResponse.json({ gameState: bankruptcyResult.updatedState });
+          }
+        }
+
         const finalVersion = currentVersion + events.length;
 
         const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
@@ -2247,6 +2663,7 @@ export async function POST(request: Request) {
               current_player_id: nextPlayer.id,
               last_roll: null,
               doubles_count: 0,
+              ...(balancesChanged ? { balances: updatedBalances } : {}),
               turn_phase: nextPlayer.is_in_jail
                 ? "AWAITING_JAIL_DECISION"
                 : "AWAITING_ROLL",
@@ -2728,17 +3145,20 @@ export async function POST(request: Request) {
       const isOwnableTile = OWNABLE_TILE_TYPES.has(activeLandingTile.type);
       const rentOwnerId =
         isOwnableTile && ownership ? ownership.owner_player_id : null;
-      const rentCalculation = calculateRent({
-        tile: activeLandingTile,
-        ownerId: rentOwnerId,
-        currentPlayerId: currentPlayer.id,
-        boardTiles,
-        ownershipByTile,
-        // TODO: allow card-triggered utility rolls to override this dice total.
-        diceTotal: rollTotal,
-      });
+      const isCollateralized = Boolean(ownership?.collateral_loan_id);
+      const rentCalculation = isCollateralized
+        ? { amount: 0, meta: null }
+        : calculateRent({
+            tile: activeLandingTile,
+            ownerId: rentOwnerId,
+            currentPlayerId: currentPlayer.id,
+            boardTiles,
+            ownershipByTile,
+            // TODO: allow card-triggered utility rolls to override this dice total.
+            diceTotal: rollTotal,
+          });
       const rentAmount = rentCalculation.amount;
-      const shouldPayRent = rentAmount > 0 && Boolean(rentOwnerId);
+      let shouldPayRent = rentAmount > 0 && Boolean(rentOwnerId);
       const isUnownedOwnableTile = isOwnableTile && !ownership;
       const isTaxTile = activeLandingTile.type === "TAX";
       const taxAmount = isTaxTile ? activeLandingTile.taxAmount ?? 0 : 0;
@@ -2753,6 +3173,23 @@ export async function POST(request: Request) {
             to_jail_tile_index: jailTile.index,
             player_id: currentPlayer.id,
             display_name: currentPlayer.display_name,
+          },
+        });
+      }
+
+      if (
+        isCollateralized &&
+        rentOwnerId &&
+        rentOwnerId !== currentPlayer.id
+      ) {
+        shouldPayRent = false;
+        events.push({
+          event_type: "RENT_SKIPPED_COLLATERAL",
+          payload: {
+            tile_index: activeLandingTile.index,
+            tile_id: activeLandingTile.tile_id,
+            owner_player_id: rentOwnerId,
+            reason: "collateralized",
           },
         });
       }
@@ -3119,6 +3556,62 @@ export async function POST(request: Request) {
         );
       }
 
+      const balances = gameState.balances ?? {};
+      let updatedBalances = balances;
+      let balancesChanged = false;
+      const events: Array<{
+        event_type: string;
+        payload: Record<string, unknown>;
+      }> = [
+        {
+          event_type: "END_TURN",
+          payload: {
+            from_player_id: currentPlayer.id,
+            from_player_name: currentPlayer.display_name,
+            to_player_id: nextPlayer.id,
+            to_player_name: nextPlayer.display_name,
+          },
+        },
+      ];
+
+      const loanResult = await applyLoanPaymentsForPlayer({
+        gameId,
+        player: nextPlayer,
+        balances: updatedBalances,
+        startingCash: game.starting_cash ?? 0,
+      });
+      updatedBalances = loanResult.balances;
+      balancesChanged = balancesChanged || loanResult.balancesChanged;
+      events.push(...loanResult.events);
+
+      if (loanResult.bankruptcyCandidate) {
+        const bankruptcyResult = await resolveBankruptcyIfNeeded({
+          gameId,
+          gameState,
+          players,
+          player: nextPlayer,
+          updatedBalances,
+          cashBefore: loanResult.bankruptcyCandidate.cashBefore,
+          cashAfter: loanResult.bankruptcyCandidate.cashAfter,
+          reason: loanResult.bankruptcyCandidate.reason,
+          events,
+          currentVersion,
+          userId: user.id,
+          playerPosition: nextPlayer.position ?? null,
+        });
+
+        if (bankruptcyResult.handled) {
+          if (bankruptcyResult.error) {
+            return NextResponse.json(
+              { error: bankruptcyResult.error },
+              { status: 409 },
+            );
+          }
+          return NextResponse.json({ gameState: bankruptcyResult.updatedState });
+        }
+      }
+
+      const finalVersion = currentVersion + events.length;
       const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
         `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
         {
@@ -3127,10 +3620,11 @@ export async function POST(request: Request) {
             Prefer: "return=representation",
           },
           body: JSON.stringify({
-            version: nextVersion,
+            version: finalVersion,
             current_player_id: nextPlayer.id,
             last_roll: null,
             doubles_count: 0,
+            ...(balancesChanged ? { balances: updatedBalances } : {}),
             turn_phase: nextPlayer.is_in_jail
               ? "AWAITING_JAIL_DECISION"
               : "AWAITING_ROLL",
@@ -3146,27 +3640,7 @@ export async function POST(request: Request) {
         );
       }
 
-      await fetchFromSupabaseWithService(
-        "game_events",
-        {
-          method: "POST",
-          headers: {
-            Prefer: "return=representation",
-          },
-          body: JSON.stringify({
-            game_id: gameId,
-            version: nextVersion,
-            event_type: "END_TURN",
-            payload: {
-              from_player_id: currentPlayer.id,
-              from_player_name: currentPlayer.display_name,
-              to_player_id: nextPlayer.id,
-              to_player_name: nextPlayer.display_name,
-            },
-            created_by: user.id,
-          }),
-        },
-      );
+      await emitGameEvents(gameId, currentVersion + 1, events, user.id);
 
       return NextResponse.json({ gameState: updatedState });
     }
