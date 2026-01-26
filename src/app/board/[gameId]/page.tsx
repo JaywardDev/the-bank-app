@@ -14,6 +14,8 @@ type Player = {
   display_name: string | null;
   created_at: string | null;
   position: number;
+  is_eliminated: boolean;
+  eliminated_at: string | null;
 };
 
 type GameMeta = {
@@ -58,7 +60,7 @@ const getTurnsRemainingFromPayload = (payload: unknown): number | null => {
 
 type OwnershipRow = {
   tile_index: number;
-  owner_player_id: string;
+  owner_player_id: string | null;
 };
 
 type OwnershipByTile = Record<number, { owner_player_id: string }>;
@@ -85,7 +87,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
   const loadPlayers = useCallback(
     async (accessToken?: string) => {
       const playerRows = await supabaseClient.fetchFromSupabase<Player[]>(
-        `players?select=id,user_id,display_name,created_at,position&game_id=eq.${params.gameId}&order=created_at.asc`,
+        `players?select=id,user_id,display_name,created_at,position,is_eliminated,eliminated_at&game_id=eq.${params.gameId}&order=created_at.asc`,
         { method: "GET" },
         accessToken,
       );
@@ -140,7 +142,9 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
         accessToken,
       );
       const mapped = ownershipRows.reduce<OwnershipByTile>((acc, row) => {
-        acc[row.tile_index] = { owner_player_id: row.owner_player_id };
+        if (row.owner_player_id) {
+          acc[row.tile_index] = { owner_player_id: row.owner_player_id };
+        }
         return acc;
       }, {});
       setOwnershipByTile(mapped);

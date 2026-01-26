@@ -20,6 +20,8 @@ type Player = {
   position: number;
   is_in_jail: boolean;
   jail_turns_remaining: number;
+  is_eliminated: boolean;
+  eliminated_at: string | null;
 };
 
 type GameMeta = {
@@ -55,7 +57,7 @@ type GameEvent = {
 
 type OwnershipRow = {
   tile_index: number;
-  owner_player_id: string;
+  owner_player_id: string | null;
 };
 
 type OwnershipByTile = Record<number, { owner_player_id: string }>;
@@ -493,6 +495,22 @@ export default function PlayPage() {
         : `${payerName} paid tax (${tileLabel})`;
     }
 
+    if (event.event_type === "BANKRUPTCY") {
+      const playerId =
+        typeof payload?.player_id === "string" ? payload.player_id : null;
+      const playerName =
+        players.find((player) => player.id === playerId)?.display_name ??
+        "Player";
+      const reason =
+        typeof payload?.reason === "string" ? payload.reason : "PAYMENT";
+      const returnedIds = Array.isArray(payload?.returned_property_ids)
+        ? payload.returned_property_ids
+        : [];
+      const propertyCount =
+        returnedIds.length > 0 ? ` (${returnedIds.length} properties)` : "";
+      return `${playerName} went bankrupt (${reason})${propertyCount}`;
+    }
+
     if (event.event_type === "JAIL_PAY_FINE") {
       const fineAmount =
         typeof payload?.amount === "number"
@@ -573,6 +591,14 @@ export default function PlayPage() {
       return `${playerName} went to ${toLabel} from ${fromLabel}`;
     }
 
+    if (event.event_type === "GAME_OVER") {
+      const winnerName =
+        typeof payload?.winner_player_name === "string"
+          ? payload.winner_player_name
+          : "Player";
+      return `Game over · Winner: ${winnerName}`;
+    }
+
     return "Update received";
   }, [boardPack?.tiles, getOwnershipLabel, players]);
 
@@ -595,7 +621,7 @@ export default function PlayPage() {
   const loadPlayers = useCallback(
     async (activeGameId: string, accessToken?: string) => {
       const playerRows = await supabaseClient.fetchFromSupabase<Player[]>(
-        `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining&game_id=eq.${activeGameId}&order=created_at.asc`,
+        `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,is_eliminated,eliminated_at&game_id=eq.${activeGameId}&order=created_at.asc`,
         { method: "GET" },
         accessToken,
       );
@@ -614,7 +640,9 @@ export default function PlayPage() {
         accessToken,
       );
       const mapped = ownershipRows.reduce<OwnershipByTile>((acc, row) => {
-        acc[row.tile_index] = { owner_player_id: row.owner_player_id };
+        if (row.owner_player_id) {
+          acc[row.tile_index] = { owner_player_id: row.owner_player_id };
+        }
         return acc;
       }, {});
       setOwnershipByTile(mapped);
@@ -1203,11 +1231,13 @@ export default function PlayPage() {
   const currentUserPlayer = players.find(
     (player) => session && player.user_id === session.user.id,
   );
+  const isEliminated = Boolean(currentUserPlayer?.is_eliminated);
   const isMyTurn = Boolean(
     isInProgress &&
       session &&
       currentUserPlayer &&
-      gameState?.current_player_id === currentUserPlayer.id,
+      gameState?.current_player_id === currentUserPlayer.id &&
+      !currentUserPlayer.is_eliminated,
   );
   const pendingPurchase = useMemo<PendingPurchaseAction | null>(() => {
     const pendingAction = gameState?.pending_action;
@@ -1264,7 +1294,7 @@ export default function PlayPage() {
   const canAffordPendingPurchase = pendingPurchase
     ? myPlayerBalance >= pendingPurchase.price
     : false;
-  const canAct = initialSnapshotReady && isMyTurn;
+  const canAct = initialSnapshotReady && isMyTurn && !isEliminated;
   const isAwaitingJailDecision =
     isMyTurn && gameState?.turn_phase === "AWAITING_JAIL_DECISION";
   const showJailDecisionPanel =
@@ -2185,6 +2215,11 @@ export default function PlayPage() {
                     >
                       <span className="font-medium text-neutral-800">
                         {player.display_name ?? "Player"}
+                        {player.is_eliminated ? (
+                          <span className="ml-2 rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-rose-700">
+                            Eliminated
+                          </span>
+                        ) : null}
                       </span>
                       <span className="text-xs text-neutral-400">
                         #{index + 1}

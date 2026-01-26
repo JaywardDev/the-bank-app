@@ -78,6 +78,8 @@ type PlayerRow = {
   position: number;
   is_in_jail: boolean;
   jail_turns_remaining: number;
+  is_eliminated: boolean;
+  eliminated_at: string | null;
 };
 
 type GameStateRow = {
@@ -98,7 +100,7 @@ type GameStateRow = {
 
 type OwnershipRow = {
   tile_index: number;
-  owner_player_id: string;
+  owner_player_id: string | null;
 };
 
 type OwnershipByTile = Record<number, { owner_player_id: string }>;
@@ -203,7 +205,9 @@ const loadOwnershipByTile = async (
   );
 
   return ownershipRows.reduce<OwnershipByTile>((acc, row) => {
-    acc[row.tile_index] = { owner_player_id: row.owner_player_id };
+    if (row.owner_player_id) {
+      acc[row.tile_index] = { owner_player_id: row.owner_player_id };
+    }
     return acc;
   }, {});
 };
@@ -316,6 +320,206 @@ const getRules = (rules: GameStateRow["rules"]) => ({
   ...DEFAULT_RULES,
   ...(rules ?? {}),
 });
+
+const getNextActivePlayer = (
+  players: PlayerRow[],
+  currentPlayerId: string | null,
+): PlayerRow | null => {
+  if (players.length === 0) {
+    return null;
+  }
+  const startIndex = players.findIndex(
+    (player) => player.id === currentPlayerId,
+  );
+  if (startIndex === -1) {
+    return players.find((player) => !player.is_eliminated) ?? null;
+  }
+  for (let offset = 1; offset <= players.length; offset += 1) {
+    const candidate = players[(startIndex + offset) % players.length];
+    if (!candidate.is_eliminated) {
+      return candidate;
+    }
+  }
+  return null;
+};
+
+const getActivePlayersAfterElimination = (
+  players: PlayerRow[],
+  eliminatedPlayerId: string,
+) => players.filter(
+  (player) => !player.is_eliminated && player.id !== eliminatedPlayerId,
+);
+
+const resolveBankruptcyIfNeeded = async ({
+  gameId,
+  gameState,
+  players,
+  player,
+  updatedBalances,
+  cashBefore,
+  cashAfter,
+  reason,
+  events,
+  currentVersion,
+  userId,
+  playerPosition,
+}: {
+  gameId: string;
+  gameState: GameStateRow;
+  players: PlayerRow[];
+  player: PlayerRow;
+  updatedBalances: Record<string, number>;
+  cashBefore: number;
+  cashAfter: number;
+  reason: string;
+  events: Array<{ event_type: string; payload: Record<string, unknown> }>;
+  currentVersion: number;
+  userId: string;
+  playerPosition: number | null;
+}): Promise<{
+  handled: boolean;
+  updatedState?: GameStateRow;
+  error?: string;
+}> => {
+  if (cashAfter >= 0) {
+    return { handled: false };
+  }
+
+  const now = new Date().toISOString();
+  const activePlayersAfter = getActivePlayersAfterElimination(
+    players,
+    player.id,
+  );
+  const nextPlayer = getNextActivePlayer(players, player.id);
+  const remainingPlayers = activePlayersAfter.length;
+  const winner = remainingPlayers === 1 ? activePlayersAfter[0] : null;
+  const gameIsOver = remainingPlayers <= 1;
+  const updatedBalancesNormalized = {
+    ...updatedBalances,
+    [player.id]: 0,
+  };
+
+  const ownedRows = await fetchFromSupabaseWithService<
+    Array<{ id: string; tile_index: number }>
+  >(
+    `property_ownership?select=id,tile_index&game_id=eq.${gameId}&owner_player_id=eq.${player.id}`,
+    { method: "GET" },
+  );
+  const returnedPropertyIds = ownedRows.map((row) => row.tile_index);
+
+  if (ownedRows.length > 0) {
+    await fetchFromSupabaseWithService(
+      `property_ownership?game_id=eq.${gameId}&owner_player_id=eq.${player.id}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          owner_player_id: null,
+        }),
+      },
+    );
+  }
+
+  await fetchFromSupabaseWithService(`players?id=eq.${player.id}`, {
+    method: "PATCH",
+    headers: {
+      Prefer: "return=representation",
+    },
+    body: JSON.stringify({
+      ...(Number.isFinite(playerPosition) ? { position: playerPosition } : {}),
+      is_in_jail: false,
+      jail_turns_remaining: 0,
+      is_eliminated: true,
+      eliminated_at: now,
+    }),
+  });
+
+  const bankruptcyEvents: Array<{
+    event_type: string;
+    payload: Record<string, unknown>;
+  }> = [
+    {
+      event_type: "BANKRUPTCY",
+      payload: {
+        player_id: player.id,
+        cash_before: cashBefore,
+        cash_after: cashAfter,
+        reason,
+        returned_property_ids: returnedPropertyIds,
+      },
+    },
+  ];
+
+  if (!gameIsOver && nextPlayer) {
+    bankruptcyEvents.push({
+      event_type: "END_TURN",
+      payload: {
+        from_player_id: player.id,
+        from_player_name: player.display_name,
+        to_player_id: nextPlayer.id,
+        to_player_name: nextPlayer.display_name,
+      },
+    });
+  }
+
+  if (gameIsOver) {
+    bankruptcyEvents.push({
+      event_type: "GAME_OVER",
+      payload: {
+        winner_player_id: winner?.id ?? null,
+        winner_player_name: winner?.display_name ?? null,
+        reason: "BANKRUPTCY",
+      },
+    });
+  }
+
+  const finalVersion = currentVersion + events.length + bankruptcyEvents.length;
+  const nextTurnPhase = nextPlayer?.is_in_jail
+    ? "AWAITING_JAIL_DECISION"
+    : "AWAITING_ROLL";
+  const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
+    `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+    {
+      method: "PATCH",
+      headers: {
+        Prefer: "return=representation",
+      },
+      body: JSON.stringify({
+        version: finalVersion,
+        balances: updatedBalancesNormalized,
+        current_player_id: gameIsOver
+          ? winner?.id ?? null
+          : nextPlayer?.id ?? null,
+        last_roll: null,
+        doubles_count: 0,
+        turn_phase: gameIsOver ? "AWAITING_ROLL" : nextTurnPhase,
+        pending_action: null,
+        updated_at: now,
+      }),
+    },
+  );
+
+  if (!updatedState) {
+    return { handled: true, error: "Version mismatch." };
+  }
+
+  await emitGameEvents(
+    gameId,
+    currentVersion + 1,
+    [...events, ...bankruptcyEvents],
+    userId,
+  );
+
+  if (gameIsOver) {
+    await fetchFromSupabaseWithService(`games?id=eq.${gameId}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        status: "ended",
+      }),
+    });
+  }
+
+  return { handled: true, updatedState };
+};
 
 const countOwnedTilesByType = (
   boardTiles: TileInfo[],
@@ -498,7 +702,7 @@ export async function POST(request: Request) {
       }
 
       const [hostPlayer] = await fetchFromSupabaseWithService<PlayerRow[]>(
-        "players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining",
+        "players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,is_eliminated,eliminated_at",
         {
           method: "POST",
           headers: {
@@ -582,7 +786,7 @@ export async function POST(request: Request) {
       }
 
       const [player] = await fetchFromSupabaseWithService<PlayerRow[]>(
-        "players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining&on_conflict=game_id,user_id",
+        "players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,is_eliminated,eliminated_at&on_conflict=game_id,user_id",
         {
           method: "POST",
           headers: {
@@ -604,7 +808,7 @@ export async function POST(request: Request) {
       }
 
       const players = await fetchFromSupabaseWithService<PlayerRow[]>(
-        `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining&game_id=eq.${game.id}&order=created_at.asc`,
+        `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,is_eliminated,eliminated_at&game_id=eq.${game.id}&order=created_at.asc`,
         { method: "GET" },
       );
       const ownershipByTile = await loadOwnershipByTile(game.id);
@@ -652,7 +856,7 @@ export async function POST(request: Request) {
     }
 
     const players = await fetchFromSupabaseWithService<PlayerRow[]>(
-      `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining&game_id=eq.${gameId}&order=created_at.asc`,
+      `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,is_eliminated,eliminated_at&game_id=eq.${gameId}&order=created_at.asc`,
       { method: "GET" },
     );
 
@@ -911,6 +1115,13 @@ export async function POST(request: Request) {
       );
     }
 
+    if (currentUserPlayer.is_eliminated) {
+      return NextResponse.json(
+        { error: "Eliminated players cannot take actions." },
+        { status: 403 },
+      );
+    }
+
     if (body.action === "ROLL_DICE") {
       if (gameState.pending_action) {
         return NextResponse.json(
@@ -972,6 +1183,9 @@ export async function POST(request: Request) {
       const balances = gameState?.balances ?? {};
       let updatedBalances = balances;
       let balancesChanged = false;
+      let bankruptcyCandidate:
+        | { reason: string; cashBefore: number; cashAfter: number }
+        | null = null;
       let goSalaryAwarded = false;
       let nextChanceIndex = gameState?.chance_index ?? 0;
       let nextCommunityIndex = gameState?.community_index ?? 0;
@@ -984,12 +1198,17 @@ export async function POST(request: Request) {
             type: "JAIL",
             name: "Jail",
           };
-        const currentIndex = players.findIndex(
-          (player) => player.id === gameState.current_player_id,
+        const nextPlayer = getNextActivePlayer(
+          players,
+          gameState.current_player_id,
         );
-        const nextIndex =
-          currentIndex === -1 ? 0 : (currentIndex + 1) % players.length;
-        const nextPlayer = players[nextIndex];
+
+        if (!nextPlayer) {
+          return NextResponse.json(
+            { error: "No active players remaining." },
+            { status: 409 },
+          );
+        }
         const events: Array<{
           event_type: string;
           payload: Record<string, unknown>;
@@ -1196,15 +1415,25 @@ export async function POST(request: Request) {
             getNumberPayload(card.payload as Record<string, unknown>, "amount") ?? 0;
           const currentBalance =
             updatedBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
+          const nextBalance =
+            card.kind === "PAY" ? currentBalance - amount : currentBalance + amount;
           updatedBalances = {
             ...updatedBalances,
-            [currentPlayer.id]:
-              card.kind === "PAY"
-                ? currentBalance - amount
-                : currentBalance + amount,
+            [currentPlayer.id]: nextBalance,
           };
           if (amount !== 0) {
             balancesChanged = true;
+          }
+          if (
+            card.kind === "PAY" &&
+            nextBalance < 0 &&
+            !bankruptcyCandidate
+          ) {
+            bankruptcyCandidate = {
+              reason: "CARD_PAY",
+              cashBefore: currentBalance,
+              cashAfter: nextBalance,
+            };
           }
           events.push({
             event_type: card.kind === "PAY" ? "CARD_PAY" : "CARD_RECEIVE",
@@ -1455,12 +1684,20 @@ export async function POST(request: Request) {
           updatedBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
         const ownerBalance =
           updatedBalances[rentOwnerId] ?? game.starting_cash ?? 0;
+        const nextBalance = payerBalance - rentAmount;
         updatedBalances = {
           ...updatedBalances,
-          [currentPlayer.id]: payerBalance - rentAmount,
+          [currentPlayer.id]: nextBalance,
           [rentOwnerId]: ownerBalance + rentAmount,
         };
         balancesChanged = true;
+        if (nextBalance < 0 && !bankruptcyCandidate) {
+          bankruptcyCandidate = {
+            reason: "PAY_RENT",
+            cashBefore: payerBalance,
+            cashAfter: nextBalance,
+          };
+        }
         const rentPayload: Record<string, unknown> = {
           tile_index: activeLandingTile.index,
           tile_id: activeLandingTile.tile_id,
@@ -1481,11 +1718,19 @@ export async function POST(request: Request) {
       if (shouldPayTax) {
         const payerBalance =
           updatedBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
+        const nextBalance = payerBalance - taxAmount;
         updatedBalances = {
           ...updatedBalances,
-          [currentPlayer.id]: payerBalance - taxAmount,
+          [currentPlayer.id]: nextBalance,
         };
         balancesChanged = true;
+        if (nextBalance < 0 && !bankruptcyCandidate) {
+          bankruptcyCandidate = {
+            reason: "PAY_TAX",
+            cashBefore: payerBalance,
+            cashAfter: nextBalance,
+          };
+        }
         events.push(
           {
             event_type: "PAY_TAX",
@@ -1514,14 +1759,17 @@ export async function POST(request: Request) {
         // TODO: Pay out free_parking_pot and reset to 0 when jackpot is enabled.
       }
 
+      const isBankruptcyPending = Boolean(bankruptcyCandidate);
       const pendingPurchaseAction =
-        isUnownedOwnableTile && !(shouldSendToJail && jailTile)
-        ? {
-            type: "BUY_PROPERTY",
-            tile_index: activeLandingTile.index,
-            price: activeLandingTile.price ?? 0,
-          }
-        : null;
+        !isBankruptcyPending &&
+        isUnownedOwnableTile &&
+        !(shouldSendToJail && jailTile)
+          ? {
+              type: "BUY_PROPERTY",
+              tile_index: activeLandingTile.index,
+              price: activeLandingTile.price ?? 0,
+            }
+          : null;
 
       if (pendingPurchaseAction) {
         events.push({
@@ -1546,7 +1794,12 @@ export async function POST(request: Request) {
         },
       });
 
-      if (isDouble && !pendingPurchaseAction && !(shouldSendToJail && jailTile)) {
+      if (
+        isDouble &&
+        !pendingPurchaseAction &&
+        !isBankruptcyPending &&
+        !(shouldSendToJail && jailTile)
+      ) {
         events.push({
           event_type: "ALLOW_EXTRA_ROLL",
           payload: {
@@ -1555,6 +1808,33 @@ export async function POST(request: Request) {
             doubles_count: nextDoublesCount,
           },
         });
+      }
+
+      if (bankruptcyCandidate) {
+        const bankruptcyResult = await resolveBankruptcyIfNeeded({
+          gameId,
+          gameState,
+          players,
+          player: currentPlayer,
+          updatedBalances,
+          cashBefore: bankruptcyCandidate.cashBefore,
+          cashAfter: bankruptcyCandidate.cashAfter,
+          reason: bankruptcyCandidate.reason,
+          events,
+          currentVersion,
+          userId: user.id,
+          playerPosition: finalPosition,
+        });
+
+        if (bankruptcyResult.handled) {
+          if (bankruptcyResult.error) {
+            return NextResponse.json(
+              { error: bankruptcyResult.error },
+              { status: 409 },
+            );
+          }
+          return NextResponse.json({ gameState: bankruptcyResult.updatedState });
+        }
       }
 
       const finalVersion = currentVersion + events.length;
@@ -1650,12 +1930,17 @@ export async function POST(request: Request) {
         );
       }
 
-      const currentIndex = players.findIndex(
-        (player) => player.id === gameState.current_player_id,
+      const nextPlayer = getNextActivePlayer(
+        players,
+        gameState.current_player_id,
       );
-      const nextIndex =
-        currentIndex === -1 ? 0 : (currentIndex + 1) % players.length;
-      const nextPlayer = players[nextIndex];
+
+      if (!nextPlayer) {
+        return NextResponse.json(
+          { error: "No active players remaining." },
+          { status: 409 },
+        );
+      }
       const events: Array<{
         event_type: string;
         payload: Record<string, unknown>;
@@ -1905,12 +2190,17 @@ export async function POST(request: Request) {
       const shouldReleaseFromJail = isDouble || turnsRemaining === 0;
 
       if (!shouldReleaseFromJail) {
-        const currentIndex = players.findIndex(
-          (player) => player.id === gameState.current_player_id,
+        const nextPlayer = getNextActivePlayer(
+          players,
+          gameState.current_player_id,
         );
-        const nextIndex =
-          currentIndex === -1 ? 0 : (currentIndex + 1) % players.length;
-        const nextPlayer = players[nextIndex];
+
+        if (!nextPlayer) {
+          return NextResponse.json(
+            { error: "No active players remaining." },
+            { status: 409 },
+          );
+        }
         const events: Array<{
           event_type: string;
           payload: Record<string, unknown>;
@@ -2030,15 +2320,26 @@ export async function POST(request: Request) {
       const balances = gameState?.balances ?? {};
       let updatedBalances = balances;
       let balancesChanged = false;
+      let bankruptcyCandidate:
+        | { reason: string; cashBefore: number; cashAfter: number }
+        | null = null;
       let goSalaryAwarded = false;
       if (forcedFine) {
         const currentBalance =
           updatedBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
+        const nextBalance = currentBalance - JAIL_FINE_AMOUNT;
         updatedBalances = {
           ...updatedBalances,
-          [currentPlayer.id]: currentBalance - JAIL_FINE_AMOUNT,
+          [currentPlayer.id]: nextBalance,
         };
         balancesChanged = true;
+        if (nextBalance < 0) {
+          bankruptcyCandidate = {
+            reason: "JAIL_PAY_FINE",
+            cashBefore: currentBalance,
+            cashAfter: nextBalance,
+          };
+        }
       }
       let nextChanceIndex = gameState?.chance_index ?? 0;
       let nextCommunityIndex = gameState?.community_index ?? 0;
@@ -2192,15 +2493,25 @@ export async function POST(request: Request) {
             getNumberPayload(card.payload as Record<string, unknown>, "amount") ?? 0;
           const currentBalance =
             updatedBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
+          const nextBalance =
+            card.kind === "PAY" ? currentBalance - amount : currentBalance + amount;
           updatedBalances = {
             ...updatedBalances,
-            [currentPlayer.id]:
-              card.kind === "PAY"
-                ? currentBalance - amount
-                : currentBalance + amount,
+            [currentPlayer.id]: nextBalance,
           };
           if (amount !== 0) {
             balancesChanged = true;
+          }
+          if (
+            card.kind === "PAY" &&
+            nextBalance < 0 &&
+            !bankruptcyCandidate
+          ) {
+            bankruptcyCandidate = {
+              reason: "CARD_PAY",
+              cashBefore: currentBalance,
+              cashAfter: nextBalance,
+            };
           }
           events.push({
             event_type: card.kind === "PAY" ? "CARD_PAY" : "CARD_RECEIVE",
@@ -2451,12 +2762,20 @@ export async function POST(request: Request) {
           updatedBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
         const ownerBalance =
           updatedBalances[rentOwnerId] ?? game.starting_cash ?? 0;
+        const nextBalance = payerBalance - rentAmount;
         updatedBalances = {
           ...updatedBalances,
-          [currentPlayer.id]: payerBalance - rentAmount,
+          [currentPlayer.id]: nextBalance,
           [rentOwnerId]: ownerBalance + rentAmount,
         };
         balancesChanged = true;
+        if (nextBalance < 0 && !bankruptcyCandidate) {
+          bankruptcyCandidate = {
+            reason: "PAY_RENT",
+            cashBefore: payerBalance,
+            cashAfter: nextBalance,
+          };
+        }
         const rentPayload: Record<string, unknown> = {
           tile_index: activeLandingTile.index,
           tile_id: activeLandingTile.tile_id,
@@ -2477,11 +2796,19 @@ export async function POST(request: Request) {
       if (shouldPayTax) {
         const payerBalance =
           updatedBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
+        const nextBalance = payerBalance - taxAmount;
         updatedBalances = {
           ...updatedBalances,
-          [currentPlayer.id]: payerBalance - taxAmount,
+          [currentPlayer.id]: nextBalance,
         };
         balancesChanged = true;
+        if (nextBalance < 0 && !bankruptcyCandidate) {
+          bankruptcyCandidate = {
+            reason: "PAY_TAX",
+            cashBefore: payerBalance,
+            cashAfter: nextBalance,
+          };
+        }
         events.push(
           {
             event_type: "PAY_TAX",
@@ -2510,14 +2837,17 @@ export async function POST(request: Request) {
         // TODO: Pay out free_parking_pot and reset to 0 when jackpot is enabled.
       }
 
+      const isBankruptcyPending = Boolean(bankruptcyCandidate);
       const pendingPurchaseAction =
-        isUnownedOwnableTile && !(shouldSendToJail && jailTile)
-        ? {
-            type: "BUY_PROPERTY",
-            tile_index: activeLandingTile.index,
-            price: activeLandingTile.price ?? 0,
-          }
-        : null;
+        !isBankruptcyPending &&
+        isUnownedOwnableTile &&
+        !(shouldSendToJail && jailTile)
+          ? {
+              type: "BUY_PROPERTY",
+              tile_index: activeLandingTile.index,
+              price: activeLandingTile.price ?? 0,
+            }
+          : null;
 
       if (pendingPurchaseAction) {
         events.push({
@@ -2546,6 +2876,7 @@ export async function POST(request: Request) {
         allowDoublesBonus &&
         isDouble &&
         !pendingPurchaseAction &&
+        !isBankruptcyPending &&
         !(shouldSendToJail && jailTile)
       ) {
         events.push({
@@ -2556,6 +2887,33 @@ export async function POST(request: Request) {
             doubles_count: nextDoublesCount,
           },
         });
+      }
+
+      if (bankruptcyCandidate) {
+        const bankruptcyResult = await resolveBankruptcyIfNeeded({
+          gameId,
+          gameState,
+          players,
+          player: currentPlayer,
+          updatedBalances,
+          cashBefore: bankruptcyCandidate.cashBefore,
+          cashAfter: bankruptcyCandidate.cashAfter,
+          reason: bankruptcyCandidate.reason,
+          events,
+          currentVersion,
+          userId: user.id,
+          playerPosition: finalPosition,
+        });
+
+        if (bankruptcyResult.handled) {
+          if (bankruptcyResult.error) {
+            return NextResponse.json(
+              { error: bankruptcyResult.error },
+              { status: 409 },
+            );
+          }
+          return NextResponse.json({ gameState: bankruptcyResult.updatedState });
+        }
       }
 
       const finalVersion = currentVersion + events.length;
@@ -2638,9 +2996,10 @@ export async function POST(request: Request) {
       const balances = gameState.balances ?? {};
       const currentBalance =
         balances[currentPlayer.id] ?? game.starting_cash ?? 0;
+      const nextBalance = currentBalance - JAIL_FINE_AMOUNT;
       const updatedBalances = {
         ...balances,
-        [currentPlayer.id]: currentBalance - JAIL_FINE_AMOUNT,
+        [currentPlayer.id]: nextBalance,
       };
       const events: Array<{
         event_type: string;
@@ -2663,6 +3022,32 @@ export async function POST(request: Request) {
           },
         },
       ];
+      if (nextBalance < 0) {
+        const bankruptcyResult = await resolveBankruptcyIfNeeded({
+          gameId,
+          gameState,
+          players,
+          player: currentPlayer,
+          updatedBalances,
+          cashBefore: currentBalance,
+          cashAfter: nextBalance,
+          reason: "JAIL_PAY_FINE",
+          events,
+          currentVersion,
+          userId: user.id,
+          playerPosition: currentPlayer.position ?? null,
+        });
+
+        if (bankruptcyResult.handled) {
+          if (bankruptcyResult.error) {
+            return NextResponse.json(
+              { error: bankruptcyResult.error },
+              { status: 409 },
+            );
+          }
+          return NextResponse.json({ gameState: bankruptcyResult.updatedState });
+        }
+      }
       const finalVersion = currentVersion + events.length;
 
       const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
@@ -2722,12 +3107,17 @@ export async function POST(request: Request) {
         );
       }
 
-      const currentIndex = players.findIndex(
-        (player) => player.id === gameState.current_player_id,
+      const nextPlayer = getNextActivePlayer(
+        players,
+        gameState.current_player_id,
       );
-      const nextIndex =
-        currentIndex === -1 ? 0 : (currentIndex + 1) % players.length;
-      const nextPlayer = players[nextIndex];
+
+      if (!nextPlayer) {
+        return NextResponse.json(
+          { error: "No active players remaining." },
+          { status: 409 },
+        );
+      }
 
       const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
         `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,

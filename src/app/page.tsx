@@ -23,6 +23,8 @@ type Player = {
   display_name: string | null;
   created_at: string | null;
   position: number;
+  is_eliminated: boolean;
+  eliminated_at: string | null;
 };
 
 export default function Home() {
@@ -78,11 +80,11 @@ export default function Home() {
         return;
       }
 
-    const playerRows = await supabaseClient.fetchFromSupabase<Player[]>(
-      `players?select=id,user_id,display_name,created_at,position&game_id=eq.${gameId}&order=created_at.asc`,
-      { method: "GET" },
-      accessToken,
-    );
+      const playerRows = await supabaseClient.fetchFromSupabase<Player[]>(
+        `players?select=id,user_id,display_name,created_at,position,is_eliminated,eliminated_at&game_id=eq.${gameId}&order=created_at.asc`,
+        { method: "GET" },
+        accessToken,
+      );
 
       setActiveGame(game[0]);
       setPlayers(playerRows);
