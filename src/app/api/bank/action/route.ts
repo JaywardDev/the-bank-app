@@ -628,29 +628,6 @@ const calculateRent = ({
   };
 };
 
-const calculateAmortizedPayment = ({
-  principal,
-  ratePerTurn,
-  termTurns,
-}: {
-  principal: number;
-  ratePerTurn: number;
-  termTurns: number;
-}) => {
-  if (!Number.isFinite(principal) || principal <= 0 || termTurns <= 0) {
-    return 0;
-  }
-  if (ratePerTurn <= 0) {
-    return Math.round(principal / termTurns);
-  }
-  const numerator = principal * ratePerTurn;
-  const denominator = 1 - (1 + ratePerTurn) ** -termTurns;
-  if (denominator <= 0) {
-    return Math.round(principal / termTurns);
-  }
-  return Math.round(numerator / denominator);
-};
-
 const applyGoSalary = ({
   player,
   balances,
@@ -2431,107 +2408,107 @@ export async function POST(request: Request) {
         );
       }
 
-      const principal = Math.round(purchasePrice * rules.collateralLtv);
-      const paymentPerTurn = calculateAmortizedPayment({
-        principal,
-        ratePerTurn: rules.loanRatePerTurn,
-        termTurns: rules.loanTermTurns,
-      });
-
-      // TODO: Reuse this loan engine for 50% down + 50% purchase mortgages.
-      const now = new Date().toISOString();
-      const [loanRow] = await fetchFromSupabaseWithService<PlayerLoanRow[]>(
-        "player_loans",
+      const rpcResponse = await fetch(
+        `${supabaseUrl}/rest/v1/rpc/take_collateral_loan`,
         {
           method: "POST",
-          headers: {
-            Prefer: "return=representation",
-          },
+          headers: bankHeaders,
           body: JSON.stringify({
             game_id: gameId,
             player_id: currentPlayer.id,
-            collateral_tile_index: tileIndex,
-            principal,
-            rate_per_turn: rules.loanRatePerTurn,
-            term_turns: rules.loanTermTurns,
-            turns_remaining: rules.loanTermTurns,
-            payment_per_turn: paymentPerTurn,
-            status: "active",
-            created_at: now,
-            updated_at: now,
+            tile_index: tileIndex,
+            expected_version: currentVersion,
+            tile_price: purchasePrice,
+            tile_type: tile.type,
+            tile_id: tile.tile_id,
+            actor_user_id: user.id,
           }),
         },
       );
 
-      if (!loanRow) {
+      if (!rpcResponse.ok) {
+        const errorText = await rpcResponse.text();
+        let errorMessage = errorText;
+        try {
+          const parsed = JSON.parse(errorText) as { message?: string };
+          if (parsed?.message) {
+            errorMessage = parsed.message;
+          }
+        } catch {
+          // noop
+        }
+
+        if (errorMessage === "VERSION_MISMATCH") {
+          return NextResponse.json(
+            { error: "Version mismatch." },
+            { status: 409 },
+          );
+        }
+        if (errorMessage === "ALREADY_COLLATERALIZED") {
+          return NextResponse.json(
+            { error: "Already collateralized." },
+            { status: 409 },
+          );
+        }
+        if (errorMessage === "NOT_OWNER") {
+          return NextResponse.json(
+            { error: "You do not own this property." },
+            { status: 409 },
+          );
+        }
+        if (errorMessage === "COLLATERAL_DISABLED") {
+          return NextResponse.json(
+            { error: "Collateral loans are disabled." },
+            { status: 409 },
+          );
+        }
+        if (errorMessage === "TILE_NOT_OWNABLE") {
+          return NextResponse.json(
+            { error: "Tile cannot be collateralized." },
+            { status: 409 },
+          );
+        }
+        if (errorMessage === "INVALID_PRICE") {
+          return NextResponse.json(
+            { error: "Collateral value unavailable for this tile." },
+            { status: 409 },
+          );
+        }
+        if (errorMessage === "PROPERTY_NOT_OWNED") {
+          return NextResponse.json(
+            { error: "You do not own this property." },
+            { status: 409 },
+          );
+        }
+
+        console.error("[Bank][CollateralLoan] RPC failed", {
+          status: rpcResponse.status,
+          error: errorText,
+        });
         return NextResponse.json(
           { error: "Unable to create collateral loan." },
           { status: 500 },
         );
       }
 
-      await fetchFromSupabaseWithService(
-        `property_ownership?game_id=eq.${gameId}&tile_index=eq.${tileIndex}`,
-        {
-          method: "PATCH",
-          body: JSON.stringify({
-            collateral_loan_id: loanRow.id,
-          }),
-        },
-      );
+      const [rpcResult] = (await rpcResponse.json()) as Array<{
+        game_state: GameStateRow;
+        property_ownership: OwnershipRow;
+        player_loan: PlayerLoanRow;
+      }>;
 
-      const balances = gameState.balances ?? {};
-      const currentBalance =
-        balances[currentPlayer.id] ?? game.starting_cash ?? 0;
-      const updatedBalances = {
-        ...balances,
-        [currentPlayer.id]: currentBalance + principal,
-      };
-
-      const events: Array<{
-        event_type: string;
-        payload: Record<string, unknown>;
-      }> = [
-        {
-          event_type: "COLLATERAL_LOAN_TAKEN",
-          payload: {
-            player_id: currentPlayer.id,
-            tile_index: tileIndex,
-            tile_id: tile.tile_id,
-            principal,
-            rate_per_turn: rules.loanRatePerTurn,
-            term_turns: rules.loanTermTurns,
-            payment_per_turn: paymentPerTurn,
-          },
-        },
-      ];
-      const finalVersion = currentVersion + events.length;
-
-      const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
-        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
-        {
-          method: "PATCH",
-          headers: {
-            Prefer: "return=representation",
-          },
-          body: JSON.stringify({
-            version: finalVersion,
-            balances: updatedBalances,
-            updated_at: now,
-          }),
-        },
-      );
-
-      if (!updatedState) {
+      if (!rpcResult?.game_state || !rpcResult?.property_ownership) {
         return NextResponse.json(
-          { error: "Version mismatch." },
-          { status: 409 },
+          { error: "Unable to create collateral loan." },
+          { status: 500 },
         );
       }
 
-      await emitGameEvents(gameId, currentVersion + 1, events, user.id);
-
-      return NextResponse.json({ gameState: updatedState });
+      return NextResponse.json({
+        gameState: rpcResult.game_state,
+        ownership: rpcResult.property_ownership,
+        loan: rpcResult.player_loan ?? null,
+      });
     }
 
     if (body.action === "JAIL_ROLL_FOR_DOUBLES") {

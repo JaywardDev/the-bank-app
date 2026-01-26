@@ -1596,8 +1596,14 @@ export default function PlayPage() {
             }),
           });
 
-          let responseBody: { error?: string; gameState?: GameState } | null =
-            null;
+          let responseBody:
+            | {
+                error?: string;
+                gameState?: GameState;
+                ownership?: OwnershipRow;
+                loan?: PlayerLoan | null;
+              }
+            | null = null;
           try {
             responseBody = (await response.json()) as {
               error?: string;
@@ -1673,6 +1679,34 @@ export default function PlayPage() {
 
         if (responseBody?.gameState) {
           setGameState(responseBody.gameState);
+        }
+        if (responseBody?.ownership) {
+          setOwnershipByTile((prev) => {
+            if (!responseBody.ownership?.owner_player_id) {
+              return prev;
+            }
+            return {
+              ...prev,
+              [responseBody.ownership.tile_index]: {
+                owner_player_id: responseBody.ownership.owner_player_id,
+                collateral_loan_id:
+                  responseBody.ownership.collateral_loan_id ?? null,
+              },
+            };
+          });
+        }
+        if (responseBody?.loan) {
+          setPlayerLoans((prev) => {
+            const existingIndex = prev.findIndex(
+              (loan) => loan.id === responseBody?.loan?.id,
+            );
+            if (existingIndex >= 0) {
+              const next = [...prev];
+              next[existingIndex] = responseBody.loan as PlayerLoan;
+              return next;
+            }
+            return [...prev, responseBody.loan as PlayerLoan];
+          });
         }
 
         await Promise.all([
@@ -2263,7 +2297,11 @@ export default function PlayPage() {
                           tileIndex: tile.index,
                         })
                       }
-                      disabled={!canAct || !rules.loanCollateralEnabled}
+                      disabled={
+                        !canAct ||
+                        !rules.loanCollateralEnabled ||
+                        actionLoading === "TAKE_COLLATERAL_LOAN"
+                      }
                     >
                       {actionLoading === "TAKE_COLLATERAL_LOAN"
                         ? "Collateralizing…"
