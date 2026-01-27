@@ -108,6 +108,14 @@ type GameStateRow = {
   pending_action: Record<string, unknown> | null;
   chance_index: number | null;
   community_index: number | null;
+  chance_order: number[] | null;
+  community_order: number[] | null;
+  chance_draw_ptr: number | null;
+  community_draw_ptr: number | null;
+  chance_seed: string | null;
+  community_seed: string | null;
+  chance_reshuffle_count: number | null;
+  community_reshuffle_count: number | null;
   free_parking_pot: number | null;
   rules: Partial<ReturnType<typeof getRules>> | null;
   auction_active: boolean | null;
@@ -179,6 +187,110 @@ const createJoinCode = () => {
     alphabet[Math.floor(Math.random() * alphabet.length)],
   );
   return segments.join("");
+};
+
+const hashStringToUint32 = (value: string) => {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+};
+
+const mulberry32 = (seed: number) => {
+  let state = seed;
+  return () => {
+    state = (state + 0x6d2b79f5) | 0;
+    let t = Math.imul(state ^ (state >>> 15), state | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+};
+
+const createDeckSeed = (gameId: string, deckLabel: string) =>
+  `${gameId}-${deckLabel}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+const buildShuffledOrder = (
+  deckLength: number,
+  seed: string,
+  reshuffleCount: number,
+) => {
+  if (deckLength <= 0) {
+    throw new Error("Event deck is empty.");
+  }
+  const order = Array.from({ length: deckLength }, (_, index) => index);
+  const rng = mulberry32(hashStringToUint32(`${seed}-${reshuffleCount}`));
+  for (let index = order.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(rng() * (index + 1));
+    [order[index], order[swapIndex]] = [order[swapIndex], order[index]];
+  }
+  return order;
+};
+
+type DeckShuffleState = {
+  order: number[] | null;
+  drawPtr: number | null;
+  seed: string | null;
+  reshuffleCount: number | null;
+};
+
+const prepareDeckDraw = ({
+  deckLength,
+  deckLabel,
+  gameId,
+  state,
+}: {
+  deckLength: number;
+  deckLabel: "chance" | "community";
+  gameId: string;
+  state: DeckShuffleState;
+}) => {
+  if (deckLength <= 0) {
+    throw new Error(`${deckLabel} deck is empty.`);
+  }
+
+  const baseSeed = state.seed ?? createDeckSeed(gameId, deckLabel);
+  let reshuffleCount = Number.isInteger(state.reshuffleCount)
+    ? (state.reshuffleCount as number)
+    : 0;
+  let order = Array.isArray(state.order) ? state.order : null;
+  let drawPtr = Number.isInteger(state.drawPtr) ? (state.drawPtr as number) : 0;
+
+  const resetOrder = () => {
+    order = buildShuffledOrder(deckLength, baseSeed, reshuffleCount);
+    drawPtr = 0;
+  };
+
+  if (!order || order.length !== deckLength) {
+    reshuffleCount = 0;
+    resetOrder();
+  }
+
+  if (drawPtr >= deckLength) {
+    reshuffleCount += 1;
+    resetOrder();
+  }
+
+  let cardIndex = order[drawPtr];
+  if (
+    typeof cardIndex !== "number" ||
+    cardIndex < 0 ||
+    cardIndex >= deckLength
+  ) {
+    reshuffleCount += 1;
+    resetOrder();
+    cardIndex = order[drawPtr];
+  }
+
+  return {
+    order,
+    drawPtr: drawPtr + 1,
+    seed: baseSeed,
+    reshuffleCount,
+    cardIndex,
+    drawIndex: drawPtr,
+  };
 };
 
 const fetchUser = async (accessToken: string) => {
@@ -1009,7 +1121,7 @@ export async function POST(request: Request) {
       }
 
       await fetchFromSupabaseWithService<GameStateRow[]>(
-        "game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment",
+        "game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment",
         {
           method: "POST",
           headers: {
@@ -1146,7 +1258,7 @@ export async function POST(request: Request) {
     )) ?? [];
 
     const [gameState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
-      `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
+      `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
       { method: "GET" },
     )) ?? [];
 
@@ -1229,9 +1341,42 @@ export async function POST(request: Request) {
         acc[player.id] = startingCash;
         return acc;
       }, {});
+      const boardPack = getBoardPackById(game.board_pack_id);
+      const chanceDeck =
+        boardPack?.eventDecks?.chance?.length
+          ? boardPack.eventDecks.chance
+          : chanceCards;
+      const communityDeck =
+        boardPack?.eventDecks?.community?.length
+          ? boardPack.eventDecks.community
+          : communityCards;
+
+      if (chanceDeck.length === 0) {
+        return NextResponse.json(
+          { error: "Chance deck is empty." },
+          { status: 500 },
+        );
+      }
+
+      if (communityDeck.length === 0) {
+        return NextResponse.json(
+          { error: "Community deck is empty." },
+          { status: 500 },
+        );
+      }
+
+      const chanceSeed = gameState?.chance_seed ?? createDeckSeed(gameId, "chance");
+      const communitySeed =
+        gameState?.community_seed ?? createDeckSeed(gameId, "community");
+      const chanceOrder = buildShuffledOrder(chanceDeck.length, chanceSeed, 0);
+      const communityOrder = buildShuffledOrder(
+        communityDeck.length,
+        communitySeed,
+        0,
+      );
 
       const upsertResponse = await fetch(
-        `${supabaseUrl}/rest/v1/game_state?on_conflict=game_id&select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,chance_index,community_index,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment`,
+        `${supabaseUrl}/rest/v1/game_state?on_conflict=game_id&select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment`,
         {
           method: "POST",
           headers: {
@@ -1249,6 +1394,14 @@ export async function POST(request: Request) {
             pending_action: null,
             chance_index: 0,
             community_index: 0,
+            chance_order: chanceOrder,
+            community_order: communityOrder,
+            chance_draw_ptr: 0,
+            community_draw_ptr: 0,
+            chance_seed: chanceSeed,
+            community_seed: communitySeed,
+            chance_reshuffle_count: 0,
+            community_reshuffle_count: 0,
             updated_at: new Date().toISOString(),
           }),
         },
@@ -1904,6 +2057,16 @@ export async function POST(request: Request) {
       let goSalaryAwarded = false;
       let nextChanceIndex = gameState?.chance_index ?? 0;
       let nextCommunityIndex = gameState?.community_index ?? 0;
+      let nextChanceOrder = gameState?.chance_order ?? null;
+      let nextCommunityOrder = gameState?.community_order ?? null;
+      let nextChanceDrawPtr = gameState?.chance_draw_ptr ?? 0;
+      let nextCommunityDrawPtr = gameState?.community_draw_ptr ?? 0;
+      let nextChanceSeed = gameState?.chance_seed ?? null;
+      let nextCommunitySeed = gameState?.community_seed ?? null;
+      let nextChanceReshuffleCount = gameState?.chance_reshuffle_count ?? 0;
+      let nextCommunityReshuffleCount = gameState?.community_reshuffle_count ?? 0;
+      let chanceStateChanged = false;
+      let communityStateChanged = false;
       let nextGetOutOfJailFreeCount =
         currentPlayer.get_out_of_jail_free_count ?? 0;
       let getOutOfJailFreeCountChanged = false;
@@ -2148,16 +2311,53 @@ export async function POST(request: Request) {
         landingTile.type === "EVENT"
           ? getEventDeckForTile(landingTile, boardPack)
           : null;
-      if (eventDeck && eventDeck.cards.length > 0) {
+      if (eventDeck) {
         const currentIndex =
           eventDeck.indexKey === "chance_index"
             ? nextChanceIndex
             : nextCommunityIndex;
-        const card = eventDeck.cards[currentIndex % eventDeck.cards.length];
+        const drawResult =
+          eventDeck.indexKey === "chance_index"
+            ? prepareDeckDraw({
+                deckLength: eventDeck.cards.length,
+                deckLabel: "chance",
+                gameId,
+                state: {
+                  order: nextChanceOrder,
+                  drawPtr: nextChanceDrawPtr,
+                  seed: nextChanceSeed,
+                  reshuffleCount: nextChanceReshuffleCount,
+                },
+              })
+            : prepareDeckDraw({
+                deckLength: eventDeck.cards.length,
+                deckLabel: "community",
+                gameId,
+                state: {
+                  order: nextCommunityOrder,
+                  drawPtr: nextCommunityDrawPtr,
+                  seed: nextCommunitySeed,
+                  reshuffleCount: nextCommunityReshuffleCount,
+                },
+              });
+        const card = eventDeck.cards[drawResult.cardIndex];
+        if (!card) {
+          throw new Error("Drawn card index out of range.");
+        }
         if (eventDeck.indexKey === "chance_index") {
           nextChanceIndex = currentIndex + 1;
+          nextChanceOrder = drawResult.order;
+          nextChanceDrawPtr = drawResult.drawPtr;
+          nextChanceSeed = drawResult.seed;
+          nextChanceReshuffleCount = drawResult.reshuffleCount;
+          chanceStateChanged = true;
         } else {
           nextCommunityIndex = currentIndex + 1;
+          nextCommunityOrder = drawResult.order;
+          nextCommunityDrawPtr = drawResult.drawPtr;
+          nextCommunitySeed = drawResult.seed;
+          nextCommunityReshuffleCount = drawResult.reshuffleCount;
+          communityStateChanged = true;
         }
 
         events.push({
@@ -2169,7 +2369,7 @@ export async function POST(request: Request) {
             card_id: card.id,
             card_title: card.title,
             card_kind: card.kind,
-            draw_index: currentIndex,
+            draw_index: drawResult.drawIndex,
           },
         });
 
@@ -2667,6 +2867,22 @@ export async function POST(request: Request) {
               : {}),
             ...(nextCommunityIndex !== (gameState?.community_index ?? 0)
               ? { community_index: nextCommunityIndex }
+              : {}),
+            ...(chanceStateChanged
+              ? {
+                  chance_order: nextChanceOrder,
+                  chance_draw_ptr: nextChanceDrawPtr,
+                  chance_seed: nextChanceSeed,
+                  chance_reshuffle_count: nextChanceReshuffleCount,
+                }
+              : {}),
+            ...(communityStateChanged
+              ? {
+                  community_order: nextCommunityOrder,
+                  community_draw_ptr: nextCommunityDrawPtr,
+                  community_seed: nextCommunitySeed,
+                  community_reshuffle_count: nextCommunityReshuffleCount,
+                }
               : {}),
             ...(pendingPurchaseAction
               ? {
@@ -3526,6 +3742,16 @@ export async function POST(request: Request) {
       }
       let nextChanceIndex = gameState?.chance_index ?? 0;
       let nextCommunityIndex = gameState?.community_index ?? 0;
+      let nextChanceOrder = gameState?.chance_order ?? null;
+      let nextCommunityOrder = gameState?.community_order ?? null;
+      let nextChanceDrawPtr = gameState?.chance_draw_ptr ?? 0;
+      let nextCommunityDrawPtr = gameState?.community_draw_ptr ?? 0;
+      let nextChanceSeed = gameState?.chance_seed ?? null;
+      let nextCommunitySeed = gameState?.community_seed ?? null;
+      let nextChanceReshuffleCount = gameState?.chance_reshuffle_count ?? 0;
+      let nextCommunityReshuffleCount = gameState?.community_reshuffle_count ?? 0;
+      let chanceStateChanged = false;
+      let communityStateChanged = false;
       let nextGetOutOfJailFreeCount =
         currentPlayer.get_out_of_jail_free_count ?? 0;
       let getOutOfJailFreeCountChanged = false;
@@ -3652,16 +3878,53 @@ export async function POST(request: Request) {
         landingTile.type === "EVENT"
           ? getEventDeckForTile(landingTile, boardPack)
           : null;
-      if (eventDeck && eventDeck.cards.length > 0) {
+      if (eventDeck) {
         const currentIndex =
           eventDeck.indexKey === "chance_index"
             ? nextChanceIndex
             : nextCommunityIndex;
-        const card = eventDeck.cards[currentIndex % eventDeck.cards.length];
+        const drawResult =
+          eventDeck.indexKey === "chance_index"
+            ? prepareDeckDraw({
+                deckLength: eventDeck.cards.length,
+                deckLabel: "chance",
+                gameId,
+                state: {
+                  order: nextChanceOrder,
+                  drawPtr: nextChanceDrawPtr,
+                  seed: nextChanceSeed,
+                  reshuffleCount: nextChanceReshuffleCount,
+                },
+              })
+            : prepareDeckDraw({
+                deckLength: eventDeck.cards.length,
+                deckLabel: "community",
+                gameId,
+                state: {
+                  order: nextCommunityOrder,
+                  drawPtr: nextCommunityDrawPtr,
+                  seed: nextCommunitySeed,
+                  reshuffleCount: nextCommunityReshuffleCount,
+                },
+              });
+        const card = eventDeck.cards[drawResult.cardIndex];
+        if (!card) {
+          throw new Error("Drawn card index out of range.");
+        }
         if (eventDeck.indexKey === "chance_index") {
           nextChanceIndex = currentIndex + 1;
+          nextChanceOrder = drawResult.order;
+          nextChanceDrawPtr = drawResult.drawPtr;
+          nextChanceSeed = drawResult.seed;
+          nextChanceReshuffleCount = drawResult.reshuffleCount;
+          chanceStateChanged = true;
         } else {
           nextCommunityIndex = currentIndex + 1;
+          nextCommunityOrder = drawResult.order;
+          nextCommunityDrawPtr = drawResult.drawPtr;
+          nextCommunitySeed = drawResult.seed;
+          nextCommunityReshuffleCount = drawResult.reshuffleCount;
+          communityStateChanged = true;
         }
 
         events.push({
@@ -3673,7 +3936,7 @@ export async function POST(request: Request) {
             card_id: card.id,
             card_title: card.title,
             card_kind: card.kind,
-            draw_index: currentIndex,
+            draw_index: drawResult.drawIndex,
           },
         });
 
@@ -4172,6 +4435,22 @@ export async function POST(request: Request) {
               : {}),
             ...(nextCommunityIndex !== (gameState?.community_index ?? 0)
               ? { community_index: nextCommunityIndex }
+              : {}),
+            ...(chanceStateChanged
+              ? {
+                  chance_order: nextChanceOrder,
+                  chance_draw_ptr: nextChanceDrawPtr,
+                  chance_seed: nextChanceSeed,
+                  chance_reshuffle_count: nextChanceReshuffleCount,
+                }
+              : {}),
+            ...(communityStateChanged
+              ? {
+                  community_order: nextCommunityOrder,
+                  community_draw_ptr: nextCommunityDrawPtr,
+                  community_seed: nextCommunitySeed,
+                  community_reshuffle_count: nextCommunityReshuffleCount,
+                }
               : {}),
             turn_phase: pendingPurchaseAction
               ? "AWAITING_DECISION"
