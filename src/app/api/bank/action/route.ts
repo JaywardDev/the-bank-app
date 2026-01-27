@@ -354,20 +354,31 @@ const resolveTile = (tile: TileInfo, player: PlayerRow) => {
   }
 };
 
-const getEventDeckForTile = (tile: TileInfo) => {
+const getEventDeckForTile = (
+  tile: TileInfo,
+  boardPack: ReturnType<typeof getBoardPackById> | null,
+) => {
+  const chanceDeck =
+    boardPack?.eventDecks?.chance?.length
+      ? boardPack.eventDecks.chance
+      : chanceCards;
+  const communityDeck =
+    boardPack?.eventDecks?.community?.length
+      ? boardPack.eventDecks.community
+      : communityCards;
   const tileId = tile.tile_id.toLowerCase();
   const tileName = tile.name.toLowerCase();
   if (tileId.includes("chance") || tileName.includes("chance")) {
     return {
       deck: "CHANCE",
-      cards: chanceCards,
+      cards: chanceDeck,
       indexKey: "chance_index" as const,
     };
   }
   if (tileId.includes("community") || tileName.includes("community")) {
     return {
       deck: "COMMUNITY",
-      cards: communityCards,
+      cards: communityDeck,
       indexKey: "community_index" as const,
     };
   }
@@ -2078,7 +2089,9 @@ export async function POST(request: Request) {
       }
       let cardTriggeredGoToJail = false;
       const eventDeck =
-        landingTile.type === "EVENT" ? getEventDeckForTile(landingTile) : null;
+        landingTile.type === "EVENT"
+          ? getEventDeckForTile(landingTile, boardPack)
+          : null;
       if (eventDeck && eventDeck.cards.length > 0) {
         const currentIndex =
           eventDeck.indexKey === "chance_index"
@@ -3566,7 +3579,9 @@ export async function POST(request: Request) {
       }
       let cardTriggeredGoToJail = false;
       const eventDeck =
-        landingTile.type === "EVENT" ? getEventDeckForTile(landingTile) : null;
+        landingTile.type === "EVENT"
+          ? getEventDeckForTile(landingTile, boardPack)
+          : null;
       if (eventDeck && eventDeck.cards.length > 0) {
         const currentIndex =
           eventDeck.indexKey === "chance_index"

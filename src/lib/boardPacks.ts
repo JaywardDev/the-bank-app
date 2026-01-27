@@ -2,7 +2,7 @@ export type BoardPack = {
   id: string;
   displayName: string;
   properties: string[];
-  eventDecks: string[];
+  eventDecks?: EventDecks;
   tiles: BoardTile[];
 };
 
@@ -19,6 +19,11 @@ export type CardDefinition = {
   title: string;
   kind: CardKind;
   payload: Record<string, number | string | boolean | null>;
+};
+
+export type EventDecks = {
+  chance: CardDefinition[];
+  community: CardDefinition[];
 };
 
 export type BoardTileType =
@@ -131,7 +136,7 @@ export const boardPacks: BoardPack[] = [
     id: "classic-us",
     displayName: "Classic (US)",
     properties: [],
-    eventDecks: [],
+    eventDecks: { chance: chanceCards, community: communityCards },
     tiles: [
       { index: 0, tile_id: "go", type: "START", name: "Go" },
       {
@@ -410,7 +415,7 @@ export const boardPacks: BoardPack[] = [
     id: "classic-uk",
     displayName: "Classic (UK)",
     properties: [],
-    eventDecks: [],
+    eventDecks: { chance: chanceCards, community: communityCards },
     tiles: [
       { index: 0, tile_id: "go", type: "START", name: "Go" },
       {
@@ -689,14 +694,12 @@ export const boardPacks: BoardPack[] = [
     id: "philippines",
     displayName: "Philippines",
     properties: [],
-    eventDecks: [],
     tiles: [],
   },
   {
     id: "new-zealand",
     displayName: "New Zealand",
     properties: [],
-    eventDecks: [],
     tiles: [],
   },
 ];
