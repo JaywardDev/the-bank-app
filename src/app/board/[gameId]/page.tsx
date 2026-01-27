@@ -567,6 +567,57 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
         return `${playerName} went to jail (${cardTitle})`;
       }
 
+      if (event.event_type === "CARD_GET_OUT_OF_JAIL_FREE_RECEIVED") {
+        const payload = event.payload as
+          | {
+              card_title?: unknown;
+              player_name?: unknown;
+              total_cards?: unknown;
+            }
+          | null;
+        const cardTitle =
+          typeof payload?.card_title === "string"
+            ? payload.card_title
+            : "Get Out of Jail Free";
+        const playerName =
+          typeof payload?.player_name === "string"
+            ? payload.player_name
+            : "Player";
+        const totalCardsRaw = payload?.total_cards;
+        const totalCards =
+          typeof totalCardsRaw === "number"
+            ? totalCardsRaw
+            : typeof totalCardsRaw === "string"
+              ? Number.parseInt(totalCardsRaw, 10)
+              : null;
+        return totalCards !== null
+          ? `${playerName} received a ${cardTitle} card (${totalCards} total)`
+          : `${playerName} received a ${cardTitle} card`;
+      }
+
+      if (event.event_type === "CARD_GET_OUT_OF_JAIL_FREE_USED") {
+        const payload = event.payload as
+          | {
+              player_name?: unknown;
+              remaining_cards?: unknown;
+            }
+          | null;
+        const playerName =
+          typeof payload?.player_name === "string"
+            ? payload.player_name
+            : "Player";
+        const remainingRaw = payload?.remaining_cards;
+        const remainingCards =
+          typeof remainingRaw === "number"
+            ? remainingRaw
+            : typeof remainingRaw === "string"
+              ? Number.parseInt(remainingRaw, 10)
+              : null;
+        return remainingCards !== null
+          ? `${playerName} used a Get Out of Jail Free card (${remainingCards} left)`
+          : `${playerName} used a Get Out of Jail Free card`;
+      }
+
       if (event.event_type === "START_GAME") {
         return "Game started";
       }

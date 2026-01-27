@@ -21,6 +21,7 @@ type Player = {
   position: number;
   is_in_jail: boolean;
   jail_turns_remaining: number;
+  get_out_of_jail_free_count: number;
   is_eliminated: boolean;
   eliminated_at: string | null;
 };
@@ -406,6 +407,42 @@ export default function PlayPage() {
           ? payload.player_name
           : "Player";
       return `${playerName} went to jail (${cardTitle})`;
+    }
+
+    if (event.event_type === "CARD_GET_OUT_OF_JAIL_FREE_RECEIVED") {
+      const cardTitle =
+        typeof payload?.card_title === "string"
+          ? payload.card_title
+          : "Get Out of Jail Free";
+      const playerName =
+        typeof payload?.player_name === "string"
+          ? payload.player_name
+          : "Player";
+      const totalCards =
+        typeof payload?.total_cards === "number"
+          ? payload.total_cards
+          : typeof payload?.total_cards === "string"
+            ? Number.parseInt(payload.total_cards, 10)
+            : null;
+      return totalCards !== null
+        ? `${playerName} received a ${cardTitle} card (${totalCards} total)`
+        : `${playerName} received a ${cardTitle} card`;
+    }
+
+    if (event.event_type === "CARD_GET_OUT_OF_JAIL_FREE_USED") {
+      const playerName =
+        typeof payload?.player_name === "string"
+          ? payload.player_name
+          : "Player";
+      const remainingCards =
+        typeof payload?.remaining_cards === "number"
+          ? payload.remaining_cards
+          : typeof payload?.remaining_cards === "string"
+            ? Number.parseInt(payload.remaining_cards, 10)
+            : null;
+      return remainingCards !== null
+        ? `${playerName} used a Get Out of Jail Free card (${remainingCards} left)`
+        : `${playerName} used a Get Out of Jail Free card`;
     }
 
     if (event.event_type === "OFFER_PURCHASE") {
@@ -892,7 +929,7 @@ export default function PlayPage() {
   const loadPlayers = useCallback(
     async (activeGameId: string, accessToken?: string) => {
       const playerRows = await supabaseClient.fetchFromSupabase<Player[]>(
-        `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,is_eliminated,eliminated_at&game_id=eq.${activeGameId}&order=created_at.asc`,
+        `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,is_eliminated,eliminated_at&game_id=eq.${activeGameId}&order=created_at.asc`,
         { method: "GET" },
         accessToken,
       );
@@ -1619,6 +1656,9 @@ export default function PlayPage() {
     isAwaitingJailDecision && currentUserPlayer?.is_in_jail;
   const canRollForDoubles =
     isAwaitingJailDecision && currentUserPlayer?.is_in_jail;
+  const getOutOfJailFreeCount =
+    currentUserPlayer?.get_out_of_jail_free_count ?? 0;
+  const hasGetOutOfJailFree = getOutOfJailFreeCount > 0;
   const canRoll =
     canAct &&
     !hasPendingDecision &&
@@ -1751,7 +1791,8 @@ export default function PlayPage() {
               | "ROLL_DICE"
               | "END_TURN"
               | "JAIL_PAY_FINE"
-              | "JAIL_ROLL_FOR_DOUBLES";
+              | "JAIL_ROLL_FOR_DOUBLES"
+              | "USE_GET_OUT_OF_JAIL_FREE";
           }
         | { action: "DECLINE_PROPERTY" | "BUY_PROPERTY"; tileIndex: number }
         | { action: "AUCTION_BID"; amount: number }
@@ -2020,6 +2061,10 @@ export default function PlayPage() {
     void handleBankAction({ action: "JAIL_ROLL_FOR_DOUBLES" });
   }, [handleBankAction]);
 
+  const handleUseGetOutOfJailFree = useCallback(() => {
+    void handleBankAction({ action: "USE_GET_OUT_OF_JAIL_FREE" });
+  }, [handleBankAction]);
+
   const handleLeaveTable = useCallback(() => {
     clearResumeStorage();
     setGameId(null);
@@ -2282,6 +2327,18 @@ export default function PlayPage() {
                     ? "Paying…"
                     : `Pay $${JAIL_FINE_AMOUNT} fine`}
                 </button>
+                {hasGetOutOfJailFree ? (
+                  <button
+                    className="rounded-2xl border border-rose-300 px-4 py-2 text-sm font-semibold text-rose-900 disabled:cursor-not-allowed disabled:border-rose-200 disabled:text-rose-400"
+                    type="button"
+                    onClick={handleUseGetOutOfJailFree}
+                    disabled={actionLoading === "USE_GET_OUT_OF_JAIL_FREE"}
+                  >
+                    {actionLoading === "USE_GET_OUT_OF_JAIL_FREE"
+                      ? "Using…"
+                      : "Use Get Out of Jail Free"}
+                  </button>
+                ) : null}
                 <button
                   className="rounded-2xl border border-rose-300 px-4 py-2 text-sm font-semibold text-rose-900 disabled:cursor-not-allowed disabled:border-rose-200 disabled:text-rose-400"
                   type="button"

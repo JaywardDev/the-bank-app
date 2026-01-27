@@ -6,7 +6,13 @@ export type BoardPack = {
   tiles: BoardTile[];
 };
 
-export type CardKind = "PAY" | "RECEIVE" | "MOVE_TO" | "MOVE_REL" | "GO_TO_JAIL";
+export type CardKind =
+  | "PAY"
+  | "RECEIVE"
+  | "MOVE_TO"
+  | "MOVE_REL"
+  | "GO_TO_JAIL"
+  | "GET_OUT_OF_JAIL_FREE";
 
 export type CardDefinition = {
   id: string;
@@ -105,6 +111,12 @@ export const communityCards: CardDefinition[] = [
     title: "From sale of stock you get $50",
     kind: "RECEIVE",
     payload: { amount: 50 },
+  },
+  {
+    id: "community-get-out-of-jail-free",
+    title: "Get Out of Jail Free",
+    kind: "GET_OUT_OF_JAIL_FREE",
+    payload: {},
   },
   {
     id: "community-hospital",

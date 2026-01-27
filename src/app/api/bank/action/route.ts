@@ -46,7 +46,8 @@ type BankActionRequest =
         | "DECLINE_PROPERTY"
         | "BUY_PROPERTY"
         | "JAIL_PAY_FINE"
-        | "JAIL_ROLL_FOR_DOUBLES",
+        | "JAIL_ROLL_FOR_DOUBLES"
+        | "USE_GET_OUT_OF_JAIL_FREE",
         "DECLINE_PROPERTY" | "BUY_PROPERTY"
       >;
       tileIndex?: number;
@@ -90,6 +91,7 @@ type PlayerRow = {
   position: number;
   is_in_jail: boolean;
   jail_turns_remaining: number;
+  get_out_of_jail_free_count: number;
   is_eliminated: boolean;
   eliminated_at: string | null;
 };
@@ -919,7 +921,7 @@ export async function POST(request: Request) {
       }
 
       const [hostPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
-        "players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,is_eliminated,eliminated_at",
+        "players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,is_eliminated,eliminated_at",
         {
           method: "POST",
           headers: {
@@ -1003,7 +1005,7 @@ export async function POST(request: Request) {
       }
 
       const [player] = (await fetchFromSupabaseWithService<PlayerRow[]>(
-        "players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,is_eliminated,eliminated_at&on_conflict=game_id,user_id",
+        "players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,is_eliminated,eliminated_at&on_conflict=game_id,user_id",
         {
           method: "POST",
           headers: {
@@ -1025,7 +1027,7 @@ export async function POST(request: Request) {
       }
 
       const players = (await fetchFromSupabaseWithService<PlayerRow[]>(
-        `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,is_eliminated,eliminated_at&game_id=eq.${game.id}&order=created_at.asc`,
+        `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,is_eliminated,eliminated_at&game_id=eq.${game.id}&order=created_at.asc`,
         { method: "GET" },
       )) ?? [];
       const ownershipByTile = await loadOwnershipByTile(game.id);
@@ -1073,7 +1075,7 @@ export async function POST(request: Request) {
     }
 
     const players = (await fetchFromSupabaseWithService<PlayerRow[]>(
-      `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,is_eliminated,eliminated_at&game_id=eq.${gameId}&order=created_at.asc`,
+      `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,is_eliminated,eliminated_at&game_id=eq.${gameId}&order=created_at.asc`,
       { method: "GET" },
     )) ?? [];
 
@@ -1836,6 +1838,9 @@ export async function POST(request: Request) {
       let goSalaryAwarded = false;
       let nextChanceIndex = gameState?.chance_index ?? 0;
       let nextCommunityIndex = gameState?.community_index ?? 0;
+      let nextGetOutOfJailFreeCount =
+        currentPlayer.get_out_of_jail_free_count ?? 0;
+      let getOutOfJailFreeCountChanged = false;
 
       if (isDouble && nextDoublesCount >= 3) {
         const jailTile =
@@ -2133,6 +2138,22 @@ export async function POST(request: Request) {
               card_title: card.title,
               card_kind: card.kind,
               amount,
+            },
+          });
+        }
+
+        if (card.kind === "GET_OUT_OF_JAIL_FREE") {
+          nextGetOutOfJailFreeCount += 1;
+          getOutOfJailFreeCountChanged = true;
+          events.push({
+            event_type: "CARD_GET_OUT_OF_JAIL_FREE_RECEIVED",
+            payload: {
+              player_id: currentPlayer.id,
+              player_name: currentPlayer.display_name,
+              card_id: card.id,
+              card_title: card.title,
+              card_kind: card.kind,
+              total_cards: nextGetOutOfJailFreeCount,
             },
           });
         }
@@ -2594,6 +2615,9 @@ export async function POST(request: Request) {
             position: finalPosition,
             is_in_jail: Boolean(shouldSendToJail && jailTile),
             jail_turns_remaining: shouldSendToJail && jailTile ? 3 : 0,
+            ...(getOutOfJailFreeCountChanged
+              ? { get_out_of_jail_free_count: nextGetOutOfJailFreeCount }
+              : {}),
           }),
         },
       )) ?? [];
@@ -3420,6 +3444,9 @@ export async function POST(request: Request) {
       }
       let nextChanceIndex = gameState?.chance_index ?? 0;
       let nextCommunityIndex = gameState?.community_index ?? 0;
+      let nextGetOutOfJailFreeCount =
+        currentPlayer.get_out_of_jail_free_count ?? 0;
+      let getOutOfJailFreeCountChanged = false;
 
       const events: Array<{
         event_type: string;
@@ -3599,6 +3626,22 @@ export async function POST(request: Request) {
               card_title: card.title,
               card_kind: card.kind,
               amount,
+            },
+          });
+        }
+
+        if (card.kind === "GET_OUT_OF_JAIL_FREE") {
+          nextGetOutOfJailFreeCount += 1;
+          getOutOfJailFreeCountChanged = true;
+          events.push({
+            event_type: "CARD_GET_OUT_OF_JAIL_FREE_RECEIVED",
+            payload: {
+              player_id: currentPlayer.id,
+              player_name: currentPlayer.display_name,
+              card_id: card.id,
+              card_title: card.title,
+              card_kind: card.kind,
+              total_cards: nextGetOutOfJailFreeCount,
             },
           });
         }
@@ -4059,6 +4102,9 @@ export async function POST(request: Request) {
             position: finalPosition,
             is_in_jail: Boolean(shouldSendToJail && jailTile),
             jail_turns_remaining: shouldSendToJail && jailTile ? 3 : 0,
+            ...(getOutOfJailFreeCountChanged
+              ? { get_out_of_jail_free_count: nextGetOutOfJailFreeCount }
+              : {}),
           }),
         },
       )) ?? [];
@@ -4180,6 +4226,95 @@ export async function POST(request: Request) {
           body: JSON.stringify({
             is_in_jail: false,
             jail_turns_remaining: 0,
+          }),
+        },
+      )) ?? [];
+
+      if (!updatedPlayer) {
+        return NextResponse.json(
+          { error: "Unable to release player from jail." },
+          { status: 500 },
+        );
+      }
+
+      await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+
+      return NextResponse.json({ gameState: updatedState });
+    }
+
+    if (body.action === "USE_GET_OUT_OF_JAIL_FREE") {
+      if (gameState.turn_phase !== "AWAITING_JAIL_DECISION") {
+        return NextResponse.json(
+          { error: "No jail decision required right now." },
+          { status: 409 },
+        );
+      }
+
+      if (!currentPlayer.is_in_jail) {
+        return NextResponse.json(
+          { error: "You are not in jail." },
+          { status: 409 },
+        );
+      }
+
+      const currentCount = currentPlayer.get_out_of_jail_free_count ?? 0;
+      if (currentCount <= 0) {
+        return NextResponse.json(
+          { error: "No Get Out of Jail Free cards available." },
+          { status: 409 },
+        );
+      }
+
+      const nextCount = Math.max(0, currentCount - 1);
+      const events: Array<{
+        event_type: string;
+        payload: Record<string, unknown>;
+      }> = [
+        {
+          event_type: "CARD_GET_OUT_OF_JAIL_FREE_USED",
+          payload: {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.display_name,
+            remaining_cards: nextCount,
+          },
+        },
+      ];
+
+      const finalVersion = currentVersion + events.length;
+
+      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            version: finalVersion,
+            turn_phase: "AWAITING_ROLL",
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      )) ?? [];
+
+      if (!updatedState) {
+        return NextResponse.json(
+          { error: "Version mismatch." },
+          { status: 409 },
+        );
+      }
+
+      const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
+        `players?id=eq.${currentPlayer.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            is_in_jail: false,
+            jail_turns_remaining: 0,
+            get_out_of_jail_free_count: nextCount,
           }),
         },
       )) ?? [];
