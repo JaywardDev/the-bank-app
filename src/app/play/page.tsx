@@ -2197,11 +2197,11 @@ export default function PlayPage() {
         <>
           <section className="space-y-4">
         <div className="relative">
-          <div
-            className={`rounded-2xl border bg-white p-5 shadow-sm space-y-4 ${
-              isAuctionActive ? "opacity-50" : ""
-            }`}
-          >
+        <div
+          className={`rounded-2xl border bg-white p-5 shadow-sm space-y-4 ${
+            isAuctionActive ? "pointer-events-none opacity-50" : ""
+          }`}
+        >
           <div className="flex items-start justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
@@ -2385,120 +2385,125 @@ export default function PlayPage() {
           ) : null}
         </div>
         {isAuctionActive ? (
-          <div className="absolute inset-0 z-10 flex items-center justify-center p-4">
-            <div className="w-full max-w-md rounded-3xl border border-indigo-200 bg-white/95 p-5 shadow-xl backdrop-blur">
-              <div className="flex items-start justify-between gap-4">
-                <div>
+          <>
+            <div className="fixed inset-0 z-10 bg-black/35 backdrop-blur-[1px]" />
+            <div className="fixed inset-0 z-20 flex items-center justify-center p-4">
+              <div className="w-full max-w-md scale-[1.02] rounded-3xl border border-indigo-200 bg-white/95 p-5 shadow-2xl backdrop-blur">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-indigo-500">
+                      Auction in progress
+                    </p>
+                    <p className="text-lg font-semibold text-neutral-900">
+                      {auctionTile?.name ??
+                        (auctionTileIndex !== null
+                          ? `Tile ${auctionTileIndex}`
+                          : "Unowned tile")}
+                    </p>
+                    <p className="text-xs text-neutral-500">
+                      {auctionTile?.type ?? "Ownable tile"}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs uppercase tracking-wide text-neutral-400">
+                      Time left
+                    </p>
+                    <p
+                      className={`text-lg font-semibold ${
+                        isCurrentAuctionBidder
+                          ? "text-rose-600"
+                          : "text-neutral-800"
+                      }`}
+                    >
+                      {auctionCountdownLabel}
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-4 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-3 text-sm text-indigo-900">
                   <p className="text-xs font-semibold uppercase tracking-wide text-indigo-500">
-                    Auction in progress
+                    Current bid
                   </p>
-                  <p className="text-lg font-semibold text-neutral-900">
-                    {auctionTile?.name ??
-                      (auctionTileIndex !== null
-                        ? `Tile ${auctionTileIndex}`
-                        : "Unowned tile")}
+                  <p className="text-base font-semibold text-indigo-900">
+                    ${auctionCurrentBid}
                   </p>
-                  <p className="text-xs text-neutral-500">
-                    {auctionTile?.type ?? "Ownable tile"}
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="text-xs uppercase tracking-wide text-neutral-400">
-                    Time left
-                  </p>
-                  <p
-                    className={`text-lg font-semibold ${
-                      isCurrentAuctionBidder
-                        ? "text-rose-600"
-                        : "text-neutral-800"
-                    }`}
-                  >
-                    {auctionCountdownLabel}
+                  <p className="text-xs text-indigo-700">
+                    {auctionWinnerName
+                      ? `Leading: ${auctionWinnerName}`
+                      : "No bids yet"}
                   </p>
                 </div>
-              </div>
-              <div className="mt-4 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-3 text-sm text-indigo-900">
-                <p className="text-xs font-semibold uppercase tracking-wide text-indigo-500">
-                  Current bid
+                <p className="mt-3 text-sm text-neutral-600">
+                  Waiting for{" "}
+                  <span className="font-semibold text-neutral-900">
+                    {auctionTurnPlayerName ?? "next bidder"}
+                  </span>
+                  …
                 </p>
-                <p className="text-base font-semibold text-indigo-900">
-                  ${auctionCurrentBid}
-                </p>
-                <p className="text-xs text-indigo-700">
-                  {auctionWinnerName
-                    ? `Leading: ${auctionWinnerName}`
-                    : "No bids yet"}
-                </p>
-              </div>
-              <p className="mt-3 text-sm text-neutral-600">
-                Waiting for{" "}
-                <span className="font-semibold text-neutral-900">
-                  {auctionTurnPlayerName ?? "next bidder"}
-                </span>
-                …
-              </p>
-              {isCurrentAuctionBidder ? (
-                <div className="mt-4 space-y-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
-                    Your bid
-                  </p>
-                  <div className="flex items-center justify-between gap-3 rounded-2xl border border-neutral-200 bg-white px-3 py-2">
-                    <button
-                      className="rounded-full border border-neutral-200 px-3 py-1 text-sm font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:text-neutral-300"
-                      type="button"
-                      onClick={() =>
-                        setAuctionBidAmount((prev) => prev - 10)
-                      }
-                      disabled={!canDecreaseAuctionBid}
-                    >
-                      –
-                    </button>
-                    <div className="text-lg font-semibold text-neutral-900">
-                      ${auctionBidAmount}
+                {isCurrentAuctionBidder ? (
+                  <div className="mt-4 space-y-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                      Your bid
+                    </p>
+                    <div className="flex items-center justify-between gap-3 rounded-2xl border border-neutral-200 bg-white px-3 py-2">
+                      <button
+                        className="rounded-full border border-neutral-200 px-3 py-1 text-sm font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:text-neutral-300"
+                        type="button"
+                        onClick={() =>
+                          setAuctionBidAmount((prev) => prev - 10)
+                        }
+                        disabled={!canDecreaseAuctionBid}
+                      >
+                        –
+                      </button>
+                      <div className="text-lg font-semibold text-neutral-900">
+                        ${auctionBidAmount}
+                      </div>
+                      <button
+                        className="rounded-full border border-neutral-200 px-3 py-1 text-sm font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:text-neutral-300"
+                        type="button"
+                        onClick={() =>
+                          setAuctionBidAmount((prev) => prev + 10)
+                        }
+                        disabled={!canIncreaseAuctionBid}
+                      >
+                        +
+                      </button>
                     </div>
-                    <button
-                      className="rounded-full border border-neutral-200 px-3 py-1 text-sm font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:text-neutral-300"
-                      type="button"
-                      onClick={() =>
-                        setAuctionBidAmount((prev) => prev + 10)
-                      }
-                      disabled={!canIncreaseAuctionBid}
-                    >
-                      +
-                    </button>
+                    <p className="text-xs text-neutral-500">
+                      Minimum bid: ${auctionBidMinimum} · Cash:{" "}
+                      {currentBidderCash}
+                    </p>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <button
+                        className="rounded-2xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-indigo-200"
+                        type="button"
+                        onClick={handleAuctionBid}
+                        disabled={
+                          actionLoading === "AUCTION_BID" ||
+                          !canSubmitAuctionBid
+                        }
+                      >
+                        {actionLoading === "AUCTION_BID" ? "Bidding…" : "Bid"}
+                      </button>
+                      <button
+                        className="rounded-2xl border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:border-neutral-100 disabled:text-neutral-300"
+                        type="button"
+                        onClick={handleAuctionPass}
+                        disabled={actionLoading === "AUCTION_PASS"}
+                      >
+                        {actionLoading === "AUCTION_PASS" ? "Passing…" : "Pass"}
+                      </button>
+                    </div>
                   </div>
-                  <p className="text-xs text-neutral-500">
-                    Minimum bid: ${auctionBidMinimum} · Cash: ${currentBidderCash}
+                ) : (
+                  <p className="mt-4 text-xs text-neutral-500">
+                    Watch the auction update live. Actions unlock when it is your
+                    turn to bid or pass.
                   </p>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <button
-                      className="rounded-2xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-indigo-200"
-                      type="button"
-                      onClick={handleAuctionBid}
-                      disabled={
-                        actionLoading === "AUCTION_BID" || !canSubmitAuctionBid
-                      }
-                    >
-                      {actionLoading === "AUCTION_BID" ? "Bidding…" : "Bid"}
-                    </button>
-                    <button
-                      className="rounded-2xl border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:border-neutral-100 disabled:text-neutral-300"
-                      type="button"
-                      onClick={handleAuctionPass}
-                      disabled={actionLoading === "AUCTION_PASS"}
-                    >
-                      {actionLoading === "AUCTION_PASS" ? "Passing…" : "Pass"}
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <p className="mt-4 text-xs text-neutral-500">
-                  Watch the auction update live. Actions unlock when it is your
-                  turn to bid or pass.
-                </p>
-              )}
+                )}
+              </div>
             </div>
-          </div>
+          </>
         ) : null}
         </div>
 
