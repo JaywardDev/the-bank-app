@@ -400,6 +400,61 @@ const getNumberPayload = (
   return null;
 };
 
+const getStringPayload = (
+  payload: Record<string, unknown>,
+  key: string,
+): string | null => {
+  const value = payload[key];
+  return typeof value === "string" ? value : null;
+};
+
+const findNearestTileByType = (
+  boardTiles: TileInfo[],
+  fromIndex: number,
+  tileType: string,
+): TileInfo | null => {
+  const boardSize = boardTiles.length;
+  for (let offset = 1; offset <= boardSize; offset += 1) {
+    const candidateIndex = (fromIndex + offset) % boardSize;
+    const candidate = boardTiles[candidateIndex];
+    if (candidate && candidate.type === tileType) {
+      return candidate;
+    }
+  }
+  return null;
+};
+
+const resolveMoveToTargetIndex = (
+  payload: Record<string, unknown>,
+  boardTiles: TileInfo[],
+  fromIndex: number,
+): number | null => {
+  const targetTileId = getStringPayload(payload, "target_tile_id");
+  if (targetTileId) {
+    const targetTile = boardTiles.find((tile) => tile.tile_id === targetTileId);
+    if (!targetTile) {
+      throw new Error(
+        `Card target tile_id not found in board pack: ${targetTileId}`,
+      );
+    }
+    return targetTile.index;
+  }
+
+  const nearestKind = getStringPayload(payload, "nearest_kind");
+  if (nearestKind === "RAILROAD" || nearestKind === "UTILITY") {
+    const tileType = nearestKind === "RAILROAD" ? "RAIL" : "UTILITY";
+    const nearestTile = findNearestTileByType(boardTiles, fromIndex, tileType);
+    if (!nearestTile) {
+      throw new Error(
+        `Card nearest ${nearestKind.toLowerCase()} tile not found in board pack.`,
+      );
+    }
+    return nearestTile.index;
+  }
+
+  return getNumberPayload(payload, "tile_index");
+};
+
 const getNextActivePlayer = (
   players: PlayerRow[],
   currentPlayerId: string | null,
@@ -2175,10 +2230,13 @@ export async function POST(request: Request) {
           const payload = card.payload as Record<string, unknown>;
           const targetIndex =
             card.kind === "MOVE_TO"
-              ? getNumberPayload(payload, "tile_index")
+              ? resolveMoveToTargetIndex(payload, boardTiles, activeResolvedTile.index)
               : null;
           const spaces =
-            card.kind === "MOVE_REL" ? getNumberPayload(payload, "spaces") : null;
+            card.kind === "MOVE_REL"
+              ? getNumberPayload(payload, "relative_spaces") ??
+                getNumberPayload(payload, "spaces")
+              : null;
           const cardFromIndex = activeResolvedTile.index;
           const rawIndex =
             card.kind === "MOVE_TO" && targetIndex !== null
@@ -3665,10 +3723,13 @@ export async function POST(request: Request) {
           const payload = card.payload as Record<string, unknown>;
           const targetIndex =
             card.kind === "MOVE_TO"
-              ? getNumberPayload(payload, "tile_index")
+              ? resolveMoveToTargetIndex(payload, boardTiles, activeResolvedTile.index)
               : null;
           const spaces =
-            card.kind === "MOVE_REL" ? getNumberPayload(payload, "spaces") : null;
+            card.kind === "MOVE_REL"
+              ? getNumberPayload(payload, "relative_spaces") ??
+                getNumberPayload(payload, "spaces")
+              : null;
           const cardFromIndex = activeResolvedTile.index;
           const rawIndex =
             card.kind === "MOVE_TO" && targetIndex !== null

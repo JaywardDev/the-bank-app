@@ -14,11 +14,23 @@ export type CardKind =
   | "GO_TO_JAIL"
   | "GET_OUT_OF_JAIL_FREE";
 
+export type CardNearestKind = "RAILROAD" | "UTILITY";
+
+export type CardPayload = {
+  amount?: number;
+  tile_index?: number;
+  target_tile_id?: string;
+  nearest_kind?: CardNearestKind;
+  spaces?: number;
+  relative_spaces?: number;
+  [key: string]: number | string | boolean | null | undefined;
+};
+
 export type CardDefinition = {
   id: string;
   title: string;
   kind: CardKind;
-  payload: Record<string, number | string | boolean | null>;
+  payload: CardPayload;
 };
 
 export type EventDecks = {
@@ -131,12 +143,411 @@ export const communityCards: CardDefinition[] = [
   },
 ];
 
+export const classicUsChanceCards: CardDefinition[] = [
+  {
+    id: "classic-us-chance-advance-go",
+    title: "Move to Go and collect salary",
+    kind: "MOVE_TO",
+    payload: { target_tile_id: "go" },
+  },
+  {
+    id: "classic-us-chance-illinois",
+    title: "Advance to Illinois Avenue",
+    kind: "MOVE_TO",
+    payload: { target_tile_id: "illinois-avenue" },
+  },
+  {
+    id: "classic-us-chance-st-charles",
+    title: "Advance to St. Charles Place",
+    kind: "MOVE_TO",
+    payload: { target_tile_id: "st-charles-place" },
+  },
+  {
+    id: "classic-us-chance-nearest-utility",
+    title: "Head to the nearest utility",
+    kind: "MOVE_TO",
+    payload: { nearest_kind: "UTILITY" },
+  },
+  {
+    id: "classic-us-chance-nearest-railroad-1",
+    title: "Proceed to the nearest railroad",
+    kind: "MOVE_TO",
+    payload: { nearest_kind: "RAILROAD" },
+  },
+  {
+    id: "classic-us-chance-nearest-railroad-2",
+    title: "Catch the next railroad ahead",
+    kind: "MOVE_TO",
+    payload: { nearest_kind: "RAILROAD" },
+  },
+  {
+    id: "classic-us-chance-reading-railroad",
+    title: "Travel to Reading Railroad",
+    kind: "MOVE_TO",
+    payload: { target_tile_id: "reading-railroad" },
+  },
+  {
+    id: "classic-us-chance-boardwalk",
+    title: "Stroll to Boardwalk",
+    kind: "MOVE_TO",
+    payload: { target_tile_id: "boardwalk" },
+  },
+  {
+    id: "classic-us-chance-back-three",
+    title: "Move back three spaces",
+    kind: "MOVE_REL",
+    payload: { relative_spaces: -3 },
+  },
+  {
+    id: "classic-us-chance-dividend",
+    title: "Collect a dividend from the bank",
+    kind: "RECEIVE",
+    payload: { amount: 50 },
+  },
+  {
+    id: "classic-us-chance-building-loan",
+    title: "Building loan matures",
+    kind: "RECEIVE",
+    payload: { amount: 150 },
+  },
+  {
+    id: "classic-us-chance-crossword",
+    title: "Win a competition prize",
+    kind: "RECEIVE",
+    payload: { amount: 100 },
+  },
+  {
+    id: "classic-us-chance-speeding-fine",
+    title: "Pay a speeding fine",
+    kind: "PAY",
+    payload: { amount: 15 },
+  },
+  {
+    id: "classic-us-chance-poor-tax",
+    title: "Pay the poor tax",
+    kind: "PAY",
+    payload: { amount: 15 },
+  },
+  {
+    id: "classic-us-chance-go-to-jail",
+    title: "Head straight to jail",
+    kind: "GO_TO_JAIL",
+    payload: {},
+  },
+  {
+    id: "classic-us-chance-get-out-of-jail",
+    title: "Keep a get out of jail free pass",
+    kind: "GET_OUT_OF_JAIL_FREE",
+    payload: {},
+  },
+];
+
+export const classicUsCommunityCards: CardDefinition[] = [
+  {
+    id: "classic-us-community-advance-go",
+    title: "Advance to Go and collect salary",
+    kind: "MOVE_TO",
+    payload: { target_tile_id: "go" },
+  },
+  {
+    id: "classic-us-community-bank-error",
+    title: "Bank correction in your favor",
+    kind: "RECEIVE",
+    payload: { amount: 200 },
+  },
+  {
+    id: "classic-us-community-doctor",
+    title: "Pay the doctor's bill",
+    kind: "PAY",
+    payload: { amount: 50 },
+  },
+  {
+    id: "classic-us-community-stock",
+    title: "Collect proceeds from a stock sale",
+    kind: "RECEIVE",
+    payload: { amount: 50 },
+  },
+  {
+    id: "classic-us-community-holiday-fund",
+    title: "Holiday fund matures",
+    kind: "RECEIVE",
+    payload: { amount: 100 },
+  },
+  {
+    id: "classic-us-community-tax-refund",
+    title: "Receive an income tax refund",
+    kind: "RECEIVE",
+    payload: { amount: 20 },
+  },
+  {
+    id: "classic-us-community-life-insurance",
+    title: "Life insurance matures",
+    kind: "RECEIVE",
+    payload: { amount: 100 },
+  },
+  {
+    id: "classic-us-community-hospital",
+    title: "Pay hospital fees",
+    kind: "PAY",
+    payload: { amount: 100 },
+  },
+  {
+    id: "classic-us-community-school-fees",
+    title: "Pay school fees",
+    kind: "PAY",
+    payload: { amount: 50 },
+  },
+  {
+    id: "classic-us-community-consultancy",
+    title: "Receive a consultancy fee",
+    kind: "RECEIVE",
+    payload: { amount: 25 },
+  },
+  {
+    id: "classic-us-community-inherit",
+    title: "Receive an inheritance",
+    kind: "RECEIVE",
+    payload: { amount: 100 },
+  },
+  {
+    id: "classic-us-community-beauty-contest",
+    title: "Collect a contest prize",
+    kind: "RECEIVE",
+    payload: { amount: 10 },
+  },
+  {
+    id: "classic-us-community-get-out-of-jail",
+    title: "Keep a get out of jail free pass",
+    kind: "GET_OUT_OF_JAIL_FREE",
+    payload: {},
+  },
+  {
+    id: "classic-us-community-go-to-jail",
+    title: "Go directly to jail",
+    kind: "GO_TO_JAIL",
+    payload: {},
+  },
+  {
+    id: "classic-us-community-birthday",
+    title: "Receive a birthday gift from the bank",
+    kind: "RECEIVE",
+    payload: { amount: 50 },
+  },
+  {
+    id: "classic-us-community-street-repairs",
+    title: "Pay for neighborhood repairs",
+    kind: "PAY",
+    payload: { amount: 40 },
+  },
+];
+
+export const classicUkChanceCards: CardDefinition[] = [
+  {
+    id: "classic-uk-chance-advance-go",
+    title: "Move to Go and collect salary",
+    kind: "MOVE_TO",
+    payload: { target_tile_id: "go" },
+  },
+  {
+    id: "classic-uk-chance-pall-mall",
+    title: "Advance to Pall Mall",
+    kind: "MOVE_TO",
+    payload: { target_tile_id: "pall-mall" },
+  },
+  {
+    id: "classic-uk-chance-trafalgar",
+    title: "Advance to Trafalgar Square",
+    kind: "MOVE_TO",
+    payload: { target_tile_id: "trafalgar-square" },
+  },
+  {
+    id: "classic-uk-chance-mayfair",
+    title: "Stroll to Mayfair",
+    kind: "MOVE_TO",
+    payload: { target_tile_id: "mayfair" },
+  },
+  {
+    id: "classic-uk-chance-nearest-utility",
+    title: "Head to the nearest utility",
+    kind: "MOVE_TO",
+    payload: { nearest_kind: "UTILITY" },
+  },
+  {
+    id: "classic-uk-chance-nearest-railroad-1",
+    title: "Proceed to the nearest station",
+    kind: "MOVE_TO",
+    payload: { nearest_kind: "RAILROAD" },
+  },
+  {
+    id: "classic-uk-chance-nearest-railroad-2",
+    title: "Catch the next station ahead",
+    kind: "MOVE_TO",
+    payload: { nearest_kind: "RAILROAD" },
+  },
+  {
+    id: "classic-uk-chance-marylebone",
+    title: "Take a trip to Marylebone Station",
+    kind: "MOVE_TO",
+    payload: { target_tile_id: "marylebone-station" },
+  },
+  {
+    id: "classic-uk-chance-back-three",
+    title: "Move back three spaces",
+    kind: "MOVE_REL",
+    payload: { relative_spaces: -3 },
+  },
+  {
+    id: "classic-uk-chance-dividend",
+    title: "Collect a dividend from the bank",
+    kind: "RECEIVE",
+    payload: { amount: 50 },
+  },
+  {
+    id: "classic-uk-chance-building-loan",
+    title: "Building loan matures",
+    kind: "RECEIVE",
+    payload: { amount: 150 },
+  },
+  {
+    id: "classic-uk-chance-crossword",
+    title: "Win a competition prize",
+    kind: "RECEIVE",
+    payload: { amount: 100 },
+  },
+  {
+    id: "classic-uk-chance-speeding-fine",
+    title: "Pay a speeding fine",
+    kind: "PAY",
+    payload: { amount: 15 },
+  },
+  {
+    id: "classic-uk-chance-poor-tax",
+    title: "Pay the poor tax",
+    kind: "PAY",
+    payload: { amount: 15 },
+  },
+  {
+    id: "classic-uk-chance-go-to-jail",
+    title: "Head straight to jail",
+    kind: "GO_TO_JAIL",
+    payload: {},
+  },
+  {
+    id: "classic-uk-chance-get-out-of-jail",
+    title: "Keep a get out of jail free pass",
+    kind: "GET_OUT_OF_JAIL_FREE",
+    payload: {},
+  },
+];
+
+export const classicUkCommunityCards: CardDefinition[] = [
+  {
+    id: "classic-uk-community-advance-go",
+    title: "Advance to Go and collect salary",
+    kind: "MOVE_TO",
+    payload: { target_tile_id: "go" },
+  },
+  {
+    id: "classic-uk-community-bank-error",
+    title: "Bank correction in your favor",
+    kind: "RECEIVE",
+    payload: { amount: 200 },
+  },
+  {
+    id: "classic-uk-community-doctor",
+    title: "Pay the doctor's bill",
+    kind: "PAY",
+    payload: { amount: 50 },
+  },
+  {
+    id: "classic-uk-community-stock",
+    title: "Collect proceeds from a stock sale",
+    kind: "RECEIVE",
+    payload: { amount: 50 },
+  },
+  {
+    id: "classic-uk-community-holiday-fund",
+    title: "Holiday fund matures",
+    kind: "RECEIVE",
+    payload: { amount: 100 },
+  },
+  {
+    id: "classic-uk-community-tax-refund",
+    title: "Receive an income tax refund",
+    kind: "RECEIVE",
+    payload: { amount: 20 },
+  },
+  {
+    id: "classic-uk-community-life-insurance",
+    title: "Life insurance matures",
+    kind: "RECEIVE",
+    payload: { amount: 100 },
+  },
+  {
+    id: "classic-uk-community-hospital",
+    title: "Pay hospital fees",
+    kind: "PAY",
+    payload: { amount: 100 },
+  },
+  {
+    id: "classic-uk-community-school-fees",
+    title: "Pay school fees",
+    kind: "PAY",
+    payload: { amount: 50 },
+  },
+  {
+    id: "classic-uk-community-consultancy",
+    title: "Receive a consultancy fee",
+    kind: "RECEIVE",
+    payload: { amount: 25 },
+  },
+  {
+    id: "classic-uk-community-inherit",
+    title: "Receive an inheritance",
+    kind: "RECEIVE",
+    payload: { amount: 100 },
+  },
+  {
+    id: "classic-uk-community-beauty-contest",
+    title: "Collect a contest prize",
+    kind: "RECEIVE",
+    payload: { amount: 10 },
+  },
+  {
+    id: "classic-uk-community-get-out-of-jail",
+    title: "Keep a get out of jail free pass",
+    kind: "GET_OUT_OF_JAIL_FREE",
+    payload: {},
+  },
+  {
+    id: "classic-uk-community-go-to-jail",
+    title: "Go directly to jail",
+    kind: "GO_TO_JAIL",
+    payload: {},
+  },
+  {
+    id: "classic-uk-community-birthday",
+    title: "Receive a birthday gift from the bank",
+    kind: "RECEIVE",
+    payload: { amount: 50 },
+  },
+  {
+    id: "classic-uk-community-street-repairs",
+    title: "Pay for neighborhood repairs",
+    kind: "PAY",
+    payload: { amount: 40 },
+  },
+];
+
 export const boardPacks: BoardPack[] = [
   {
     id: "classic-us",
     displayName: "Classic (US)",
     properties: [],
-    eventDecks: { chance: chanceCards, community: communityCards },
+    eventDecks: {
+      chance: classicUsChanceCards,
+      community: classicUsCommunityCards,
+    },
     tiles: [
       { index: 0, tile_id: "go", type: "START", name: "Go" },
       {
@@ -415,7 +826,10 @@ export const boardPacks: BoardPack[] = [
     id: "classic-uk",
     displayName: "Classic (UK)",
     properties: [],
-    eventDecks: { chance: chanceCards, community: communityCards },
+    eventDecks: {
+      chance: classicUkChanceCards,
+      community: classicUkCommunityCards,
+    },
     tiles: [
       { index: 0, tile_id: "go", type: "START", name: "Go" },
       {
