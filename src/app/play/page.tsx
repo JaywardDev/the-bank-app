@@ -46,6 +46,16 @@ type GameState = {
   community_index: number | null;
   free_parking_pot: number | null;
   rules: Partial<ReturnType<typeof getRules>> | null;
+  auction_active: boolean | null;
+  auction_tile_index: number | null;
+  auction_initiator_player_id: string | null;
+  auction_current_bid: number | null;
+  auction_current_winner_player_id: string | null;
+  auction_turn_player_id: string | null;
+  auction_turn_ends_at: string | null;
+  auction_eligible_player_ids: string[] | null;
+  auction_passed_player_ids: string[] | null;
+  auction_min_increment: number | null;
 };
 
 type GameEvent = {
@@ -120,6 +130,8 @@ export default function PlayPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"wallet" | "board">("wallet");
   const [boardZoomed, setBoardZoomed] = useState(false);
+  const [auctionBidAmount, setAuctionBidAmount] = useState<number>(10);
+  const [auctionNow, setAuctionNow] = useState<Date>(() => new Date());
   const [needsAuth, setNeedsAuth] = useState(false);
   const [initialSnapshotReady, setInitialSnapshotReady] = useState(false);
   const [realtimeReady, setRealtimeReady] = useState(false);
@@ -441,6 +453,133 @@ export default function PlayPage() {
       const tileLabel =
         tileNameFromBoard ?? (tileIndex !== null ? `Tile ${tileIndex}` : "tile");
       return `Auction: ${tileLabel}`;
+    }
+
+    if (event.event_type === "AUCTION_STARTED") {
+      const tileIndexRaw = payload?.tile_index;
+      const tileIndex =
+        typeof tileIndexRaw === "number"
+          ? tileIndexRaw
+          : typeof tileIndexRaw === "string"
+            ? Number.parseInt(tileIndexRaw, 10)
+            : null;
+      const tileNameFromBoard =
+        tileIndex !== null
+          ? boardPack?.tiles?.find((entry) => entry.index === tileIndex)?.name
+          : null;
+      const tileLabel =
+        tileNameFromBoard ?? (tileIndex !== null ? `Tile ${tileIndex}` : "tile");
+      const minIncrement =
+        typeof payload?.min_increment === "number"
+          ? payload.min_increment
+          : typeof payload?.min_increment === "string"
+            ? Number.parseInt(payload.min_increment, 10)
+            : null;
+      return minIncrement !== null
+        ? `Auction started for ${tileLabel} (min +$${minIncrement})`
+        : `Auction started for ${tileLabel}`;
+    }
+
+    if (event.event_type === "AUCTION_BID") {
+      const amount =
+        typeof payload?.amount === "number"
+          ? payload.amount
+          : typeof payload?.amount === "string"
+            ? Number.parseInt(payload.amount, 10)
+            : null;
+      const playerId =
+        typeof payload?.player_id === "string" ? payload.player_id : null;
+      const playerName =
+        players.find((player) => player.id === playerId)?.display_name ??
+        "Player";
+      const tileIndexRaw = payload?.tile_index;
+      const tileIndex =
+        typeof tileIndexRaw === "number"
+          ? tileIndexRaw
+          : typeof tileIndexRaw === "string"
+            ? Number.parseInt(tileIndexRaw, 10)
+            : null;
+      const tileNameFromBoard =
+        tileIndex !== null
+          ? boardPack?.tiles?.find((entry) => entry.index === tileIndex)?.name
+          : null;
+      const tileLabel =
+        tileNameFromBoard ?? (tileIndex !== null ? `Tile ${tileIndex}` : "tile");
+      return amount !== null
+        ? `${playerName} bid $${amount} on ${tileLabel}`
+        : `${playerName} bid on ${tileLabel}`;
+    }
+
+    if (event.event_type === "AUCTION_PASS") {
+      const playerId =
+        typeof payload?.player_id === "string" ? payload.player_id : null;
+      const playerName =
+        players.find((player) => player.id === playerId)?.display_name ??
+        "Player";
+      const tileIndexRaw = payload?.tile_index;
+      const tileIndex =
+        typeof tileIndexRaw === "number"
+          ? tileIndexRaw
+          : typeof tileIndexRaw === "string"
+            ? Number.parseInt(tileIndexRaw, 10)
+            : null;
+      const tileNameFromBoard =
+        tileIndex !== null
+          ? boardPack?.tiles?.find((entry) => entry.index === tileIndex)?.name
+          : null;
+      const tileLabel =
+        tileNameFromBoard ?? (tileIndex !== null ? `Tile ${tileIndex}` : "tile");
+      const isAuto = payload?.auto === true;
+      return isAuto
+        ? `${playerName} auto-passed on ${tileLabel}`
+        : `${playerName} passed on ${tileLabel}`;
+    }
+
+    if (event.event_type === "AUCTION_WON") {
+      const winnerId =
+        typeof payload?.winner_id === "string" ? payload.winner_id : null;
+      const winnerName =
+        players.find((player) => player.id === winnerId)?.display_name ??
+        "Player";
+      const amount =
+        typeof payload?.amount === "number"
+          ? payload.amount
+          : typeof payload?.amount === "string"
+            ? Number.parseInt(payload.amount, 10)
+            : null;
+      const tileIndexRaw = payload?.tile_index;
+      const tileIndex =
+        typeof tileIndexRaw === "number"
+          ? tileIndexRaw
+          : typeof tileIndexRaw === "string"
+            ? Number.parseInt(tileIndexRaw, 10)
+            : null;
+      const tileNameFromBoard =
+        tileIndex !== null
+          ? boardPack?.tiles?.find((entry) => entry.index === tileIndex)?.name
+          : null;
+      const tileLabel =
+        tileNameFromBoard ?? (tileIndex !== null ? `Tile ${tileIndex}` : "tile");
+      return amount !== null
+        ? `${winnerName} won ${tileLabel} for $${amount}`
+        : `${winnerName} won ${tileLabel}`;
+    }
+
+    if (event.event_type === "AUCTION_SKIPPED") {
+      const tileIndexRaw = payload?.tile_index;
+      const tileIndex =
+        typeof tileIndexRaw === "number"
+          ? tileIndexRaw
+          : typeof tileIndexRaw === "string"
+            ? Number.parseInt(tileIndexRaw, 10)
+            : null;
+      const tileNameFromBoard =
+        tileIndex !== null
+          ? boardPack?.tiles?.find((entry) => entry.index === tileIndex)?.name
+          : null;
+      const tileLabel =
+        tileNameFromBoard ?? (tileIndex !== null ? `Tile ${tileIndex}` : "tile");
+      return `Auction skipped for ${tileLabel}`;
     }
 
     if (event.event_type === "PAY_RENT") {
@@ -829,7 +968,7 @@ export default function PlayPage() {
   const loadGameState = useCallback(
     async (activeGameId: string, accessToken?: string) => {
       const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
-        `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,chance_index,community_index,free_parking_pot,rules&game_id=eq.${activeGameId}&limit=1`,
+        `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${activeGameId}&limit=1`,
         { method: "GET" },
         accessToken,
       );
@@ -1407,6 +1546,7 @@ export default function PlayPage() {
     (player) => player.id === gameState?.current_player_id,
   );
   const isEliminated = Boolean(currentUserPlayer?.is_eliminated);
+  const isAuctionActive = Boolean(gameState?.auction_active);
   const isMyTurn = Boolean(
     isInProgress &&
       session &&
@@ -1460,8 +1600,10 @@ export default function PlayPage() {
     pendingTile?.name ??
     (pendingPurchase ? `Tile ${pendingPurchase.tile_index}` : null);
   const hasPendingDecision = Boolean(pendingPurchase);
-  const showPendingDecisionCard = hasPendingDecision && isMyTurn;
-  const showPendingDecisionBanner = hasPendingDecision && !isMyTurn;
+  const showPendingDecisionCard =
+    hasPendingDecision && isMyTurn && !isAuctionActive;
+  const showPendingDecisionBanner =
+    hasPendingDecision && !isMyTurn && !isAuctionActive;
   const myPlayerBalance =
     gameState?.balances && currentUserPlayer
       ? gameState.balances[currentUserPlayer.id] ?? 0
@@ -1469,7 +1611,8 @@ export default function PlayPage() {
   const canAffordPendingPurchase = pendingPurchase
     ? myPlayerBalance >= pendingPurchase.price
     : false;
-  const canAct = initialSnapshotReady && isMyTurn && !isEliminated;
+  const canAct =
+    initialSnapshotReady && isMyTurn && !isEliminated && !isAuctionActive;
   const isAwaitingJailDecision =
     isMyTurn && gameState?.turn_phase === "AWAITING_JAIL_DECISION";
   const showJailDecisionPanel =
@@ -1508,6 +1651,57 @@ export default function PlayPage() {
     (entry) => !entry.isCollateralized,
   );
   const activeLoans = playerLoans.filter((loan) => loan.status === "active");
+  const auctionTurnPlayerId = gameState?.auction_turn_player_id ?? null;
+  const auctionTileIndex = gameState?.auction_tile_index ?? null;
+  const auctionTile =
+    auctionTileIndex !== null && auctionTileIndex !== undefined
+      ? boardPack?.tiles?.find((tile) => tile.index === auctionTileIndex) ?? null
+      : null;
+  const auctionCurrentBid = gameState?.auction_current_bid ?? 0;
+  const auctionMinIncrement =
+    gameState?.auction_min_increment ?? rules.auctionMinIncrement;
+  const auctionBidMinimum =
+    auctionCurrentBid > 0 ? auctionCurrentBid + auctionMinIncrement : 10;
+  const auctionTurnEndsAt = gameState?.auction_turn_ends_at ?? null;
+  const auctionWinnerId = gameState?.auction_current_winner_player_id ?? null;
+  const auctionWinnerName =
+    players.find((player) => player.id === auctionWinnerId)?.display_name ??
+    (auctionWinnerId ? "Player" : null);
+  const auctionTurnPlayerName =
+    players.find((player) => player.id === auctionTurnPlayerId)?.display_name ??
+    (auctionTurnPlayerId ? "Player" : null);
+  const isCurrentAuctionBidder =
+    Boolean(currentUserPlayer?.id) &&
+    currentUserPlayer?.id === auctionTurnPlayerId;
+  const currentBidderCash =
+    currentUserPlayer && gameState?.balances
+      ? gameState.balances[currentUserPlayer.id] ?? 0
+      : 0;
+  const auctionRemainingSeconds = useMemo(() => {
+    if (!auctionTurnEndsAt) {
+      return null;
+    }
+    const endMs = Date.parse(auctionTurnEndsAt);
+    if (Number.isNaN(endMs)) {
+      return null;
+    }
+    const diffMs = endMs - auctionNow.getTime();
+    return Math.max(0, Math.ceil(diffMs / 1000));
+  }, [auctionNow, auctionTurnEndsAt]);
+  const auctionCountdownLabel =
+    typeof auctionRemainingSeconds === "number"
+      ? `${Math.floor(auctionRemainingSeconds / 60)}:${String(
+          auctionRemainingSeconds % 60,
+        ).padStart(2, "0")}`
+      : "—";
+  const canIncreaseAuctionBid =
+    isCurrentAuctionBidder && auctionBidAmount + 10 <= currentBidderCash;
+  const canDecreaseAuctionBid =
+    isCurrentAuctionBidder && auctionBidAmount - 10 >= auctionBidMinimum;
+  const canSubmitAuctionBid =
+    isCurrentAuctionBidder &&
+    auctionBidAmount >= auctionBidMinimum &&
+    auctionBidAmount <= currentBidderCash;
 
   useEffect(() => {
     if (!gameId || !session?.access_token) {
@@ -1515,6 +1709,39 @@ export default function PlayPage() {
     }
     void loadLoans(gameId, session.access_token, currentUserPlayer?.id);
   }, [currentUserPlayer?.id, gameId, loadLoans, session?.access_token]);
+
+  useEffect(() => {
+    if (!isAuctionActive) {
+      return;
+    }
+    setAuctionNow(new Date());
+    const interval = setInterval(() => {
+      setAuctionNow(new Date());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isAuctionActive, auctionTurnEndsAt]);
+
+  useEffect(() => {
+    if (!isAuctionActive || !isCurrentAuctionBidder) {
+      return;
+    }
+    setAuctionBidAmount((prev) => {
+      const minValue = auctionBidMinimum;
+      const maxValue = currentBidderCash;
+      if (prev < minValue) {
+        return minValue;
+      }
+      if (prev > maxValue) {
+        return maxValue;
+      }
+      return prev;
+    });
+  }, [
+    auctionBidMinimum,
+    currentBidderCash,
+    isAuctionActive,
+    isCurrentAuctionBidder,
+  ]);
 
   const handleBankAction = useCallback(
     async (
@@ -1527,10 +1754,13 @@ export default function PlayPage() {
               | "JAIL_ROLL_FOR_DOUBLES";
           }
         | { action: "DECLINE_PROPERTY" | "BUY_PROPERTY"; tileIndex: number }
+        | { action: "AUCTION_BID"; amount: number }
+        | { action: "AUCTION_PASS" }
         | { action: "TAKE_COLLATERAL_LOAN"; tileIndex: number },
     ) => {
       const { action } = request;
       const tileIndex = "tileIndex" in request ? request.tileIndex : undefined;
+      const amount = "amount" in request ? request.amount : undefined;
       if (!session || !gameId) {
         setNotice("Join a game lobby first.");
         return;
@@ -1592,6 +1822,7 @@ export default function PlayPage() {
               gameId,
               action,
               tileIndex,
+              amount,
               expectedVersion: snapshotVersion,
             }),
           });
@@ -1763,6 +1994,23 @@ export default function PlayPage() {
       tileIndex: pendingPurchase.tile_index,
     });
   }, [handleBankAction, pendingPurchase]);
+
+  const handleAuctionBid = useCallback(() => {
+    if (!isCurrentAuctionBidder) {
+      return;
+    }
+    void handleBankAction({
+      action: "AUCTION_BID",
+      amount: auctionBidAmount,
+    });
+  }, [auctionBidAmount, handleBankAction, isCurrentAuctionBidder]);
+
+  const handleAuctionPass = useCallback(() => {
+    if (!isCurrentAuctionBidder) {
+      return;
+    }
+    void handleBankAction({ action: "AUCTION_PASS" });
+  }, [handleBankAction, isCurrentAuctionBidder]);
 
   const handlePayJailFine = useCallback(() => {
     void handleBankAction({ action: "JAIL_PAY_FINE" });
@@ -1948,7 +2196,12 @@ export default function PlayPage() {
       {viewMode === "wallet" ? (
         <>
           <section className="space-y-4">
-        <div className="rounded-2xl border bg-white p-5 shadow-sm space-y-4">
+        <div className="relative">
+          <div
+            className={`rounded-2xl border bg-white p-5 shadow-sm space-y-4 ${
+              isAuctionActive ? "opacity-50" : ""
+            }`}
+          >
           <div className="flex items-start justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
@@ -2106,7 +2359,7 @@ export default function PlayPage() {
                   type="button"
                   onClick={handleDeclineProperty}
                   disabled={actionLoading === "DECLINE_PROPERTY"}
-                  title="Phase 7C: treat as decline/auction placeholder"
+                  title="Start auction for this property"
                 >
                   {actionLoading === "DECLINE_PROPERTY"
                     ? "Auctioning…"
@@ -2130,6 +2383,123 @@ export default function PlayPage() {
           {!initialSnapshotReady ? (
             <p className="text-xs text-neutral-400">Loading snapshot…</p>
           ) : null}
+        </div>
+        {isAuctionActive ? (
+          <div className="absolute inset-0 z-10 flex items-center justify-center p-4">
+            <div className="w-full max-w-md rounded-3xl border border-indigo-200 bg-white/95 p-5 shadow-xl backdrop-blur">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-indigo-500">
+                    Auction in progress
+                  </p>
+                  <p className="text-lg font-semibold text-neutral-900">
+                    {auctionTile?.name ??
+                      (auctionTileIndex !== null
+                        ? `Tile ${auctionTileIndex}`
+                        : "Unowned tile")}
+                  </p>
+                  <p className="text-xs text-neutral-500">
+                    {auctionTile?.type ?? "Ownable tile"}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs uppercase tracking-wide text-neutral-400">
+                    Time left
+                  </p>
+                  <p
+                    className={`text-lg font-semibold ${
+                      isCurrentAuctionBidder
+                        ? "text-rose-600"
+                        : "text-neutral-800"
+                    }`}
+                  >
+                    {auctionCountdownLabel}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-4 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-3 text-sm text-indigo-900">
+                <p className="text-xs font-semibold uppercase tracking-wide text-indigo-500">
+                  Current bid
+                </p>
+                <p className="text-base font-semibold text-indigo-900">
+                  ${auctionCurrentBid}
+                </p>
+                <p className="text-xs text-indigo-700">
+                  {auctionWinnerName
+                    ? `Leading: ${auctionWinnerName}`
+                    : "No bids yet"}
+                </p>
+              </div>
+              <p className="mt-3 text-sm text-neutral-600">
+                Waiting for{" "}
+                <span className="font-semibold text-neutral-900">
+                  {auctionTurnPlayerName ?? "next bidder"}
+                </span>
+                …
+              </p>
+              {isCurrentAuctionBidder ? (
+                <div className="mt-4 space-y-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                    Your bid
+                  </p>
+                  <div className="flex items-center justify-between gap-3 rounded-2xl border border-neutral-200 bg-white px-3 py-2">
+                    <button
+                      className="rounded-full border border-neutral-200 px-3 py-1 text-sm font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:text-neutral-300"
+                      type="button"
+                      onClick={() =>
+                        setAuctionBidAmount((prev) => prev - 10)
+                      }
+                      disabled={!canDecreaseAuctionBid}
+                    >
+                      –
+                    </button>
+                    <div className="text-lg font-semibold text-neutral-900">
+                      ${auctionBidAmount}
+                    </div>
+                    <button
+                      className="rounded-full border border-neutral-200 px-3 py-1 text-sm font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:text-neutral-300"
+                      type="button"
+                      onClick={() =>
+                        setAuctionBidAmount((prev) => prev + 10)
+                      }
+                      disabled={!canIncreaseAuctionBid}
+                    >
+                      +
+                    </button>
+                  </div>
+                  <p className="text-xs text-neutral-500">
+                    Minimum bid: ${auctionBidMinimum} · Cash: ${currentBidderCash}
+                  </p>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <button
+                      className="rounded-2xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-indigo-200"
+                      type="button"
+                      onClick={handleAuctionBid}
+                      disabled={
+                        actionLoading === "AUCTION_BID" || !canSubmitAuctionBid
+                      }
+                    >
+                      {actionLoading === "AUCTION_BID" ? "Bidding…" : "Bid"}
+                    </button>
+                    <button
+                      className="rounded-2xl border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:border-neutral-100 disabled:text-neutral-300"
+                      type="button"
+                      onClick={handleAuctionPass}
+                      disabled={actionLoading === "AUCTION_PASS"}
+                    >
+                      {actionLoading === "AUCTION_PASS" ? "Passing…" : "Pass"}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <p className="mt-4 text-xs text-neutral-500">
+                  Watch the auction update live. Actions unlock when it is your
+                  turn to bid or pass.
+                </p>
+              )}
+            </div>
+          </div>
+        ) : null}
         </div>
 
         <div className="rounded-2xl border bg-white p-5 shadow-sm space-y-4">

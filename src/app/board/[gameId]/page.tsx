@@ -34,6 +34,11 @@ type GameState = {
   community_index: number | null;
   free_parking_pot: number | null;
   rules: Partial<ReturnType<typeof getRules>> | null;
+  auction_active: boolean | null;
+  auction_tile_index: number | null;
+  auction_current_bid: number | null;
+  auction_current_winner_player_id: string | null;
+  auction_turn_player_id: string | null;
 };
 
 type GameEvent = {
@@ -120,7 +125,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
   const loadGameState = useCallback(
     async (accessToken?: string) => {
       const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
-        `game_state?select=game_id,version,current_player_id,last_roll,chance_index,community_index,free_parking_pot,rules&game_id=eq.${params.gameId}&limit=1`,
+        `game_state?select=game_id,version,current_player_id,last_roll,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id&game_id=eq.${params.gameId}&limit=1`,
         { method: "GET" },
         accessToken,
       );
@@ -384,6 +389,17 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
     ? Number(lastMovedTileIndexValue)
     : null;
   const boardPack = getBoardPackById(gameMeta?.board_pack_id);
+  const isAuctionActive = Boolean(gameState?.auction_active);
+  const auctionTileIndex = gameState?.auction_tile_index ?? null;
+  const auctionTileName =
+    auctionTileIndex !== null
+      ? boardPack?.tiles?.find((tile) => tile.index === auctionTileIndex)?.name ??
+        `Tile ${auctionTileIndex}`
+      : null;
+  const auctionCurrentBid = gameState?.auction_current_bid ?? 0;
+  const auctionTurnPlayerName =
+    players.find((player) => player.id === gameState?.auction_turn_player_id)
+      ?.display_name ?? "Player";
   const getOwnershipLabel = useCallback(
     (tileIndex: number | null) => {
       if (tileIndex === null || Number.isNaN(tileIndex)) {
@@ -932,6 +948,20 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
       {errorMessage ? (
         <div className="rounded-3xl border border-rose-300/40 bg-rose-500/10 p-6 text-rose-100">
           {errorMessage}
+        </div>
+      ) : null}
+
+      {isAuctionActive ? (
+        <div className="rounded-3xl border border-indigo-200/30 bg-indigo-500/10 p-5 text-indigo-100">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-200/70">
+            Auction in progress
+          </p>
+          <p className="mt-1 text-lg font-semibold text-white">
+            {auctionTileName ?? "Unowned tile"} — Current bid ${auctionCurrentBid}
+          </p>
+          <p className="text-sm text-indigo-100/80">
+            Waiting for {auctionTurnPlayerName}…
+          </p>
         </div>
       ) : null}
 

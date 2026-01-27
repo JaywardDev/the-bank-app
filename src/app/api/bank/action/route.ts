@@ -56,6 +56,13 @@ type BankActionRequest =
       tileIndex: number;
     })
   | (BaseActionRequest & {
+      action: "AUCTION_BID";
+      amount: number;
+    })
+  | (BaseActionRequest & {
+      action: "AUCTION_PASS";
+    })
+  | (BaseActionRequest & {
       action: "TAKE_COLLATERAL_LOAN";
       tileIndex: number;
     });
@@ -101,6 +108,16 @@ type GameStateRow = {
   community_index: number | null;
   free_parking_pot: number | null;
   rules: Partial<ReturnType<typeof getRules>> | null;
+  auction_active: boolean | null;
+  auction_tile_index: number | null;
+  auction_initiator_player_id: string | null;
+  auction_current_bid: number | null;
+  auction_current_winner_player_id: string | null;
+  auction_turn_player_id: string | null;
+  auction_turn_ends_at: string | null;
+  auction_eligible_player_ids: string[] | null;
+  auction_passed_player_ids: string[] | null;
+  auction_min_increment: number | null;
 };
 
 type OwnershipRow = {
@@ -398,6 +415,47 @@ const getActivePlayersAfterElimination = (
 ) => players.filter(
   (player) => !player.is_eliminated && player.id !== eliminatedPlayerId,
 );
+
+const normalizePlayerIdArray = (value: unknown): string[] =>
+  Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string")
+    : [];
+
+const getNextEligibleAuctionPlayerId = (
+  players: PlayerRow[],
+  startingPlayerId: string | null,
+  eligibleIds: string[],
+  passedIds: Set<string>,
+): string | null => {
+  if (eligibleIds.length === 0) {
+    return null;
+  }
+  const eligibleSet = new Set(eligibleIds);
+  const startIndex = players.findIndex(
+    (player) => player.id === startingPlayerId,
+  );
+  if (startIndex === -1) {
+    return (
+      players.find(
+        (player) =>
+          eligibleSet.has(player.id) &&
+          !passedIds.has(player.id) &&
+          !player.is_eliminated,
+      )?.id ?? null
+    );
+  }
+  for (let offset = 1; offset <= players.length; offset += 1) {
+    const candidate = players[(startIndex + offset) % players.length];
+    if (
+      eligibleSet.has(candidate.id) &&
+      !passedIds.has(candidate.id) &&
+      !candidate.is_eliminated
+    ) {
+      return candidate.id;
+    }
+  }
+  return null;
+};
 
 const resolveBankruptcyIfNeeded = async ({
   gameId,
@@ -883,7 +941,7 @@ export async function POST(request: Request) {
       }
 
       await fetchFromSupabaseWithService<GameStateRow[]>(
-        "game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,chance_index,community_index,free_parking_pot,rules",
+        "game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment",
         {
           method: "POST",
           headers: {
@@ -1020,7 +1078,7 @@ export async function POST(request: Request) {
     )) ?? [];
 
     const [gameState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
-      `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,chance_index,community_index,free_parking_pot,rules&game_id=eq.${gameId}&limit=1`,
+      `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
       { method: "GET" },
     )) ?? [];
 
@@ -1105,7 +1163,7 @@ export async function POST(request: Request) {
       }, {});
 
       const upsertResponse = await fetch(
-        `${supabaseUrl}/rest/v1/game_state?on_conflict=game_id&select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,chance_index,community_index`,
+        `${supabaseUrl}/rest/v1/game_state?on_conflict=game_id&select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,chance_index,community_index,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment`,
         {
           method: "POST",
           headers: {
@@ -1258,7 +1316,11 @@ export async function POST(request: Request) {
     const currentPlayer = players.find(
       (player) => player.id === gameState.current_player_id,
     );
-    const currentUserPlayer = players.find((player) => player.user_id === user.id);
+    const currentUserPlayer = players.find(
+      (player) => player.user_id === user.id,
+    );
+    const isAuctionAction =
+      body.action === "AUCTION_BID" || body.action === "AUCTION_PASS";
 
     if (!currentPlayer) {
       return NextResponse.json(
@@ -1267,7 +1329,14 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!currentUserPlayer || currentUserPlayer.id !== gameState.current_player_id) {
+    if (!currentUserPlayer) {
+      return NextResponse.json(
+        { error: "Player not found for this game." },
+        { status: 403 },
+      );
+    }
+
+    if (!isAuctionAction && currentUserPlayer.id !== gameState.current_player_id) {
       return NextResponse.json(
         { error: "It is not your turn." },
         { status: 403 },
@@ -1279,6 +1348,425 @@ export async function POST(request: Request) {
         { error: "Eliminated players cannot take actions." },
         { status: 403 },
       );
+    }
+
+    if (gameState.auction_active && !isAuctionAction) {
+      return NextResponse.json(
+        { error: "Auction in progress." },
+        { status: 409 },
+      );
+    }
+
+    if (isAuctionAction) {
+      if (!gameState.auction_active) {
+        return NextResponse.json(
+          { error: "No auction is active." },
+          { status: 409 },
+        );
+      }
+
+      const auctionTileIndex = gameState.auction_tile_index;
+      if (!Number.isInteger(auctionTileIndex)) {
+        return NextResponse.json(
+          { error: "Auction tile is missing." },
+          { status: 409 },
+        );
+      }
+
+      const activePlayerIds = players
+        .filter((player) => !player.is_eliminated)
+        .map((player) => player.id);
+      const eligiblePlayerIds = normalizePlayerIdArray(
+        gameState.auction_eligible_player_ids,
+      ).filter((id) => activePlayerIds.includes(id));
+
+      if (eligiblePlayerIds.length === 0) {
+        return NextResponse.json(
+          { error: "Auction has no eligible bidders." },
+          { status: 409 },
+        );
+      }
+
+      const passedPlayerIds = new Set(
+        normalizePlayerIdArray(gameState.auction_passed_player_ids).filter((id) =>
+          eligiblePlayerIds.includes(id),
+        ),
+      );
+      let currentBid =
+        typeof gameState.auction_current_bid === "number"
+          ? gameState.auction_current_bid
+          : 0;
+      let currentWinnerId =
+        typeof gameState.auction_current_winner_player_id === "string"
+          ? gameState.auction_current_winner_player_id
+          : null;
+      let turnPlayerId =
+        typeof gameState.auction_turn_player_id === "string"
+          ? gameState.auction_turn_player_id
+          : null;
+      let turnEndsAt = gameState.auction_turn_ends_at
+        ? new Date(gameState.auction_turn_ends_at)
+        : null;
+      const minIncrement =
+        typeof gameState.auction_min_increment === "number"
+          ? gameState.auction_min_increment
+          : rules.auctionMinIncrement;
+      const now = new Date();
+      const auctionEvents: Array<{
+        event_type: string;
+        payload: Record<string, unknown>;
+      }> = [];
+
+      const advanceTurn = (fromPlayerId: string | null) =>
+        getNextEligibleAuctionPlayerId(
+          players,
+          fromPlayerId,
+          eligiblePlayerIds,
+          passedPlayerIds,
+        );
+
+      const isValidTurnPlayer = (playerId: string | null) =>
+        Boolean(
+          playerId &&
+            eligiblePlayerIds.includes(playerId) &&
+            !passedPlayerIds.has(playerId) &&
+            !players.find((player) => player.id === playerId)?.is_eliminated,
+        );
+
+      if (!isValidTurnPlayer(turnPlayerId)) {
+        const nextTurnId = advanceTurn(turnPlayerId);
+        turnPlayerId = nextTurnId;
+        turnEndsAt = nextTurnId
+          ? new Date(now.getTime() + rules.auctionTurnSeconds * 1000)
+          : null;
+      }
+
+      while (turnPlayerId && turnEndsAt && now > turnEndsAt) {
+        if (!passedPlayerIds.has(turnPlayerId)) {
+          passedPlayerIds.add(turnPlayerId);
+          auctionEvents.push({
+            event_type: "AUCTION_PASS",
+            payload: {
+              tile_index: auctionTileIndex,
+              player_id: turnPlayerId,
+              auto: true,
+            },
+          });
+        }
+
+        const nextTurnId = advanceTurn(turnPlayerId);
+        turnPlayerId = nextTurnId;
+        turnEndsAt = nextTurnId
+          ? new Date(now.getTime() + rules.auctionTurnSeconds * 1000)
+          : null;
+      }
+
+      const allEligiblePassed = eligiblePlayerIds.every((id) =>
+        passedPlayerIds.has(id),
+      );
+      const allOthersPassed =
+        Boolean(currentWinnerId) &&
+        eligiblePlayerIds
+          .filter((id) => id !== currentWinnerId)
+          .every((id) => passedPlayerIds.has(id));
+
+      const finalizeAuction = async ({
+        winnerId,
+        amount,
+        skipped,
+      }: {
+        winnerId: string | null;
+        amount: number;
+        skipped: boolean;
+      }) => {
+        const events = [...auctionEvents];
+        if (winnerId && !skipped) {
+          events.push({
+            event_type: "AUCTION_WON",
+            payload: {
+              tile_index: auctionTileIndex,
+              winner_id: winnerId,
+              amount,
+            },
+          });
+        } else if (skipped) {
+          events.push({
+            event_type: "AUCTION_SKIPPED",
+            payload: {
+              tile_index: auctionTileIndex,
+              reason: "NO_BIDS",
+            },
+          });
+        }
+
+        const finalVersion = currentVersion + events.length;
+        const patchPayload: Record<string, unknown> = {
+          version: finalVersion,
+          auction_active: false,
+          auction_tile_index: null,
+          auction_initiator_player_id: null,
+          auction_current_bid: 0,
+          auction_current_winner_player_id: null,
+          auction_turn_player_id: null,
+          auction_turn_ends_at: null,
+          auction_eligible_player_ids: [],
+          auction_passed_player_ids: [],
+          auction_min_increment: rules.auctionMinIncrement,
+          turn_phase: "AWAITING_ROLL",
+          pending_action: null,
+          updated_at: new Date().toISOString(),
+        };
+
+        let updatedBalances = gameState.balances ?? {};
+        if (winnerId && !skipped) {
+          const currentBalance =
+            updatedBalances[winnerId] ?? game.starting_cash ?? 0;
+          updatedBalances = {
+            ...updatedBalances,
+            [winnerId]: currentBalance - amount,
+          };
+          patchPayload.balances = updatedBalances;
+
+          const ownershipResponse = await fetch(
+            `${supabaseUrl}/rest/v1/property_ownership`,
+            {
+              method: "POST",
+              headers: {
+                ...bankHeaders,
+                Prefer: "return=representation",
+              },
+              body: JSON.stringify({
+                game_id: gameId,
+                tile_index: auctionTileIndex,
+                owner_player_id: winnerId,
+              }),
+            },
+          );
+
+          if (!ownershipResponse.ok) {
+            const errorText = await ownershipResponse.text();
+            return NextResponse.json(
+              { error: errorText || "Unable to record auction ownership." },
+              { status: 500 },
+            );
+          }
+        }
+
+        const [updatedState] = (await fetchFromSupabaseWithService<
+          GameStateRow[]
+        >(`game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`, {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify(patchPayload),
+        })) ?? [];
+
+        if (!updatedState) {
+          return NextResponse.json(
+            { error: "Version mismatch." },
+            { status: 409 },
+          );
+        }
+
+        if (events.length > 0) {
+          await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+        }
+
+        return NextResponse.json({ gameState: updatedState });
+      };
+
+      if (currentWinnerId && allOthersPassed) {
+        return await finalizeAuction({
+          winnerId: currentWinnerId,
+          amount: currentBid,
+          skipped: false,
+        });
+      }
+
+      if (!currentWinnerId && allEligiblePassed) {
+        return await finalizeAuction({
+          winnerId: null,
+          amount: 0,
+          skipped: true,
+        });
+      }
+
+      if (turnPlayerId !== currentUserPlayer.id) {
+        const nextPassedIds = Array.from(passedPlayerIds);
+        const existingPassedIds = normalizePlayerIdArray(
+          gameState.auction_passed_player_ids,
+        );
+        const shouldUpdateState =
+          auctionEvents.length > 0 ||
+          turnPlayerId !== gameState.auction_turn_player_id ||
+          nextPassedIds.length !== existingPassedIds.length;
+
+        if (shouldUpdateState) {
+          const finalVersion = currentVersion + auctionEvents.length;
+          const [updatedState] = (await fetchFromSupabaseWithService<
+            GameStateRow[]
+          >(`game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`, {
+            method: "PATCH",
+            headers: {
+              Prefer: "return=representation",
+            },
+            body: JSON.stringify({
+              version: finalVersion,
+              auction_turn_player_id: turnPlayerId,
+              auction_turn_ends_at: turnEndsAt
+                ? turnEndsAt.toISOString()
+                : null,
+              auction_passed_player_ids: nextPassedIds,
+              auction_eligible_player_ids: eligiblePlayerIds,
+              auction_current_bid: currentBid,
+              auction_current_winner_player_id: currentWinnerId,
+              auction_min_increment: minIncrement,
+              updated_at: new Date().toISOString(),
+            }),
+          })) ?? [];
+
+          if (updatedState && auctionEvents.length > 0) {
+            await emitGameEvents(
+              gameId,
+              currentVersion + 1,
+              auctionEvents,
+              user.id,
+            );
+          }
+        }
+
+        return NextResponse.json(
+          { error: "Auction turn advanced. Sync to continue." },
+          { status: 409 },
+        );
+      }
+
+      if (body.action === "AUCTION_BID") {
+        const amount = body.amount;
+        if (typeof amount !== "number" || Number.isNaN(amount)) {
+          return NextResponse.json(
+            { error: "Invalid bid amount." },
+            { status: 400 },
+          );
+        }
+
+        const minBid = currentBid === 0 ? 10 : currentBid + minIncrement;
+        if (amount < minBid) {
+          return NextResponse.json(
+            { error: `Bid must be at least $${minBid}.` },
+            { status: 409 },
+          );
+        }
+
+        const balances = gameState.balances ?? {};
+        const currentBalance =
+          balances[currentUserPlayer.id] ?? game.starting_cash ?? 0;
+        if (amount > currentBalance) {
+          return NextResponse.json(
+            { error: "Insufficient cash for that bid." },
+            { status: 409 },
+          );
+        }
+
+        currentBid = amount;
+        currentWinnerId = currentUserPlayer.id;
+        auctionEvents.push({
+          event_type: "AUCTION_BID",
+          payload: {
+            tile_index: auctionTileIndex,
+            player_id: currentUserPlayer.id,
+            amount,
+          },
+        });
+
+        turnPlayerId = advanceTurn(turnPlayerId);
+        turnEndsAt = turnPlayerId
+          ? new Date(now.getTime() + rules.auctionTurnSeconds * 1000)
+          : null;
+      }
+
+      if (body.action === "AUCTION_PASS") {
+        passedPlayerIds.add(currentUserPlayer.id);
+        auctionEvents.push({
+          event_type: "AUCTION_PASS",
+          payload: {
+            tile_index: auctionTileIndex,
+            player_id: currentUserPlayer.id,
+          },
+        });
+        turnPlayerId = advanceTurn(turnPlayerId);
+        turnEndsAt = turnPlayerId
+          ? new Date(now.getTime() + rules.auctionTurnSeconds * 1000)
+          : null;
+      }
+
+      const finalAllOthersPassed =
+        Boolean(currentWinnerId) &&
+        eligiblePlayerIds
+          .filter((id) => id !== currentWinnerId)
+          .every((id) => passedPlayerIds.has(id));
+      const finalAllPassed = eligiblePlayerIds.every((id) =>
+        passedPlayerIds.has(id),
+      );
+
+      if (currentWinnerId && finalAllOthersPassed) {
+        return await finalizeAuction({
+          winnerId: currentWinnerId,
+          amount: currentBid,
+          skipped: false,
+        });
+      }
+
+      if (!currentWinnerId && finalAllPassed) {
+        return await finalizeAuction({
+          winnerId: null,
+          amount: 0,
+          skipped: true,
+        });
+      }
+
+      const finalVersion = currentVersion + auctionEvents.length;
+      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            version: finalVersion,
+            auction_turn_player_id: turnPlayerId,
+            auction_turn_ends_at: turnEndsAt ? turnEndsAt.toISOString() : null,
+            auction_passed_player_ids: Array.from(passedPlayerIds),
+            auction_eligible_player_ids: eligiblePlayerIds,
+            auction_current_bid: currentBid,
+            auction_current_winner_player_id: currentWinnerId,
+            auction_min_increment: minIncrement,
+            turn_phase: "AUCTION",
+            pending_action: null,
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      )) ?? [];
+
+      if (!updatedState) {
+        return NextResponse.json(
+          { error: "Version mismatch." },
+          { status: 409 },
+        );
+      }
+
+      if (auctionEvents.length > 0) {
+        await emitGameEvents(
+          gameId,
+          currentVersion + 1,
+          auctionEvents,
+          user.id,
+        );
+      }
+
+      return NextResponse.json({ gameState: updatedState });
     }
 
     if (body.action === "ROLL_DICE") {
@@ -2151,17 +2639,34 @@ export async function POST(request: Request) {
         );
       }
 
-      const nextPlayer = getNextActivePlayer(
-        players,
-        gameState.current_player_id,
+      const boardPack = getBoardPackById(game.board_pack_id);
+      const boardTiles = boardPack?.tiles ?? [];
+      const landingTile = boardTiles.find(
+        (tile) => tile.index === body.tileIndex,
       );
 
-      if (!nextPlayer) {
+      if (!landingTile) {
         return NextResponse.json(
-          { error: "No active players remaining." },
+          { error: "Tile not found on this board." },
+          { status: 404 },
+        );
+      }
+
+      if (!OWNABLE_TILE_TYPES.has(landingTile.type)) {
+        return NextResponse.json(
+          { error: "Tile is not ownable." },
           { status: 409 },
         );
       }
+
+      const ownershipByTile = await loadOwnershipByTile(gameId);
+      if (ownershipByTile[body.tileIndex]) {
+        return NextResponse.json(
+          { error: "Property already owned." },
+          { status: 409 },
+        );
+      }
+
       const events: Array<{
         event_type: string;
         payload: Record<string, unknown>;
@@ -2174,16 +2679,164 @@ export async function POST(request: Request) {
             tile_index: body.tileIndex,
           },
         },
-        {
-          event_type: "END_TURN",
-          payload: {
-            from_player_id: currentPlayer.id,
-            from_player_name: currentPlayer.display_name,
-            to_player_id: nextPlayer.id,
-            to_player_name: nextPlayer.display_name,
-          },
-        },
       ];
+
+      if (rules.auctionEnabled) {
+        const activePlayers = players.filter((player) => !player.is_eliminated);
+        const eligiblePlayers = rules.auctionAllowInitiatorToBid
+          ? activePlayers
+          : activePlayers.filter((player) => player.id !== currentPlayer.id);
+        const eligibleIds = eligiblePlayers.map((player) => player.id);
+
+        if (eligibleIds.length <= 1) {
+          const nextPlayer = getNextActivePlayer(
+            players,
+            gameState.current_player_id,
+          );
+
+          if (!nextPlayer) {
+            return NextResponse.json(
+              { error: "No active players remaining." },
+              { status: 409 },
+            );
+          }
+
+          events.push({
+            event_type: "AUCTION_SKIPPED",
+            payload: {
+              tile_index: body.tileIndex,
+            },
+          });
+          events.push({
+            event_type: "END_TURN",
+            payload: {
+              from_player_id: currentPlayer.id,
+              from_player_name: currentPlayer.display_name,
+              to_player_id: nextPlayer.id,
+              to_player_name: nextPlayer.display_name,
+            },
+          });
+
+          const finalVersion = currentVersion + events.length;
+          const [updatedState] =
+            (await fetchFromSupabaseWithService<GameStateRow[]>(
+              `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+              {
+                method: "PATCH",
+                headers: {
+                  Prefer: "return=representation",
+                },
+                body: JSON.stringify({
+                  version: finalVersion,
+                  current_player_id: nextPlayer.id,
+                  last_roll: null,
+                  doubles_count: 0,
+                  turn_phase: nextPlayer.is_in_jail
+                    ? "AWAITING_JAIL_DECISION"
+                    : "AWAITING_ROLL",
+                  pending_action: null,
+                  updated_at: new Date().toISOString(),
+                }),
+              },
+            )) ?? [];
+
+          if (!updatedState) {
+            return NextResponse.json(
+              { error: "Version mismatch." },
+              { status: 409 },
+            );
+          }
+
+          await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+
+          return NextResponse.json({ gameState: updatedState });
+        }
+
+        const nextTurnPlayerId = getNextEligibleAuctionPlayerId(
+          players,
+          currentPlayer.id,
+          eligibleIds,
+          new Set(),
+        );
+
+        if (!nextTurnPlayerId) {
+          return NextResponse.json(
+            { error: "Unable to start auction." },
+            { status: 409 },
+          );
+        }
+
+        events.push({
+          event_type: "AUCTION_STARTED",
+          payload: {
+            tile_index: body.tileIndex,
+            min_increment: rules.auctionMinIncrement,
+          },
+        });
+
+        const finalVersion = currentVersion + events.length;
+        const [updatedState] =
+          (await fetchFromSupabaseWithService<GameStateRow[]>(
+            `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+            {
+              method: "PATCH",
+              headers: {
+                Prefer: "return=representation",
+              },
+              body: JSON.stringify({
+                version: finalVersion,
+                pending_action: null,
+                turn_phase: "AUCTION",
+                auction_active: true,
+                auction_tile_index: body.tileIndex,
+                auction_initiator_player_id: currentPlayer.id,
+                auction_current_bid: 0,
+                auction_current_winner_player_id: null,
+                auction_turn_player_id: nextTurnPlayerId,
+                auction_turn_ends_at: new Date(
+                  Date.now() + rules.auctionTurnSeconds * 1000,
+                ).toISOString(),
+                auction_eligible_player_ids: eligibleIds,
+                auction_passed_player_ids: [],
+                auction_min_increment: rules.auctionMinIncrement,
+                updated_at: new Date().toISOString(),
+              }),
+            },
+          )) ?? [];
+
+        if (!updatedState) {
+          return NextResponse.json(
+            { error: "Version mismatch." },
+            { status: 409 },
+          );
+        }
+
+        await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+
+        return NextResponse.json({ gameState: updatedState });
+      }
+
+      const nextPlayer = getNextActivePlayer(
+        players,
+        gameState.current_player_id,
+      );
+
+      if (!nextPlayer) {
+        return NextResponse.json(
+          { error: "No active players remaining." },
+          { status: 409 },
+        );
+      }
+
+      events.push({
+        event_type: "END_TURN",
+        payload: {
+          from_player_id: currentPlayer.id,
+          from_player_name: currentPlayer.display_name,
+          to_player_id: nextPlayer.id,
+          to_player_name: nextPlayer.display_name,
+        },
+      });
       const finalVersion = currentVersion + events.length;
 
       const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
@@ -2203,7 +2856,7 @@ export async function POST(request: Request) {
               : "AWAITING_ROLL",
             pending_action: null,
             updated_at: new Date().toISOString(),
-            }),
+          }),
         },
       )) ?? [];
 

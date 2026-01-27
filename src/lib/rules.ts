@@ -4,6 +4,10 @@ export type GameRules = {
   collateralLtv: number;
   loanRatePerTurn: number;
   loanTermTurns: number;
+  auctionEnabled: boolean;
+  auctionMinIncrement: number;
+  auctionTurnSeconds: number;
+  auctionAllowInitiatorToBid: boolean;
 };
 
 export const DEFAULT_RULES: GameRules = {
@@ -12,6 +16,10 @@ export const DEFAULT_RULES: GameRules = {
   collateralLtv: 0.5,
   loanRatePerTurn: 0.008,
   loanTermTurns: 10,
+  auctionEnabled: true,
+  auctionMinIncrement: 10,
+  auctionTurnSeconds: 60,
+  auctionAllowInitiatorToBid: true,
 };
 
 export const getRules = (rules?: Partial<GameRules> | null): GameRules => ({
