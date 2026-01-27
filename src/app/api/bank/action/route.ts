@@ -177,10 +177,50 @@ const fetchUser = async (accessToken: string) => {
   return (await response.json()) as SupabaseUser;
 };
 
+const parseSupabaseResponse = async <T>(
+  response: Response,
+  options?: { onErrorMessage?: string },
+): Promise<T | null> => {
+  if (response.status === 204) {
+    return null;
+  }
+
+  const bodyText = await response.text();
+  if (!response.ok) {
+    const defaultMessage = options?.onErrorMessage ?? "Supabase request failed.";
+    if (!bodyText) {
+      throw new Error(defaultMessage);
+    }
+    try {
+      const parsed = JSON.parse(bodyText) as { message?: string; error?: string };
+      if (parsed?.message) {
+        throw new Error(parsed.message);
+      }
+      if (parsed?.error) {
+        throw new Error(parsed.error);
+      }
+    } catch {
+      // fallback to raw text
+    }
+    throw new Error(bodyText || defaultMessage);
+  }
+
+  if (!bodyText) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(bodyText) as T;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Invalid JSON.";
+    throw new Error(`Supabase returned invalid JSON: ${message}`);
+  }
+};
+
 const fetchFromSupabase = async <T>(
   path: string,
   options: RequestInit,
-): Promise<T> => {
+): Promise<T | null> => {
   const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
     ...options,
     headers: {
@@ -189,18 +229,13 @@ const fetchFromSupabase = async <T>(
     },
   });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(errorText || "Supabase request failed.");
-  }
-
-  return (await response.json()) as T;
+  return parseSupabaseResponse<T>(response);
 };
 
 const fetchFromSupabaseWithService = async <T>(
   path: string,
   options: RequestInit,
-): Promise<T> => {
+): Promise<T | null> => {
   const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
     ...options,
     headers: {
@@ -209,21 +244,16 @@ const fetchFromSupabaseWithService = async <T>(
     },
   });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(errorText || "Supabase request failed.");
-  }
-
-  return (await response.json()) as T;
+  return parseSupabaseResponse<T>(response);
 };
 
 const loadOwnershipByTile = async (
   gameId: string,
 ): Promise<OwnershipByTile> => {
-  const ownershipRows = await fetchFromSupabaseWithService<OwnershipRow[]>(
+  const ownershipRows = (await fetchFromSupabaseWithService<OwnershipRow[]>(
     `property_ownership?select=tile_index,owner_player_id,collateral_loan_id&game_id=eq.${gameId}`,
     { method: "GET" },
-  );
+  )) ?? [];
 
   return ownershipRows.reduce<OwnershipByTile>((acc, row) => {
     if (row.owner_player_id) {
@@ -418,12 +448,12 @@ const resolveBankruptcyIfNeeded = async ({
     [player.id]: 0,
   };
 
-  const ownedRows = await fetchFromSupabaseWithService<
+  const ownedRows = (await fetchFromSupabaseWithService<
     Array<{ id: string; tile_index: number }>
   >(
     `property_ownership?select=id,tile_index&game_id=eq.${gameId}&owner_player_id=eq.${player.id}`,
     { method: "GET" },
-  );
+  )) ?? [];
   const returnedPropertyIds = ownedRows.map((row) => row.tile_index);
 
   if (ownedRows.length > 0) {
@@ -507,7 +537,7 @@ const resolveBankruptcyIfNeeded = async ({
   const nextTurnPhase = nextPlayer?.is_in_jail
     ? "AWAITING_JAIL_DECISION"
     : "AWAITING_ROLL";
-  const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
+  const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
     `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
     {
       method: "PATCH",
@@ -527,7 +557,7 @@ const resolveBankruptcyIfNeeded = async ({
         updated_at: now,
       }),
     },
-  );
+  )) ?? [];
 
   if (!updatedState) {
     return { handled: true, error: "Version mismatch." };
@@ -674,10 +704,10 @@ const applyLoanPaymentsForPlayer = async ({
   balances: Record<string, number>;
   startingCash: number;
 }) => {
-  const activeLoans = await fetchFromSupabaseWithService<PlayerLoanRow[]>(
+  const activeLoans = (await fetchFromSupabaseWithService<PlayerLoanRow[]>(
     `player_loans?select=id,collateral_tile_index,principal,rate_per_turn,term_turns,turns_remaining,payment_per_turn,status&game_id=eq.${gameId}&player_id=eq.${player.id}&status=eq.active`,
     { method: "GET" },
-  );
+  )) ?? [];
 
   if (activeLoans.length === 0) {
     return {
@@ -808,7 +838,7 @@ export async function POST(request: Request) {
 
       const boardPack = getBoardPackById(body.boardPackId);
 
-      const [game] = await fetchFromSupabaseWithService<GameRow[]>(
+      const [game] = (await fetchFromSupabaseWithService<GameRow[]>(
         "games?select=id,join_code,created_by",
         {
           method: "POST",
@@ -821,7 +851,7 @@ export async function POST(request: Request) {
             board_pack_id: boardPack?.id ?? defaultBoardPackId,
           }),
         },
-      );
+      )) ?? [];
 
       if (!game) {
         return NextResponse.json(
@@ -830,7 +860,7 @@ export async function POST(request: Request) {
         );
       }
 
-      const [hostPlayer] = await fetchFromSupabaseWithService<PlayerRow[]>(
+      const [hostPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
         "players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,is_eliminated,eliminated_at",
         {
           method: "POST",
@@ -843,7 +873,7 @@ export async function POST(request: Request) {
             display_name: body.playerName.trim(),
           }),
         },
-      );
+      )) ?? [];
 
       if (!hostPlayer) {
         return NextResponse.json(
@@ -895,10 +925,10 @@ export async function POST(request: Request) {
 
       const joinCode = body.joinCode.trim().toUpperCase();
 
-      const [game] = await fetchFromSupabaseWithService<GameRow[]>(
+      const [game] = (await fetchFromSupabaseWithService<GameRow[]>(
         `games?select=id,join_code,status,created_at,board_pack_id,created_by&join_code=eq.${joinCode}&limit=1`,
         { method: "GET" },
-      );
+      )) ?? [];
 
       if (!game) {
         return NextResponse.json(
@@ -914,7 +944,7 @@ export async function POST(request: Request) {
         );
       }
 
-      const [player] = await fetchFromSupabaseWithService<PlayerRow[]>(
+      const [player] = (await fetchFromSupabaseWithService<PlayerRow[]>(
         "players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,is_eliminated,eliminated_at&on_conflict=game_id,user_id",
         {
           method: "POST",
@@ -927,7 +957,7 @@ export async function POST(request: Request) {
             display_name: body.displayName.trim(),
           }),
         },
-      );
+      )) ?? [];
 
       if (!player) {
         return NextResponse.json(
@@ -936,10 +966,10 @@ export async function POST(request: Request) {
         );
       }
 
-      const players = await fetchFromSupabaseWithService<PlayerRow[]>(
+      const players = (await fetchFromSupabaseWithService<PlayerRow[]>(
         `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,is_eliminated,eliminated_at&game_id=eq.${game.id}&order=created_at.asc`,
         { method: "GET" },
-      );
+      )) ?? [];
       const ownershipByTile = await loadOwnershipByTile(game.id);
 
       return NextResponse.json({
@@ -975,24 +1005,24 @@ export async function POST(request: Request) {
 
     const gameId = body.gameId;
 
-    const [game] = await fetchFromSupabaseWithService<GameRow[]>(
+    const [game] = (await fetchFromSupabaseWithService<GameRow[]>(
       `games?select=id,join_code,starting_cash,created_by,status,board_pack_id&id=eq.${gameId}&limit=1`,
       { method: "GET" },
-    );
+    )) ?? [];
 
     if (!game) {
       return NextResponse.json({ error: "Game not found." }, { status: 404 });
     }
 
-    const players = await fetchFromSupabaseWithService<PlayerRow[]>(
+    const players = (await fetchFromSupabaseWithService<PlayerRow[]>(
       `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,is_eliminated,eliminated_at&game_id=eq.${gameId}&order=created_at.asc`,
       { method: "GET" },
-    );
+    )) ?? [];
 
-    const [gameState] = await fetchFromSupabaseWithService<GameStateRow[]>(
+    const [gameState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
       `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,chance_index,community_index,free_parking_pot,rules&game_id=eq.${gameId}&limit=1`,
       { method: "GET" },
-    );
+    )) ?? [];
 
     if (!players.some((player) => player.user_id === user.id)) {
       return NextResponse.json(
@@ -1036,7 +1066,7 @@ export async function POST(request: Request) {
         );
       }
 
-      const [startedGame] = await fetchFromSupabaseWithService<GameRow[]>(
+      const [startedGame] = (await fetchFromSupabaseWithService<GameRow[]>(
         `games?select=id,status&id=eq.${gameId}&status=eq.lobby`,
         {
           method: "PATCH",
@@ -1047,13 +1077,13 @@ export async function POST(request: Request) {
             status: "in_progress",
           }),
         },
-      );
+      )) ?? [];
 
       if (!startedGame) {
-        const [latestGame] = await fetchFromSupabaseWithService<GameRow[]>(
+        const [latestGame] = (await fetchFromSupabaseWithService<GameRow[]>(
           `games?select=id,status&id=eq.${gameId}&limit=1`,
           { method: "GET" },
-        );
+        )) ?? [];
 
         if (latestGame?.status === "in_progress") {
           return NextResponse.json(
@@ -1157,7 +1187,7 @@ export async function POST(request: Request) {
         );
       }
 
-      const [endedGame] = await fetchFromSupabaseWithService<GameRow[]>(
+      const [endedGame] = (await fetchFromSupabaseWithService<GameRow[]>(
         `games?select=id,status&id=eq.${gameId}&status=in.(lobby,in_progress)`,
         {
           method: "PATCH",
@@ -1168,13 +1198,13 @@ export async function POST(request: Request) {
             status: "ended",
           }),
         },
-      );
+      )) ?? [];
 
       if (!endedGame) {
-        const [latestGame] = await fetchFromSupabaseWithService<GameRow[]>(
+        const [latestGame] = (await fetchFromSupabaseWithService<GameRow[]>(
           `games?select=id,status&id=eq.${gameId}&limit=1`,
           { method: "GET" },
-        );
+        )) ?? [];
 
         if (latestGame?.status === "ended") {
           return NextResponse.json(
@@ -1424,7 +1454,7 @@ export async function POST(request: Request) {
 
         const finalVersion = currentVersion + events.length;
 
-        const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
+        const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
           `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
           {
             method: "PATCH",
@@ -1441,9 +1471,9 @@ export async function POST(request: Request) {
                 ? "AWAITING_JAIL_DECISION"
                 : "AWAITING_ROLL",
               updated_at: new Date().toISOString(),
-            }),
+              }),
           },
-        );
+        )) ?? [];
 
         if (!updatedState) {
           return NextResponse.json(
@@ -1452,7 +1482,7 @@ export async function POST(request: Request) {
           );
         }
 
-        const [updatedPlayer] = await fetchFromSupabaseWithService<PlayerRow[]>(
+        const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
           `players?id=eq.${currentPlayer.id}`,
           {
             method: "PATCH",
@@ -1465,7 +1495,7 @@ export async function POST(request: Request) {
               jail_turns_remaining: 3,
             }),
           },
-        );
+        )) ?? [];
 
         if (!updatedPlayer) {
           return NextResponse.json(
@@ -2029,7 +2059,7 @@ export async function POST(request: Request) {
       }
 
       const finalVersion = currentVersion + events.length;
-      const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
+      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
         `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
         {
           method: "PATCH",
@@ -2054,9 +2084,9 @@ export async function POST(request: Request) {
                 }
               : {}),
             updated_at: new Date().toISOString(),
-          }),
+            }),
         },
-      );
+      )) ?? [];
 
       if (!updatedState) {
         return NextResponse.json(
@@ -2065,7 +2095,7 @@ export async function POST(request: Request) {
         );
       }
 
-      const [updatedPlayer] = await fetchFromSupabaseWithService<PlayerRow[]>(
+      const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
         `players?id=eq.${currentPlayer.id}`,
         {
           method: "PATCH",
@@ -2078,7 +2108,7 @@ export async function POST(request: Request) {
             jail_turns_remaining: shouldSendToJail && jailTile ? 3 : 0,
           }),
         },
-      );
+      )) ?? [];
 
       if (!updatedPlayer) {
         return NextResponse.json(
@@ -2156,7 +2186,7 @@ export async function POST(request: Request) {
       ];
       const finalVersion = currentVersion + events.length;
 
-      const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
+      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
         `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
         {
           method: "PATCH",
@@ -2173,9 +2203,9 @@ export async function POST(request: Request) {
               : "AWAITING_ROLL",
             pending_action: null,
             updated_at: new Date().toISOString(),
-          }),
+            }),
         },
-      );
+      )) ?? [];
 
       if (!updatedState) {
         return NextResponse.json(
@@ -2321,7 +2351,7 @@ export async function POST(request: Request) {
       ];
       const finalVersion = currentVersion + events.length;
 
-      const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
+      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
         `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
         {
           method: "PATCH",
@@ -2336,7 +2366,7 @@ export async function POST(request: Request) {
             updated_at: new Date().toISOString(),
           }),
         },
-      );
+      )) ?? [];
 
       if (!updatedState) {
         return NextResponse.json(
@@ -2628,7 +2658,7 @@ export async function POST(request: Request) {
 
         const finalVersion = currentVersion + events.length;
 
-        const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
+        const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
           `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
           {
             method: "PATCH",
@@ -2647,7 +2677,7 @@ export async function POST(request: Request) {
               updated_at: new Date().toISOString(),
             }),
           },
-        );
+        )) ?? [];
 
         if (!updatedState) {
           return NextResponse.json(
@@ -2656,7 +2686,7 @@ export async function POST(request: Request) {
           );
         }
 
-        const [updatedPlayer] = await fetchFromSupabaseWithService<PlayerRow[]>(
+        const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
           `players?id=eq.${currentPlayer.id}`,
           {
             method: "PATCH",
@@ -2667,7 +2697,7 @@ export async function POST(request: Request) {
               jail_turns_remaining: turnsRemaining,
             }),
           },
-        );
+        )) ?? [];
 
         if (!updatedPlayer) {
           return NextResponse.json(
@@ -3331,7 +3361,7 @@ export async function POST(request: Request) {
       }
 
       const finalVersion = currentVersion + events.length;
-      const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
+      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
         `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
         {
           method: "PATCH",
@@ -3356,7 +3386,7 @@ export async function POST(request: Request) {
             updated_at: new Date().toISOString(),
           }),
         },
-      );
+      )) ?? [];
 
       if (!updatedState) {
         return NextResponse.json(
@@ -3365,7 +3395,7 @@ export async function POST(request: Request) {
         );
       }
 
-      const [updatedPlayer] = await fetchFromSupabaseWithService<PlayerRow[]>(
+      const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
         `players?id=eq.${currentPlayer.id}`,
         {
           method: "PATCH",
@@ -3378,7 +3408,7 @@ export async function POST(request: Request) {
             jail_turns_remaining: shouldSendToJail && jailTile ? 3 : 0,
           }),
         },
-      );
+      )) ?? [];
 
       if (!updatedPlayer) {
         return NextResponse.json(
@@ -3464,7 +3494,7 @@ export async function POST(request: Request) {
       }
       const finalVersion = currentVersion + events.length;
 
-      const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
+      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
         `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
         {
           method: "PATCH",
@@ -3478,7 +3508,7 @@ export async function POST(request: Request) {
             updated_at: new Date().toISOString(),
           }),
         },
-      );
+      )) ?? [];
 
       if (!updatedState) {
         return NextResponse.json(
@@ -3487,7 +3517,7 @@ export async function POST(request: Request) {
         );
       }
 
-      const [updatedPlayer] = await fetchFromSupabaseWithService<PlayerRow[]>(
+      const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
         `players?id=eq.${currentPlayer.id}`,
         {
           method: "PATCH",
@@ -3499,7 +3529,7 @@ export async function POST(request: Request) {
             jail_turns_remaining: 0,
           }),
         },
-      );
+      )) ?? [];
 
       if (!updatedPlayer) {
         return NextResponse.json(
@@ -3589,7 +3619,7 @@ export async function POST(request: Request) {
       }
 
       const finalVersion = currentVersion + events.length;
-      const [updatedState] = await fetchFromSupabaseWithService<GameStateRow[]>(
+      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
         `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
         {
           method: "PATCH",
@@ -3608,12 +3638,12 @@ export async function POST(request: Request) {
             updated_at: new Date().toISOString(),
           }),
         },
-      );
+      )) ?? [];
 
       if (!updatedState) {
         return NextResponse.json(
-          { error: "Version mismatch." },
-          { status: 409 },
+          { error: "Supabase returned no data for END_TURN game_state update." },
+          { status: 500 },
         );
       }
 
