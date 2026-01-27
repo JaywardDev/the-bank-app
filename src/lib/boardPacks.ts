@@ -23,6 +23,7 @@ export type CardPayload = {
   nearest_kind?: CardNearestKind;
   spaces?: number;
   relative_spaces?: number;
+  utility_roll_override?: number;
   [key: string]: number | string | boolean | null | undefined;
 };
 

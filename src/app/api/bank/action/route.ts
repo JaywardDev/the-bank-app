@@ -408,17 +408,18 @@ const getStringPayload = (
   return typeof value === "string" ? value : null;
 };
 
-const findNearestTileByType = (
+const findNearestTileIndex = (
   boardTiles: TileInfo[],
   fromIndex: number,
-  tileType: string,
-): TileInfo | null => {
+  kind: "RAILROAD" | "UTILITY",
+): number | null => {
+  const tileType = kind === "RAILROAD" ? "RAIL" : "UTILITY";
   const boardSize = boardTiles.length;
   for (let offset = 1; offset <= boardSize; offset += 1) {
     const candidateIndex = (fromIndex + offset) % boardSize;
     const candidate = boardTiles[candidateIndex];
     if (candidate && candidate.type === tileType) {
-      return candidate;
+      return candidate.index;
     }
   }
   return null;
@@ -442,14 +443,13 @@ const resolveMoveToTargetIndex = (
 
   const nearestKind = getStringPayload(payload, "nearest_kind");
   if (nearestKind === "RAILROAD" || nearestKind === "UTILITY") {
-    const tileType = nearestKind === "RAILROAD" ? "RAIL" : "UTILITY";
-    const nearestTile = findNearestTileByType(boardTiles, fromIndex, tileType);
-    if (!nearestTile) {
+    const nearestIndex = findNearestTileIndex(boardTiles, fromIndex, nearestKind);
+    if (nearestIndex === null) {
       throw new Error(
         `Card nearest ${nearestKind.toLowerCase()} tile not found in board pack.`,
       );
     }
-    return nearestTile.index;
+    return nearestIndex;
   }
 
   return getNumberPayload(payload, "tile_index");
@@ -2143,6 +2143,7 @@ export async function POST(request: Request) {
         });
       }
       let cardTriggeredGoToJail = false;
+      let cardUtilityRollOverride: number | null = null;
       const eventDeck =
         landingTile.type === "EVENT"
           ? getEventDeckForTile(landingTile, boardPack)
@@ -2228,6 +2229,13 @@ export async function POST(request: Request) {
 
         if (card.kind === "MOVE_TO" || card.kind === "MOVE_REL") {
           const payload = card.payload as Record<string, unknown>;
+          const utilityRollOverride = getNumberPayload(
+            payload,
+            "utility_roll_override",
+          );
+          if (utilityRollOverride !== null) {
+            cardUtilityRollOverride = utilityRollOverride;
+          }
           const targetIndex =
             card.kind === "MOVE_TO"
               ? resolveMoveToTargetIndex(payload, boardTiles, activeResolvedTile.index)
@@ -2434,15 +2442,18 @@ export async function POST(request: Request) {
       const isCollateralized = Boolean(ownership?.collateral_loan_id);
       const rentCalculation = isCollateralized
         ? { amount: 0, meta: null }
-        : calculateRent({
-            tile: activeLandingTile,
-            ownerId: rentOwnerId,
-            currentPlayerId: currentPlayer.id,
-            boardTiles,
-            ownershipByTile,
-            // TODO: allow card-triggered utility rolls to override this dice total.
-            diceTotal: rollTotal,
-          });
+        : (() => {
+            const rentDiceTotal = rollTotal;
+            // TODO: allow cardUtilityRollOverride to replace rentDiceTotal for utility rent.
+            return calculateRent({
+              tile: activeLandingTile,
+              ownerId: rentOwnerId,
+              currentPlayerId: currentPlayer.id,
+              boardTiles,
+              ownershipByTile,
+              diceTotal: rentDiceTotal,
+            });
+          })();
       const rentAmount = rentCalculation.amount;
       let shouldPayRent = rentAmount > 0 && Boolean(rentOwnerId);
       const isUnownedOwnableTile = isOwnableTile && !ownership;
@@ -3636,6 +3647,7 @@ export async function POST(request: Request) {
         });
       }
       let cardTriggeredGoToJail = false;
+      let cardUtilityRollOverride: number | null = null;
       const eventDeck =
         landingTile.type === "EVENT"
           ? getEventDeckForTile(landingTile, boardPack)
@@ -3721,6 +3733,13 @@ export async function POST(request: Request) {
 
         if (card.kind === "MOVE_TO" || card.kind === "MOVE_REL") {
           const payload = card.payload as Record<string, unknown>;
+          const utilityRollOverride = getNumberPayload(
+            payload,
+            "utility_roll_override",
+          );
+          if (utilityRollOverride !== null) {
+            cardUtilityRollOverride = utilityRollOverride;
+          }
           const targetIndex =
             card.kind === "MOVE_TO"
               ? resolveMoveToTargetIndex(payload, boardTiles, activeResolvedTile.index)
@@ -3927,15 +3946,18 @@ export async function POST(request: Request) {
       const isCollateralized = Boolean(ownership?.collateral_loan_id);
       const rentCalculation = isCollateralized
         ? { amount: 0, meta: null }
-        : calculateRent({
-            tile: activeLandingTile,
-            ownerId: rentOwnerId,
-            currentPlayerId: currentPlayer.id,
-            boardTiles,
-            ownershipByTile,
-            // TODO: allow card-triggered utility rolls to override this dice total.
-            diceTotal: rollTotal,
-          });
+        : (() => {
+            const rentDiceTotal = rollTotal;
+            // TODO: allow cardUtilityRollOverride to replace rentDiceTotal for utility rent.
+            return calculateRent({
+              tile: activeLandingTile,
+              ownerId: rentOwnerId,
+              currentPlayerId: currentPlayer.id,
+              boardTiles,
+              ownershipByTile,
+              diceTotal: rentDiceTotal,
+            });
+          })();
       const rentAmount = rentCalculation.amount;
       let shouldPayRent = rentAmount > 0 && Boolean(rentOwnerId);
       const isUnownedOwnableTile = isOwnableTile && !ownership;
