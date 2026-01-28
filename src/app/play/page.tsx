@@ -43,6 +43,15 @@ type GameState = {
   doubles_count: number | null;
   turn_phase: string | null;
   pending_action: Record<string, unknown> | null;
+  pending_card_active: boolean | null;
+  pending_card_deck: "CHANCE" | "COMMUNITY" | null;
+  pending_card_id: string | null;
+  pending_card_title: string | null;
+  pending_card_kind: string | null;
+  pending_card_payload: Record<string, unknown> | null;
+  pending_card_drawn_by_player_id: string | null;
+  pending_card_drawn_at: string | null;
+  pending_card_source_tile_index: number | null;
   chance_index: number | null;
   community_index: number | null;
   free_parking_pot: number | null;
@@ -94,6 +103,70 @@ type PendingPurchaseAction = {
   type: "BUY_PROPERTY";
   tile_index: number;
   price: number;
+};
+
+const getPendingCardDescription = (
+  kind: string | null,
+  payload: Record<string, unknown> | null,
+  boardPack: ReturnType<typeof getBoardPackById> | null,
+) => {
+  if (!kind) {
+    return "Card effect pending.";
+  }
+  const data = payload ?? {};
+  if (kind === "PAY" || kind === "RECEIVE") {
+    const amount =
+      typeof data.amount === "number"
+        ? data.amount
+        : typeof data.amount === "string"
+          ? Number.parseInt(data.amount, 10)
+          : null;
+    if (amount !== null) {
+      return kind === "PAY"
+        ? `Pay $${amount}.`
+        : `Receive $${amount}.`;
+    }
+    return kind === "PAY" ? "Pay the bank." : "Receive money from the bank.";
+  }
+  if (kind === "MOVE_TO") {
+    const tileIndex =
+      typeof data.tile_index === "number"
+        ? data.tile_index
+        : typeof data.tile_index === "string"
+          ? Number.parseInt(data.tile_index, 10)
+          : null;
+    const tileName =
+      tileIndex !== null
+        ? boardPack?.tiles?.find((tile) => tile.index === tileIndex)?.name ??
+          `Tile ${tileIndex}`
+        : "a specific tile";
+    return `Move to ${tileName}.`;
+  }
+  if (kind === "MOVE_REL") {
+    const spaces =
+      typeof data.relative_spaces === "number"
+        ? data.relative_spaces
+        : typeof data.spaces === "number"
+          ? data.spaces
+          : typeof data.relative_spaces === "string"
+            ? Number.parseInt(data.relative_spaces, 10)
+            : typeof data.spaces === "string"
+              ? Number.parseInt(data.spaces, 10)
+              : null;
+    if (spaces !== null) {
+      return spaces >= 0
+        ? `Move forward ${spaces} spaces.`
+        : `Move back ${Math.abs(spaces)} spaces.`;
+    }
+    return "Move to a new space.";
+  }
+  if (kind === "GET_OUT_OF_JAIL_FREE") {
+    return "Keep this card to use later.";
+  }
+  if (kind === "GO_TO_JAIL") {
+    return "Go directly to jail.";
+  }
+  return "Card effect pending.";
 };
 
 const getTurnsRemainingFromPayload = (payload: unknown): number | null => {
@@ -345,6 +418,14 @@ export default function PlayPage() {
           ? payload.player_name
           : "Player";
       return `${playerName} drew ${deck}: ${cardTitle}`;
+    }
+
+    if (event.event_type === "CARD_REVEALED") {
+      const deck =
+        typeof payload?.deck === "string" ? payload.deck : "Card";
+      const cardTitle =
+        typeof payload?.card_title === "string" ? payload.card_title : "Card";
+      return `${deck} card revealed: ${cardTitle}`;
     }
 
     if (event.event_type === "CARD_PAY") {
@@ -1015,7 +1096,7 @@ export default function PlayPage() {
   const loadGameState = useCallback(
     async (activeGameId: string, accessToken?: string) => {
       const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
-        `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${activeGameId}&limit=1`,
+        `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${activeGameId}&limit=1`,
         { method: "GET" },
         accessToken,
       );
@@ -1630,6 +1711,41 @@ export default function PlayPage() {
       price: candidate.price,
     };
   }, [gameState?.pending_action]);
+  const pendingCard = useMemo(() => {
+    if (!gameState?.pending_card_active) {
+      return null;
+    }
+    return {
+      deck: gameState.pending_card_deck ?? null,
+      title: gameState.pending_card_title ?? "Card",
+      kind: gameState.pending_card_kind ?? null,
+      payload: gameState.pending_card_payload ?? null,
+      drawnBy: gameState.pending_card_drawn_by_player_id ?? null,
+    };
+  }, [
+    gameState?.pending_card_active,
+    gameState?.pending_card_deck,
+    gameState?.pending_card_kind,
+    gameState?.pending_card_payload,
+    gameState?.pending_card_title,
+    gameState?.pending_card_drawn_by_player_id,
+  ]);
+  const pendingCardDescription = useMemo(
+    () =>
+      pendingCard
+        ? getPendingCardDescription(pendingCard.kind, pendingCard.payload, boardPack)
+        : null,
+    [boardPack, pendingCard],
+  );
+  const pendingCardActorName = useMemo(() => {
+    if (!pendingCard?.drawnBy) {
+      return null;
+    }
+    return (
+      players.find((player) => player.id === pendingCard.drawnBy)?.display_name ??
+      "Player"
+    );
+  }, [pendingCard?.drawnBy, players]);
   const pendingTile = useMemo(() => {
     if (!pendingPurchase) {
       return null;
@@ -1658,8 +1774,13 @@ export default function PlayPage() {
   const canAffordPendingPurchase = pendingPurchase
     ? myPlayerBalance >= pendingPurchase.price
     : false;
+  const hasPendingCard = Boolean(pendingCard);
   const canAct =
-    initialSnapshotReady && isMyTurn && !isEliminated && !isAuctionActive;
+    initialSnapshotReady &&
+    isMyTurn &&
+    !isEliminated &&
+    !isAuctionActive &&
+    !hasPendingCard;
   const isAwaitingJailDecision =
     isMyTurn && gameState?.turn_phase === "AWAITING_JAIL_DECISION";
   const showJailDecisionPanel =
@@ -1676,6 +1797,16 @@ export default function PlayPage() {
     (gameState?.last_roll == null || (gameState?.doubles_count ?? 0) > 0);
   const canEndTurn =
     canAct && !hasPendingDecision && gameState?.last_roll != null;
+  const canConfirmPendingCard =
+    Boolean(pendingCard) &&
+    currentUserPlayer?.id === pendingCard.drawnBy &&
+    gameState?.turn_phase === "AWAITING_CARD_CONFIRM";
+  const pendingDeckLabel =
+    pendingCard?.deck === "CHANCE"
+      ? "Chance"
+      : pendingCard?.deck === "COMMUNITY"
+        ? "Community"
+        : "Card";
   const realtimeStatusLabel = realtimeReady ? "Live" : "Syncing…";
   const isHost = Boolean(
     session && gameMeta?.created_by && session.user.id === gameMeta.created_by,
@@ -1797,13 +1928,14 @@ export default function PlayPage() {
     async (
       request:
         | {
-            action:
-              | "ROLL_DICE"
-              | "END_TURN"
-              | "JAIL_PAY_FINE"
-              | "JAIL_ROLL_FOR_DOUBLES"
-              | "USE_GET_OUT_OF_JAIL_FREE";
-          }
+          action:
+            | "ROLL_DICE"
+            | "END_TURN"
+            | "JAIL_PAY_FINE"
+            | "JAIL_ROLL_FOR_DOUBLES"
+            | "USE_GET_OUT_OF_JAIL_FREE"
+            | "CONFIRM_PENDING_CARD";
+        }
         | { action: "DECLINE_PROPERTY" | "BUY_PROPERTY"; tileIndex: number }
         | { action: "AUCTION_BID"; amount: number }
         | { action: "AUCTION_PASS" }
@@ -2045,6 +2177,13 @@ export default function PlayPage() {
       tileIndex: pendingPurchase.tile_index,
     });
   }, [handleBankAction, pendingPurchase]);
+
+  const handleConfirmPendingCard = useCallback(() => {
+    if (!canConfirmPendingCard) {
+      return;
+    }
+    void handleBankAction({ action: "CONFIRM_PENDING_CARD" });
+  }, [canConfirmPendingCard, handleBankAction]);
 
   const handleAuctionBid = useCallback(() => {
     if (!isCurrentAuctionBidder) {
@@ -2451,6 +2590,46 @@ export default function PlayPage() {
             <p className="text-xs text-neutral-400">Loading snapshot…</p>
           ) : null}
         </div>
+        {pendingCard ? (
+          <>
+            <div className="fixed inset-0 z-20 bg-black/40 backdrop-blur-[1px]" />
+            <div className="fixed inset-0 z-30 flex items-center justify-center p-4">
+              <div className="w-full max-w-md rounded-3xl border border-emerald-200 bg-white/95 p-5 shadow-2xl backdrop-blur">
+                <p className="text-xs font-semibold uppercase tracking-wide text-emerald-500">
+                  Card revealed
+                </p>
+                <p className="text-lg font-semibold text-neutral-900">
+                  {pendingDeckLabel}
+                </p>
+                <p className="mt-2 text-base font-semibold text-neutral-900">
+                  {pendingCard.title}
+                </p>
+                {pendingCardDescription ? (
+                  <p className="mt-1 text-sm text-neutral-600">
+                    {pendingCardDescription}
+                  </p>
+                ) : null}
+                {canConfirmPendingCard ? (
+                  <button
+                    className="mt-4 w-full rounded-2xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-emerald-200"
+                    type="button"
+                    onClick={handleConfirmPendingCard}
+                    disabled={actionLoading === "CONFIRM_PENDING_CARD"}
+                  >
+                    {actionLoading === "CONFIRM_PENDING_CARD"
+                      ? "Confirming…"
+                      : "OK"}
+                  </button>
+                ) : (
+                  <p className="mt-4 text-sm text-neutral-500">
+                    Waiting for {pendingCardActorName ?? "the current player"} to
+                    confirm…
+                  </p>
+                )}
+              </div>
+            </div>
+          </>
+        ) : null}
         {isAuctionActive ? (
           <>
             <div className="fixed inset-0 z-10 bg-black/35 backdrop-blur-[1px]" />

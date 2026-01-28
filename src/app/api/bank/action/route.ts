@@ -47,7 +47,8 @@ type BankActionRequest =
         | "BUY_PROPERTY"
         | "JAIL_PAY_FINE"
         | "JAIL_ROLL_FOR_DOUBLES"
-        | "USE_GET_OUT_OF_JAIL_FREE",
+        | "USE_GET_OUT_OF_JAIL_FREE"
+        | "CONFIRM_PENDING_CARD",
         "DECLINE_PROPERTY" | "BUY_PROPERTY"
       >;
       tileIndex?: number;
@@ -128,6 +129,15 @@ type GameStateRow = {
   auction_eligible_player_ids: string[] | null;
   auction_passed_player_ids: string[] | null;
   auction_min_increment: number | null;
+  pending_card_active: boolean | null;
+  pending_card_deck: "CHANCE" | "COMMUNITY" | null;
+  pending_card_id: string | null;
+  pending_card_title: string | null;
+  pending_card_kind: string | null;
+  pending_card_payload: Record<string, unknown> | null;
+  pending_card_drawn_by_player_id: string | null;
+  pending_card_drawn_at: string | null;
+  pending_card_source_tile_index: number | null;
 };
 
 type OwnershipRow = {
@@ -985,6 +995,714 @@ const applyGoSalary = ({
   return { balances: updatedBalances, balancesChanged: true, alreadyCollected: true };
 };
 
+const applyCardEffect = ({
+  card,
+  currentPlayer,
+  boardTiles,
+  boardSize,
+  activeLandingTile,
+  activeResolvedTile,
+  jailTile,
+  shouldSendToJail,
+  finalPosition,
+  events,
+  updatedBalances,
+  balancesChanged,
+  bankruptcyCandidate,
+  goSalaryAwarded,
+  nextGetOutOfJailFreeCount,
+  getOutOfJailFreeCountChanged,
+  cardUtilityRollOverride,
+  cardTriggeredGoToJail,
+  startingCash,
+}: {
+  card: { id: string; title: string; kind: string; payload?: unknown };
+  currentPlayer: PlayerRow;
+  boardTiles: TileInfo[];
+  boardSize: number;
+  activeLandingTile: TileInfo;
+  activeResolvedTile: TileInfo;
+  jailTile: TileInfo | null;
+  shouldSendToJail: boolean;
+  finalPosition: number;
+  events: Array<{ event_type: string; payload: Record<string, unknown> }>;
+  updatedBalances: Record<string, number>;
+  balancesChanged: boolean;
+  bankruptcyCandidate:
+    | { reason: string; cashBefore: number; cashAfter: number }
+    | null;
+  goSalaryAwarded: boolean;
+  nextGetOutOfJailFreeCount: number;
+  getOutOfJailFreeCountChanged: boolean;
+  cardUtilityRollOverride:
+    | { total: number; dice: [number, number] }
+    | null;
+  cardTriggeredGoToJail: boolean;
+  startingCash: number;
+}) => {
+  if (card.kind === "PAY" || card.kind === "RECEIVE") {
+    const amount =
+      getNumberPayload(card.payload as Record<string, unknown>, "amount") ?? 0;
+    const currentBalance = updatedBalances[currentPlayer.id] ?? startingCash;
+    const nextBalance =
+      card.kind === "PAY" ? currentBalance - amount : currentBalance + amount;
+    updatedBalances = {
+      ...updatedBalances,
+      [currentPlayer.id]: nextBalance,
+    };
+    if (amount !== 0) {
+      balancesChanged = true;
+    }
+    if (card.kind === "PAY" && nextBalance < 0 && !bankruptcyCandidate) {
+      bankruptcyCandidate = {
+        reason: "CARD_PAY",
+        cashBefore: currentBalance,
+        cashAfter: nextBalance,
+      };
+    }
+    events.push({
+      event_type: card.kind === "PAY" ? "CARD_PAY" : "CARD_RECEIVE",
+      payload: {
+        player_id: currentPlayer.id,
+        player_name: currentPlayer.display_name,
+        card_id: card.id,
+        card_title: card.title,
+        card_kind: card.kind,
+        amount,
+      },
+    });
+  }
+
+  if (card.kind === "GET_OUT_OF_JAIL_FREE") {
+    nextGetOutOfJailFreeCount += 1;
+    getOutOfJailFreeCountChanged = true;
+    events.push({
+      event_type: "CARD_GET_OUT_OF_JAIL_FREE_RECEIVED",
+      payload: {
+        player_id: currentPlayer.id,
+        player_name: currentPlayer.display_name,
+        card_id: card.id,
+        card_title: card.title,
+        card_kind: card.kind,
+        total_cards: nextGetOutOfJailFreeCount,
+      },
+    });
+  }
+
+  if (card.kind === "MOVE_TO" || card.kind === "MOVE_REL") {
+    const payload = card.payload as Record<string, unknown>;
+    const shouldOverrideUtilityRoll =
+      card.kind === "MOVE_TO" &&
+      getBooleanPayload(payload, "utility_roll_override");
+    const targetIndex =
+      card.kind === "MOVE_TO"
+        ? resolveMoveToTargetIndex(payload, boardTiles, activeResolvedTile.index)
+        : null;
+    const spaces =
+      card.kind === "MOVE_REL"
+        ? getNumberPayload(payload, "relative_spaces") ??
+          getNumberPayload(payload, "spaces")
+        : null;
+    const cardFromIndex = activeResolvedTile.index;
+    const rawIndex =
+      card.kind === "MOVE_TO" && targetIndex !== null
+        ? targetIndex
+        : card.kind === "MOVE_REL" && spaces !== null
+          ? cardFromIndex + spaces
+          : null;
+    if (rawIndex !== null) {
+      const normalizedIndex = ((rawIndex % boardSize) + boardSize) % boardSize;
+      const cardLandingTile = boardTiles[normalizedIndex] ?? {
+        index: normalizedIndex,
+        tile_id: `tile-${normalizedIndex}`,
+        type: "PROPERTY",
+        name: `Tile ${normalizedIndex}`,
+      };
+      const cardPassedStart =
+        card.kind === "MOVE_TO"
+          ? normalizedIndex < cardFromIndex
+          : spaces !== null
+            ? spaces > 0 && cardFromIndex + spaces >= boardSize
+            : false;
+      const cardJailTile =
+        cardLandingTile.type === "GO_TO_JAIL"
+          ? boardTiles.find((tile) => tile.type === "JAIL") ?? {
+              index: 10,
+              tile_id: "jail",
+              type: "JAIL",
+              name: "Jail",
+            }
+          : null;
+      const cardResolvedTile = cardJailTile ?? cardLandingTile;
+      jailTile = cardJailTile ?? jailTile;
+      shouldSendToJail =
+        cardLandingTile.type === "GO_TO_JAIL" && Boolean(cardJailTile);
+      activeLandingTile = cardLandingTile;
+      activeResolvedTile = cardResolvedTile;
+      finalPosition = cardResolvedTile.index;
+      if (shouldOverrideUtilityRoll && cardLandingTile.type === "UTILITY") {
+        const overrideRoll = rollDice();
+        cardUtilityRollOverride = overrideRoll;
+        events.push({
+          event_type: "CARD_UTILITY_ROLL",
+          payload: {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.display_name,
+            roll: overrideRoll.total,
+            dice: overrideRoll.dice,
+            tile_id: cardLandingTile.tile_id,
+            tile_index: cardLandingTile.index,
+            card_id: card.id,
+            card_title: card.title,
+          },
+        });
+      }
+      events.push({
+        event_type: card.kind === "MOVE_TO" ? "CARD_MOVE_TO" : "CARD_MOVE_REL",
+        payload: {
+          player_id: currentPlayer.id,
+          player_name: currentPlayer.display_name,
+          card_id: card.id,
+          card_title: card.title,
+          card_kind: card.kind,
+          from_tile_index: cardFromIndex,
+          to_tile_index: cardLandingTile.index,
+          passed_start: cardPassedStart,
+        },
+      });
+
+      events.push({
+        event_type: "MOVE_PLAYER",
+        payload: {
+          player_id: currentPlayer.id,
+          from: cardFromIndex,
+          to: cardLandingTile.index,
+          passedStart: cardPassedStart,
+          tile_id: cardLandingTile.tile_id,
+          tile_name: cardLandingTile.name,
+          reason: "CARD",
+          card_id: card.id,
+        },
+      });
+
+      if (cardPassedStart || cardLandingTile.type === "START") {
+        const reason = cardPassedStart ? "PASS_START" : "LAND_GO";
+        const goResult = applyGoSalary({
+          player: currentPlayer,
+          balances: updatedBalances,
+          startingCash,
+          events,
+          alreadyCollected: goSalaryAwarded,
+          reason,
+        });
+        updatedBalances = goResult.balances;
+        balancesChanged = balancesChanged || goResult.balancesChanged;
+        goSalaryAwarded = goResult.alreadyCollected;
+      }
+
+      events.push({
+        event_type: "LAND_ON_TILE",
+        payload: {
+          player_id: currentPlayer.id,
+          tile_id: cardLandingTile.tile_id,
+          tile_type: cardLandingTile.type,
+          tile_index: cardLandingTile.index,
+        },
+      });
+
+      const cardResolutionEvent = resolveTile(cardLandingTile, currentPlayer);
+      if (cardResolutionEvent) {
+        events.push({
+          event_type: cardResolutionEvent.event_type,
+          payload: cardResolutionEvent.payload,
+        });
+      }
+
+      if (cardLandingTile.type === "GO_TO_JAIL" && cardJailTile) {
+        cardTriggeredGoToJail = true;
+        events.push({
+          event_type: "GO_TO_JAIL",
+          payload: {
+            from_tile_index: cardLandingTile.index,
+            to_jail_tile_index: cardJailTile.index,
+            player_id: currentPlayer.id,
+            display_name: currentPlayer.display_name,
+          },
+        });
+      }
+    }
+  }
+
+  if (card.kind === "GO_TO_JAIL") {
+    const cardFromIndex = activeResolvedTile.index;
+    const cardJailTile =
+      boardTiles.find((tile) => tile.type === "JAIL") ?? {
+        index: 10,
+        tile_id: "jail",
+        type: "JAIL",
+        name: "Jail",
+      };
+    activeLandingTile = cardJailTile;
+    activeResolvedTile = cardJailTile;
+    finalPosition = cardJailTile.index;
+    shouldSendToJail = true;
+    jailTile = cardJailTile;
+    cardTriggeredGoToJail = true;
+
+    events.push({
+      event_type: "CARD_GO_TO_JAIL",
+      payload: {
+        player_id: currentPlayer.id,
+        player_name: currentPlayer.display_name,
+        card_id: card.id,
+        card_title: card.title,
+        card_kind: card.kind,
+        from_tile_index: cardFromIndex,
+        to_jail_tile_index: cardJailTile.index,
+      },
+    });
+
+    events.push(
+      {
+        event_type: "MOVE_PLAYER",
+        payload: {
+          player_id: currentPlayer.id,
+          from: cardFromIndex,
+          to: cardJailTile.index,
+          tile_id: cardJailTile.tile_id,
+          tile_name: cardJailTile.name,
+          reason: "CARD",
+          card_id: card.id,
+        },
+      },
+      {
+        event_type: "LAND_ON_TILE",
+        payload: {
+          player_id: currentPlayer.id,
+          tile_id: cardJailTile.tile_id,
+          tile_type: cardJailTile.type,
+          tile_index: cardJailTile.index,
+        },
+      },
+    );
+
+    const cardResolutionEvent = resolveTile(cardJailTile, currentPlayer);
+    if (cardResolutionEvent) {
+      events.push({
+        event_type: cardResolutionEvent.event_type,
+        payload: cardResolutionEvent.payload,
+      });
+    }
+
+    events.push({
+      event_type: "GO_TO_JAIL",
+      payload: {
+        from_tile_index: cardFromIndex,
+        to_jail_tile_index: cardJailTile.index,
+        player_id: currentPlayer.id,
+        display_name: currentPlayer.display_name,
+      },
+    });
+  }
+
+  return {
+    activeLandingTile,
+    activeResolvedTile,
+    jailTile,
+    shouldSendToJail,
+    finalPosition,
+    updatedBalances,
+    balancesChanged,
+    bankruptcyCandidate,
+    nextGetOutOfJailFreeCount,
+    getOutOfJailFreeCountChanged,
+    cardUtilityRollOverride,
+    cardTriggeredGoToJail,
+    goSalaryAwarded,
+  };
+};
+
+const finalizeMoveResolution = async ({
+  gameId,
+  gameState,
+  players,
+  currentPlayer,
+  updatedBalances,
+  balancesChanged,
+  bankruptcyCandidate,
+  activeLandingTile,
+  activeResolvedTile,
+  finalPosition,
+  shouldSendToJail,
+  jailTile,
+  cardTriggeredGoToJail,
+  cardUtilityRollOverride,
+  rollTotal,
+  isDouble,
+  allowExtraRoll,
+  nextDoublesCount,
+  events,
+  currentVersion,
+  userId,
+  ownershipByTile,
+  boardTiles,
+  rules,
+  startingCash,
+  nextChanceIndex,
+  nextCommunityIndex,
+  nextChanceOrder,
+  nextCommunityOrder,
+  nextChanceDrawPtr,
+  nextCommunityDrawPtr,
+  nextChanceSeed,
+  nextCommunitySeed,
+  nextChanceReshuffleCount,
+  nextCommunityReshuffleCount,
+  chanceStateChanged,
+  communityStateChanged,
+  nextGetOutOfJailFreeCount,
+  getOutOfJailFreeCountChanged,
+  extraGameStatePatch,
+}: {
+  gameId: string;
+  gameState: GameStateRow;
+  players: PlayerRow[];
+  currentPlayer: PlayerRow;
+  updatedBalances: Record<string, number>;
+  balancesChanged: boolean;
+  bankruptcyCandidate:
+    | { reason: string; cashBefore: number; cashAfter: number }
+    | null;
+  activeLandingTile: TileInfo;
+  activeResolvedTile: TileInfo;
+  finalPosition: number;
+  shouldSendToJail: boolean;
+  jailTile: TileInfo | null;
+  cardTriggeredGoToJail: boolean;
+  cardUtilityRollOverride:
+    | { total: number; dice: [number, number] }
+    | null;
+  rollTotal: number | null;
+  isDouble: boolean;
+  allowExtraRoll: boolean;
+  nextDoublesCount: number;
+  events: Array<{ event_type: string; payload: Record<string, unknown> }>;
+  currentVersion: number;
+  userId: string;
+  ownershipByTile: OwnershipByTile;
+  boardTiles: TileInfo[];
+  rules: ReturnType<typeof getRules>;
+  startingCash: number;
+  nextChanceIndex: number;
+  nextCommunityIndex: number;
+  nextChanceOrder: number[] | null;
+  nextCommunityOrder: number[] | null;
+  nextChanceDrawPtr: number;
+  nextCommunityDrawPtr: number;
+  nextChanceSeed: string | null;
+  nextCommunitySeed: string | null;
+  nextChanceReshuffleCount: number;
+  nextCommunityReshuffleCount: number;
+  chanceStateChanged: boolean;
+  communityStateChanged: boolean;
+  nextGetOutOfJailFreeCount: number;
+  getOutOfJailFreeCountChanged: boolean;
+  extraGameStatePatch?: Record<string, unknown>;
+}) => {
+  const ownership = ownershipByTile[activeLandingTile.index];
+  const isOwnableTile = OWNABLE_TILE_TYPES.has(activeLandingTile.type);
+  const rentOwnerId =
+    isOwnableTile && ownership ? ownership.owner_player_id : null;
+  const isCollateralized = Boolean(ownership?.collateral_loan_id);
+  const rentCalculation = isCollateralized
+    ? { amount: 0, meta: null }
+    : (() => {
+        const rentDiceTotal =
+          activeLandingTile.type === "UTILITY" && cardUtilityRollOverride
+            ? cardUtilityRollOverride.total
+            : rollTotal ?? 0;
+        return calculateRent({
+          tile: activeLandingTile,
+          ownerId: rentOwnerId,
+          currentPlayerId: currentPlayer.id,
+          boardTiles,
+          ownershipByTile,
+          diceTotal: rentDiceTotal,
+        });
+      })();
+  if (activeLandingTile.type === "UTILITY" && cardUtilityRollOverride) {
+    cardUtilityRollOverride = null;
+  }
+  const rentAmount = rentCalculation.amount;
+  let shouldPayRent = rentAmount > 0 && Boolean(rentOwnerId);
+  const isUnownedOwnableTile = isOwnableTile && !ownership;
+  const isTaxTile = activeLandingTile.type === "TAX";
+  const taxAmount = isTaxTile ? activeLandingTile.taxAmount ?? 0 : 0;
+  const shouldPayTax = isTaxTile && taxAmount > 0;
+  const isFreeParking = activeLandingTile.type === "FREE_PARKING";
+
+  if (
+    activeLandingTile.type === "GO_TO_JAIL" &&
+    jailTile &&
+    !cardTriggeredGoToJail
+  ) {
+    events.push({
+      event_type: "GO_TO_JAIL",
+      payload: {
+        from_tile_index: activeLandingTile.index,
+        to_jail_tile_index: jailTile.index,
+        player_id: currentPlayer.id,
+        display_name: currentPlayer.display_name,
+      },
+    });
+  }
+
+  if (isCollateralized && rentOwnerId && rentOwnerId !== currentPlayer.id) {
+    shouldPayRent = false;
+    events.push({
+      event_type: "RENT_SKIPPED_COLLATERAL",
+      payload: {
+        tile_index: activeLandingTile.index,
+        tile_id: activeLandingTile.tile_id,
+        owner_player_id: rentOwnerId,
+        reason: "collateralized",
+      },
+    });
+  }
+
+  if (shouldPayRent && rentOwnerId && rentOwnerId !== currentPlayer.id) {
+    const payerBalance = updatedBalances[currentPlayer.id] ?? startingCash;
+    const ownerBalance = updatedBalances[rentOwnerId] ?? startingCash;
+    const nextBalance = payerBalance - rentAmount;
+    updatedBalances = {
+      ...updatedBalances,
+      [currentPlayer.id]: nextBalance,
+      [rentOwnerId]: ownerBalance + rentAmount,
+    };
+    balancesChanged = true;
+    if (nextBalance < 0 && !bankruptcyCandidate) {
+      bankruptcyCandidate = {
+        reason: "PAY_RENT",
+        cashBefore: payerBalance,
+        cashAfter: nextBalance,
+      };
+    }
+    const rentPayload: Record<string, unknown> = {
+      tile_index: activeLandingTile.index,
+      tile_id: activeLandingTile.tile_id,
+      tile_type: activeLandingTile.type,
+      from_player_id: currentPlayer.id,
+      to_player_id: rentOwnerId,
+      amount: rentAmount,
+    };
+    if (rentCalculation.meta) {
+      Object.assign(rentPayload, rentCalculation.meta);
+    }
+    events.push({
+      event_type: "PAY_RENT",
+      payload: rentPayload,
+    });
+  }
+
+  if (shouldPayTax) {
+    const payerBalance = updatedBalances[currentPlayer.id] ?? startingCash;
+    const nextBalance = payerBalance - taxAmount;
+    updatedBalances = {
+      ...updatedBalances,
+      [currentPlayer.id]: nextBalance,
+    };
+    balancesChanged = true;
+    if (nextBalance < 0 && !bankruptcyCandidate) {
+      bankruptcyCandidate = {
+        reason: "PAY_TAX",
+        cashBefore: payerBalance,
+        cashAfter: nextBalance,
+      };
+    }
+    events.push(
+      {
+        event_type: "PAY_TAX",
+        payload: {
+          tile_index: activeLandingTile.index,
+          tile_name: activeLandingTile.name,
+          amount: taxAmount,
+          payer_player_id: currentPlayer.id,
+          payer_display_name: currentPlayer.display_name,
+        },
+      },
+      {
+        event_type: "CASH_DEBIT",
+        payload: {
+          player_id: currentPlayer.id,
+          amount: taxAmount,
+          reason: "PAY_TAX",
+          tile_index: activeLandingTile.index,
+        },
+      },
+    );
+    // TODO: If rules.freeParkingJackpotEnabled, route taxAmount into free_parking_pot.
+  }
+
+  if (isFreeParking && rules.freeParkingJackpotEnabled) {
+    // TODO: Pay out free_parking_pot and reset to 0 when jackpot is enabled.
+  }
+
+  const isBankruptcyPending = Boolean(bankruptcyCandidate);
+  const pendingPurchaseAction =
+    !isBankruptcyPending && isUnownedOwnableTile && !(shouldSendToJail && jailTile)
+      ? {
+          type: "BUY_PROPERTY",
+          tile_index: activeLandingTile.index,
+          price: activeLandingTile.price ?? 0,
+        }
+      : null;
+
+  if (pendingPurchaseAction) {
+    events.push({
+      event_type: "OFFER_PURCHASE",
+      payload: {
+        player_id: currentPlayer.id,
+        tile_id: activeLandingTile.tile_id,
+        tile_name: activeLandingTile.name,
+        tile_index: activeLandingTile.index,
+        price: pendingPurchaseAction.price,
+      },
+    });
+  }
+
+  events.push({
+    event_type: "MOVE_RESOLVED",
+    payload: {
+      player_id: currentPlayer.id,
+      tile_id: activeResolvedTile.tile_id,
+      tile_type: activeResolvedTile.type,
+      tile_index: activeResolvedTile.index,
+    },
+  });
+
+  if (
+    allowExtraRoll &&
+    isDouble &&
+    !pendingPurchaseAction &&
+    !isBankruptcyPending &&
+    !(shouldSendToJail && jailTile)
+  ) {
+    events.push({
+      event_type: "ALLOW_EXTRA_ROLL",
+      payload: {
+        player_id: currentPlayer.id,
+        player_name: currentPlayer.display_name,
+        doubles_count: nextDoublesCount,
+      },
+    });
+  }
+
+  if (bankruptcyCandidate) {
+    const bankruptcyResult = await resolveBankruptcyIfNeeded({
+      gameId,
+      gameState,
+      players,
+      player: currentPlayer,
+      updatedBalances,
+      cashBefore: bankruptcyCandidate.cashBefore,
+      cashAfter: bankruptcyCandidate.cashAfter,
+      reason: bankruptcyCandidate.reason,
+      events,
+      currentVersion,
+      userId,
+      playerPosition: finalPosition,
+    });
+
+    if (bankruptcyResult.handled) {
+      if (bankruptcyResult.error) {
+        return NextResponse.json(
+          { error: bankruptcyResult.error },
+          { status: 409 },
+        );
+      }
+      return NextResponse.json({ gameState: bankruptcyResult.updatedState });
+    }
+  }
+
+  const finalVersion = currentVersion + events.length;
+  const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+    `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+    {
+      method: "PATCH",
+      headers: {
+        Prefer: "return=representation",
+      },
+      body: JSON.stringify({
+        version: finalVersion,
+        last_roll: rollTotal ?? null,
+        doubles_count: nextDoublesCount,
+        ...(balancesChanged ? { balances: updatedBalances } : {}),
+        ...(nextChanceIndex !== (gameState?.chance_index ?? 0)
+          ? { chance_index: nextChanceIndex }
+          : {}),
+        ...(nextCommunityIndex !== (gameState?.community_index ?? 0)
+          ? { community_index: nextCommunityIndex }
+          : {}),
+        ...(chanceStateChanged
+          ? {
+              chance_order: nextChanceOrder,
+              chance_draw_ptr: nextChanceDrawPtr,
+              chance_seed: nextChanceSeed,
+              chance_reshuffle_count: nextChanceReshuffleCount,
+            }
+          : {}),
+        ...(communityStateChanged
+          ? {
+              community_order: nextCommunityOrder,
+              community_draw_ptr: nextCommunityDrawPtr,
+              community_seed: nextCommunitySeed,
+              community_reshuffle_count: nextCommunityReshuffleCount,
+            }
+          : {}),
+        turn_phase: pendingPurchaseAction
+          ? "AWAITING_DECISION"
+          : "AWAITING_ROLL",
+        pending_action: pendingPurchaseAction,
+        ...(extraGameStatePatch ?? {}),
+        updated_at: new Date().toISOString(),
+      }),
+    },
+  )) ?? [];
+
+  if (!updatedState) {
+    return NextResponse.json({ error: "Version mismatch." }, { status: 409 });
+  }
+
+  const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
+    `players?id=eq.${currentPlayer.id}`,
+    {
+      method: "PATCH",
+      headers: {
+        Prefer: "return=representation",
+      },
+      body: JSON.stringify({
+        position: finalPosition,
+        is_in_jail: Boolean(shouldSendToJail && jailTile),
+        jail_turns_remaining: shouldSendToJail && jailTile ? 3 : 0,
+        ...(getOutOfJailFreeCountChanged
+          ? { get_out_of_jail_free_count: nextGetOutOfJailFreeCount }
+          : {}),
+      }),
+    },
+  )) ?? [];
+
+  if (!updatedPlayer) {
+    return NextResponse.json(
+      { error: "Unable to update player position." },
+      { status: 500 },
+    );
+  }
+
+  await emitGameEvents(gameId, currentVersion + 1, events, userId);
+
+  return NextResponse.json({ gameState: updatedState });
+};
+
 const applyLoanPaymentsForPlayer = async ({
   gameId,
   player,
@@ -1175,7 +1893,7 @@ export async function POST(request: Request) {
       }
 
       await fetchFromSupabaseWithService<GameStateRow[]>(
-        "game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment",
+        "game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment",
         {
           method: "POST",
           headers: {
@@ -1312,7 +2030,7 @@ export async function POST(request: Request) {
     )) ?? [];
 
     const [gameState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
-      `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
+      `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
       { method: "GET" },
     )) ?? [];
 
@@ -1430,7 +2148,7 @@ export async function POST(request: Request) {
       );
 
       const upsertResponse = await fetch(
-        `${supabaseUrl}/rest/v1/game_state?on_conflict=game_id&select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment`,
+        `${supabaseUrl}/rest/v1/game_state?on_conflict=game_id&select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment`,
         {
           method: "POST",
           headers: {
@@ -1628,6 +2346,13 @@ export async function POST(request: Request) {
     if (gameState.auction_active && !isAuctionAction) {
       return NextResponse.json(
         { error: "Auction in progress." },
+        { status: 409 },
+      );
+    }
+
+    if (gameState.pending_card_active && body.action !== "CONFIRM_PENDING_CARD") {
+      return NextResponse.json(
+        { error: "Confirm the pending card before continuing." },
         { status: 409 },
       );
     }
@@ -2044,6 +2769,198 @@ export async function POST(request: Request) {
       return NextResponse.json({ gameState: updatedState });
     }
 
+    if (body.action === "CONFIRM_PENDING_CARD") {
+      if (!gameState.pending_card_active) {
+        return NextResponse.json(
+          { error: "No pending card to confirm." },
+          { status: 409 },
+        );
+      }
+
+      if (gameState.turn_phase !== "AWAITING_CARD_CONFIRM") {
+        return NextResponse.json(
+          { error: "Not ready to confirm the card yet." },
+          { status: 409 },
+        );
+      }
+
+      if (gameState.pending_card_drawn_by_player_id !== currentUserPlayer.id) {
+        return NextResponse.json(
+          { error: "Only the acting player can confirm this card." },
+          { status: 403 },
+        );
+      }
+
+      const cardId = gameState.pending_card_id;
+      const cardKind = gameState.pending_card_kind;
+      if (!cardId || !cardKind) {
+        return NextResponse.json(
+          { error: "Pending card data is missing." },
+          { status: 409 },
+        );
+      }
+
+      const cardTitle = gameState.pending_card_title ?? "Card";
+      const cardPayload =
+        gameState.pending_card_payload &&
+        typeof gameState.pending_card_payload === "object"
+          ? gameState.pending_card_payload
+          : {};
+      const card = {
+        id: cardId,
+        title: cardTitle,
+        kind: cardKind,
+        payload: cardPayload,
+      };
+      const boardPack = getBoardPackById(game.board_pack_id);
+      const boardTiles = boardPack?.tiles ?? [];
+      const boardSize = boardTiles.length > 0 ? boardTiles.length : 40;
+      const sourceIndex =
+        typeof gameState.pending_card_source_tile_index === "number"
+          ? gameState.pending_card_source_tile_index
+          : Number.isFinite(currentPlayer.position)
+            ? currentPlayer.position
+            : 0;
+      const sourceTile = boardTiles[sourceIndex] ?? {
+        index: sourceIndex,
+        tile_id: `tile-${sourceIndex}`,
+        type: "PROPERTY",
+        name: `Tile ${sourceIndex}`,
+      };
+      let jailTile =
+        sourceTile.type === "GO_TO_JAIL"
+          ? boardTiles.find((tile) => tile.type === "JAIL") ?? {
+              index: 10,
+              tile_id: "jail",
+              type: "JAIL",
+              name: "Jail",
+            }
+          : null;
+      const resolvedTile = jailTile ?? sourceTile;
+      let finalPosition = resolvedTile.index;
+      let shouldSendToJail =
+        sourceTile.type === "GO_TO_JAIL" && Boolean(jailTile);
+      let activeLandingTile = sourceTile;
+      let activeResolvedTile = resolvedTile;
+      const balances = gameState?.balances ?? {};
+      let updatedBalances = balances;
+      let balancesChanged = false;
+      let bankruptcyCandidate:
+        | { reason: string; cashBefore: number; cashAfter: number }
+        | null = null;
+      let goSalaryAwarded = false;
+      const rollTotal =
+        typeof gameState.last_roll === "number" ? gameState.last_roll : null;
+      if (rollTotal !== null) {
+        const previousPosition =
+          ((sourceTile.index - rollTotal) % boardSize + boardSize) % boardSize;
+        const passedStart = previousPosition + rollTotal >= boardSize;
+        goSalaryAwarded = passedStart || sourceTile.type === "START";
+      }
+      let cardTriggeredGoToJail = false;
+      let cardUtilityRollOverride:
+        | { total: number; dice: [number, number] }
+        | null = null;
+      let nextGetOutOfJailFreeCount =
+        currentPlayer.get_out_of_jail_free_count ?? 0;
+      let getOutOfJailFreeCountChanged = false;
+      const events: Array<{
+        event_type: string;
+        payload: Record<string, unknown>;
+      }> = [];
+
+      const cardResult = applyCardEffect({
+        card,
+        currentPlayer,
+        boardTiles,
+        boardSize,
+        activeLandingTile,
+        activeResolvedTile,
+        jailTile,
+        shouldSendToJail,
+        finalPosition,
+        events,
+        updatedBalances,
+        balancesChanged,
+        bankruptcyCandidate,
+        goSalaryAwarded,
+        nextGetOutOfJailFreeCount,
+        getOutOfJailFreeCountChanged,
+        cardUtilityRollOverride,
+        cardTriggeredGoToJail,
+        startingCash: game.starting_cash ?? 0,
+      });
+
+      ({
+        activeLandingTile,
+        activeResolvedTile,
+        jailTile,
+        shouldSendToJail,
+        finalPosition,
+        updatedBalances,
+        balancesChanged,
+        bankruptcyCandidate,
+        nextGetOutOfJailFreeCount,
+        getOutOfJailFreeCountChanged,
+        cardUtilityRollOverride,
+        cardTriggeredGoToJail,
+        goSalaryAwarded,
+      } = cardResult);
+
+      return await finalizeMoveResolution({
+        gameId,
+        gameState,
+        players,
+        currentPlayer,
+        updatedBalances,
+        balancesChanged,
+        bankruptcyCandidate,
+        activeLandingTile,
+        activeResolvedTile,
+        finalPosition,
+        shouldSendToJail,
+        jailTile,
+        cardTriggeredGoToJail,
+        cardUtilityRollOverride,
+        rollTotal,
+        isDouble: (gameState.doubles_count ?? 0) > 0,
+        allowExtraRoll: true,
+        nextDoublesCount: gameState.doubles_count ?? 0,
+        events,
+        currentVersion,
+        userId: user.id,
+        ownershipByTile: await loadOwnershipByTile(gameId),
+        boardTiles,
+        rules,
+        startingCash: game.starting_cash ?? 0,
+        nextChanceIndex: gameState.chance_index ?? 0,
+        nextCommunityIndex: gameState.community_index ?? 0,
+        nextChanceOrder: gameState.chance_order ?? null,
+        nextCommunityOrder: gameState.community_order ?? null,
+        nextChanceDrawPtr: gameState.chance_draw_ptr ?? 0,
+        nextCommunityDrawPtr: gameState.community_draw_ptr ?? 0,
+        nextChanceSeed: gameState.chance_seed ?? null,
+        nextCommunitySeed: gameState.community_seed ?? null,
+        nextChanceReshuffleCount: gameState.chance_reshuffle_count ?? 0,
+        nextCommunityReshuffleCount: gameState.community_reshuffle_count ?? 0,
+        chanceStateChanged: false,
+        communityStateChanged: false,
+        nextGetOutOfJailFreeCount,
+        getOutOfJailFreeCountChanged,
+        extraGameStatePatch: {
+          pending_card_active: false,
+          pending_card_deck: null,
+          pending_card_id: null,
+          pending_card_title: null,
+          pending_card_kind: null,
+          pending_card_payload: null,
+          pending_card_drawn_by_player_id: null,
+          pending_card_drawn_at: null,
+          pending_card_source_tile_index: null,
+        },
+      });
+    }
+
     if (body.action === "ROLL_DICE") {
       if (gameState.pending_action) {
         return NextResponse.json(
@@ -2427,585 +3344,150 @@ export async function POST(request: Request) {
             draw_index: drawResult.drawIndex,
           },
         });
-
-        if (card.kind === "PAY" || card.kind === "RECEIVE") {
-          const amount =
-            getNumberPayload(card.payload as Record<string, unknown>, "amount") ?? 0;
-          const currentBalance =
-            updatedBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
-          const nextBalance =
-            card.kind === "PAY" ? currentBalance - amount : currentBalance + amount;
-          updatedBalances = {
-            ...updatedBalances,
-            [currentPlayer.id]: nextBalance,
-          };
-          if (amount !== 0) {
-            balancesChanged = true;
-          }
-          if (
-            card.kind === "PAY" &&
-            nextBalance < 0 &&
-            !bankruptcyCandidate
-          ) {
-            bankruptcyCandidate = {
-              reason: "CARD_PAY",
-              cashBefore: currentBalance,
-              cashAfter: nextBalance,
-            };
-          }
-          events.push({
-            event_type: card.kind === "PAY" ? "CARD_PAY" : "CARD_RECEIVE",
-            payload: {
-              player_id: currentPlayer.id,
-              player_name: currentPlayer.display_name,
-              card_id: card.id,
-              card_title: card.title,
-              card_kind: card.kind,
-              amount,
-            },
-          });
-        }
-
-        if (card.kind === "GET_OUT_OF_JAIL_FREE") {
-          nextGetOutOfJailFreeCount += 1;
-          getOutOfJailFreeCountChanged = true;
-          events.push({
-            event_type: "CARD_GET_OUT_OF_JAIL_FREE_RECEIVED",
-            payload: {
-              player_id: currentPlayer.id,
-              player_name: currentPlayer.display_name,
-              card_id: card.id,
-              card_title: card.title,
-              card_kind: card.kind,
-              total_cards: nextGetOutOfJailFreeCount,
-            },
-          });
-        }
-
-        if (card.kind === "MOVE_TO" || card.kind === "MOVE_REL") {
-          const payload = card.payload as Record<string, unknown>;
-          const shouldOverrideUtilityRoll =
-            card.kind === "MOVE_TO" &&
-            getBooleanPayload(payload, "utility_roll_override");
-          const targetIndex =
-            card.kind === "MOVE_TO"
-              ? resolveMoveToTargetIndex(payload, boardTiles, activeResolvedTile.index)
-              : null;
-          const spaces =
-            card.kind === "MOVE_REL"
-              ? getNumberPayload(payload, "relative_spaces") ??
-                getNumberPayload(payload, "spaces")
-              : null;
-          const cardFromIndex = activeResolvedTile.index;
-          const rawIndex =
-            card.kind === "MOVE_TO" && targetIndex !== null
-              ? targetIndex
-              : card.kind === "MOVE_REL" && spaces !== null
-                ? cardFromIndex + spaces
-                : null;
-          if (rawIndex !== null) {
-            const normalizedIndex =
-              ((rawIndex % boardSize) + boardSize) % boardSize;
-            const cardLandingTile = boardTiles[normalizedIndex] ?? {
-              index: normalizedIndex,
-              tile_id: `tile-${normalizedIndex}`,
-              type: "PROPERTY",
-              name: `Tile ${normalizedIndex}`,
-            };
-            const cardPassedStart =
-              card.kind === "MOVE_TO"
-                ? normalizedIndex < cardFromIndex
-                : spaces !== null
-                  ? spaces > 0 && cardFromIndex + spaces >= boardSize
-                  : false;
-            const cardJailTile =
-              cardLandingTile.type === "GO_TO_JAIL"
-                ? boardTiles.find((tile) => tile.type === "JAIL") ?? {
-                    index: 10,
-                    tile_id: "jail",
-                    type: "JAIL",
-                    name: "Jail",
-                  }
-                : null;
-            const cardResolvedTile = cardJailTile ?? cardLandingTile;
-            jailTile = cardJailTile ?? jailTile;
-            shouldSendToJail =
-              cardLandingTile.type === "GO_TO_JAIL" && Boolean(cardJailTile);
-            activeLandingTile = cardLandingTile;
-            activeResolvedTile = cardResolvedTile;
-            finalPosition = cardResolvedTile.index;
-            if (
-              shouldOverrideUtilityRoll &&
-              cardLandingTile.type === "UTILITY"
-            ) {
-              const overrideRoll = rollDice();
-              cardUtilityRollOverride = overrideRoll;
-              events.push({
-                event_type: "CARD_UTILITY_ROLL",
-                payload: {
-                  player_id: currentPlayer.id,
-                  player_name: currentPlayer.display_name,
-                  roll: overrideRoll.total,
-                  dice: overrideRoll.dice,
-                  tile_id: cardLandingTile.tile_id,
-                  tile_index: cardLandingTile.index,
-                  card_id: card.id,
-                  card_title: card.title,
-                },
-              });
-            }
-            events.push({
-              event_type: card.kind === "MOVE_TO" ? "CARD_MOVE_TO" : "CARD_MOVE_REL",
-              payload: {
-                player_id: currentPlayer.id,
-                player_name: currentPlayer.display_name,
-                card_id: card.id,
-                card_title: card.title,
-                card_kind: card.kind,
-                from_tile_index: cardFromIndex,
-                to_tile_index: cardLandingTile.index,
-                passed_start: cardPassedStart,
-              },
-            });
-
-            events.push({
-              event_type: "MOVE_PLAYER",
-              payload: {
-                player_id: currentPlayer.id,
-                from: cardFromIndex,
-                to: cardLandingTile.index,
-                passedStart: cardPassedStart,
-                tile_id: cardLandingTile.tile_id,
-                tile_name: cardLandingTile.name,
-                reason: "CARD",
-                card_id: card.id,
-              },
-            });
-
-            if (cardPassedStart || cardLandingTile.type === "START") {
-              const reason = cardPassedStart ? "PASS_START" : "LAND_GO";
-              const goResult = applyGoSalary({
-                player: currentPlayer,
-                balances: updatedBalances,
-                startingCash: game.starting_cash ?? 0,
-                events,
-                alreadyCollected: goSalaryAwarded,
-                reason,
-              });
-              updatedBalances = goResult.balances;
-              balancesChanged = balancesChanged || goResult.balancesChanged;
-              goSalaryAwarded = goResult.alreadyCollected;
-            }
-
-            events.push({
-              event_type: "LAND_ON_TILE",
-              payload: {
-                player_id: currentPlayer.id,
-                tile_id: cardLandingTile.tile_id,
-                tile_type: cardLandingTile.type,
-                tile_index: cardLandingTile.index,
-              },
-            });
-
-            const cardResolutionEvent = resolveTile(
-              cardLandingTile,
-              currentPlayer,
-            );
-            if (cardResolutionEvent) {
-              events.push({
-                event_type: cardResolutionEvent.event_type,
-                payload: cardResolutionEvent.payload,
-              });
-            }
-
-            if (cardLandingTile.type === "GO_TO_JAIL" && cardJailTile) {
-              cardTriggeredGoToJail = true;
-              events.push({
-                event_type: "GO_TO_JAIL",
-                payload: {
-                  from_tile_index: cardLandingTile.index,
-                  to_jail_tile_index: cardJailTile.index,
-                  player_id: currentPlayer.id,
-                  display_name: currentPlayer.display_name,
-                },
-              });
-            }
-          }
-        }
-
-        if (card.kind === "GO_TO_JAIL") {
-          const cardFromIndex = activeResolvedTile.index;
-          const cardJailTile =
-            boardTiles.find((tile) => tile.type === "JAIL") ?? {
-              index: 10,
-              tile_id: "jail",
-              type: "JAIL",
-              name: "Jail",
-            };
-          activeLandingTile = cardJailTile;
-          activeResolvedTile = cardJailTile;
-          finalPosition = cardJailTile.index;
-          shouldSendToJail = true;
-          jailTile = cardJailTile;
-          cardTriggeredGoToJail = true;
-
-          events.push({
-            event_type: "CARD_GO_TO_JAIL",
-            payload: {
-              player_id: currentPlayer.id,
-              player_name: currentPlayer.display_name,
-              card_id: card.id,
-              card_title: card.title,
-              card_kind: card.kind,
-              from_tile_index: cardFromIndex,
-              to_jail_tile_index: cardJailTile.index,
-            },
-          });
-
-          events.push(
-            {
-              event_type: "MOVE_PLAYER",
-              payload: {
-                player_id: currentPlayer.id,
-                from: cardFromIndex,
-                to: cardJailTile.index,
-                tile_id: cardJailTile.tile_id,
-                tile_name: cardJailTile.name,
-                reason: "CARD",
-                card_id: card.id,
-              },
-            },
-            {
-              event_type: "LAND_ON_TILE",
-              payload: {
-                player_id: currentPlayer.id,
-                tile_id: cardJailTile.tile_id,
-                tile_type: cardJailTile.type,
-                tile_index: cardJailTile.index,
-              },
-            },
-          );
-
-          const cardResolutionEvent = resolveTile(cardJailTile, currentPlayer);
-          if (cardResolutionEvent) {
-            events.push({
-              event_type: cardResolutionEvent.event_type,
-              payload: cardResolutionEvent.payload,
-            });
-          }
-
-          events.push({
-            event_type: "GO_TO_JAIL",
-            payload: {
-              from_tile_index: cardFromIndex,
-              to_jail_tile_index: cardJailTile.index,
-              player_id: currentPlayer.id,
-              display_name: currentPlayer.display_name,
-            },
-          });
-        }
-      }
-
-      const ownership = ownershipByTile[activeLandingTile.index];
-      const isOwnableTile = OWNABLE_TILE_TYPES.has(activeLandingTile.type);
-      const rentOwnerId =
-        isOwnableTile && ownership ? ownership.owner_player_id : null;
-      const isCollateralized = Boolean(ownership?.collateral_loan_id);
-      const rentCalculation = isCollateralized
-        ? { amount: 0, meta: null }
-        : (() => {
-            const rentDiceTotal =
-              activeLandingTile.type === "UTILITY" && cardUtilityRollOverride
-                ? cardUtilityRollOverride.total
-                : rollTotal;
-            return calculateRent({
-              tile: activeLandingTile,
-              ownerId: rentOwnerId,
-              currentPlayerId: currentPlayer.id,
-              boardTiles,
-              ownershipByTile,
-              diceTotal: rentDiceTotal,
-            });
-          })();
-      if (activeLandingTile.type === "UTILITY" && cardUtilityRollOverride) {
-        cardUtilityRollOverride = null;
-      }
-      const rentAmount = rentCalculation.amount;
-      let shouldPayRent = rentAmount > 0 && Boolean(rentOwnerId);
-      const isUnownedOwnableTile = isOwnableTile && !ownership;
-      const isTaxTile = activeLandingTile.type === "TAX";
-      const taxAmount = isTaxTile ? activeLandingTile.taxAmount ?? 0 : 0;
-      const shouldPayTax = isTaxTile && taxAmount > 0;
-      const isFreeParking = activeLandingTile.type === "FREE_PARKING";
-
-      if (activeLandingTile.type === "GO_TO_JAIL" && jailTile && !cardTriggeredGoToJail) {
         events.push({
-          event_type: "GO_TO_JAIL",
-          payload: {
-            from_tile_index: activeLandingTile.index,
-            to_jail_tile_index: jailTile.index,
-            player_id: currentPlayer.id,
-            display_name: currentPlayer.display_name,
-          },
-        });
-      }
-
-      if (
-        isCollateralized &&
-        rentOwnerId &&
-        rentOwnerId !== currentPlayer.id
-      ) {
-        shouldPayRent = false;
-        events.push({
-          event_type: "RENT_SKIPPED_COLLATERAL",
-          payload: {
-            tile_index: activeLandingTile.index,
-            tile_id: activeLandingTile.tile_id,
-            owner_player_id: rentOwnerId,
-            reason: "collateralized",
-          },
-        });
-      }
-
-      if (shouldPayRent && rentOwnerId && rentOwnerId !== currentPlayer.id) {
-        const payerBalance =
-          updatedBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
-        const ownerBalance =
-          updatedBalances[rentOwnerId] ?? game.starting_cash ?? 0;
-        const nextBalance = payerBalance - rentAmount;
-        updatedBalances = {
-          ...updatedBalances,
-          [currentPlayer.id]: nextBalance,
-          [rentOwnerId]: ownerBalance + rentAmount,
-        };
-        balancesChanged = true;
-        if (nextBalance < 0 && !bankruptcyCandidate) {
-          bankruptcyCandidate = {
-            reason: "PAY_RENT",
-            cashBefore: payerBalance,
-            cashAfter: nextBalance,
-          };
-        }
-        const rentPayload: Record<string, unknown> = {
-          tile_index: activeLandingTile.index,
-          tile_id: activeLandingTile.tile_id,
-          tile_type: activeLandingTile.type,
-          from_player_id: currentPlayer.id,
-          to_player_id: rentOwnerId,
-          amount: rentAmount,
-        };
-        if (rentCalculation.meta) {
-          Object.assign(rentPayload, rentCalculation.meta);
-        }
-        events.push({
-          event_type: "PAY_RENT",
-          payload: rentPayload,
-        });
-      }
-
-      if (shouldPayTax) {
-        const payerBalance =
-          updatedBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
-        const nextBalance = payerBalance - taxAmount;
-        updatedBalances = {
-          ...updatedBalances,
-          [currentPlayer.id]: nextBalance,
-        };
-        balancesChanged = true;
-        if (nextBalance < 0 && !bankruptcyCandidate) {
-          bankruptcyCandidate = {
-            reason: "PAY_TAX",
-            cashBefore: payerBalance,
-            cashAfter: nextBalance,
-          };
-        }
-        events.push(
-          {
-            event_type: "PAY_TAX",
-            payload: {
-              tile_index: activeLandingTile.index,
-              tile_name: activeLandingTile.name,
-              amount: taxAmount,
-              payer_player_id: currentPlayer.id,
-              payer_display_name: currentPlayer.display_name,
-            },
-          },
-          {
-            event_type: "CASH_DEBIT",
-            payload: {
-              player_id: currentPlayer.id,
-              amount: taxAmount,
-              reason: "PAY_TAX",
-              tile_index: activeLandingTile.index,
-            },
-          },
-        );
-        // TODO: If rules.freeParkingJackpotEnabled, route taxAmount into free_parking_pot.
-      }
-
-      if (isFreeParking && rules.freeParkingJackpotEnabled) {
-        // TODO: Pay out free_parking_pot and reset to 0 when jackpot is enabled.
-      }
-
-      const isBankruptcyPending = Boolean(bankruptcyCandidate);
-      const pendingPurchaseAction =
-        !isBankruptcyPending &&
-        isUnownedOwnableTile &&
-        !(shouldSendToJail && jailTile)
-          ? {
-              type: "BUY_PROPERTY",
-              tile_index: activeLandingTile.index,
-              price: activeLandingTile.price ?? 0,
-            }
-          : null;
-
-      if (pendingPurchaseAction) {
-        events.push({
-          event_type: "OFFER_PURCHASE",
-          payload: {
-            player_id: currentPlayer.id,
-            tile_id: activeLandingTile.tile_id,
-            tile_name: activeLandingTile.name,
-            tile_index: activeLandingTile.index,
-            price: pendingPurchaseAction.price,
-          },
-        });
-      }
-
-      events.push({
-        event_type: "MOVE_RESOLVED",
-        payload: {
-          player_id: currentPlayer.id,
-          tile_id: activeResolvedTile.tile_id,
-          tile_type: activeResolvedTile.type,
-          tile_index: activeResolvedTile.index,
-        },
-      });
-
-      if (
-        isDouble &&
-        !pendingPurchaseAction &&
-        !isBankruptcyPending &&
-        !(shouldSendToJail && jailTile)
-      ) {
-        events.push({
-          event_type: "ALLOW_EXTRA_ROLL",
+          event_type: "CARD_REVEALED",
           payload: {
             player_id: currentPlayer.id,
             player_name: currentPlayer.display_name,
-            doubles_count: nextDoublesCount,
+            deck: eventDeck.deck,
+            card_id: card.id,
+            card_title: card.title,
+            card_kind: card.kind,
           },
         });
-      }
 
-      if (bankruptcyCandidate) {
-        const bankruptcyResult = await resolveBankruptcyIfNeeded({
-          gameId,
-          gameState,
-          players,
-          player: currentPlayer,
-          updatedBalances,
-          cashBefore: bankruptcyCandidate.cashBefore,
-          cashAfter: bankruptcyCandidate.cashAfter,
-          reason: bankruptcyCandidate.reason,
-          events,
-          currentVersion,
-          userId: user.id,
-          playerPosition: finalPosition,
-        });
-
-        if (bankruptcyResult.handled) {
-          if (bankruptcyResult.error) {
-            return NextResponse.json(
-              { error: bankruptcyResult.error },
-              { status: 409 },
-            );
-          }
-          return NextResponse.json({ gameState: bankruptcyResult.updatedState });
-        }
-      }
-
-      const finalVersion = currentVersion + events.length;
-      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
-        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
-        {
-          method: "PATCH",
-          headers: {
-            Prefer: "return=representation",
-          },
-          body: JSON.stringify({
-            version: finalVersion,
-            last_roll: rollTotal,
-            doubles_count: nextDoublesCount,
-            ...(balancesChanged ? { balances: updatedBalances } : {}),
-            ...(nextChanceIndex !== (gameState?.chance_index ?? 0)
-              ? { chance_index: nextChanceIndex }
-              : {}),
-            ...(nextCommunityIndex !== (gameState?.community_index ?? 0)
-              ? { community_index: nextCommunityIndex }
-              : {}),
-            ...(chanceStateChanged
-              ? {
-                  chance_order: nextChanceOrder,
-                  chance_draw_ptr: nextChanceDrawPtr,
-                  chance_seed: nextChanceSeed,
-                  chance_reshuffle_count: nextChanceReshuffleCount,
-                }
-              : {}),
-            ...(communityStateChanged
-              ? {
-                  community_order: nextCommunityOrder,
-                  community_draw_ptr: nextCommunityDrawPtr,
-                  community_seed: nextCommunitySeed,
-                  community_reshuffle_count: nextCommunityReshuffleCount,
-                }
-              : {}),
-            ...(pendingPurchaseAction
-              ? {
-                  turn_phase: "AWAITING_DECISION",
-                  pending_action: pendingPurchaseAction,
-                }
-              : {}),
-            updated_at: new Date().toISOString(),
+        const finalVersion = currentVersion + events.length;
+        const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+          `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+          {
+            method: "PATCH",
+            headers: {
+              Prefer: "return=representation",
+            },
+            body: JSON.stringify({
+              version: finalVersion,
+              last_roll: rollTotal,
+              doubles_count: nextDoublesCount,
+              ...(balancesChanged ? { balances: updatedBalances } : {}),
+              ...(nextChanceIndex !== (gameState?.chance_index ?? 0)
+                ? { chance_index: nextChanceIndex }
+                : {}),
+              ...(nextCommunityIndex !== (gameState?.community_index ?? 0)
+                ? { community_index: nextCommunityIndex }
+                : {}),
+              ...(chanceStateChanged
+                ? {
+                    chance_order: nextChanceOrder,
+                    chance_draw_ptr: nextChanceDrawPtr,
+                    chance_seed: nextChanceSeed,
+                    chance_reshuffle_count: nextChanceReshuffleCount,
+                  }
+                : {}),
+              ...(communityStateChanged
+                ? {
+                    community_order: nextCommunityOrder,
+                    community_draw_ptr: nextCommunityDrawPtr,
+                    community_seed: nextCommunitySeed,
+                    community_reshuffle_count: nextCommunityReshuffleCount,
+                  }
+                : {}),
+              pending_card_active: true,
+              pending_card_deck: eventDeck.deck,
+              pending_card_id: card.id,
+              pending_card_title: card.title,
+              pending_card_kind: card.kind,
+              pending_card_payload:
+                typeof card.payload === "object" && card.payload
+                  ? card.payload
+                  : null,
+              pending_card_drawn_by_player_id: currentPlayer.id,
+              pending_card_drawn_at: new Date().toISOString(),
+              pending_card_source_tile_index: activeResolvedTile.index,
+              turn_phase: "AWAITING_CARD_CONFIRM",
+              pending_action: null,
+              updated_at: new Date().toISOString(),
             }),
-        },
-      )) ?? [];
-
-      if (!updatedState) {
-        return NextResponse.json(
-          { error: "Version mismatch." },
-          { status: 409 },
-        );
-      }
-
-      const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
-        `players?id=eq.${currentPlayer.id}`,
-        {
-          method: "PATCH",
-          headers: {
-            Prefer: "return=representation",
           },
-          body: JSON.stringify({
-            position: finalPosition,
-            is_in_jail: Boolean(shouldSendToJail && jailTile),
-            jail_turns_remaining: shouldSendToJail && jailTile ? 3 : 0,
-            ...(getOutOfJailFreeCountChanged
-              ? { get_out_of_jail_free_count: nextGetOutOfJailFreeCount }
-              : {}),
-          }),
-        },
-      )) ?? [];
+        )) ?? [];
 
-      if (!updatedPlayer) {
-        return NextResponse.json(
-          { error: "Unable to update player position." },
-          { status: 500 },
-        );
+        if (!updatedState) {
+          return NextResponse.json(
+            { error: "Version mismatch." },
+            { status: 409 },
+          );
+        }
+
+        const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
+          `players?id=eq.${currentPlayer.id}`,
+          {
+            method: "PATCH",
+            headers: {
+              Prefer: "return=representation",
+            },
+            body: JSON.stringify({
+              position: finalPosition,
+              is_in_jail: Boolean(shouldSendToJail && jailTile),
+              jail_turns_remaining: shouldSendToJail && jailTile ? 3 : 0,
+              ...(getOutOfJailFreeCountChanged
+                ? { get_out_of_jail_free_count: nextGetOutOfJailFreeCount }
+                : {}),
+            }),
+          },
+        )) ?? [];
+
+        if (!updatedPlayer) {
+          return NextResponse.json(
+            { error: "Unable to update player position." },
+            { status: 500 },
+          );
+        }
+
+        await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+
+        return NextResponse.json({ gameState: updatedState });
       }
 
-      await emitGameEvents(gameId, currentVersion + 1, events, user.id);
-
-      return NextResponse.json({ gameState: updatedState });
+      return await finalizeMoveResolution({
+        gameId,
+        gameState,
+        players,
+        currentPlayer,
+        updatedBalances,
+        balancesChanged,
+        bankruptcyCandidate,
+        activeLandingTile,
+        activeResolvedTile,
+        finalPosition,
+        shouldSendToJail,
+        jailTile,
+        cardTriggeredGoToJail,
+        cardUtilityRollOverride,
+        rollTotal,
+        isDouble,
+        allowExtraRoll: true,
+        nextDoublesCount,
+        events,
+        currentVersion,
+        userId: user.id,
+        ownershipByTile,
+        boardTiles,
+        rules,
+        startingCash: game.starting_cash ?? 0,
+        nextChanceIndex,
+        nextCommunityIndex,
+        nextChanceOrder,
+        nextCommunityOrder,
+        nextChanceDrawPtr,
+        nextCommunityDrawPtr,
+        nextChanceSeed,
+        nextCommunitySeed,
+        nextChanceReshuffleCount,
+        nextCommunityReshuffleCount,
+        chanceStateChanged,
+        communityStateChanged,
+        nextGetOutOfJailFreeCount,
+        getOutOfJailFreeCountChanged,
+      });
     }
 
     if (body.action === "DECLINE_PROPERTY") {
@@ -4015,584 +4497,150 @@ export async function POST(request: Request) {
             draw_index: drawResult.drawIndex,
           },
         });
-
-        if (card.kind === "PAY" || card.kind === "RECEIVE") {
-          const amount =
-            getNumberPayload(card.payload as Record<string, unknown>, "amount") ?? 0;
-          const currentBalance =
-            updatedBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
-          const nextBalance =
-            card.kind === "PAY" ? currentBalance - amount : currentBalance + amount;
-          updatedBalances = {
-            ...updatedBalances,
-            [currentPlayer.id]: nextBalance,
-          };
-          if (amount !== 0) {
-            balancesChanged = true;
-          }
-          if (
-            card.kind === "PAY" &&
-            nextBalance < 0 &&
-            !bankruptcyCandidate
-          ) {
-            bankruptcyCandidate = {
-              reason: "CARD_PAY",
-              cashBefore: currentBalance,
-              cashAfter: nextBalance,
-            };
-          }
-          events.push({
-            event_type: card.kind === "PAY" ? "CARD_PAY" : "CARD_RECEIVE",
-            payload: {
-              player_id: currentPlayer.id,
-              player_name: currentPlayer.display_name,
-              card_id: card.id,
-              card_title: card.title,
-              card_kind: card.kind,
-              amount,
-            },
-          });
-        }
-
-        if (card.kind === "GET_OUT_OF_JAIL_FREE") {
-          nextGetOutOfJailFreeCount += 1;
-          getOutOfJailFreeCountChanged = true;
-          events.push({
-            event_type: "CARD_GET_OUT_OF_JAIL_FREE_RECEIVED",
-            payload: {
-              player_id: currentPlayer.id,
-              player_name: currentPlayer.display_name,
-              card_id: card.id,
-              card_title: card.title,
-              card_kind: card.kind,
-              total_cards: nextGetOutOfJailFreeCount,
-            },
-          });
-        }
-
-        if (card.kind === "MOVE_TO" || card.kind === "MOVE_REL") {
-          const payload = card.payload as Record<string, unknown>;
-          const shouldOverrideUtilityRoll =
-            card.kind === "MOVE_TO" &&
-            getBooleanPayload(payload, "utility_roll_override");
-          const targetIndex =
-            card.kind === "MOVE_TO"
-              ? resolveMoveToTargetIndex(payload, boardTiles, activeResolvedTile.index)
-              : null;
-          const spaces =
-            card.kind === "MOVE_REL"
-              ? getNumberPayload(payload, "relative_spaces") ??
-                getNumberPayload(payload, "spaces")
-              : null;
-          const cardFromIndex = activeResolvedTile.index;
-          const rawIndex =
-            card.kind === "MOVE_TO" && targetIndex !== null
-              ? targetIndex
-              : card.kind === "MOVE_REL" && spaces !== null
-                ? cardFromIndex + spaces
-                : null;
-          if (rawIndex !== null) {
-            const normalizedIndex =
-              ((rawIndex % boardSize) + boardSize) % boardSize;
-            const cardLandingTile = boardTiles[normalizedIndex] ?? {
-              index: normalizedIndex,
-              tile_id: `tile-${normalizedIndex}`,
-              type: "PROPERTY",
-              name: `Tile ${normalizedIndex}`,
-            };
-            const cardPassedStart =
-              card.kind === "MOVE_TO"
-                ? normalizedIndex < cardFromIndex
-                : spaces !== null
-                  ? spaces > 0 && cardFromIndex + spaces >= boardSize
-                  : false;
-            const cardJailTile =
-              cardLandingTile.type === "GO_TO_JAIL"
-                ? boardTiles.find((tile) => tile.type === "JAIL") ?? {
-                    index: 10,
-                    tile_id: "jail",
-                    type: "JAIL",
-                    name: "Jail",
-                  }
-                : null;
-            const cardResolvedTile = cardJailTile ?? cardLandingTile;
-            jailTile = cardJailTile ?? jailTile;
-            shouldSendToJail =
-              cardLandingTile.type === "GO_TO_JAIL" && Boolean(cardJailTile);
-            activeLandingTile = cardLandingTile;
-            activeResolvedTile = cardResolvedTile;
-            finalPosition = cardResolvedTile.index;
-            if (
-              shouldOverrideUtilityRoll &&
-              cardLandingTile.type === "UTILITY"
-            ) {
-              const overrideRoll = rollDice();
-              cardUtilityRollOverride = overrideRoll;
-              events.push({
-                event_type: "CARD_UTILITY_ROLL",
-                payload: {
-                  player_id: currentPlayer.id,
-                  player_name: currentPlayer.display_name,
-                  roll: overrideRoll.total,
-                  dice: overrideRoll.dice,
-                  tile_id: cardLandingTile.tile_id,
-                  tile_index: cardLandingTile.index,
-                  card_id: card.id,
-                  card_title: card.title,
-                },
-              });
-            }
-            events.push({
-              event_type: card.kind === "MOVE_TO" ? "CARD_MOVE_TO" : "CARD_MOVE_REL",
-              payload: {
-                player_id: currentPlayer.id,
-                player_name: currentPlayer.display_name,
-                card_id: card.id,
-                card_title: card.title,
-                card_kind: card.kind,
-                from_tile_index: cardFromIndex,
-                to_tile_index: cardLandingTile.index,
-                passed_start: cardPassedStart,
-              },
-            });
-
-            events.push({
-              event_type: "MOVE_PLAYER",
-              payload: {
-                player_id: currentPlayer.id,
-                from: cardFromIndex,
-                to: cardLandingTile.index,
-                passedStart: cardPassedStart,
-                tile_id: cardLandingTile.tile_id,
-                tile_name: cardLandingTile.name,
-                reason: "CARD",
-                card_id: card.id,
-              },
-            });
-
-            if (cardPassedStart || cardLandingTile.type === "START") {
-              const reason = cardPassedStart ? "PASS_START" : "LAND_GO";
-              const goResult = applyGoSalary({
-                player: currentPlayer,
-                balances: updatedBalances,
-                startingCash: game.starting_cash ?? 0,
-                events,
-                alreadyCollected: goSalaryAwarded,
-                reason,
-              });
-              updatedBalances = goResult.balances;
-              balancesChanged = balancesChanged || goResult.balancesChanged;
-              goSalaryAwarded = goResult.alreadyCollected;
-            }
-
-            events.push({
-              event_type: "LAND_ON_TILE",
-              payload: {
-                player_id: currentPlayer.id,
-                tile_id: cardLandingTile.tile_id,
-                tile_type: cardLandingTile.type,
-                tile_index: cardLandingTile.index,
-              },
-            });
-
-            const cardResolutionEvent = resolveTile(
-              cardLandingTile,
-              currentPlayer,
-            );
-            if (cardResolutionEvent) {
-              events.push({
-                event_type: cardResolutionEvent.event_type,
-                payload: cardResolutionEvent.payload,
-              });
-            }
-
-            if (cardLandingTile.type === "GO_TO_JAIL" && cardJailTile) {
-              cardTriggeredGoToJail = true;
-              events.push({
-                event_type: "GO_TO_JAIL",
-                payload: {
-                  from_tile_index: cardLandingTile.index,
-                  to_jail_tile_index: cardJailTile.index,
-                  player_id: currentPlayer.id,
-                  display_name: currentPlayer.display_name,
-                },
-              });
-            }
-          }
-        }
-
-        if (card.kind === "GO_TO_JAIL") {
-          const cardFromIndex = activeResolvedTile.index;
-          const cardJailTile =
-            boardTiles.find((tile) => tile.type === "JAIL") ?? {
-              index: 10,
-              tile_id: "jail",
-              type: "JAIL",
-              name: "Jail",
-            };
-          activeLandingTile = cardJailTile;
-          activeResolvedTile = cardJailTile;
-          finalPosition = cardJailTile.index;
-          shouldSendToJail = true;
-          jailTile = cardJailTile;
-          cardTriggeredGoToJail = true;
-
-          events.push({
-            event_type: "CARD_GO_TO_JAIL",
-            payload: {
-              player_id: currentPlayer.id,
-              player_name: currentPlayer.display_name,
-              card_id: card.id,
-              card_title: card.title,
-              card_kind: card.kind,
-              from_tile_index: cardFromIndex,
-              to_jail_tile_index: cardJailTile.index,
-            },
-          });
-
-          events.push(
-            {
-              event_type: "MOVE_PLAYER",
-              payload: {
-                player_id: currentPlayer.id,
-                from: cardFromIndex,
-                to: cardJailTile.index,
-                tile_id: cardJailTile.tile_id,
-                tile_name: cardJailTile.name,
-                reason: "CARD",
-                card_id: card.id,
-              },
-            },
-            {
-              event_type: "LAND_ON_TILE",
-              payload: {
-                player_id: currentPlayer.id,
-                tile_id: cardJailTile.tile_id,
-                tile_type: cardJailTile.type,
-                tile_index: cardJailTile.index,
-              },
-            },
-          );
-
-          const cardResolutionEvent = resolveTile(cardJailTile, currentPlayer);
-          if (cardResolutionEvent) {
-            events.push({
-              event_type: cardResolutionEvent.event_type,
-              payload: cardResolutionEvent.payload,
-            });
-          }
-
-          events.push({
-            event_type: "GO_TO_JAIL",
-            payload: {
-              from_tile_index: cardFromIndex,
-              to_jail_tile_index: cardJailTile.index,
-              player_id: currentPlayer.id,
-              display_name: currentPlayer.display_name,
-            },
-          });
-        }
-      }
-
-      const ownership = ownershipByTile[activeLandingTile.index];
-      const isOwnableTile = OWNABLE_TILE_TYPES.has(activeLandingTile.type);
-      const rentOwnerId =
-        isOwnableTile && ownership ? ownership.owner_player_id : null;
-      const isCollateralized = Boolean(ownership?.collateral_loan_id);
-      const rentCalculation = isCollateralized
-        ? { amount: 0, meta: null }
-        : (() => {
-            const rentDiceTotal =
-              activeLandingTile.type === "UTILITY" && cardUtilityRollOverride
-                ? cardUtilityRollOverride.total
-                : rollTotal;
-            return calculateRent({
-              tile: activeLandingTile,
-              ownerId: rentOwnerId,
-              currentPlayerId: currentPlayer.id,
-              boardTiles,
-              ownershipByTile,
-              diceTotal: rentDiceTotal,
-            });
-          })();
-      if (activeLandingTile.type === "UTILITY" && cardUtilityRollOverride) {
-        cardUtilityRollOverride = null;
-      }
-      const rentAmount = rentCalculation.amount;
-      let shouldPayRent = rentAmount > 0 && Boolean(rentOwnerId);
-      const isUnownedOwnableTile = isOwnableTile && !ownership;
-      const isTaxTile = activeLandingTile.type === "TAX";
-      const taxAmount = isTaxTile ? activeLandingTile.taxAmount ?? 0 : 0;
-      const shouldPayTax = isTaxTile && taxAmount > 0;
-      const isFreeParking = activeLandingTile.type === "FREE_PARKING";
-
-      if (activeLandingTile.type === "GO_TO_JAIL" && jailTile && !cardTriggeredGoToJail) {
         events.push({
-          event_type: "GO_TO_JAIL",
-          payload: {
-            from_tile_index: activeLandingTile.index,
-            to_jail_tile_index: jailTile.index,
-            player_id: currentPlayer.id,
-            display_name: currentPlayer.display_name,
-          },
-        });
-      }
-
-      if (
-        isCollateralized &&
-        rentOwnerId &&
-        rentOwnerId !== currentPlayer.id
-      ) {
-        shouldPayRent = false;
-        events.push({
-          event_type: "RENT_SKIPPED_COLLATERAL",
-          payload: {
-            tile_index: activeLandingTile.index,
-            tile_id: activeLandingTile.tile_id,
-            owner_player_id: rentOwnerId,
-            reason: "collateralized",
-          },
-        });
-      }
-
-      if (shouldPayRent && rentOwnerId && rentOwnerId !== currentPlayer.id) {
-        const payerBalance =
-          updatedBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
-        const ownerBalance =
-          updatedBalances[rentOwnerId] ?? game.starting_cash ?? 0;
-        const nextBalance = payerBalance - rentAmount;
-        updatedBalances = {
-          ...updatedBalances,
-          [currentPlayer.id]: nextBalance,
-          [rentOwnerId]: ownerBalance + rentAmount,
-        };
-        balancesChanged = true;
-        if (nextBalance < 0 && !bankruptcyCandidate) {
-          bankruptcyCandidate = {
-            reason: "PAY_RENT",
-            cashBefore: payerBalance,
-            cashAfter: nextBalance,
-          };
-        }
-        const rentPayload: Record<string, unknown> = {
-          tile_index: activeLandingTile.index,
-          tile_id: activeLandingTile.tile_id,
-          tile_type: activeLandingTile.type,
-          from_player_id: currentPlayer.id,
-          to_player_id: rentOwnerId,
-          amount: rentAmount,
-        };
-        if (rentCalculation.meta) {
-          Object.assign(rentPayload, rentCalculation.meta);
-        }
-        events.push({
-          event_type: "PAY_RENT",
-          payload: rentPayload,
-        });
-      }
-
-      if (shouldPayTax) {
-        const payerBalance =
-          updatedBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
-        const nextBalance = payerBalance - taxAmount;
-        updatedBalances = {
-          ...updatedBalances,
-          [currentPlayer.id]: nextBalance,
-        };
-        balancesChanged = true;
-        if (nextBalance < 0 && !bankruptcyCandidate) {
-          bankruptcyCandidate = {
-            reason: "PAY_TAX",
-            cashBefore: payerBalance,
-            cashAfter: nextBalance,
-          };
-        }
-        events.push(
-          {
-            event_type: "PAY_TAX",
-            payload: {
-              tile_index: activeLandingTile.index,
-              tile_name: activeLandingTile.name,
-              amount: taxAmount,
-              payer_player_id: currentPlayer.id,
-              payer_display_name: currentPlayer.display_name,
-            },
-          },
-          {
-            event_type: "CASH_DEBIT",
-            payload: {
-              player_id: currentPlayer.id,
-              amount: taxAmount,
-              reason: "PAY_TAX",
-              tile_index: activeLandingTile.index,
-            },
-          },
-        );
-        // TODO: If rules.freeParkingJackpotEnabled, route taxAmount into free_parking_pot.
-      }
-
-      if (isFreeParking && rules.freeParkingJackpotEnabled) {
-        // TODO: Pay out free_parking_pot and reset to 0 when jackpot is enabled.
-      }
-
-      const isBankruptcyPending = Boolean(bankruptcyCandidate);
-      const pendingPurchaseAction =
-        !isBankruptcyPending &&
-        isUnownedOwnableTile &&
-        !(shouldSendToJail && jailTile)
-          ? {
-              type: "BUY_PROPERTY",
-              tile_index: activeLandingTile.index,
-              price: activeLandingTile.price ?? 0,
-            }
-          : null;
-
-      if (pendingPurchaseAction) {
-        events.push({
-          event_type: "OFFER_PURCHASE",
-          payload: {
-            player_id: currentPlayer.id,
-            tile_id: activeLandingTile.tile_id,
-            tile_name: activeLandingTile.name,
-            tile_index: activeLandingTile.index,
-            price: pendingPurchaseAction.price,
-          },
-        });
-      }
-
-      events.push({
-        event_type: "MOVE_RESOLVED",
-        payload: {
-          player_id: currentPlayer.id,
-          tile_id: activeResolvedTile.tile_id,
-          tile_type: activeResolvedTile.type,
-          tile_index: activeResolvedTile.index,
-        },
-      });
-
-      if (
-        allowDoublesBonus &&
-        isDouble &&
-        !pendingPurchaseAction &&
-        !isBankruptcyPending &&
-        !(shouldSendToJail && jailTile)
-      ) {
-        events.push({
-          event_type: "ALLOW_EXTRA_ROLL",
+          event_type: "CARD_REVEALED",
           payload: {
             player_id: currentPlayer.id,
             player_name: currentPlayer.display_name,
-            doubles_count: nextDoublesCount,
+            deck: eventDeck.deck,
+            card_id: card.id,
+            card_title: card.title,
+            card_kind: card.kind,
           },
         });
-      }
 
-      if (bankruptcyCandidate) {
-        const bankruptcyResult = await resolveBankruptcyIfNeeded({
-          gameId,
-          gameState,
-          players,
-          player: currentPlayer,
-          updatedBalances,
-          cashBefore: bankruptcyCandidate.cashBefore,
-          cashAfter: bankruptcyCandidate.cashAfter,
-          reason: bankruptcyCandidate.reason,
-          events,
-          currentVersion,
-          userId: user.id,
-          playerPosition: finalPosition,
-        });
+        const finalVersion = currentVersion + events.length;
+        const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+          `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+          {
+            method: "PATCH",
+            headers: {
+              Prefer: "return=representation",
+            },
+            body: JSON.stringify({
+              version: finalVersion,
+              last_roll: rollTotal,
+              doubles_count: nextDoublesCount,
+              ...(balancesChanged ? { balances: updatedBalances } : {}),
+              ...(nextChanceIndex !== (gameState?.chance_index ?? 0)
+                ? { chance_index: nextChanceIndex }
+                : {}),
+              ...(nextCommunityIndex !== (gameState?.community_index ?? 0)
+                ? { community_index: nextCommunityIndex }
+                : {}),
+              ...(chanceStateChanged
+                ? {
+                    chance_order: nextChanceOrder,
+                    chance_draw_ptr: nextChanceDrawPtr,
+                    chance_seed: nextChanceSeed,
+                    chance_reshuffle_count: nextChanceReshuffleCount,
+                  }
+                : {}),
+              ...(communityStateChanged
+                ? {
+                    community_order: nextCommunityOrder,
+                    community_draw_ptr: nextCommunityDrawPtr,
+                    community_seed: nextCommunitySeed,
+                    community_reshuffle_count: nextCommunityReshuffleCount,
+                  }
+                : {}),
+              pending_card_active: true,
+              pending_card_deck: eventDeck.deck,
+              pending_card_id: card.id,
+              pending_card_title: card.title,
+              pending_card_kind: card.kind,
+              pending_card_payload:
+                typeof card.payload === "object" && card.payload
+                  ? card.payload
+                  : null,
+              pending_card_drawn_by_player_id: currentPlayer.id,
+              pending_card_drawn_at: new Date().toISOString(),
+              pending_card_source_tile_index: activeResolvedTile.index,
+              turn_phase: "AWAITING_CARD_CONFIRM",
+              pending_action: null,
+              updated_at: new Date().toISOString(),
+            }),
+          },
+        )) ?? [];
 
-        if (bankruptcyResult.handled) {
-          if (bankruptcyResult.error) {
-            return NextResponse.json(
-              { error: bankruptcyResult.error },
-              { status: 409 },
-            );
-          }
-          return NextResponse.json({ gameState: bankruptcyResult.updatedState });
+        if (!updatedState) {
+          return NextResponse.json(
+            { error: "Version mismatch." },
+            { status: 409 },
+          );
         }
-      }
 
-      const finalVersion = currentVersion + events.length;
-      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
-        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
-        {
-          method: "PATCH",
-          headers: {
-            Prefer: "return=representation",
+        const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
+          `players?id=eq.${currentPlayer.id}`,
+          {
+            method: "PATCH",
+            headers: {
+              Prefer: "return=representation",
+            },
+            body: JSON.stringify({
+              position: finalPosition,
+              is_in_jail: Boolean(shouldSendToJail && jailTile),
+              jail_turns_remaining: shouldSendToJail && jailTile ? 3 : 0,
+              ...(getOutOfJailFreeCountChanged
+                ? { get_out_of_jail_free_count: nextGetOutOfJailFreeCount }
+                : {}),
+            }),
           },
-          body: JSON.stringify({
-            version: finalVersion,
-            last_roll: rollTotal,
-            doubles_count: nextDoublesCount,
-            ...(balancesChanged ? { balances: updatedBalances } : {}),
-            ...(nextChanceIndex !== (gameState?.chance_index ?? 0)
-              ? { chance_index: nextChanceIndex }
-              : {}),
-            ...(nextCommunityIndex !== (gameState?.community_index ?? 0)
-              ? { community_index: nextCommunityIndex }
-              : {}),
-            ...(chanceStateChanged
-              ? {
-                  chance_order: nextChanceOrder,
-                  chance_draw_ptr: nextChanceDrawPtr,
-                  chance_seed: nextChanceSeed,
-                  chance_reshuffle_count: nextChanceReshuffleCount,
-                }
-              : {}),
-            ...(communityStateChanged
-              ? {
-                  community_order: nextCommunityOrder,
-                  community_draw_ptr: nextCommunityDrawPtr,
-                  community_seed: nextCommunitySeed,
-                  community_reshuffle_count: nextCommunityReshuffleCount,
-                }
-              : {}),
-            turn_phase: pendingPurchaseAction
-              ? "AWAITING_DECISION"
-              : "AWAITING_ROLL",
-            pending_action: pendingPurchaseAction,
-            updated_at: new Date().toISOString(),
-          }),
-        },
-      )) ?? [];
+        )) ?? [];
 
-      if (!updatedState) {
-        return NextResponse.json(
-          { error: "Version mismatch." },
-          { status: 409 },
-        );
+        if (!updatedPlayer) {
+          return NextResponse.json(
+            { error: "Unable to update player position." },
+            { status: 500 },
+          );
+        }
+
+        await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+
+        return NextResponse.json({ gameState: updatedState });
       }
 
-      const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
-        `players?id=eq.${currentPlayer.id}`,
-        {
-          method: "PATCH",
-          headers: {
-            Prefer: "return=representation",
-          },
-          body: JSON.stringify({
-            position: finalPosition,
-            is_in_jail: Boolean(shouldSendToJail && jailTile),
-            jail_turns_remaining: shouldSendToJail && jailTile ? 3 : 0,
-            ...(getOutOfJailFreeCountChanged
-              ? { get_out_of_jail_free_count: nextGetOutOfJailFreeCount }
-              : {}),
-          }),
-        },
-      )) ?? [];
-
-      if (!updatedPlayer) {
-        return NextResponse.json(
-          { error: "Unable to update player position." },
-          { status: 500 },
-        );
-      }
-
-      await emitGameEvents(gameId, currentVersion + 1, events, user.id);
-
-      return NextResponse.json({ gameState: updatedState });
+      return await finalizeMoveResolution({
+        gameId,
+        gameState,
+        players,
+        currentPlayer,
+        updatedBalances,
+        balancesChanged,
+        bankruptcyCandidate,
+        activeLandingTile,
+        activeResolvedTile,
+        finalPosition,
+        shouldSendToJail,
+        jailTile,
+        cardTriggeredGoToJail,
+        cardUtilityRollOverride,
+        rollTotal,
+        isDouble,
+        allowExtraRoll: false,
+        nextDoublesCount,
+        events,
+        currentVersion,
+        userId: user.id,
+        ownershipByTile,
+        boardTiles,
+        rules,
+        startingCash: game.starting_cash ?? 0,
+        nextChanceIndex,
+        nextCommunityIndex,
+        nextChanceOrder,
+        nextCommunityOrder,
+        nextChanceDrawPtr,
+        nextCommunityDrawPtr,
+        nextChanceSeed,
+        nextCommunitySeed,
+        nextChanceReshuffleCount,
+        nextCommunityReshuffleCount,
+        chanceStateChanged,
+        communityStateChanged,
+        nextGetOutOfJailFreeCount,
+        getOutOfJailFreeCountChanged,
+      });
     }
 
     if (body.action === "JAIL_PAY_FINE") {
