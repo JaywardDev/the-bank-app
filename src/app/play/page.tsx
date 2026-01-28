@@ -209,6 +209,7 @@ export default function PlayPage() {
   const [auctionBidAmount, setAuctionBidAmount] = useState<number>(10);
   const [auctionNow, setAuctionNow] = useState<Date>(() => new Date());
   const [needsAuth, setNeedsAuth] = useState(false);
+  const [isEventLogOpen, setIsEventLogOpen] = useState(false);
   const [initialSnapshotReady, setInitialSnapshotReady] = useState(false);
   const [realtimeReady, setRealtimeReady] = useState(false);
   const [firstRoundResyncEnabled, setFirstRoundResyncEnabled] = useState(true);
@@ -1992,6 +1993,20 @@ export default function PlayPage() {
     currentUserPlayer && gameState?.balances
       ? gameState.balances[currentUserPlayer.id] ?? 0
       : 0;
+  const isEventLogSuppressed =
+    viewMode !== "wallet" ||
+    showJailDecisionPanel ||
+    pendingCard !== null ||
+    isCardResolving ||
+    payoffLoan !== null ||
+    isLoanPayoffResolving ||
+    isAuctionActive;
+
+  useEffect(() => {
+    if (isEventLogSuppressed && isEventLogOpen) {
+      setIsEventLogOpen(false);
+    }
+  }, [isEventLogOpen, isEventLogSuppressed]);
   const auctionRemainingSeconds = useMemo(() => {
     if (!auctionTurnEndsAt) {
       return null;
@@ -3112,7 +3127,7 @@ export default function PlayPage() {
               <p className="text-lg font-semibold text-neutral-700">$26,200</p>
             </div>
           </div>
-          <div className="grid gap-3 rounded-2xl border border-dashed border-neutral-200 p-3 text-sm text-neutral-600">
+        <div className="grid gap-3 rounded-2xl border border-dashed border-neutral-200 p-3 text-sm text-neutral-600">
             <div className="flex items-center justify-between">
               <span>Recent income</span>
               <span className="font-medium text-emerald-600">+$1,800</span>
@@ -3125,36 +3140,6 @@ export default function PlayPage() {
               <span>Cash flow target</span>
               <span className="font-medium text-neutral-700">$15,000</span>
             </div>
-          </div>
-        </div>
-
-        <div className="rounded-2xl border bg-white p-5 shadow-sm space-y-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
-              Event log
-            </p>
-            <p className="text-sm text-neutral-600">
-              Recent table actions synced live from the bank.
-            </p>
-          </div>
-          <div className="space-y-3 text-sm">
-            {events.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-neutral-200 p-4 text-center text-neutral-500">
-                Events will appear once the game starts.
-              </div>
-            ) : (
-              events.map((event) => (
-                <div key={event.id} className="rounded-2xl border px-4 py-3">
-                  <div className="flex items-center justify-between text-xs uppercase text-neutral-400">
-                    <span>{event.event_type.replaceAll("_", " ")}</span>
-                    <span>v{event.version}</span>
-                  </div>
-                  <p className="mt-2 text-sm font-medium text-neutral-800">
-                    {formatEventDescription(event)}
-                  </p>
-                </div>
-              ))
-            )}
           </div>
         </div>
       </section>
@@ -3410,6 +3395,69 @@ export default function PlayPage() {
           </button>
         </div>
       </section>
+      {!isEventLogSuppressed ? (
+        <>
+          <button
+            className="fixed bottom-6 right-6 z-10 rounded-full bg-neutral-900 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white shadow-lg shadow-neutral-900/20 transition hover:bg-neutral-800"
+            type="button"
+            onClick={() => setIsEventLogOpen(true)}
+          >
+            Log
+          </button>
+          {isEventLogOpen ? (
+            <div
+              className="fixed inset-0 z-30"
+              onClick={() => setIsEventLogOpen(false)}
+            >
+              <div className="absolute inset-0 bg-black/20" />
+              <div
+                className="absolute bottom-20 right-6 z-40 w-[min(90vw,360px)] rounded-2xl border bg-white p-4 shadow-2xl"
+                onClick={(event) => event.stopPropagation()}
+                role="dialog"
+                aria-modal="true"
+                aria-label="Event Log"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                      Event Log
+                    </p>
+                    <p className="text-sm text-neutral-600">
+                      Recent table actions synced live from the bank.
+                    </p>
+                  </div>
+                  <button
+                    className="rounded-full border border-neutral-200 px-2 py-1 text-xs font-semibold text-neutral-500 transition hover:border-neutral-300 hover:text-neutral-700"
+                    type="button"
+                    onClick={() => setIsEventLogOpen(false)}
+                  >
+                    Close
+                  </button>
+                </div>
+                <div className="mt-4 max-h-[50vh] space-y-3 overflow-y-auto text-sm">
+                  {events.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-neutral-200 p-4 text-center text-neutral-500">
+                      Events will appear once the game starts.
+                    </div>
+                  ) : (
+                    events.map((event) => (
+                      <div key={event.id} className="rounded-2xl border px-4 py-3">
+                        <div className="flex items-center justify-between text-xs uppercase text-neutral-400">
+                          <span>{event.event_type.replaceAll("_", " ")}</span>
+                          <span>v{event.version}</span>
+                        </div>
+                        <p className="mt-2 text-sm font-medium text-neutral-800">
+                          {formatEventDescription(event)}
+                        </p>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </>
+      ) : null}
         </>
       ) : (
         <section className="space-y-4">
