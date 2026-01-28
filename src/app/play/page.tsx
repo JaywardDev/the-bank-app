@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import PageShell from "../components/PageShell";
 import BoardMiniMap from "../components/BoardMiniMap";
-import { getBoardPackById } from "@/lib/boardPacks";
+import { getBoardPackById, type BoardTile } from "@/lib/boardPacks";
 import { getRules } from "@/lib/rules";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 
@@ -187,6 +187,22 @@ const getTurnsRemainingFromPayload = (payload: unknown): number | null => {
     return Number.isNaN(parsed) ? null : parsed;
   }
   return null;
+};
+
+const getTileGroupLabel = (tile: BoardTile | null | undefined) => {
+  if (!tile) {
+    return "Property";
+  }
+  switch (tile.type) {
+    case "RAIL":
+      return "Railroads";
+    case "UTILITY":
+      return "Utilities";
+    case "PROPERTY":
+      return "Property";
+    default:
+      return "Property";
+  }
 };
 
 export default function PlayPage() {
@@ -3144,52 +3160,6 @@ export default function PlayPage() {
         </div>
       </section>
 
-      <section className="space-y-4">
-        <div className="rounded-2xl border bg-white p-5 shadow-sm space-y-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
-              Properties
-            </p>
-            <p className="text-lg font-semibold text-neutral-900">
-              Current holdings
-            </p>
-          </div>
-          <div className="space-y-3">
-            {[
-              {
-                name: "Pacific Avenue",
-                group: "Green Set",
-                rent: "$1,200",
-              },
-              { name: "Reading Railroad", group: "Railroads", rent: "$200" },
-              { name: "Electric Company", group: "Utilities", rent: "$150" },
-            ].map((property) => (
-              <div
-                key={property.name}
-                className="rounded-2xl border px-4 py-3"
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-semibold text-neutral-900">
-                      {property.name}
-                    </p>
-                    <p className="text-xs text-neutral-500">
-                      {property.group}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xs uppercase text-neutral-400">Rent</p>
-                    <p className="text-sm font-semibold text-neutral-700">
-                      {property.rent}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
       <section className="rounded-2xl border bg-white p-5 shadow-sm space-y-4">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
@@ -3210,7 +3180,7 @@ export default function PlayPage() {
         </div>
         <div className="space-y-2">
           <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
-            Eligible collateral
+            Owned properties
           </p>
           {eligibleCollateralTiles.length === 0 ? (
             <p className="text-sm text-neutral-500">
@@ -3222,18 +3192,34 @@ export default function PlayPage() {
                 const principalPreview = Math.round(
                   (tile.price ?? 0) * rules.collateralLtv,
                 );
+                const baseRent =
+                  typeof tile.baseRent === "number" ? tile.baseRent : null;
+                const groupLabel = getTileGroupLabel(tile);
                 return (
                   <div
                     key={tile.index}
                     className="flex items-center justify-between rounded-2xl border px-4 py-3 text-sm"
                   >
-                    <div>
-                      <p className="font-semibold text-neutral-900">
-                        {tile.name}
-                      </p>
-                      <p className="text-xs text-neutral-500">
-                        Principal: ${principalPreview}
-                      </p>
+                    <div className="space-y-1">
+                      <div>
+                        <p className="font-semibold text-neutral-900">
+                          {tile.name}
+                        </p>
+                        <p className="text-xs text-neutral-500">
+                          {groupLabel}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-3 text-xs text-neutral-500">
+                        <span className="font-semibold text-neutral-700">
+                          Principal: ${principalPreview}
+                        </span>
+                        <span className="uppercase tracking-wide text-neutral-400">
+                          Rent
+                        </span>
+                        <span className="font-semibold text-neutral-700">
+                          {baseRent !== null ? `$${baseRent}` : "—"}
+                        </span>
+                      </div>
                     </div>
                     <button
                       className="rounded-full bg-neutral-900 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
@@ -3269,10 +3255,13 @@ export default function PlayPage() {
           ) : (
             <div className="space-y-2">
               {activeLoans.map((loan) => {
-                const tileName =
+                const tile =
                   boardPack?.tiles?.find(
                     (entry) => entry.index === loan.collateral_tile_index,
-                  )?.name ?? `Tile ${loan.collateral_tile_index}`;
+                  ) ?? null;
+                const tileName =
+                  tile?.name ?? `Tile ${loan.collateral_tile_index}`;
+                const groupLabel = getTileGroupLabel(tile);
                 const payoffAmount =
                   typeof loan.remaining_principal === "number"
                     ? loan.remaining_principal
@@ -3289,6 +3278,10 @@ export default function PlayPage() {
                     <div>
                       <p className="font-semibold text-neutral-900">
                         {tileName}
+                      </p>
+                      <p className="text-xs text-neutral-500">{groupLabel}</p>
+                      <p className="text-xs text-neutral-400">
+                        Rent paused while collateralized.
                       </p>
                       <p className="text-xs text-neutral-500">
                         Payment: ${loan.payment_per_turn} · Turns remaining:{" "}
