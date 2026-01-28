@@ -12,6 +12,9 @@ import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 const lastGameKey = "bank.lastGameId";
 const DEBUG = process.env.NEXT_PUBLIC_DEBUG === "true";
 const JAIL_FINE_AMOUNT = 50;
+const EVENT_FETCH_LIMIT = 100;
+const EVENT_LOG_LIMIT = 10;
+const TRANSACTION_DISPLAY_LIMIT = 30;
 
 type Player = {
   id: string;
@@ -1484,14 +1487,17 @@ export default function PlayPage() {
     [],
   );
 
-  const loadEvents = useCallback(async (activeGameId: string, accessToken?: string) => {
-    const eventRows = await supabaseClient.fetchFromSupabase<GameEvent[]>(
-      `game_events?select=id,event_type,payload,created_at,version&game_id=eq.${activeGameId}&order=version.desc&limit=10`,
-      { method: "GET" },
-      accessToken,
-    );
-    setEvents(eventRows);
-  }, []);
+  const loadEvents = useCallback(
+    async (activeGameId: string, accessToken?: string) => {
+      const eventRows = await supabaseClient.fetchFromSupabase<GameEvent[]>(
+        `game_events?select=id,event_type,payload,created_at,version&game_id=eq.${activeGameId}&order=version.desc&limit=${EVENT_FETCH_LIMIT}`,
+        { method: "GET" },
+        accessToken,
+      );
+      setEvents(eventRows);
+    },
+    [],
+  );
 
   const loadGameData = useCallback(
     async (activeGameId: string, accessToken?: string) => {
@@ -2366,16 +2372,25 @@ export default function PlayPage() {
     payoffLoan !== null ||
     isLoanPayoffResolving ||
     isAuctionActive;
-  const transactions = useMemo(
-    () =>
-      derivePlayerTransactions({
-        events,
-        currentPlayerId: currentUserPlayer?.id ?? null,
-        players,
-        boardPack,
-        ownershipByTile,
-      }),
-    [boardPack, currentUserPlayer?.id, events, ownershipByTile, players],
+  const transactions = useMemo(() => {
+    const derived = derivePlayerTransactions({
+      events,
+      currentPlayerId: currentUserPlayer?.id ?? null,
+      players,
+      boardPack,
+      ownershipByTile,
+    });
+    return [...derived].sort(
+      (a, b) => b.sourceEventVersion - a.sourceEventVersion,
+    );
+  }, [boardPack, currentUserPlayer?.id, events, ownershipByTile, players]);
+  const displayEvents = useMemo(
+    () => events.slice(0, EVENT_LOG_LIMIT),
+    [events],
+  );
+  const displayTransactions = useMemo(
+    () => transactions.slice(0, TRANSACTION_DISPLAY_LIMIT),
+    [transactions],
   );
   const formatSignedCurrency = (amount: number) =>
     `${amount < 0 ? "-" : "+"}$${Math.abs(amount)}`;
@@ -3757,12 +3772,12 @@ export default function PlayPage() {
                 </div>
                 {activityTab === "log" ? (
                   <div className="mt-4 max-h-[50vh] space-y-3 overflow-y-auto text-sm">
-                    {events.length === 0 ? (
+                    {displayEvents.length === 0 ? (
                       <div className="rounded-2xl border border-dashed border-neutral-200 p-4 text-center text-neutral-500">
                         Events will appear once the game starts.
                       </div>
                     ) : (
-                      events.map((event) => (
+                      displayEvents.map((event) => (
                         <div key={event.id} className="rounded-2xl border px-4 py-3">
                           <div className="flex items-center justify-between text-xs uppercase text-neutral-400">
                             <span>{event.event_type.replaceAll("_", " ")}</span>
@@ -3777,12 +3792,12 @@ export default function PlayPage() {
                   </div>
                 ) : (
                   <div className="mt-4 max-h-[50vh] space-y-3 overflow-y-auto text-sm">
-                    {transactions.length === 0 ? (
+                    {displayTransactions.length === 0 ? (
                       <div className="rounded-2xl border border-dashed border-neutral-200 p-4 text-center text-neutral-500">
                         No transactions yet.
                       </div>
                     ) : (
-                      transactions.map((transaction) => (
+                      displayTransactions.map((transaction) => (
                         <div
                           key={transaction.id}
                           className="flex items-center justify-between rounded-2xl border px-4 py-3"
