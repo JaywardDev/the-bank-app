@@ -2589,61 +2589,64 @@ export default function PlayPage() {
             </div>
           </div>
           {showJailDecisionPanel ? (
-            <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
-              <p className="text-xs font-semibold uppercase tracking-wide text-rose-700">
-                Jail decision
-              </p>
-              <p className="mt-1 text-base font-semibold text-rose-900">
-                You are in jail.
-              </p>
-              <p className="text-sm text-rose-800">
-                Turns remaining: {currentUserPlayer?.jail_turns_remaining ?? 0}
-              </p>
-              <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                <div className="space-y-1">
-                  <button
-                    className="rounded-2xl bg-rose-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-rose-300"
-                    type="button"
-                    onClick={handlePayJailFine}
-                    disabled={actionLoading === "JAIL_PAY_FINE"}
-                  >
-                    {actionLoading === "JAIL_PAY_FINE"
-                      ? "Paying…"
-                      : `Pay $${JAIL_FINE_AMOUNT} fine`}
-                  </button>
-                  {jailPayDisabledReason ? (
-                    <p className="text-xs text-neutral-400">
-                      {jailPayDisabledReason}
-                    </p>
+            <>
+              <div className="fixed inset-0 z-20 bg-black/45 backdrop-blur-[2px]" />
+              <div className="relative z-30 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900 shadow-2xl ring-1 ring-black/10">
+                <p className="text-xs font-semibold uppercase tracking-wide text-rose-700">
+                  Jail decision
+                </p>
+                <p className="mt-1 text-base font-semibold text-rose-900">
+                  You are in jail.
+                </p>
+                <p className="text-sm text-rose-800">
+                  Turns remaining: {currentUserPlayer?.jail_turns_remaining ?? 0}
+                </p>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <button
+                      className="rounded-2xl bg-rose-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-rose-300"
+                      type="button"
+                      onClick={handlePayJailFine}
+                      disabled={actionLoading === "JAIL_PAY_FINE"}
+                    >
+                      {actionLoading === "JAIL_PAY_FINE"
+                        ? "Paying…"
+                        : `Pay $${JAIL_FINE_AMOUNT} fine`}
+                    </button>
+                    {jailPayDisabledReason ? (
+                      <p className="text-xs text-neutral-400">
+                        {jailPayDisabledReason}
+                      </p>
+                    ) : null}
+                  </div>
+                  {hasGetOutOfJailFree ? (
+                    <button
+                      className="rounded-2xl border border-rose-300 px-4 py-2 text-sm font-semibold text-rose-900 disabled:cursor-not-allowed disabled:border-rose-200 disabled:text-rose-400"
+                      type="button"
+                      onClick={handleUseGetOutOfJailFree}
+                      disabled={actionLoading === "USE_GET_OUT_OF_JAIL_FREE"}
+                    >
+                      {actionLoading === "USE_GET_OUT_OF_JAIL_FREE"
+                        ? "Using…"
+                        : "Use Get Out of Jail Free"}
+                    </button>
                   ) : null}
-                </div>
-                {hasGetOutOfJailFree ? (
                   <button
                     className="rounded-2xl border border-rose-300 px-4 py-2 text-sm font-semibold text-rose-900 disabled:cursor-not-allowed disabled:border-rose-200 disabled:text-rose-400"
                     type="button"
-                    onClick={handleUseGetOutOfJailFree}
-                    disabled={actionLoading === "USE_GET_OUT_OF_JAIL_FREE"}
+                    onClick={handleRollForDoubles}
+                    disabled={
+                      !canRollForDoubles ||
+                      actionLoading === "JAIL_ROLL_FOR_DOUBLES"
+                    }
                   >
-                    {actionLoading === "USE_GET_OUT_OF_JAIL_FREE"
-                      ? "Using…"
-                      : "Use Get Out of Jail Free"}
+                    {actionLoading === "JAIL_ROLL_FOR_DOUBLES"
+                      ? "Rolling…"
+                      : "Roll for doubles"}
                   </button>
-                ) : null}
-                <button
-                  className="rounded-2xl border border-rose-300 px-4 py-2 text-sm font-semibold text-rose-900 disabled:cursor-not-allowed disabled:border-rose-200 disabled:text-rose-400"
-                  type="button"
-                  onClick={handleRollForDoubles}
-                  disabled={
-                    !canRollForDoubles ||
-                    actionLoading === "JAIL_ROLL_FOR_DOUBLES"
-                  }
-                >
-                  {actionLoading === "JAIL_ROLL_FOR_DOUBLES"
-                    ? "Rolling…"
-                    : "Roll for doubles"}
-                </button>
+                </div>
               </div>
-            </div>
+            </>
           ) : null}
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1">
@@ -2743,9 +2746,9 @@ export default function PlayPage() {
         </div>
         {pendingCard ? (
           <>
-            <div className="fixed inset-0 z-20 bg-black/40 backdrop-blur-[1px]" />
+            <div className="fixed inset-0 z-20 bg-black/45 backdrop-blur-[2px]" />
             <div className="fixed inset-0 z-30 flex items-center justify-center p-4">
-              <div className="w-full max-w-md rounded-3xl border border-emerald-200 bg-white/95 p-5 shadow-2xl backdrop-blur">
+              <div className="w-full max-w-md rounded-3xl border border-emerald-200 bg-white/95 p-5 shadow-2xl ring-1 ring-black/10 backdrop-blur">
                 <p className="text-xs font-semibold uppercase tracking-wide text-emerald-500">
                   Card revealed
                 </p>
@@ -2790,9 +2793,9 @@ export default function PlayPage() {
         ) : null}
         {payoffLoan ? (
           <>
-            <div className="fixed inset-0 z-20 bg-black/40 backdrop-blur-[1px]" />
+            <div className="fixed inset-0 z-20 bg-black/45 backdrop-blur-[2px]" />
             <div className="fixed inset-0 z-30 flex items-center justify-center p-4">
-              <div className="w-full max-w-md rounded-3xl border border-neutral-200 bg-white/95 p-5 shadow-2xl backdrop-blur">
+              <div className="w-full max-w-md rounded-3xl border border-neutral-200 bg-white/95 p-5 shadow-2xl ring-1 ring-black/10 backdrop-blur">
                 <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
                   Pay off loan
                 </p>
@@ -2847,9 +2850,9 @@ export default function PlayPage() {
         ) : null}
         {isAuctionActive ? (
           <>
-            <div className="fixed inset-0 z-10 bg-black/35 backdrop-blur-[1px]" />
-            <div className="fixed inset-0 z-20 flex items-center justify-center p-4">
-              <div className="w-full max-w-md scale-[1.02] rounded-3xl border border-indigo-200 bg-white/95 p-5 shadow-2xl backdrop-blur">
+            <div className="fixed inset-0 z-20 bg-black/45 backdrop-blur-[2px]" />
+            <div className="fixed inset-0 z-30 flex items-center justify-center p-4">
+              <div className="w-full max-w-md scale-[1.02] rounded-3xl border border-indigo-200 bg-white/95 p-5 shadow-2xl ring-1 ring-black/10 backdrop-blur">
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wide text-indigo-500">
