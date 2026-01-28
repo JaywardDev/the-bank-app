@@ -1799,7 +1799,7 @@ export default function PlayPage() {
     canAct && !hasPendingDecision && gameState?.last_roll != null;
   const canConfirmPendingCard =
     Boolean(pendingCard) &&
-    currentUserPlayer?.id === pendingCard.drawnBy &&
+    currentUserPlayer?.id === pendingCard?.drawnBy &&
     gameState?.turn_phase === "AWAITING_CARD_CONFIRM";
   const pendingDeckLabel =
     pendingCard?.deck === "CHANCE"

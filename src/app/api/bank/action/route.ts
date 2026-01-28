@@ -5,6 +5,7 @@ import {
   defaultBoardPackId,
   getBoardPackById,
 } from "@/lib/boardPacks";
+import type { BoardTileType } from "@/lib/boardPacks";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "@/lib/env";
 import { DEFAULT_RULES, getRules } from "@/lib/rules";
 
@@ -166,7 +167,7 @@ type PlayerLoanRow = {
 
 type TileInfo = {
   tile_id: string;
-  type: string;
+  type: BoardTileType;
   index: number;
   name: string;
   price?: number;
