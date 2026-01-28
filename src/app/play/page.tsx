@@ -1835,6 +1835,32 @@ export default function PlayPage() {
       : pendingCard?.deck === "COMMUNITY"
         ? "Community"
         : "Card";
+  const turnPhaseLabel = useMemo(() => {
+    if (gameState?.auction_active) {
+      return "Auction in progress";
+    }
+    if (gameState?.turn_phase === "AWAITING_JAIL_DECISION") {
+      return "In jail – choose option";
+    }
+    if (
+      gameState?.turn_phase === "AWAITING_CARD_CONFIRM" ||
+      gameState?.pending_card_active
+    ) {
+      return "Resolving card";
+    }
+    if (gameState?.turn_phase === "AWAITING_ROLL") {
+      return "Rolling";
+    }
+    if (gameState?.current_player_id) {
+      return "Waiting for other player";
+    }
+    return "Waiting";
+  }, [
+    gameState?.auction_active,
+    gameState?.current_player_id,
+    gameState?.pending_card_active,
+    gameState?.turn_phase,
+  ]);
   const realtimeStatusLabel = realtimeReady ? "Live" : "Syncing…";
   const isHost = Boolean(
     session && gameMeta?.created_by && session.user.id === gameMeta.created_by,
@@ -2429,9 +2455,14 @@ export default function PlayPage() {
         >
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
-                Current turn
-              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                  Current turn
+                </p>
+                <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+                  {turnPhaseLabel}
+                </span>
+              </div>
               <p className="text-2xl font-semibold text-neutral-900">
                 {hasGameMetaError
                   ? "Game not visible"
