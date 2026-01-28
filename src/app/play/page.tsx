@@ -2574,6 +2574,12 @@ export default function PlayPage() {
                 ${myPlayerBalance}
               </p>
               <p className="text-sm text-neutral-500">Available to spend</p>
+              {getOutOfJailFreeCount > 0 ? (
+                <div className="mt-3 inline-flex items-center gap-2 rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
+                  <span className="h-2 w-2 rounded-full bg-amber-500" />
+                  Get Out of Jail Free: {getOutOfJailFreeCount}
+                </div>
+              ) : null}
             </div>
             <div className="text-right">
               <p className="text-xs uppercase tracking-wide text-neutral-400">
