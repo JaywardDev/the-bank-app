@@ -1970,6 +1970,24 @@ export default function PlayPage() {
   const isCurrentAuctionBidder =
     Boolean(currentUserPlayer?.id) &&
     currentUserPlayer?.id === auctionTurnPlayerId;
+  const UI_RESOLVE_DELAY_MS = 250;
+  const [isCardResolving, setIsCardResolving] = useState(false);
+  const [isAuctionResolving, setIsAuctionResolving] = useState(false);
+  const [isLoanPayoffResolving, setIsLoanPayoffResolving] = useState(false);
+  const [cardDisplaySnapshot, setCardDisplaySnapshot] = useState<{
+    deckLabel: string;
+    title: string;
+    description: string | null;
+    actorName: string | null;
+  } | null>(null);
+  const [auctionDisplaySnapshot, setAuctionDisplaySnapshot] = useState<{
+    tileName: string;
+    tileType: string;
+    currentBid: number;
+    winnerName: string | null;
+    turnPlayerName: string | null;
+    countdownLabel: string;
+  } | null>(null);
   const currentBidderCash =
     currentUserPlayer && gameState?.balances
       ? gameState.balances[currentUserPlayer.id] ?? 0
@@ -2021,12 +2039,62 @@ export default function PlayPage() {
     if (!isAuctionActive) {
       return;
     }
+    setAuctionDisplaySnapshot({
+      tileName:
+        auctionTile?.name ??
+        (auctionTileIndex !== null
+          ? `Tile ${auctionTileIndex}`
+          : "Unowned tile"),
+      tileType: auctionTile?.type ?? "Ownable tile",
+      currentBid: auctionCurrentBid,
+      winnerName: auctionWinnerName,
+      turnPlayerName: auctionTurnPlayerName,
+      countdownLabel: auctionCountdownLabel,
+    });
     setAuctionNow(new Date());
     const interval = setInterval(() => {
       setAuctionNow(new Date());
     }, 1000);
     return () => clearInterval(interval);
-  }, [isAuctionActive, auctionTurnEndsAt]);
+  }, [
+    auctionCountdownLabel,
+    auctionCurrentBid,
+    auctionTile?.name,
+    auctionTile?.type,
+    auctionTileIndex,
+    auctionTurnEndsAt,
+    auctionTurnPlayerName,
+    auctionWinnerName,
+    isAuctionActive,
+  ]);
+
+  useEffect(() => {
+    if (!pendingCard) {
+      return;
+    }
+    setCardDisplaySnapshot({
+      deckLabel: pendingDeckLabel,
+      title: pendingCard.title,
+      description: pendingCardDescription ?? null,
+      actorName: pendingCardActorName ?? null,
+    });
+  }, [
+    pendingCard,
+    pendingCardActorName,
+    pendingCardDescription,
+    pendingDeckLabel,
+  ]);
+
+  useEffect(() => {
+    if (!isAuctionActive && auctionDisplaySnapshot) {
+      setIsAuctionResolving(true);
+      const timeout = window.setTimeout(() => {
+        setIsAuctionResolving(false);
+      }, UI_RESOLVE_DELAY_MS);
+      return () => window.clearTimeout(timeout);
+    }
+    return undefined;
+  }, [UI_RESOLVE_DELAY_MS, auctionDisplaySnapshot, isAuctionActive]);
 
   useEffect(() => {
     if (!isAuctionActive || !isCurrentAuctionBidder) {
@@ -2311,8 +2379,12 @@ export default function PlayPage() {
     if (!canConfirmPendingCard) {
       return;
     }
+    setIsCardResolving(true);
+    window.setTimeout(() => {
+      setIsCardResolving(false);
+    }, UI_RESOLVE_DELAY_MS);
     void handleBankAction({ action: "CONFIRM_PENDING_CARD" });
-  }, [canConfirmPendingCard, handleBankAction]);
+  }, [UI_RESOLVE_DELAY_MS, canConfirmPendingCard, handleBankAction]);
 
   const handleAuctionBid = useCallback(() => {
     if (!isCurrentAuctionBidder) {
@@ -2744,35 +2816,39 @@ export default function PlayPage() {
             <p className="text-xs text-neutral-400">Loading snapshot…</p>
           ) : null}
         </div>
-        {pendingCard ? (
+        {pendingCard || isCardResolving ? (
           <>
             <div className="fixed inset-0 z-20 bg-black/45 backdrop-blur-[2px]" />
             <div className="fixed inset-0 z-30 flex items-center justify-center p-4">
               <div className="w-full max-w-md rounded-3xl border border-emerald-200 bg-white/95 p-5 shadow-2xl ring-1 ring-black/10 backdrop-blur">
                 <p className="text-xs font-semibold uppercase tracking-wide text-emerald-500">
-                  Card revealed
+                  {pendingCard ? "Card revealed" : "Resolving card"}
                 </p>
                 <p className="text-lg font-semibold text-neutral-900">
-                  {pendingDeckLabel}
+                  {pendingCard ? pendingDeckLabel : cardDisplaySnapshot?.deckLabel}
                 </p>
                 <p className="mt-2 text-base font-semibold text-neutral-900">
-                  {pendingCard.title}
+                  {pendingCard?.title ?? cardDisplaySnapshot?.title}
                 </p>
-                {pendingCardDescription ? (
+                {pendingCardDescription || cardDisplaySnapshot?.description ? (
                   <p className="mt-1 text-sm text-neutral-600">
-                    {pendingCardDescription}
+                    {pendingCardDescription ?? cardDisplaySnapshot?.description}
                   </p>
                 ) : null}
-                {canConfirmPendingCard ? (
+                {canConfirmPendingCard && !isCardResolving ? (
                   <div className="mt-4 space-y-1">
                     <button
                       className="w-full rounded-2xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-emerald-200"
                       type="button"
                       onClick={handleConfirmPendingCard}
-                      disabled={actionLoading === "CONFIRM_PENDING_CARD"}
+                      disabled={
+                        actionLoading === "CONFIRM_PENDING_CARD" || isCardResolving
+                      }
                     >
                       {actionLoading === "CONFIRM_PENDING_CARD"
                         ? "Confirming…"
+                        : isCardResolving
+                          ? "Resolving…"
                         : "OK"}
                     </button>
                     {confirmCardDisabledReason ? (
@@ -2783,8 +2859,13 @@ export default function PlayPage() {
                   </div>
                 ) : (
                   <p className="mt-4 text-sm text-neutral-500">
-                    Waiting for {pendingCardActorName ?? "the current player"} to
-                    confirm…
+                    {isCardResolving
+                      ? "Resolving…"
+                      : `Waiting for ${
+                          pendingCardActorName ??
+                          cardDisplaySnapshot?.actorName ??
+                          "the current player"
+                        } to confirm…`}
                   </p>
                 )}
               </div>
@@ -2822,20 +2903,27 @@ export default function PlayPage() {
                       className="rounded-2xl bg-neutral-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
                       type="button"
                       onClick={() => {
+                        setIsLoanPayoffResolving(true);
                         void handleBankAction({
                           action: "PAYOFF_COLLATERAL_LOAN",
                           loanId: payoffLoan.id,
                         });
-                        setPayoffLoan(null);
+                        window.setTimeout(() => {
+                          setIsLoanPayoffResolving(false);
+                          setPayoffLoan(null);
+                        }, UI_RESOLVE_DELAY_MS);
                       }}
                       disabled={
                         actionLoading === "PAYOFF_COLLATERAL_LOAN" ||
-                        payoffLoan.remaining_principal > myPlayerBalance
+                        payoffLoan.remaining_principal > myPlayerBalance ||
+                        isLoanPayoffResolving
                       }
                     >
                       {actionLoading === "PAYOFF_COLLATERAL_LOAN"
                         ? "Paying…"
-                        : `Pay $${payoffLoan.remaining_principal}`}
+                        : isLoanPayoffResolving
+                          ? "Resolving…"
+                          : `Pay $${payoffLoan.remaining_principal}`}
                     </button>
                     {payoffLoanDisabledReason ? (
                       <p className="text-xs text-neutral-400">
@@ -2848,7 +2936,7 @@ export default function PlayPage() {
             </div>
           </>
         ) : null}
-        {isAuctionActive ? (
+        {isAuctionActive || isAuctionResolving ? (
           <>
             <div className="fixed inset-0 z-20 bg-black/45 backdrop-blur-[2px]" />
             <div className="fixed inset-0 z-30 flex items-center justify-center p-4">
@@ -2856,21 +2944,25 @@ export default function PlayPage() {
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wide text-indigo-500">
-                      Auction in progress
+                      {isAuctionActive ? "Auction in progress" : "Resolving auction"}
                     </p>
                     <p className="text-lg font-semibold text-neutral-900">
-                      {auctionTile?.name ??
-                        (auctionTileIndex !== null
-                          ? `Tile ${auctionTileIndex}`
-                          : "Unowned tile")}
+                      {isAuctionActive
+                        ? auctionTile?.name ??
+                          (auctionTileIndex !== null
+                            ? `Tile ${auctionTileIndex}`
+                            : "Unowned tile")
+                        : auctionDisplaySnapshot?.tileName ?? "Unowned tile"}
                     </p>
                     <p className="text-xs text-neutral-500">
-                      {auctionTile?.type ?? "Ownable tile"}
+                      {isAuctionActive
+                        ? auctionTile?.type ?? "Ownable tile"
+                        : auctionDisplaySnapshot?.tileType ?? "Ownable tile"}
                     </p>
                   </div>
                   <div className="text-right">
                     <p className="text-xs uppercase tracking-wide text-neutral-400">
-                      Time left
+                      {isAuctionActive ? "Time left" : "Finalizing"}
                     </p>
                     <p
                       className={`text-lg font-semibold ${
@@ -2879,7 +2971,9 @@ export default function PlayPage() {
                           : "text-neutral-800"
                       }`}
                     >
-                      {auctionCountdownLabel}
+                      {isAuctionActive
+                        ? auctionCountdownLabel
+                        : auctionDisplaySnapshot?.countdownLabel ?? "—"}
                     </p>
                   </div>
                 </div>
@@ -2888,22 +2982,37 @@ export default function PlayPage() {
                     Current bid
                   </p>
                   <p className="text-base font-semibold text-indigo-900">
-                    ${auctionCurrentBid}
+                    $
+                    {isAuctionActive
+                      ? auctionCurrentBid
+                      : auctionDisplaySnapshot?.currentBid ?? 0}
                   </p>
                   <p className="text-xs text-indigo-700">
-                    {auctionWinnerName
-                      ? `Leading: ${auctionWinnerName}`
-                      : "No bids yet"}
+                    {isAuctionActive
+                      ? auctionWinnerName
+                        ? `Leading: ${auctionWinnerName}`
+                        : "No bids yet"
+                      : auctionDisplaySnapshot?.winnerName
+                        ? `Leading: ${auctionDisplaySnapshot.winnerName}`
+                        : "No bids yet"}
                   </p>
                 </div>
-                <p className="mt-3 text-sm text-neutral-600">
-                  Waiting for{" "}
-                  <span className="font-semibold text-neutral-900">
-                    {auctionTurnPlayerName ?? "next bidder"}
-                  </span>
-                  …
-                </p>
-                {isCurrentAuctionBidder ? (
+                {isAuctionActive ? (
+                  <>
+                    <p className="mt-3 text-sm text-neutral-600">
+                      Waiting for{" "}
+                      <span className="font-semibold text-neutral-900">
+                        {auctionTurnPlayerName ?? "next bidder"}
+                      </span>
+                      …
+                    </p>
+                  </>
+                ) : (
+                  <p className="mt-3 text-sm text-neutral-600">
+                    Resolving…
+                  </p>
+                )}
+                {isCurrentAuctionBidder && isAuctionActive ? (
                   <div className="mt-4 space-y-3">
                     <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
                       Your bid
@@ -2968,8 +3077,9 @@ export default function PlayPage() {
                   </div>
                 ) : (
                   <p className="mt-4 text-xs text-neutral-500">
-                    Watch the auction update live. Actions unlock when it is your
-                    turn to bid or pass.
+                    {isAuctionActive
+                      ? "Watch the auction update live. Actions unlock when it is your turn to bid or pass."
+                      : "Updating auction results..."}
                   </p>
                 )}
               </div>
