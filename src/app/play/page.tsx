@@ -2299,6 +2299,21 @@ export default function PlayPage() {
     (entry) => !entry.isCollateralized,
   );
   const activeLoans = playerLoans.filter((loan) => loan.status === "active");
+  const netWorth = useMemo(() => {
+    const propertyValue = ownedProperties.reduce((total, entry) => {
+      if (entry.isCollateralized) {
+        return total;
+      }
+      return total + (entry.tile.price ?? 0);
+    }, 0);
+    const outstandingPrincipal = activeLoans.reduce((total, loan) => {
+      if (typeof loan.remaining_principal === "number") {
+        return total + loan.remaining_principal;
+      }
+      return total + loan.principal;
+    }, 0);
+    return myPlayerBalance + propertyValue - outstandingPrincipal;
+  }, [activeLoans, myPlayerBalance, ownedProperties]);
   const auctionTurnPlayerId = gameState?.auction_turn_player_id ?? null;
   const auctionTileIndex = gameState?.auction_tile_index ?? null;
   const auctionTile =
@@ -3487,21 +3502,9 @@ export default function PlayPage() {
               <p className="text-xs uppercase tracking-wide text-neutral-400">
                 Net worth
               </p>
-              <p className="text-lg font-semibold text-neutral-700">$26,200</p>
-            </div>
-          </div>
-        <div className="grid gap-3 rounded-2xl border border-dashed border-neutral-200 p-3 text-sm text-neutral-600">
-            <div className="flex items-center justify-between">
-              <span>Recent income</span>
-              <span className="font-medium text-emerald-600">+$1,800</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span>Recent expenses</span>
-              <span className="font-medium text-rose-500">-$950</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span>Cash flow target</span>
-              <span className="font-medium text-neutral-700">$15,000</span>
+              <p className="text-lg font-semibold text-neutral-700">
+                ${netWorth}
+              </p>
             </div>
           </div>
         </div>
