@@ -3337,32 +3337,6 @@ export default function PlayPage() {
         </div>
       </section>
 
-      <section className="space-y-3">
-        <div className="flex items-center justify-between">
-          <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
-            Actions
-          </p>
-          <span className="text-xs text-neutral-400">Coming soon</span>
-        </div>
-        <div className="grid gap-3">
-          {[
-            "Pay Bank",
-            "Receive from Bank",
-            "Loan with Collateral",
-            "Build / Sell Houses",
-          ].map((label) => (
-            <button
-              key={label}
-              className="w-full rounded-2xl border bg-white px-4 py-4 text-left text-base font-semibold text-neutral-800 shadow-sm opacity-50 cursor-not-allowed"
-              type="button"
-              disabled
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </section>
-
       <section className="rounded-2xl border bg-white p-5 shadow-sm space-y-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
