@@ -235,7 +235,7 @@ type DeckShuffleState = {
   reshuffleCount: number | null;
 };
 
-const prepareDeckDraw = ({
+const ensureDeckOrder = ({
   deckLength,
   deckLabel,
   gameId,
@@ -272,6 +272,37 @@ const prepareDeckDraw = ({
     resetOrder();
   }
 
+  return {
+    order: order ?? buildShuffledOrder(deckLength, baseSeed, reshuffleCount),
+    drawPtr,
+    seed: baseSeed,
+    reshuffleCount,
+  };
+};
+
+const prepareDeckDraw = ({
+  deckLength,
+  deckLabel,
+  gameId,
+  state,
+}: {
+  deckLength: number;
+  deckLabel: "chance" | "community";
+  gameId: string;
+  state: DeckShuffleState;
+}) => {
+  let { order, drawPtr, seed, reshuffleCount } = ensureDeckOrder({
+    deckLength,
+    deckLabel,
+    gameId,
+    state,
+  });
+
+  const resetOrder = () => {
+    order = buildShuffledOrder(deckLength, seed, reshuffleCount);
+    drawPtr = 0;
+  };
+
   let cardIndex = order[drawPtr];
   if (
     typeof cardIndex !== "number" ||
@@ -286,7 +317,7 @@ const prepareDeckDraw = ({
   return {
     order,
     drawPtr: drawPtr + 1,
-    seed: baseSeed,
+    seed,
     reshuffleCount,
     cardIndex,
     drawIndex: drawPtr,
