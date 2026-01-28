@@ -76,6 +76,16 @@ type GameEvent = {
   version: number;
 };
 
+type TransactionItem = {
+  id: string;
+  ts: string | null;
+  title: string;
+  subtitle: string | null;
+  amount: number;
+  sourceEventVersion: number;
+  sourceEventId: string;
+};
+
 type OwnershipRow = {
   tile_index: number;
   owner_player_id: string | null;
@@ -189,6 +199,17 @@ const getTurnsRemainingFromPayload = (payload: unknown): number | null => {
   return null;
 };
 
+const parseNumber = (value: unknown): number | null => {
+  if (typeof value === "number") {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
+};
+
 const getTileGroupLabel = (tile: BoardTile | null | undefined) => {
   if (!tile) {
     return "Property";
@@ -203,6 +224,318 @@ const getTileGroupLabel = (tile: BoardTile | null | undefined) => {
     default:
       return "Property";
   }
+};
+
+const derivePlayerTransactions = ({
+  events,
+  currentPlayerId,
+  players,
+  boardPack,
+  ownershipByTile,
+}: {
+  events: GameEvent[];
+  currentPlayerId: string | null;
+  players: Player[];
+  boardPack: ReturnType<typeof getBoardPackById> | null;
+  ownershipByTile: OwnershipByTile;
+}): TransactionItem[] => {
+  if (!currentPlayerId) {
+    return [];
+  }
+
+  const getPlayerName = (playerId: string | null) =>
+    players.find((player) => player.id === playerId)?.display_name ?? "Player";
+  const getTileName = (tileIndex: number | null) => {
+    if (tileIndex === null) {
+      return "Tile";
+    }
+    return (
+      boardPack?.tiles?.find((entry) => entry.index === tileIndex)?.name ??
+      `Tile ${tileIndex}`
+    );
+  };
+
+  const transactions: TransactionItem[] = [];
+
+  for (const event of events) {
+    const payload =
+      event.payload && typeof event.payload === "object" ? event.payload : null;
+    if (!payload) {
+      continue;
+    }
+
+    const recordBase = {
+      ts: event.created_at ?? null,
+      sourceEventVersion: event.version,
+      sourceEventId: event.id,
+    };
+
+    switch (event.event_type) {
+      case "COLLECT_GO": {
+        const playerId =
+          typeof payload.player_id === "string" ? payload.player_id : null;
+        if (playerId !== currentPlayerId) {
+          break;
+        }
+        const amount = parseNumber(payload.amount);
+        if (amount === null) {
+          break;
+        }
+        const reason =
+          typeof payload.reason === "string" ? payload.reason : null;
+        const reasonLabel =
+          reason === "LAND_GO"
+            ? "Landing on GO"
+            : reason === "PASS_START"
+              ? "Passing GO"
+              : null;
+        transactions.push({
+          ...recordBase,
+          id: event.id,
+          title: "GO salary",
+          subtitle: reasonLabel,
+          amount,
+        });
+        break;
+      }
+      case "CARD_PAY": {
+        const playerId =
+          typeof payload.player_id === "string" ? payload.player_id : null;
+        if (playerId !== currentPlayerId) {
+          break;
+        }
+        const amount = parseNumber(payload.amount);
+        if (amount === null) {
+          break;
+        }
+        const cardTitle =
+          typeof payload.card_title === "string" ? payload.card_title : null;
+        transactions.push({
+          ...recordBase,
+          id: event.id,
+          title: "Card payment",
+          subtitle: cardTitle,
+          amount: -amount,
+        });
+        break;
+      }
+      case "CARD_RECEIVE": {
+        const playerId =
+          typeof payload.player_id === "string" ? payload.player_id : null;
+        if (playerId !== currentPlayerId) {
+          break;
+        }
+        const amount = parseNumber(payload.amount);
+        if (amount === null) {
+          break;
+        }
+        const cardTitle =
+          typeof payload.card_title === "string" ? payload.card_title : null;
+        transactions.push({
+          ...recordBase,
+          id: event.id,
+          title: "Card payout",
+          subtitle: cardTitle,
+          amount,
+        });
+        break;
+      }
+      case "PAY_RENT": {
+        const amount = parseNumber(payload.amount);
+        if (amount === null) {
+          break;
+        }
+        const fromPlayerId =
+          typeof payload.from_player_id === "string"
+            ? payload.from_player_id
+            : null;
+        const toPlayerId =
+          typeof payload.to_player_id === "string"
+            ? payload.to_player_id
+            : null;
+        const tileIndex = parseNumber(payload.tile_index);
+        const tileName = getTileName(tileIndex);
+
+        if (fromPlayerId === currentPlayerId) {
+          transactions.push({
+            ...recordBase,
+            id: `${event.id}-paid`,
+            title: "Rent paid",
+            subtitle: `${tileName} → ${getPlayerName(toPlayerId)}`,
+            amount: -amount,
+          });
+          break;
+        }
+        if (toPlayerId === currentPlayerId) {
+          transactions.push({
+            ...recordBase,
+            id: `${event.id}-received`,
+            title: "Rent received",
+            subtitle: `${tileName} ← ${getPlayerName(fromPlayerId)}`,
+            amount,
+          });
+        }
+        break;
+      }
+      case "PAY_TAX": {
+        const payerId =
+          typeof payload.payer_player_id === "string"
+            ? payload.payer_player_id
+            : null;
+        if (payerId !== currentPlayerId) {
+          break;
+        }
+        const amount = parseNumber(payload.amount);
+        if (amount === null) {
+          break;
+        }
+        const tileIndex = parseNumber(payload.tile_index);
+        const tileName =
+          typeof payload.tile_name === "string"
+            ? payload.tile_name
+            : getTileName(tileIndex);
+        transactions.push({
+          ...recordBase,
+          id: event.id,
+          title: "Tax paid",
+          subtitle: tileName,
+          amount: -amount,
+        });
+        break;
+      }
+      case "JAIL_PAY_FINE": {
+        const playerId =
+          typeof payload.player_id === "string" ? payload.player_id : null;
+        if (playerId !== currentPlayerId) {
+          break;
+        }
+        const amount = parseNumber(payload.amount);
+        if (amount === null) {
+          break;
+        }
+        transactions.push({
+          ...recordBase,
+          id: event.id,
+          title: "Jail fine",
+          subtitle: "Paid to leave jail",
+          amount: -amount,
+        });
+        break;
+      }
+      case "BUY_PROPERTY": {
+        const playerId =
+          typeof payload.owner_player_id === "string"
+            ? payload.owner_player_id
+            : null;
+        if (playerId !== currentPlayerId) {
+          break;
+        }
+        const amount = parseNumber(payload.price);
+        if (amount === null) {
+          break;
+        }
+        const tileIndex = parseNumber(payload.tile_index);
+        const tileName = getTileName(tileIndex);
+        transactions.push({
+          ...recordBase,
+          id: event.id,
+          title: "Property purchase",
+          subtitle: tileName,
+          amount: -amount,
+        });
+        break;
+      }
+      case "AUCTION_WON": {
+        const winnerId =
+          typeof payload.winner_id === "string" ? payload.winner_id : null;
+        if (winnerId !== currentPlayerId) {
+          break;
+        }
+        const amount = parseNumber(payload.amount);
+        if (amount === null) {
+          break;
+        }
+        const tileIndex = parseNumber(payload.tile_index);
+        const tileName = getTileName(tileIndex);
+        transactions.push({
+          ...recordBase,
+          id: event.id,
+          title: "Auction won",
+          subtitle: tileName,
+          amount: -amount,
+        });
+        break;
+      }
+      case "COLLATERAL_LOAN_TAKEN": {
+        const playerId =
+          typeof payload.player_id === "string" ? payload.player_id : null;
+        if (playerId !== currentPlayerId) {
+          break;
+        }
+        const amount = parseNumber(payload.principal);
+        if (amount === null) {
+          break;
+        }
+        const tileIndex = parseNumber(payload.tile_index);
+        const tileName = getTileName(tileIndex);
+        transactions.push({
+          ...recordBase,
+          id: event.id,
+          title: "Loan proceeds",
+          subtitle: tileName,
+          amount,
+        });
+        break;
+      }
+      case "COLLATERAL_LOAN_PAYMENT": {
+        const playerId =
+          typeof payload.player_id === "string" ? payload.player_id : null;
+        if (playerId !== currentPlayerId) {
+          break;
+        }
+        const amount = parseNumber(payload.amount);
+        if (amount === null) {
+          break;
+        }
+        const tileIndex = parseNumber(payload.tile_index);
+        const tileName = getTileName(tileIndex);
+        transactions.push({
+          ...recordBase,
+          id: event.id,
+          title: "Loan payment",
+          subtitle: tileName,
+          amount: -amount,
+        });
+        break;
+      }
+      case "LOAN_PAID_OFF": {
+        const tileIndex = parseNumber(payload.tile_index);
+        if (
+          tileIndex === null ||
+          ownershipByTile[tileIndex]?.owner_player_id !== currentPlayerId
+        ) {
+          break;
+        }
+        const amount = parseNumber(payload.amount);
+        if (amount === null) {
+          break;
+        }
+        const tileName = getTileName(tileIndex);
+        transactions.push({
+          ...recordBase,
+          id: event.id,
+          title: "Loan payoff",
+          subtitle: tileName,
+          amount: -amount,
+        });
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  return transactions.slice(0, 10);
 };
 
 export default function PlayPage() {
@@ -225,7 +558,8 @@ export default function PlayPage() {
   const [auctionBidAmount, setAuctionBidAmount] = useState<number>(10);
   const [auctionNow, setAuctionNow] = useState<Date>(() => new Date());
   const [needsAuth, setNeedsAuth] = useState(false);
-  const [isEventLogOpen, setIsEventLogOpen] = useState(false);
+  const [isActivityPanelOpen, setIsActivityPanelOpen] = useState(false);
+  const [activityTab, setActivityTab] = useState<"log" | "transactions">("log");
   const [initialSnapshotReady, setInitialSnapshotReady] = useState(false);
   const [realtimeReady, setRealtimeReady] = useState(false);
   const [firstRoundResyncEnabled, setFirstRoundResyncEnabled] = useState(true);
@@ -2017,12 +2351,25 @@ export default function PlayPage() {
     payoffLoan !== null ||
     isLoanPayoffResolving ||
     isAuctionActive;
+  const transactions = useMemo(
+    () =>
+      derivePlayerTransactions({
+        events,
+        currentPlayerId: currentUserPlayer?.id ?? null,
+        players,
+        boardPack,
+        ownershipByTile,
+      }),
+    [boardPack, currentUserPlayer?.id, events, ownershipByTile, players],
+  );
+  const formatSignedCurrency = (amount: number) =>
+    `${amount < 0 ? "-" : "+"}$${Math.abs(amount)}`;
 
   useEffect(() => {
-    if (isEventLogSuppressed && isEventLogOpen) {
-      setIsEventLogOpen(false);
+    if (isEventLogSuppressed && isActivityPanelOpen) {
+      setIsActivityPanelOpen(false);
     }
-  }, [isEventLogOpen, isEventLogSuppressed]);
+  }, [isActivityPanelOpen, isEventLogSuppressed]);
   const auctionRemainingSeconds = useMemo(() => {
     if (!auctionTurnEndsAt) {
       return null;
@@ -3318,55 +3665,6 @@ export default function PlayPage() {
       <section className="rounded-2xl border bg-white p-5 shadow-sm space-y-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
-            Transaction History
-          </p>
-          <p className="text-sm text-neutral-600">
-            Latest activity synced to your wallet.
-          </p>
-        </div>
-        <div className="space-y-3 text-sm">
-          {[
-            {
-              title: "Rent paid to Indigo",
-              amount: "-$1,200",
-              detail: "Pacific Avenue",
-            },
-            {
-              title: "Dividend from bank",
-              amount: "+$200",
-              detail: "Community payout",
-            },
-            {
-              title: "Utility charge",
-              amount: "-$150",
-              detail: "Electric Company",
-            },
-          ].map((item) => (
-            <div
-              key={item.title}
-              className="flex items-center justify-between rounded-2xl border px-4 py-3"
-            >
-              <div>
-                <p className="font-medium text-neutral-800">{item.title}</p>
-                <p className="text-xs text-neutral-500">{item.detail}</p>
-              </div>
-              <p
-                className={`text-sm font-semibold ${
-                  item.amount.startsWith("-")
-                    ? "text-rose-500"
-                    : "text-emerald-600"
-                }`}
-              >
-                {item.amount}
-              </p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="rounded-2xl border bg-white p-5 shadow-sm space-y-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
             Trade Confirm
           </p>
           <p className="text-sm text-neutral-600">
@@ -3393,59 +3691,123 @@ export default function PlayPage() {
           <button
             className="fixed bottom-6 right-6 z-10 rounded-full bg-neutral-900 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white shadow-lg shadow-neutral-900/20 transition hover:bg-neutral-800"
             type="button"
-            onClick={() => setIsEventLogOpen(true)}
+            onClick={() => {
+              setActivityTab("log");
+              setIsActivityPanelOpen(true);
+            }}
           >
-            Log
+            Activity
           </button>
-          {isEventLogOpen ? (
+          {isActivityPanelOpen ? (
             <div
               className="fixed inset-0 z-30"
-              onClick={() => setIsEventLogOpen(false)}
+              onClick={() => setIsActivityPanelOpen(false)}
             >
               <div className="absolute inset-0 bg-black/20" />
               <div
-                className="absolute bottom-20 right-6 z-40 w-[min(90vw,360px)] rounded-2xl border bg-white p-4 shadow-2xl"
+                className="absolute bottom-20 right-6 z-40 w-[min(92vw,380px)] rounded-2xl border bg-white p-4 shadow-2xl"
                 onClick={(event) => event.stopPropagation()}
                 role="dialog"
                 aria-modal="true"
-                aria-label="Event Log"
+                aria-label="Activity"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
-                      Event Log
+                      Activity
                     </p>
                     <p className="text-sm text-neutral-600">
-                      Recent table actions synced live from the bank.
+                      Wallet-impacting updates and live table events.
                     </p>
                   </div>
                   <button
                     className="rounded-full border border-neutral-200 px-2 py-1 text-xs font-semibold text-neutral-500 transition hover:border-neutral-300 hover:text-neutral-700"
                     type="button"
-                    onClick={() => setIsEventLogOpen(false)}
+                    onClick={() => setIsActivityPanelOpen(false)}
                   >
                     Close
                   </button>
                 </div>
-                <div className="mt-4 max-h-[50vh] space-y-3 overflow-y-auto text-sm">
-                  {events.length === 0 ? (
-                    <div className="rounded-2xl border border-dashed border-neutral-200 p-4 text-center text-neutral-500">
-                      Events will appear once the game starts.
-                    </div>
-                  ) : (
-                    events.map((event) => (
-                      <div key={event.id} className="rounded-2xl border px-4 py-3">
-                        <div className="flex items-center justify-between text-xs uppercase text-neutral-400">
-                          <span>{event.event_type.replaceAll("_", " ")}</span>
-                          <span>v{event.version}</span>
-                        </div>
-                        <p className="mt-2 text-sm font-medium text-neutral-800">
-                          {formatEventDescription(event)}
-                        </p>
-                      </div>
-                    ))
-                  )}
+                <div className="mt-4 flex items-center gap-2 rounded-full bg-neutral-100 p-1 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+                  <button
+                    className={`flex-1 rounded-full px-3 py-1 transition ${
+                      activityTab === "log"
+                        ? "bg-white text-neutral-900 shadow-sm"
+                        : "text-neutral-500 hover:text-neutral-700"
+                    }`}
+                    type="button"
+                    onClick={() => setActivityTab("log")}
+                  >
+                    Log
+                  </button>
+                  <button
+                    className={`flex-1 rounded-full px-3 py-1 transition ${
+                      activityTab === "transactions"
+                        ? "bg-white text-neutral-900 shadow-sm"
+                        : "text-neutral-500 hover:text-neutral-700"
+                    }`}
+                    type="button"
+                    onClick={() => setActivityTab("transactions")}
+                  >
+                    Transactions
+                  </button>
                 </div>
+                {activityTab === "log" ? (
+                  <div className="mt-4 max-h-[50vh] space-y-3 overflow-y-auto text-sm">
+                    {events.length === 0 ? (
+                      <div className="rounded-2xl border border-dashed border-neutral-200 p-4 text-center text-neutral-500">
+                        Events will appear once the game starts.
+                      </div>
+                    ) : (
+                      events.map((event) => (
+                        <div key={event.id} className="rounded-2xl border px-4 py-3">
+                          <div className="flex items-center justify-between text-xs uppercase text-neutral-400">
+                            <span>{event.event_type.replaceAll("_", " ")}</span>
+                            <span>v{event.version}</span>
+                          </div>
+                          <p className="mt-2 text-sm font-medium text-neutral-800">
+                            {formatEventDescription(event)}
+                          </p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                ) : (
+                  <div className="mt-4 max-h-[50vh] space-y-3 overflow-y-auto text-sm">
+                    {transactions.length === 0 ? (
+                      <div className="rounded-2xl border border-dashed border-neutral-200 p-4 text-center text-neutral-500">
+                        No transactions yet.
+                      </div>
+                    ) : (
+                      transactions.map((transaction) => (
+                        <div
+                          key={transaction.id}
+                          className="flex items-center justify-between rounded-2xl border px-4 py-3"
+                        >
+                          <div>
+                            <p className="font-medium text-neutral-800">
+                              {transaction.title}
+                            </p>
+                            {transaction.subtitle ? (
+                              <p className="text-xs text-neutral-500">
+                                {transaction.subtitle}
+                              </p>
+                            ) : null}
+                          </div>
+                          <p
+                            className={`text-sm font-semibold ${
+                              transaction.amount < 0
+                                ? "text-rose-500"
+                                : "text-emerald-600"
+                            }`}
+                          >
+                            {formatSignedCurrency(transaction.amount)}
+                          </p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           ) : null}
