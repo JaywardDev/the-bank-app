@@ -272,6 +272,16 @@ export default function PlayPage() {
       return "Dice rolled";
     }
 
+    if (event.event_type === "CARD_UTILITY_ROLL") {
+      if (diceDisplay) {
+        return `Rolled ${diceDisplay} for utility rent (card effect)`;
+      }
+      if (typeof payload?.roll === "number") {
+        return `Rolled ${payload.roll} for utility rent (card effect)`;
+      }
+      return "Rolled for utility rent (card effect)";
+    }
+
     if (event.event_type === "ROLLED_DOUBLE") {
       return doublesCount !== null
         ? `Double rolled (streak ${doublesCount})`

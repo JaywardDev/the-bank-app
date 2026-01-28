@@ -543,6 +543,29 @@ const getNumberPayload = (
   return null;
 };
 
+const getBooleanPayload = (
+  payload: Record<string, unknown>,
+  key: string,
+): boolean => {
+  const value = payload[key];
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+  if (typeof value === "string") {
+    return value.toLowerCase() === "true";
+  }
+  return false;
+};
+
+const rollDice = () => {
+  const dieOne = Math.floor(Math.random() * 6) + 1;
+  const dieTwo = Math.floor(Math.random() * 6) + 1;
+  return { dice: [dieOne, dieTwo] as [number, number], total: dieOne + dieTwo };
+};
+
 const getStringPayload = (
   payload: Record<string, unknown>,
   key: string,
@@ -2045,9 +2068,8 @@ export async function POST(request: Request) {
         );
       }
 
-      const dieOne = Math.floor(Math.random() * 6) + 1;
-      const dieTwo = Math.floor(Math.random() * 6) + 1;
-      const rollTotal = dieOne + dieTwo;
+      const { dice, total: rollTotal } = rollDice();
+      const [dieOne, dieTwo] = dice;
       const isDouble = dieOne === dieTwo;
       const nextDoublesCount = isDouble ? doublesCount + 1 : 0;
       const boardPack = getBoardPackById(game.board_pack_id);
@@ -2131,7 +2153,7 @@ export async function POST(request: Request) {
               player_id: currentPlayer.id,
               player_name: currentPlayer.display_name,
               roll: rollTotal,
-              dice: [dieOne, dieTwo],
+              dice,
             } satisfies DiceEventPayload,
           },
           {
@@ -2140,7 +2162,7 @@ export async function POST(request: Request) {
               player_id: currentPlayer.id,
               player_name: currentPlayer.display_name,
               roll: rollTotal,
-              dice: [dieOne, dieTwo],
+              dice,
               doubles_count: nextDoublesCount,
             } satisfies DiceEventPayload,
           },
@@ -2272,7 +2294,7 @@ export async function POST(request: Request) {
             player_id: currentPlayer.id,
             player_name: currentPlayer.display_name,
             roll: rollTotal,
-            dice: [dieOne, dieTwo],
+            dice,
           } satisfies DiceEventPayload,
         },
       ];
@@ -2284,7 +2306,7 @@ export async function POST(request: Request) {
             player_id: currentPlayer.id,
             player_name: currentPlayer.display_name,
             roll: rollTotal,
-            dice: [dieOne, dieTwo],
+            dice,
             doubles_count: nextDoublesCount,
           } satisfies DiceEventPayload,
         });
@@ -2297,7 +2319,7 @@ export async function POST(request: Request) {
           from: currentPosition,
           to: newPosition,
           roll_total: rollTotal,
-          dice: [dieOne, dieTwo],
+          dice,
           passedStart,
           tile_id: landingTile.tile_id,
           tile_name: landingTile.name,
@@ -2337,7 +2359,9 @@ export async function POST(request: Request) {
         });
       }
       let cardTriggeredGoToJail = false;
-      let cardUtilityRollOverride: number | null = null;
+      let cardUtilityRollOverride:
+        | { total: number; dice: [number, number] }
+        | null = null;
       const eventDeck =
         landingTile.type === "EVENT"
           ? getEventDeckForTile(landingTile, boardPack)
@@ -2460,13 +2484,9 @@ export async function POST(request: Request) {
 
         if (card.kind === "MOVE_TO" || card.kind === "MOVE_REL") {
           const payload = card.payload as Record<string, unknown>;
-          const utilityRollOverride = getNumberPayload(
-            payload,
-            "utility_roll_override",
-          );
-          if (utilityRollOverride !== null) {
-            cardUtilityRollOverride = utilityRollOverride;
-          }
+          const shouldOverrideUtilityRoll =
+            card.kind === "MOVE_TO" &&
+            getBooleanPayload(payload, "utility_roll_override");
           const targetIndex =
             card.kind === "MOVE_TO"
               ? resolveMoveToTargetIndex(payload, boardTiles, activeResolvedTile.index)
@@ -2514,6 +2534,26 @@ export async function POST(request: Request) {
             activeLandingTile = cardLandingTile;
             activeResolvedTile = cardResolvedTile;
             finalPosition = cardResolvedTile.index;
+            if (
+              shouldOverrideUtilityRoll &&
+              cardLandingTile.type === "UTILITY"
+            ) {
+              const overrideRoll = rollDice();
+              cardUtilityRollOverride = overrideRoll;
+              events.push({
+                event_type: "CARD_UTILITY_ROLL",
+                payload: {
+                  player_id: currentPlayer.id,
+                  player_name: currentPlayer.display_name,
+                  roll: overrideRoll.total,
+                  dice: overrideRoll.dice,
+                  tile_id: cardLandingTile.tile_id,
+                  tile_index: cardLandingTile.index,
+                  card_id: card.id,
+                  card_title: card.title,
+                },
+              });
+            }
             events.push({
               event_type: card.kind === "MOVE_TO" ? "CARD_MOVE_TO" : "CARD_MOVE_REL",
               payload: {
@@ -2674,8 +2714,10 @@ export async function POST(request: Request) {
       const rentCalculation = isCollateralized
         ? { amount: 0, meta: null }
         : (() => {
-            const rentDiceTotal = rollTotal;
-            // TODO: allow cardUtilityRollOverride to replace rentDiceTotal for utility rent.
+            const rentDiceTotal =
+              activeLandingTile.type === "UTILITY" && cardUtilityRollOverride
+                ? cardUtilityRollOverride.total
+                : rollTotal;
             return calculateRent({
               tile: activeLandingTile,
               ownerId: rentOwnerId,
@@ -2685,6 +2727,9 @@ export async function POST(request: Request) {
               diceTotal: rentDiceTotal,
             });
           })();
+      if (activeLandingTile.type === "UTILITY" && cardUtilityRollOverride) {
+        cardUtilityRollOverride = null;
+      }
       const rentAmount = rentCalculation.amount;
       let shouldPayRent = rentAmount > 0 && Boolean(rentOwnerId);
       const isUnownedOwnableTile = isOwnableTile && !ownership;
@@ -3562,10 +3607,8 @@ export async function POST(request: Request) {
         );
       }
 
-      const dieOne = Math.floor(Math.random() * 6) + 1;
-      const dieTwo = Math.floor(Math.random() * 6) + 1;
-      const rollTotal = dieOne + dieTwo;
-      const dice = [dieOne, dieTwo];
+      const { dice, total: rollTotal } = rollDice();
+      const [dieOne, dieTwo] = dice;
       const isDouble = dieOne === dieTwo;
       const doublesCount = gameState?.doubles_count ?? 0;
       const allowDoublesBonus = false;
@@ -3904,7 +3947,9 @@ export async function POST(request: Request) {
         });
       }
       let cardTriggeredGoToJail = false;
-      let cardUtilityRollOverride: number | null = null;
+      let cardUtilityRollOverride:
+        | { total: number; dice: [number, number] }
+        | null = null;
       const eventDeck =
         landingTile.type === "EVENT"
           ? getEventDeckForTile(landingTile, boardPack)
@@ -4027,13 +4072,9 @@ export async function POST(request: Request) {
 
         if (card.kind === "MOVE_TO" || card.kind === "MOVE_REL") {
           const payload = card.payload as Record<string, unknown>;
-          const utilityRollOverride = getNumberPayload(
-            payload,
-            "utility_roll_override",
-          );
-          if (utilityRollOverride !== null) {
-            cardUtilityRollOverride = utilityRollOverride;
-          }
+          const shouldOverrideUtilityRoll =
+            card.kind === "MOVE_TO" &&
+            getBooleanPayload(payload, "utility_roll_override");
           const targetIndex =
             card.kind === "MOVE_TO"
               ? resolveMoveToTargetIndex(payload, boardTiles, activeResolvedTile.index)
@@ -4081,6 +4122,26 @@ export async function POST(request: Request) {
             activeLandingTile = cardLandingTile;
             activeResolvedTile = cardResolvedTile;
             finalPosition = cardResolvedTile.index;
+            if (
+              shouldOverrideUtilityRoll &&
+              cardLandingTile.type === "UTILITY"
+            ) {
+              const overrideRoll = rollDice();
+              cardUtilityRollOverride = overrideRoll;
+              events.push({
+                event_type: "CARD_UTILITY_ROLL",
+                payload: {
+                  player_id: currentPlayer.id,
+                  player_name: currentPlayer.display_name,
+                  roll: overrideRoll.total,
+                  dice: overrideRoll.dice,
+                  tile_id: cardLandingTile.tile_id,
+                  tile_index: cardLandingTile.index,
+                  card_id: card.id,
+                  card_title: card.title,
+                },
+              });
+            }
             events.push({
               event_type: card.kind === "MOVE_TO" ? "CARD_MOVE_TO" : "CARD_MOVE_REL",
               payload: {
@@ -4241,8 +4302,10 @@ export async function POST(request: Request) {
       const rentCalculation = isCollateralized
         ? { amount: 0, meta: null }
         : (() => {
-            const rentDiceTotal = rollTotal;
-            // TODO: allow cardUtilityRollOverride to replace rentDiceTotal for utility rent.
+            const rentDiceTotal =
+              activeLandingTile.type === "UTILITY" && cardUtilityRollOverride
+                ? cardUtilityRollOverride.total
+                : rollTotal;
             return calculateRent({
               tile: activeLandingTile,
               ownerId: rentOwnerId,
@@ -4252,6 +4315,9 @@ export async function POST(request: Request) {
               diceTotal: rentDiceTotal,
             });
           })();
+      if (activeLandingTile.type === "UTILITY" && cardUtilityRollOverride) {
+        cardUtilityRollOverride = null;
+      }
       const rentAmount = rentCalculation.amount;
       let shouldPayRent = rentAmount > 0 && Boolean(rentOwnerId);
       const isUnownedOwnableTile = isOwnableTile && !ownership;

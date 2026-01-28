@@ -468,6 +468,35 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
         return `${playerName} drew ${deck}: ${cardTitle}`;
       }
 
+      if (event.event_type === "CARD_UTILITY_ROLL") {
+        const payload = event.payload as
+          | {
+              roll?: unknown;
+              dice?: unknown;
+            }
+          | null;
+        const dice = payload?.dice;
+        const diceDisplay =
+          Array.isArray(dice) &&
+          dice.length >= 2 &&
+          typeof dice[0] === "number" &&
+          typeof dice[1] === "number"
+            ? `🎲 ${dice[0]} + ${dice[1]}`
+            : null;
+        if (diceDisplay) {
+          return `Rolled ${diceDisplay} for utility rent (card effect)`;
+        }
+        const roll =
+          typeof payload?.roll === "number"
+            ? payload.roll
+            : typeof payload?.roll === "string"
+              ? Number.parseInt(payload.roll, 10)
+              : null;
+        return roll !== null
+          ? `Rolled ${roll} for utility rent (card effect)`
+          : "Rolled for utility rent (card effect)";
+      }
+
       if (event.event_type === "CARD_PAY") {
         const payload = event.payload as
           | {
