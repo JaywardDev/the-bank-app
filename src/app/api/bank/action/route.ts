@@ -49,10 +49,12 @@ type BankActionRequest =
         | "JAIL_PAY_FINE"
         | "JAIL_ROLL_FOR_DOUBLES"
         | "USE_GET_OUT_OF_JAIL_FREE"
-        | "CONFIRM_PENDING_CARD",
+        | "CONFIRM_PENDING_CARD"
+        | "PAYOFF_COLLATERAL_LOAN",
         "DECLINE_PROPERTY" | "BUY_PROPERTY"
       >;
       tileIndex?: number;
+      loanId?: string;
     })
   | (BaseActionRequest & {
       action: "DECLINE_PROPERTY" | "BUY_PROPERTY";
@@ -68,6 +70,10 @@ type BankActionRequest =
   | (BaseActionRequest & {
       action: "TAKE_COLLATERAL_LOAN";
       tileIndex: number;
+    })
+  | (BaseActionRequest & {
+      action: "PAYOFF_COLLATERAL_LOAN";
+      loanId: string;
     });
 
 type SupabaseUser = {
@@ -158,6 +164,7 @@ type PlayerLoanRow = {
   player_id: string;
   collateral_tile_index: number;
   principal: number;
+  remaining_principal: number;
   rate_per_turn: number;
   term_turns: number;
   turns_remaining: number;
@@ -1716,7 +1723,7 @@ const applyLoanPaymentsForPlayer = async ({
   startingCash: number;
 }) => {
   const activeLoans = (await fetchFromSupabaseWithService<PlayerLoanRow[]>(
-    `player_loans?select=id,collateral_tile_index,principal,rate_per_turn,term_turns,turns_remaining,payment_per_turn,status&game_id=eq.${gameId}&player_id=eq.${player.id}&status=eq.active`,
+    `player_loans?select=id,collateral_tile_index,principal,remaining_principal,rate_per_turn,term_turns,turns_remaining,payment_per_turn,status&game_id=eq.${gameId}&player_id=eq.${player.id}&status=eq.active`,
     { method: "GET" },
   )) ?? [];
 
@@ -1741,6 +1748,14 @@ const applyLoanPaymentsForPlayer = async ({
     const paymentAmount = loan.payment_per_turn;
     const currentBalance = updatedBalances[player.id] ?? startingCash;
     const nextBalance = currentBalance - paymentAmount;
+    const remainingPrincipal =
+      typeof loan.remaining_principal === "number"
+        ? loan.remaining_principal
+        : loan.principal;
+    const remainingPrincipalAfter = Math.max(
+      0,
+      remainingPrincipal - paymentAmount,
+    );
     updatedBalances = {
       ...updatedBalances,
       [player.id]: nextBalance,
@@ -1757,13 +1772,17 @@ const applyLoanPaymentsForPlayer = async ({
     }
 
     const turnsRemainingAfter = Math.max(0, loan.turns_remaining - 1);
-    const status = turnsRemainingAfter === 0 ? "paid" : "active";
+    const status =
+      turnsRemainingAfter === 0 || remainingPrincipalAfter === 0
+        ? "paid"
+        : "active";
 
     await fetchFromSupabaseWithService(`player_loans?id=eq.${loan.id}`, {
       method: "PATCH",
       body: JSON.stringify({
         turns_remaining: turnsRemainingAfter,
         status,
+        remaining_principal: remainingPrincipalAfter,
         updated_at: new Date().toISOString(),
       }),
     });
@@ -4064,6 +4083,108 @@ export async function POST(request: Request) {
       if (!rpcResult?.game_state || !rpcResult?.property_ownership) {
         return NextResponse.json(
           { error: "Unable to create collateral loan." },
+          { status: 500 },
+        );
+      }
+
+      return NextResponse.json({
+        gameState: rpcResult.game_state,
+        ownership: rpcResult.property_ownership,
+        loan: rpcResult.player_loan ?? null,
+      });
+    }
+
+    if (body.action === "PAYOFF_COLLATERAL_LOAN") {
+      if (!body.loanId) {
+        return NextResponse.json(
+          { error: "Missing collateral loan." },
+          { status: 400 },
+        );
+      }
+
+      const rpcResponse = await fetch(
+        `${supabaseUrl}/rest/v1/rpc/payoff_collateral_loan`,
+        {
+          method: "POST",
+          headers: bankHeaders,
+          body: JSON.stringify({
+            game_id: gameId,
+            player_id: currentPlayer.id,
+            loan_id: body.loanId,
+            expected_version: currentVersion,
+            actor_user_id: user.id,
+          }),
+        },
+      );
+
+      if (!rpcResponse.ok) {
+        const errorText = await rpcResponse.text();
+        let errorMessage = errorText;
+        try {
+          const parsed = JSON.parse(errorText) as { message?: string };
+          if (parsed?.message) {
+            errorMessage = parsed.message;
+          }
+        } catch {
+          // noop
+        }
+
+        if (errorMessage === "VERSION_MISMATCH") {
+          return NextResponse.json(
+            { error: "Version mismatch." },
+            { status: 409 },
+          );
+        }
+        if (errorMessage === "LOAN_NOT_ACTIVE") {
+          return NextResponse.json(
+            { error: "Loan already paid." },
+            { status: 409 },
+          );
+        }
+        if (errorMessage === "INSUFFICIENT_FUNDS") {
+          return NextResponse.json(
+            { error: "Not enough cash to pay off loan." },
+            { status: 409 },
+          );
+        }
+        if (errorMessage === "COLLATERAL_NOT_LINKED") {
+          return NextResponse.json(
+            { error: "Collateral is not linked to this loan." },
+            { status: 409 },
+          );
+        }
+        if (errorMessage === "COLLATERAL_NOT_FOUND") {
+          return NextResponse.json(
+            { error: "Collateral tile not found." },
+            { status: 409 },
+          );
+        }
+        if (errorMessage === "LOAN_NOT_FOUND") {
+          return NextResponse.json(
+            { error: "Loan not found." },
+            { status: 404 },
+          );
+        }
+
+        console.error("[Bank][CollateralLoan] Payoff RPC failed", {
+          status: rpcResponse.status,
+          error: errorText,
+        });
+        return NextResponse.json(
+          { error: "Unable to pay off collateral loan." },
+          { status: 500 },
+        );
+      }
+
+      const [rpcResult] = (await rpcResponse.json()) as Array<{
+        game_state: GameStateRow;
+        property_ownership: OwnershipRow;
+        player_loan: PlayerLoanRow;
+      }>;
+
+      if (!rpcResult?.game_state || !rpcResult?.property_ownership) {
+        return NextResponse.json(
+          { error: "Unable to pay off collateral loan." },
           { status: 500 },
         );
       }

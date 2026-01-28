@@ -988,6 +988,38 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
         return `Loan paid off on ${tileLabel}`;
       }
 
+      if (event.event_type === "LOAN_PAID_OFF") {
+        const payload = event.payload as
+          | {
+              tile_index?: unknown;
+              amount?: unknown;
+            }
+          | null;
+        const tileIndexRaw = payload?.tile_index;
+        const tileIndex =
+          typeof tileIndexRaw === "number"
+            ? tileIndexRaw
+            : typeof tileIndexRaw === "string"
+              ? Number.parseInt(tileIndexRaw, 10)
+              : null;
+        const tileNameFromBoard =
+          tileIndex !== null
+            ? boardPack?.tiles?.find((entry) => entry.index === tileIndex)?.name
+            : null;
+        const tileLabel =
+          tileNameFromBoard ?? (tileIndex !== null ? `Tile ${tileIndex}` : "tile");
+        const amount =
+          typeof payload?.amount === "number"
+            ? payload.amount
+            : typeof payload?.amount === "string"
+              ? Number.parseInt(payload.amount, 10)
+              : null;
+        if (amount !== null) {
+          return `Loan paid off early on ${tileLabel} for $${amount}`;
+        }
+        return `Loan paid off early on ${tileLabel}`;
+      }
+
       if (event.event_type === "PAY_TAX") {
         const payload = event.payload as
           | {

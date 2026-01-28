@@ -92,6 +92,7 @@ type PlayerLoan = {
   player_id: string;
   collateral_tile_index: number;
   principal: number;
+  remaining_principal: number;
   rate_per_turn: number;
   term_turns: number;
   turns_remaining: number;
@@ -199,6 +200,7 @@ export default function PlayPage() {
   const [events, setEvents] = useState<GameEvent[]>([]);
   const [ownershipByTile, setOwnershipByTile] = useState<OwnershipByTile>({});
   const [playerLoans, setPlayerLoans] = useState<PlayerLoan[]>([]);
+  const [payoffLoan, setPayoffLoan] = useState<PlayerLoan | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -864,6 +866,32 @@ export default function PlayPage() {
       return `Loan paid off on ${tileLabel}`;
     }
 
+    if (event.event_type === "LOAN_PAID_OFF") {
+      const tileIndexRaw = payload?.tile_index;
+      const tileIndex =
+        typeof tileIndexRaw === "number"
+          ? tileIndexRaw
+          : typeof tileIndexRaw === "string"
+            ? Number.parseInt(tileIndexRaw, 10)
+            : null;
+      const tileNameFromBoard =
+        tileIndex !== null
+          ? boardPack?.tiles?.find((entry) => entry.index === tileIndex)?.name
+          : null;
+      const tileLabel =
+        tileNameFromBoard ?? (tileIndex !== null ? `Tile ${tileIndex}` : "tile");
+      const amount =
+        typeof payload?.amount === "number"
+          ? payload.amount
+          : typeof payload?.amount === "string"
+            ? Number.parseInt(payload.amount, 10)
+            : null;
+      if (amount !== null) {
+        return `Loan paid off early on ${tileLabel} for $${amount}`;
+      }
+      return `Loan paid off early on ${tileLabel}`;
+    }
+
     if (event.event_type === "PAY_TAX") {
       const tileIndexRaw = payload?.tile_index;
       const tileIndex =
@@ -1063,7 +1091,7 @@ export default function PlayPage() {
         return;
       }
       const loanRows = await supabaseClient.fetchFromSupabase<PlayerLoan[]>(
-        `player_loans?select=id,player_id,collateral_tile_index,principal,rate_per_turn,term_turns,turns_remaining,payment_per_turn,status&game_id=eq.${activeGameId}&player_id=eq.${playerId}`,
+        `player_loans?select=id,player_id,collateral_tile_index,principal,remaining_principal,rate_per_turn,term_turns,turns_remaining,payment_per_turn,status&game_id=eq.${activeGameId}&player_id=eq.${playerId}`,
         { method: "GET" },
         accessToken,
       );
@@ -1939,11 +1967,13 @@ export default function PlayPage() {
         | { action: "DECLINE_PROPERTY" | "BUY_PROPERTY"; tileIndex: number }
         | { action: "AUCTION_BID"; amount: number }
         | { action: "AUCTION_PASS" }
-        | { action: "TAKE_COLLATERAL_LOAN"; tileIndex: number },
+        | { action: "TAKE_COLLATERAL_LOAN"; tileIndex: number }
+        | { action: "PAYOFF_COLLATERAL_LOAN"; loanId: string },
     ) => {
       const { action } = request;
       const tileIndex = "tileIndex" in request ? request.tileIndex : undefined;
       const amount = "amount" in request ? request.amount : undefined;
+      const loanId = "loanId" in request ? request.loanId : undefined;
       if (!session || !gameId) {
         setNotice("Join a game lobby first.");
         return;
@@ -2006,6 +2036,7 @@ export default function PlayPage() {
               action,
               tileIndex,
               amount,
+              loanId,
               expectedVersion: snapshotVersion,
             }),
           });
@@ -2630,6 +2661,56 @@ export default function PlayPage() {
             </div>
           </>
         ) : null}
+        {payoffLoan ? (
+          <>
+            <div className="fixed inset-0 z-20 bg-black/40 backdrop-blur-[1px]" />
+            <div className="fixed inset-0 z-30 flex items-center justify-center p-4">
+              <div className="w-full max-w-md rounded-3xl border border-neutral-200 bg-white/95 p-5 shadow-2xl backdrop-blur">
+                <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                  Pay off loan
+                </p>
+                <p className="text-lg font-semibold text-neutral-900">
+                  {boardPack?.tiles?.find(
+                    (entry) => entry.index === payoffLoan.collateral_tile_index,
+                  )?.name ?? `Tile ${payoffLoan.collateral_tile_index}`}
+                </p>
+                <p className="mt-2 text-sm text-neutral-600">
+                  Pay ${payoffLoan.remaining_principal} to release the collateral
+                  and re-enable rent immediately.
+                </p>
+                <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                  <button
+                    className="rounded-2xl border px-4 py-2 text-sm font-semibold text-neutral-700"
+                    type="button"
+                    onClick={() => setPayoffLoan(null)}
+                    disabled={actionLoading === "PAYOFF_COLLATERAL_LOAN"}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="rounded-2xl bg-neutral-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
+                    type="button"
+                    onClick={() => {
+                      void handleBankAction({
+                        action: "PAYOFF_COLLATERAL_LOAN",
+                        loanId: payoffLoan.id,
+                      });
+                      setPayoffLoan(null);
+                    }}
+                    disabled={
+                      actionLoading === "PAYOFF_COLLATERAL_LOAN" ||
+                      payoffLoan.remaining_principal > myPlayerBalance
+                    }
+                  >
+                    {actionLoading === "PAYOFF_COLLATERAL_LOAN"
+                      ? "Paying…"
+                      : `Pay $${payoffLoan.remaining_principal}`}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </>
+        ) : null}
         {isAuctionActive ? (
           <>
             <div className="fixed inset-0 z-10 bg-black/35 backdrop-blur-[1px]" />
@@ -2953,6 +3034,14 @@ export default function PlayPage() {
                   boardPack?.tiles?.find(
                     (entry) => entry.index === loan.collateral_tile_index,
                   )?.name ?? `Tile ${loan.collateral_tile_index}`;
+                const payoffAmount =
+                  typeof loan.remaining_principal === "number"
+                    ? loan.remaining_principal
+                    : loan.principal;
+                const canPayoff =
+                  canAct &&
+                  payoffAmount > 0 &&
+                  myPlayerBalance >= payoffAmount;
                 return (
                   <div
                     key={loan.id}
@@ -2966,7 +3055,26 @@ export default function PlayPage() {
                         Payment: ${loan.payment_per_turn} · Turns remaining:{" "}
                         {loan.turns_remaining}
                       </p>
+                      <p className="text-xs text-neutral-500">
+                        Remaining balance: ${payoffAmount}
+                      </p>
                     </div>
+                    <button
+                      className="rounded-full border border-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
+                      type="button"
+                      onClick={() => setPayoffLoan(loan)}
+                      disabled={
+                        !canPayoff ||
+                        actionLoading === "PAYOFF_COLLATERAL_LOAN"
+                      }
+                      title={
+                        canPayoff
+                          ? "Pay off this loan"
+                          : "Not enough cash to pay off"
+                      }
+                    >
+                      Pay off
+                    </button>
                   </div>
                 );
               })}
