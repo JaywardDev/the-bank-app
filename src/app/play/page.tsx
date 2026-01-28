@@ -208,6 +208,15 @@ export default function PlayPage() {
   const [boardZoomed, setBoardZoomed] = useState(false);
   const [auctionBidAmount, setAuctionBidAmount] = useState<number>(10);
   const [auctionNow, setAuctionNow] = useState<Date>(() => new Date());
+  const [pendingCardHold, setPendingCardHold] = useState<{
+    deck: "CHANCE" | "COMMUNITY" | null;
+    title: string;
+    kind: string | null;
+    payload: Record<string, unknown> | null;
+    drawnBy: string | null;
+  } | null>(null);
+  const [cardResolving, setCardResolving] = useState(false);
+  const [auctionClosing, setAuctionClosing] = useState(false);
   const [needsAuth, setNeedsAuth] = useState(false);
   const [initialSnapshotReady, setInitialSnapshotReady] = useState(false);
   const [realtimeReady, setRealtimeReady] = useState(false);
@@ -217,6 +226,7 @@ export default function PlayPage() {
   const refreshInFlightRef = useRef(false);
   const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
   const realtimeReconciledRef = useRef(false);
+  const auctionActiveRef = useRef(false);
   const firstRoundEndTurnsRef = useRef<Set<string>>(new Set());
   const firstRoundResyncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -1758,22 +1768,27 @@ export default function PlayPage() {
     gameState?.pending_card_title,
     gameState?.pending_card_drawn_by_player_id,
   ]);
+  const displayPendingCard = pendingCard ?? pendingCardHold;
   const pendingCardDescription = useMemo(
     () =>
-      pendingCard
-        ? getPendingCardDescription(pendingCard.kind, pendingCard.payload, boardPack)
+      displayPendingCard
+        ? getPendingCardDescription(
+            displayPendingCard.kind,
+            displayPendingCard.payload,
+            boardPack,
+          )
         : null,
-    [boardPack, pendingCard],
+    [boardPack, displayPendingCard],
   );
   const pendingCardActorName = useMemo(() => {
-    if (!pendingCard?.drawnBy) {
+    if (!displayPendingCard?.drawnBy) {
       return null;
     }
     return (
-      players.find((player) => player.id === pendingCard.drawnBy)?.display_name ??
-      "Player"
+      players.find((player) => player.id === displayPendingCard.drawnBy)
+        ?.display_name ?? "Player"
     );
-  }, [pendingCard?.drawnBy, players]);
+  }, [displayPendingCard?.drawnBy, players]);
   const pendingTile = useMemo(() => {
     if (!pendingPurchase) {
       return null;
@@ -1830,9 +1845,9 @@ export default function PlayPage() {
     currentUserPlayer?.id === pendingCard?.drawnBy &&
     gameState?.turn_phase === "AWAITING_CARD_CONFIRM";
   const pendingDeckLabel =
-    pendingCard?.deck === "CHANCE"
+    displayPendingCard?.deck === "CHANCE"
       ? "Chance"
-      : pendingCard?.deck === "COMMUNITY"
+      : displayPendingCard?.deck === "COMMUNITY"
         ? "Community"
         : "Card";
   const realtimeStatusLabel = realtimeReady ? "Live" : "Syncing…";
@@ -1911,6 +1926,192 @@ export default function PlayPage() {
     isCurrentAuctionBidder &&
     auctionBidAmount >= auctionBidMinimum &&
     auctionBidAmount <= currentBidderCash;
+  const showBlockingOverlay = Boolean(
+    pendingCard ||
+      isAuctionActive ||
+      auctionClosing ||
+      payoffLoan ||
+      showJailDecisionPanel ||
+      showPendingDecisionCard,
+  );
+  const awaitingOtherPlayer =
+    !isMyTurn &&
+    isInProgress &&
+    currentPlayer?.display_name &&
+    !isAuctionActive &&
+    !auctionClosing &&
+    !pendingCard &&
+    !showPendingDecisionBanner;
+  const turnStatusLabel = useMemo(() => {
+    if (hasGameMetaError) {
+      return "Check access";
+    }
+    if (!isInProgress) {
+      return "Waiting for start";
+    }
+    if (pendingCard) {
+      return canConfirmPendingCard
+        ? "Card revealed — confirm to continue"
+        : `Waiting for ${pendingCardActorName ?? "player"} to confirm card`;
+    }
+    if (isAuctionActive || auctionClosing) {
+      if (auctionClosing) {
+        return "Resolving auction…";
+      }
+      return isCurrentAuctionBidder
+        ? "Auction — your bid or pass"
+        : `Auction: waiting for ${auctionTurnPlayerName ?? "next bidder"}`;
+    }
+    if (showJailDecisionPanel) {
+      return "In jail — choose an option";
+    }
+    if (hasPendingDecision) {
+      return isMyTurn
+        ? "Property decision — buy or auction"
+        : `Waiting for ${currentPlayer?.display_name ?? "player"} to decide`;
+    }
+    if (isMyTurn) {
+      if (canRoll) {
+        return "Your turn — roll the dice";
+      }
+      if (canEndTurn) {
+        return "Your turn — end your turn";
+      }
+      return "Your turn — resolve next step";
+    }
+    return `Waiting for ${currentPlayer?.display_name ?? "next player"}`;
+  }, [
+    auctionClosing,
+    canConfirmPendingCard,
+    canEndTurn,
+    canRoll,
+    currentPlayer?.display_name,
+    hasGameMetaError,
+    hasPendingDecision,
+    isAuctionActive,
+    isCurrentAuctionBidder,
+    isInProgress,
+    isMyTurn,
+    pendingCard,
+    pendingCardActorName,
+    showJailDecisionPanel,
+    auctionTurnPlayerName,
+  ]);
+  const rollDisabledReason = useMemo(() => {
+    if (canRoll) {
+      return null;
+    }
+    if (!initialSnapshotReady) {
+      return "Syncing game state…";
+    }
+    if (!isMyTurn) {
+      return `Waiting for ${currentPlayer?.display_name ?? "other player"}`;
+    }
+    if (hasPendingCard) {
+      return "Resolve card to continue";
+    }
+    if (isAuctionActive) {
+      return "Auction in progress";
+    }
+    if (showJailDecisionPanel) {
+      return "Jail decision required";
+    }
+    if (hasPendingDecision) {
+      return "Resolve property decision";
+    }
+    if (isEliminated) {
+      return "You are eliminated";
+    }
+    return "Roll not available yet";
+  }, [
+    canRoll,
+    currentPlayer?.display_name,
+    hasPendingCard,
+    hasPendingDecision,
+    initialSnapshotReady,
+    isAuctionActive,
+    isEliminated,
+    isMyTurn,
+    showJailDecisionPanel,
+  ]);
+  const endTurnDisabledReason = useMemo(() => {
+    if (canEndTurn) {
+      return null;
+    }
+    if (!initialSnapshotReady) {
+      return "Syncing game state…";
+    }
+    if (!isMyTurn) {
+      return `Waiting for ${currentPlayer?.display_name ?? "other player"}`;
+    }
+    if (hasPendingCard) {
+      return "Resolve card to continue";
+    }
+    if (isAuctionActive) {
+      return "Auction in progress";
+    }
+    if (showJailDecisionPanel) {
+      return "Jail decision required";
+    }
+    if (hasPendingDecision) {
+      return "Resolve property decision";
+    }
+    if (gameState?.last_roll == null) {
+      return "Roll the dice to end your turn";
+    }
+    if (isEliminated) {
+      return "You are eliminated";
+    }
+    return "End turn unavailable";
+  }, [
+    canEndTurn,
+    currentPlayer?.display_name,
+    gameState?.last_roll,
+    hasPendingCard,
+    hasPendingDecision,
+    initialSnapshotReady,
+    isAuctionActive,
+    isEliminated,
+    isMyTurn,
+    showJailDecisionPanel,
+  ]);
+  const actionBlockedReason = useMemo(() => {
+    if (canAct) {
+      return null;
+    }
+    if (!initialSnapshotReady) {
+      return "Syncing game state…";
+    }
+    if (!isMyTurn) {
+      return `Waiting for ${currentPlayer?.display_name ?? "other player"}`;
+    }
+    if (hasPendingCard) {
+      return "Resolve card to continue";
+    }
+    if (isAuctionActive) {
+      return "Auction in progress";
+    }
+    if (showJailDecisionPanel) {
+      return "Jail decision required";
+    }
+    if (hasPendingDecision) {
+      return "Resolve property decision";
+    }
+    if (isEliminated) {
+      return "You are eliminated";
+    }
+    return "Action unavailable";
+  }, [
+    canAct,
+    currentPlayer?.display_name,
+    hasPendingCard,
+    hasPendingDecision,
+    initialSnapshotReady,
+    isAuctionActive,
+    isEliminated,
+    isMyTurn,
+    showJailDecisionPanel,
+  ]);
 
   useEffect(() => {
     if (!gameId || !session?.access_token) {
@@ -1929,6 +2130,29 @@ export default function PlayPage() {
     }, 1000);
     return () => clearInterval(interval);
   }, [isAuctionActive, auctionTurnEndsAt]);
+
+  useEffect(() => {
+    const wasActive = auctionActiveRef.current;
+    if (wasActive && !isAuctionActive) {
+      setAuctionClosing(true);
+      const timeout = setTimeout(() => {
+        setAuctionClosing(false);
+      }, 250);
+      return () => clearTimeout(timeout);
+    }
+    auctionActiveRef.current = isAuctionActive;
+    return undefined;
+  }, [isAuctionActive]);
+
+  useEffect(() => {
+    if (pendingCard) {
+      setPendingCardHold(pendingCard);
+      return;
+    }
+    if (!cardResolving) {
+      setPendingCardHold(null);
+    }
+  }, [cardResolving, pendingCard]);
 
   useEffect(() => {
     if (!isAuctionActive || !isCurrentAuctionBidder) {
@@ -2213,6 +2437,10 @@ export default function PlayPage() {
     if (!canConfirmPendingCard) {
       return;
     }
+    setCardResolving(true);
+    setTimeout(() => {
+      setCardResolving(false);
+    }, 250);
     void handleBankAction({ action: "CONFIRM_PENDING_CARD" });
   }, [canConfirmPendingCard, handleBankAction]);
 
@@ -2422,9 +2650,15 @@ export default function PlayPage() {
         <>
           <section className="space-y-4">
         <div className="relative">
+        {showJailDecisionPanel ? (
+          <div className="fixed inset-0 z-10 bg-black/30 backdrop-blur-[1px]" />
+        ) : null}
+        {showBlockingOverlay && !showJailDecisionPanel ? (
+          <div className="fixed inset-0 z-10 bg-black/20 backdrop-blur-[1px]" />
+        ) : null}
         <div
           className={`rounded-2xl border bg-white p-5 shadow-sm space-y-4 ${
-            isAuctionActive ? "pointer-events-none opacity-50" : ""
+            isAuctionActive || auctionClosing ? "pointer-events-none opacity-50" : ""
           }`}
         >
           <div className="flex items-start justify-between">
@@ -2472,13 +2706,7 @@ export default function PlayPage() {
                 Turn status
               </p>
               <p className="text-sm font-semibold text-neutral-700">
-                {hasGameMetaError
-                  ? "Check access"
-                  : isInProgress
-                    ? isMyTurn
-                      ? "Your turn"
-                      : "Stand by"
-                    : "Waiting"}
+                {turnStatusLabel}
               </p>
               <p className="text-[11px] font-medium uppercase tracking-wide text-neutral-400">
                 {realtimeStatusLabel}
@@ -2486,7 +2714,7 @@ export default function PlayPage() {
             </div>
           </div>
           {showJailDecisionPanel ? (
-            <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
+            <div className="relative z-20 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900 shadow-lg">
               <p className="text-xs font-semibold uppercase tracking-wide text-rose-700">
                 Jail decision
               </p>
@@ -2533,32 +2761,49 @@ export default function PlayPage() {
                     : "Roll for doubles"}
                 </button>
               </div>
+              <p className="mt-2 text-xs text-rose-700">
+                You must choose a jail option to continue your turn.
+              </p>
             </div>
           ) : null}
           <div className="grid gap-3 sm:grid-cols-2">
-            <button
-              className="rounded-2xl bg-neutral-900 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
-              type="button"
-              onClick={() => void handleBankAction({ action: "ROLL_DICE" })}
-              disabled={
-                !canRoll ||
-                actionLoading === "ROLL_DICE"
-              }
-            >
-              {actionLoading === "ROLL_DICE" ? "Rolling…" : "Roll Dice"}
-            </button>
-            <button
-              className="rounded-2xl border px-4 py-3 text-sm font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
-              type="button"
-              onClick={() => void handleBankAction({ action: "END_TURN" })}
-              disabled={
-                !canEndTurn ||
-                actionLoading === "END_TURN"
-              }
-            >
-              {actionLoading === "END_TURN" ? "Ending…" : "End Turn"}
-            </button>
+            <div className="space-y-1">
+              <button
+                className="rounded-2xl bg-neutral-900 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
+                type="button"
+                onClick={() => void handleBankAction({ action: "ROLL_DICE" })}
+                disabled={!canRoll || actionLoading === "ROLL_DICE"}
+              >
+                {actionLoading === "ROLL_DICE" ? "Rolling…" : "Roll Dice"}
+              </button>
+              {rollDisabledReason ? (
+                <p className="text-[11px] text-neutral-400">
+                  {rollDisabledReason}
+                </p>
+              ) : null}
+            </div>
+            <div className="space-y-1">
+              <button
+                className="rounded-2xl border px-4 py-3 text-sm font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
+                type="button"
+                onClick={() => void handleBankAction({ action: "END_TURN" })}
+                disabled={!canEndTurn || actionLoading === "END_TURN"}
+              >
+                {actionLoading === "END_TURN" ? "Ending…" : "End Turn"}
+              </button>
+              {endTurnDisabledReason ? (
+                <p className="text-[11px] text-neutral-400">
+                  {endTurnDisabledReason}
+                </p>
+              ) : null}
+            </div>
           </div>
+          {awaitingOtherPlayer ? (
+            <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-600">
+              Waiting for {currentPlayer?.display_name ?? "another player"} to
+              take their turn…
+            </div>
+          ) : null}
           {showPendingDecisionCard && pendingPurchase ? (
             <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
               <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
@@ -2576,32 +2821,40 @@ export default function PlayPage() {
                 </p>
               ) : null}
               <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                <button
-                  className="rounded-2xl bg-amber-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-amber-300"
-                  type="button"
-                  onClick={handleBuyProperty}
-                  disabled={
-                    actionLoading === "BUY_PROPERTY" || !canAffordPendingPurchase
-                  }
-                  title={
-                    canAffordPendingPurchase
-                      ? "Buy this property"
-                      : "Not enough cash to buy"
-                  }
-                >
-                  {actionLoading === "BUY_PROPERTY" ? "Buying…" : "Buy"}
-                </button>
-                <button
-                  className="rounded-2xl border border-amber-300 px-4 py-2 text-sm font-semibold text-amber-900 disabled:cursor-not-allowed disabled:border-amber-200 disabled:text-amber-400"
-                  type="button"
-                  onClick={handleDeclineProperty}
-                  disabled={actionLoading === "DECLINE_PROPERTY"}
-                  title="Start auction for this property"
-                >
-                  {actionLoading === "DECLINE_PROPERTY"
-                    ? "Auctioning…"
-                    : "Auction"}
-                </button>
+                <div className="space-y-1">
+                  <button
+                    className="rounded-2xl bg-amber-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-amber-300"
+                    type="button"
+                    onClick={handleBuyProperty}
+                    disabled={
+                      actionLoading === "BUY_PROPERTY" || !canAffordPendingPurchase
+                    }
+                  >
+                    {actionLoading === "BUY_PROPERTY" ? "Buying…" : "Buy"}
+                  </button>
+                  {!canAffordPendingPurchase ? (
+                    <p className="text-[11px] text-amber-700">
+                      Not enough cash to buy.
+                    </p>
+                  ) : null}
+                </div>
+                <div className="space-y-1">
+                  <button
+                    className="rounded-2xl border border-amber-300 px-4 py-2 text-sm font-semibold text-amber-900 disabled:cursor-not-allowed disabled:border-amber-200 disabled:text-amber-400"
+                    type="button"
+                    onClick={handleDeclineProperty}
+                    disabled={actionLoading === "DECLINE_PROPERTY"}
+                  >
+                    {actionLoading === "DECLINE_PROPERTY"
+                      ? "Auctioning…"
+                      : "Auction"}
+                  </button>
+                  {actionLoading === "DECLINE_PROPERTY" ? (
+                    <p className="text-[11px] text-amber-700">
+                      Starting auction…
+                    </p>
+                  ) : null}
+                </div>
               </div>
               {!canAffordPendingPurchase ? (
                 <p className="mt-2 text-[11px] text-amber-700">
@@ -2621,7 +2874,7 @@ export default function PlayPage() {
             <p className="text-xs text-neutral-400">Loading snapshot…</p>
           ) : null}
         </div>
-        {pendingCard ? (
+        {displayPendingCard ? (
           <>
             <div className="fixed inset-0 z-20 bg-black/40 backdrop-blur-[1px]" />
             <div className="fixed inset-0 z-30 flex items-center justify-center p-4">
@@ -2633,7 +2886,7 @@ export default function PlayPage() {
                   {pendingDeckLabel}
                 </p>
                 <p className="mt-2 text-base font-semibold text-neutral-900">
-                  {pendingCard.title}
+                  {displayPendingCard.title}
                 </p>
                 {pendingCardDescription ? (
                   <p className="mt-1 text-sm text-neutral-600">
@@ -2649,7 +2902,9 @@ export default function PlayPage() {
                   >
                     {actionLoading === "CONFIRM_PENDING_CARD"
                       ? "Confirming…"
-                      : "OK"}
+                      : cardResolving
+                        ? "Resolving…"
+                        : "OK"}
                   </button>
                 ) : (
                   <p className="mt-4 text-sm text-neutral-500">
@@ -2687,31 +2942,40 @@ export default function PlayPage() {
                   >
                     Cancel
                   </button>
-                  <button
-                    className="rounded-2xl bg-neutral-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
-                    type="button"
-                    onClick={() => {
-                      void handleBankAction({
-                        action: "PAYOFF_COLLATERAL_LOAN",
-                        loanId: payoffLoan.id,
-                      });
-                      setPayoffLoan(null);
-                    }}
-                    disabled={
-                      actionLoading === "PAYOFF_COLLATERAL_LOAN" ||
-                      payoffLoan.remaining_principal > myPlayerBalance
-                    }
-                  >
-                    {actionLoading === "PAYOFF_COLLATERAL_LOAN"
-                      ? "Paying…"
-                      : `Pay $${payoffLoan.remaining_principal}`}
-                  </button>
+                  <div className="space-y-1">
+                    <button
+                      className="rounded-2xl bg-neutral-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
+                      type="button"
+                      onClick={() => {
+                        void handleBankAction({
+                          action: "PAYOFF_COLLATERAL_LOAN",
+                          loanId: payoffLoan.id,
+                        });
+                        setTimeout(() => {
+                          setPayoffLoan(null);
+                        }, 250);
+                      }}
+                      disabled={
+                        actionLoading === "PAYOFF_COLLATERAL_LOAN" ||
+                        payoffLoan.remaining_principal > myPlayerBalance
+                      }
+                    >
+                      {actionLoading === "PAYOFF_COLLATERAL_LOAN"
+                        ? "Paying…"
+                        : `Pay $${payoffLoan.remaining_principal}`}
+                    </button>
+                    {payoffLoan.remaining_principal > myPlayerBalance ? (
+                      <p className="text-[11px] text-neutral-500">
+                        Not enough cash to pay off this loan.
+                      </p>
+                    ) : null}
+                  </div>
                 </div>
               </div>
             </div>
           </>
         ) : null}
-        {isAuctionActive ? (
+        {isAuctionActive || auctionClosing ? (
           <>
             <div className="fixed inset-0 z-10 bg-black/35 backdrop-blur-[1px]" />
             <div className="fixed inset-0 z-20 flex items-center justify-center p-4">
@@ -2801,25 +3065,39 @@ export default function PlayPage() {
                       {currentBidderCash}
                     </p>
                     <div className="grid gap-2 sm:grid-cols-2">
-                      <button
-                        className="rounded-2xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-indigo-200"
-                        type="button"
-                        onClick={handleAuctionBid}
-                        disabled={
-                          actionLoading === "AUCTION_BID" ||
-                          !canSubmitAuctionBid
-                        }
-                      >
-                        {actionLoading === "AUCTION_BID" ? "Bidding…" : "Bid"}
-                      </button>
-                      <button
-                        className="rounded-2xl border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:border-neutral-100 disabled:text-neutral-300"
-                        type="button"
-                        onClick={handleAuctionPass}
-                        disabled={actionLoading === "AUCTION_PASS"}
-                      >
-                        {actionLoading === "AUCTION_PASS" ? "Passing…" : "Pass"}
-                      </button>
+                      <div className="space-y-1">
+                        <button
+                          className="rounded-2xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-indigo-200"
+                          type="button"
+                          onClick={handleAuctionBid}
+                          disabled={
+                            actionLoading === "AUCTION_BID" ||
+                            !canSubmitAuctionBid
+                          }
+                        >
+                          {actionLoading === "AUCTION_BID" ? "Bidding…" : "Bid"}
+                        </button>
+                        {!canSubmitAuctionBid ? (
+                          <p className="text-[11px] text-neutral-500">
+                            Enter a valid bid you can afford.
+                          </p>
+                        ) : null}
+                      </div>
+                      <div className="space-y-1">
+                        <button
+                          className="rounded-2xl border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:border-neutral-100 disabled:text-neutral-300"
+                          type="button"
+                          onClick={handleAuctionPass}
+                          disabled={actionLoading === "AUCTION_PASS"}
+                        >
+                          {actionLoading === "AUCTION_PASS" ? "Passing…" : "Pass"}
+                        </button>
+                        {actionLoading === "AUCTION_PASS" ? (
+                          <p className="text-[11px] text-neutral-500">
+                            Passing your bid…
+                          </p>
+                        ) : null}
+                      </div>
                     </div>
                   </div>
                 ) : (
@@ -2996,25 +3274,36 @@ export default function PlayPage() {
                         Principal: ${principalPreview}
                       </p>
                     </div>
-                    <button
-                      className="rounded-full bg-neutral-900 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
-                      type="button"
-                      onClick={() =>
-                        void handleBankAction({
-                          action: "TAKE_COLLATERAL_LOAN",
-                          tileIndex: tile.index,
-                        })
-                      }
-                      disabled={
-                        !canAct ||
-                        !rules.loanCollateralEnabled ||
-                        actionLoading === "TAKE_COLLATERAL_LOAN"
-                      }
-                    >
-                      {actionLoading === "TAKE_COLLATERAL_LOAN"
-                        ? "Collateralizing…"
-                        : "Collateralize"}
-                    </button>
+                    <div className="text-right">
+                      <button
+                        className="rounded-full bg-neutral-900 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
+                        type="button"
+                        onClick={() =>
+                          void handleBankAction({
+                            action: "TAKE_COLLATERAL_LOAN",
+                            tileIndex: tile.index,
+                          })
+                        }
+                        disabled={
+                          !canAct ||
+                          !rules.loanCollateralEnabled ||
+                          actionLoading === "TAKE_COLLATERAL_LOAN"
+                        }
+                      >
+                        {actionLoading === "TAKE_COLLATERAL_LOAN"
+                          ? "Collateralizing…"
+                          : "Collateralize"}
+                      </button>
+                      {!rules.loanCollateralEnabled ? (
+                        <p className="mt-1 text-[11px] text-neutral-400">
+                          Collateral loans are disabled.
+                        </p>
+                      ) : !canAct ? (
+                        <p className="mt-1 text-[11px] text-neutral-400">
+                          {actionBlockedReason ?? "Action unavailable."}
+                        </p>
+                      ) : null}
+                    </div>
                   </div>
                 );
               })}
@@ -3059,22 +3348,26 @@ export default function PlayPage() {
                         Remaining balance: ${payoffAmount}
                       </p>
                     </div>
-                    <button
-                      className="rounded-full border border-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
-                      type="button"
-                      onClick={() => setPayoffLoan(loan)}
-                      disabled={
-                        !canPayoff ||
-                        actionLoading === "PAYOFF_COLLATERAL_LOAN"
-                      }
-                      title={
-                        canPayoff
-                          ? "Pay off this loan"
-                          : "Not enough cash to pay off"
-                      }
-                    >
-                      Pay off
-                    </button>
+                    <div className="text-right">
+                      <button
+                        className="rounded-full border border-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
+                        type="button"
+                        onClick={() => setPayoffLoan(loan)}
+                        disabled={
+                          !canPayoff ||
+                          actionLoading === "PAYOFF_COLLATERAL_LOAN"
+                        }
+                      >
+                        Pay off
+                      </button>
+                      {!canPayoff ? (
+                        <p className="mt-1 text-[11px] text-neutral-400">
+                          {myPlayerBalance < payoffAmount
+                            ? "Not enough cash to pay off."
+                            : actionBlockedReason ?? "Action unavailable."}
+                        </p>
+                      ) : null}
+                    </div>
                   </div>
                 );
               })}
