@@ -592,10 +592,13 @@ export default function PlayPage() {
   const [isActivityPanelOpen, setIsActivityPanelOpen] = useState(false);
   const [activityTab, setActivityTab] = useState<"log" | "transactions">("log");
   const [isBoardExpanded, setIsBoardExpanded] = useState(false);
+  const [expandedBoardScale, setExpandedBoardScale] = useState(1);
   const [initialSnapshotReady, setInitialSnapshotReady] = useState(false);
   const [realtimeReady, setRealtimeReady] = useState(false);
   const [firstRoundResyncEnabled, setFirstRoundResyncEnabled] = useState(true);
   const [sessionInvalid, setSessionInvalid] = useState(false);
+  const expandedBoardContainerRef = useRef<HTMLDivElement | null>(null);
+  const expandedBoardRef = useRef<HTMLDivElement | null>(null);
   const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshInFlightRef = useRef(false);
   const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
@@ -2552,6 +2555,31 @@ export default function PlayPage() {
   );
   const formatSignedCurrency = (amount: number) =>
     `${amount < 0 ? "-" : "+"}$${Math.abs(amount)}`;
+  const updateExpandedBoardScale = useCallback(() => {
+    const container = expandedBoardContainerRef.current;
+    const board = expandedBoardRef.current;
+    if (!container || !board) {
+      return;
+    }
+    const containerRect = container.getBoundingClientRect();
+    const boardWidth = board.offsetWidth;
+    const boardHeight = board.offsetHeight;
+    if (
+      containerRect.width === 0 ||
+      containerRect.height === 0 ||
+      boardWidth === 0 ||
+      boardHeight === 0
+    ) {
+      return;
+    }
+    const rawScale = Math.min(
+      containerRect.width / boardWidth,
+      containerRect.height / boardHeight,
+    );
+    const paddedScale = rawScale * 0.95;
+    const nextScale = Math.min(2, Math.max(0.4, paddedScale));
+    setExpandedBoardScale(nextScale);
+  }, []);
 
   useEffect(() => {
     if (isEventLogSuppressed && isActivityPanelOpen) {
@@ -2587,6 +2615,25 @@ export default function PlayPage() {
       document.body.style.overflow = previousOverflow;
     };
   }, [isBoardExpanded]);
+  useEffect(() => {
+    if (!isBoardExpanded) {
+      return undefined;
+    }
+    const container = expandedBoardContainerRef.current;
+    const board = expandedBoardRef.current;
+    if (!container || !board) {
+      return undefined;
+    }
+    updateExpandedBoardScale();
+    const observer = new ResizeObserver(() => {
+      updateExpandedBoardScale();
+    });
+    observer.observe(container);
+    observer.observe(board);
+    return () => {
+      observer.disconnect();
+    };
+  }, [isBoardExpanded, updateExpandedBoardScale]);
   const auctionRemainingSeconds = useMemo(() => {
     if (!auctionTurnEndsAt) {
       return null;
@@ -3947,45 +3994,57 @@ export default function PlayPage() {
               </button>
             </div>
             <div className="flex min-h-0 flex-1 flex-col px-4 pb-6 pt-4 sm:px-6">
-              <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-auto">
-                <div className="w-full max-w-6xl">
-                  <div className="aspect-square w-full">
-                    <div className="grid h-full w-full grid-cols-[minmax(0,1fr)_minmax(0,9fr)_minmax(0,1fr)] grid-rows-[minmax(0,1fr)_minmax(0,9fr)_minmax(0,1fr)] gap-2 rounded-3xl border border-neutral-200 bg-white p-2 text-neutral-700 sm:p-3">
-                      <div className="flex">
-                        {renderExpandedTile(20)}
-                      </div>
-                      <div className="grid grid-cols-9 gap-2">
-                        {expandedBoardEdges.top.map((index) =>
-                          renderExpandedTile(index),
-                        )}
-                      </div>
-                      <div className="flex">
-                        {renderExpandedTile(30)}
-                      </div>
-                      <div className="grid grid-rows-9 gap-2">
-                        {expandedBoardEdges.left
-                          .slice()
-                          .reverse()
-                          .map((index) => renderExpandedTile(index))}
-                      </div>
-                      <div className="flex items-center justify-center rounded-2xl border border-dashed border-neutral-200 bg-neutral-50 text-sm font-semibold uppercase tracking-[0.2em] text-neutral-400">
-                        The Bank
-                      </div>
-                      <div className="grid grid-rows-9 gap-2">
-                        {expandedBoardEdges.right.map((index) =>
-                          renderExpandedTile(index),
-                        )}
-                      </div>
-                      <div className="flex">
-                        {renderExpandedTile(10)}
-                      </div>
-                      <div className="grid grid-cols-9 gap-2">
-                        {expandedBoardEdges.bottom.map((index) =>
-                          renderExpandedTile(index),
-                        )}
-                      </div>
-                      <div className="flex">
-                        {renderExpandedTile(0)}
+              <div
+                ref={expandedBoardContainerRef}
+                className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden"
+              >
+                <div
+                  ref={expandedBoardRef}
+                  className="flex items-center justify-center"
+                  style={{
+                    transform: `scale(${expandedBoardScale})`,
+                    transformOrigin: "center",
+                  }}
+                >
+                  <div className="w-full max-w-6xl">
+                    <div className="aspect-square w-full">
+                      <div className="grid h-full w-full grid-cols-[minmax(0,1fr)_minmax(0,9fr)_minmax(0,1fr)] grid-rows-[minmax(0,1fr)_minmax(0,9fr)_minmax(0,1fr)] gap-2 rounded-3xl border border-neutral-200 bg-white p-2 text-neutral-700 sm:p-3">
+                        <div className="flex">
+                          {renderExpandedTile(20)}
+                        </div>
+                        <div className="grid grid-cols-9 gap-2">
+                          {expandedBoardEdges.top.map((index) =>
+                            renderExpandedTile(index),
+                          )}
+                        </div>
+                        <div className="flex">
+                          {renderExpandedTile(30)}
+                        </div>
+                        <div className="grid grid-rows-9 gap-2">
+                          {expandedBoardEdges.left
+                            .slice()
+                            .reverse()
+                            .map((index) => renderExpandedTile(index))}
+                        </div>
+                        <div className="flex items-center justify-center rounded-2xl border border-dashed border-neutral-200 bg-neutral-50 text-sm font-semibold uppercase tracking-[0.2em] text-neutral-400">
+                          The Bank
+                        </div>
+                        <div className="grid grid-rows-9 gap-2">
+                          {expandedBoardEdges.right.map((index) =>
+                            renderExpandedTile(index),
+                          )}
+                        </div>
+                        <div className="flex">
+                          {renderExpandedTile(10)}
+                        </div>
+                        <div className="grid grid-cols-9 gap-2">
+                          {expandedBoardEdges.bottom.map((index) =>
+                            renderExpandedTile(index),
+                          )}
+                        </div>
+                        <div className="flex">
+                          {renderExpandedTile(0)}
+                        </div>
                       </div>
                     </div>
                   </div>
