@@ -702,12 +702,31 @@ export default function PlayPage() {
       {},
     );
   }, [players]);
-  const getExpandedShortName = useCallback((name: string) => {
-    const trimmed = name.trim();
-    if (trimmed.length <= 14) {
-      return trimmed;
+  const getExpandedTileLabel = useCallback((tile: BoardTile) => {
+    switch (tile.type) {
+      case "PROPERTY":
+        return "PROP";
+      case "RAIL":
+        return "RR";
+      case "UTILITY":
+        return "UTIL";
+      case "CHANCE":
+        return "CH";
+      case "COMMUNITY_CHEST":
+        return "CC";
+      case "TAX":
+        return "TAX";
+      case "GO_TO_JAIL":
+        return "G2J";
+      case "JAIL":
+        return "JAIL";
+      case "FREE_PARKING":
+        return "PARK";
+      case "START":
+        return "GO";
+      default:
+        return "TILE";
     }
-    return `${trimmed.slice(0, 12)}…`;
   }, []);
   const expandedBoardEdges = useMemo(
     () => ({
@@ -743,44 +762,51 @@ export default function PlayPage() {
           }
         : undefined;
 
+      const isCornerTile = [0, 10, 20, 30].includes(tileIndex);
+      const tileLabel = getExpandedTileLabel(tile);
+
       return (
         <div
           key={tile.tile_id}
           style={ownershipStyle}
-          className={`border rounded-2xl px-2.5 py-2.5 text-xs leading-tight text-neutral-700 md:text-sm ${
+          className={`border bg-white text-neutral-700 ${
             isCurrentTile ? "ring-2 ring-emerald-400/70" : ""
-          } border-neutral-200 bg-neutral-50`}
+          } ${isCornerTile ? "rounded-3xl px-3 py-3 md:px-4 md:py-4" : "rounded-2xl px-2.5 py-2.5"} border-neutral-200`}
         >
-          <div className="flex items-center justify-between gap-1 text-xs font-semibold md:text-sm">
-            <span>{tile.index}</span>
-            <span className="truncate text-[10px] uppercase text-neutral-400">
-              {getExpandedShortName(tile.name)}
-            </span>
-          </div>
-          <div className="truncate text-xs font-medium md:text-sm">
-            {tile.name}
-          </div>
-          {tilePlayers.length > 0 ? (
-            <div className="mt-2 flex flex-col gap-1">
-              {tilePlayers.map((player) => (
-                <div
-                  key={player.id}
-                  className={`flex items-center gap-1.5 rounded-full bg-neutral-900 px-2 py-1 text-xs font-semibold text-white ${
-                    player.id === currentPlayerId
-                      ? "ring-2 ring-emerald-300"
-                      : ""
-                  }`}
-                >
-                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-black/40 text-[10px] uppercase">
-                    {getPlayerInitials(player.display_name)}
-                  </span>
-                  <span className="truncate text-[10px] font-medium">
-                    {player.display_name ?? "Player"}
-                  </span>
-                </div>
-              ))}
+          <div className="flex h-full flex-col justify-between gap-2">
+            <div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-wide text-neutral-400">
+              <span className="text-neutral-500">{tile.index}</span>
+              <span className="rounded-full bg-neutral-100 px-1.5 py-0.5 text-[9px] text-neutral-500">
+                {tileLabel}
+              </span>
             </div>
-          ) : null}
+            <div className="flex flex-1 items-center justify-center">
+              <span className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-400">
+                {tileLabel}
+              </span>
+            </div>
+            {tilePlayers.length > 0 ? (
+              <div className="flex flex-col gap-1">
+                {tilePlayers.map((player) => (
+                  <div
+                    key={player.id}
+                    className={`flex items-center gap-1.5 rounded-full bg-neutral-900 px-2 py-1 text-[10px] font-semibold text-white ${
+                      player.id === currentPlayerId
+                        ? "ring-2 ring-emerald-300"
+                        : ""
+                    }`}
+                  >
+                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-black/40 text-[9px] uppercase">
+                      {getPlayerInitials(player.display_name)}
+                    </span>
+                    <span className="truncate text-[9px] font-medium">
+                      {player.display_name ?? "Player"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
         </div>
       );
     },
@@ -789,7 +815,7 @@ export default function PlayPage() {
       expandedOwnershipColorsByPlayer,
       expandedPlayersByTile,
       expandedTilesByIndex,
-      getExpandedShortName,
+      getExpandedTileLabel,
       ownershipByTile,
     ],
   );
@@ -4008,7 +4034,7 @@ export default function PlayPage() {
                 >
                   <div className="w-full max-w-6xl">
                     <div className="aspect-square w-full">
-                      <div className="grid h-full w-full grid-cols-[minmax(0,1fr)_minmax(0,9fr)_minmax(0,1fr)] grid-rows-[minmax(0,1fr)_minmax(0,9fr)_minmax(0,1fr)] gap-2 rounded-3xl border border-neutral-200 bg-white p-2 text-neutral-700 sm:p-3">
+                      <div className="grid h-full w-full grid-cols-[minmax(0,1.15fr)_minmax(0,8.7fr)_minmax(0,1.15fr)] grid-rows-[minmax(0,1.15fr)_minmax(0,8.7fr)_minmax(0,1.15fr)] gap-2.5 rounded-3xl border border-neutral-200 bg-white p-2 text-neutral-700 sm:p-3">
                         <div className="flex">
                           {renderExpandedTile(20)}
                         </div>
