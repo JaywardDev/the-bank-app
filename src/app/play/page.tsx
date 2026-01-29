@@ -15,6 +15,36 @@ const JAIL_FINE_AMOUNT = 50;
 const EVENT_FETCH_LIMIT = 100;
 const EVENT_LOG_LIMIT = 10;
 const TRANSACTION_DISPLAY_LIMIT = 30;
+const fallbackExpandedTiles: BoardTile[] = Array.from(
+  { length: 40 },
+  (_, index) => ({
+    index,
+    tile_id: `tile-${index}`,
+    type: index === 0 ? "START" : "PROPERTY",
+    name: `Tile ${index}`,
+  }),
+);
+const expandedOwnershipPalette = [
+  { border: "rgba(37, 99, 235, 0.9)", inset: "rgba(37, 99, 235, 0.28)" },
+  { border: "rgba(220, 38, 38, 0.9)", inset: "rgba(220, 38, 38, 0.26)" },
+  { border: "rgba(5, 150, 105, 0.9)", inset: "rgba(5, 150, 105, 0.25)" },
+  { border: "rgba(124, 58, 237, 0.9)", inset: "rgba(124, 58, 237, 0.26)" },
+  { border: "rgba(217, 119, 6, 0.9)", inset: "rgba(217, 119, 6, 0.24)" },
+  { border: "rgba(8, 145, 178, 0.9)", inset: "rgba(8, 145, 178, 0.24)" },
+];
+
+const getPlayerInitials = (name: string | null) => {
+  if (!name) {
+    return "P";
+  }
+
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) {
+    return parts[0]?.slice(0, 2).toUpperCase() ?? "P";
+  }
+
+  return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
+};
 
 type Player = {
   id: string;
@@ -638,6 +668,128 @@ export default function PlayPage() {
     [players, session],
   );
   const boardPack = getBoardPackById(gameMeta?.board_pack_id);
+  const currentPlayerId = gameState?.current_player_id ?? null;
+  const expandedBoardTiles =
+    boardPack?.tiles && boardPack.tiles.length > 0
+      ? boardPack.tiles
+      : fallbackExpandedTiles;
+  const expandedTilesByIndex = useMemo(() => {
+    const lookup = new Map<number, BoardTile>();
+    expandedBoardTiles.forEach((tile) => {
+      lookup.set(tile.index, tile);
+    });
+    return lookup;
+  }, [expandedBoardTiles]);
+  const expandedPlayersByTile = useMemo(
+    () =>
+      players.reduce<Record<number, Player[]>>((acc, player) => {
+        const position = Number.isFinite(player.position) ? player.position : 0;
+        acc[position] = acc[position] ? [...acc[position], player] : [player];
+        return acc;
+      }, {}),
+    [players],
+  );
+  const expandedOwnershipColorsByPlayer = useMemo(() => {
+    return players.reduce<Record<string, { border: string; inset: string }>>(
+      (acc, player, index) => {
+        acc[player.id] =
+          expandedOwnershipPalette[index % expandedOwnershipPalette.length];
+        return acc;
+      },
+      {},
+    );
+  }, [players]);
+  const getExpandedShortName = useCallback((name: string) => {
+    const trimmed = name.trim();
+    if (trimmed.length <= 14) {
+      return trimmed;
+    }
+    return `${trimmed.slice(0, 12)}…`;
+  }, []);
+  const expandedBoardEdges = useMemo(
+    () => ({
+      bottom: [9, 8, 7, 6, 5, 4, 3, 2, 1],
+      left: [11, 12, 13, 14, 15, 16, 17, 18, 19],
+      top: [21, 22, 23, 24, 25, 26, 27, 28, 29],
+      right: [31, 32, 33, 34, 35, 36, 37, 38, 39],
+    }),
+    [],
+  );
+  const renderExpandedTile = useCallback(
+    (tileIndex: number) => {
+      const tile =
+        expandedTilesByIndex.get(tileIndex) ??
+        ({
+          index: tileIndex,
+          tile_id: `tile-${tileIndex}`,
+          type: tileIndex === 0 ? "START" : "PROPERTY",
+          name: `Tile ${tileIndex}`,
+        } satisfies BoardTile);
+      const tilePlayers = expandedPlayersByTile[tileIndex] ?? [];
+      const isCurrentTile = tilePlayers.some(
+        (player) => player.id === currentPlayerId,
+      );
+      const ownerId = ownershipByTile?.[tileIndex]?.owner_player_id;
+      const ownershipColor = ownerId
+        ? expandedOwnershipColorsByPlayer[ownerId]
+        : undefined;
+      const ownershipStyle = ownershipColor
+        ? {
+            borderColor: ownershipColor.border,
+            boxShadow: `inset 0 0 0 2px ${ownershipColor.inset}`,
+          }
+        : undefined;
+
+      return (
+        <div
+          key={tile.tile_id}
+          style={ownershipStyle}
+          className={`border rounded-2xl px-2.5 py-2.5 text-xs leading-tight text-neutral-700 md:text-sm ${
+            isCurrentTile ? "ring-2 ring-emerald-400/70" : ""
+          } border-neutral-200 bg-neutral-50`}
+        >
+          <div className="flex items-center justify-between gap-1 text-xs font-semibold md:text-sm">
+            <span>{tile.index}</span>
+            <span className="truncate text-[10px] uppercase text-neutral-400">
+              {getExpandedShortName(tile.name)}
+            </span>
+          </div>
+          <div className="truncate text-xs font-medium md:text-sm">
+            {tile.name}
+          </div>
+          {tilePlayers.length > 0 ? (
+            <div className="mt-2 flex flex-col gap-1">
+              {tilePlayers.map((player) => (
+                <div
+                  key={player.id}
+                  className={`flex items-center gap-1.5 rounded-full bg-neutral-900 px-2 py-1 text-xs font-semibold text-white ${
+                    player.id === currentPlayerId
+                      ? "ring-2 ring-emerald-300"
+                      : ""
+                  }`}
+                >
+                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-black/40 text-[10px] uppercase">
+                    {getPlayerInitials(player.display_name)}
+                  </span>
+                  <span className="truncate text-[10px] font-medium">
+                    {player.display_name ?? "Player"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      );
+    },
+    [
+      currentPlayerId,
+      expandedOwnershipColorsByPlayer,
+      expandedPlayersByTile,
+      expandedTilesByIndex,
+      getExpandedShortName,
+      ownershipByTile,
+    ],
+  );
   const rules = useMemo(() => getRules(gameState?.rules), [gameState?.rules]);
   const latestRolledDoubleConfirmed = useMemo(() => {
     if (!latestRollEvent || !latestRolledDoubleEvent) {
@@ -3797,14 +3949,46 @@ export default function PlayPage() {
             <div className="flex min-h-0 flex-1 flex-col px-4 pb-6 pt-4 sm:px-6">
               <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-auto">
                 <div className="w-full max-w-6xl">
-                  <BoardMiniMap
-                    tiles={boardPack?.tiles}
-                    players={players}
-                    currentPlayerId={currentPlayer?.id}
-                    ownershipByTile={ownershipByTile}
-                    showOwnership
-                    size="large"
-                  />
+                  <div className="aspect-square w-full">
+                    <div className="grid h-full w-full grid-cols-[minmax(0,1fr)_minmax(0,9fr)_minmax(0,1fr)] grid-rows-[minmax(0,1fr)_minmax(0,9fr)_minmax(0,1fr)] gap-2 rounded-3xl border border-neutral-200 bg-white p-2 text-neutral-700 sm:p-3">
+                      <div className="flex">
+                        {renderExpandedTile(20)}
+                      </div>
+                      <div className="grid grid-cols-9 gap-2">
+                        {expandedBoardEdges.top.map((index) =>
+                          renderExpandedTile(index),
+                        )}
+                      </div>
+                      <div className="flex">
+                        {renderExpandedTile(30)}
+                      </div>
+                      <div className="grid grid-rows-9 gap-2">
+                        {expandedBoardEdges.left
+                          .slice()
+                          .reverse()
+                          .map((index) => renderExpandedTile(index))}
+                      </div>
+                      <div className="flex items-center justify-center rounded-2xl border border-dashed border-neutral-200 bg-neutral-50 text-sm font-semibold uppercase tracking-[0.2em] text-neutral-400">
+                        The Bank
+                      </div>
+                      <div className="grid grid-rows-9 gap-2">
+                        {expandedBoardEdges.right.map((index) =>
+                          renderExpandedTile(index),
+                        )}
+                      </div>
+                      <div className="flex">
+                        {renderExpandedTile(10)}
+                      </div>
+                      <div className="grid grid-cols-9 gap-2">
+                        {expandedBoardEdges.bottom.map((index) =>
+                          renderExpandedTile(index),
+                        )}
+                      </div>
+                      <div className="flex">
+                        {renderExpandedTile(0)}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
