@@ -708,10 +708,10 @@ export default function PlayPage() {
   }, [players]);
   const expandedBoardEdges = useMemo(
     () => ({
-      bottom: [4, 3, 2, 1],
+      top: [20, 21, 22, 23, 24, 25],
+      right: [26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39],
+      bottom: [5, 4, 3, 2, 1, 0],
       left: [19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6],
-      top: [21, 22, 23, 24, 25, 26, 27, 28, 29],
-      right: [31, 32, 33, 34, 35, 36, 37, 38, 39],
     }),
     [],
   );
@@ -740,7 +740,7 @@ export default function PlayPage() {
           }
         : undefined;
 
-      const isCornerTile = [0, 5, 20, 30].includes(tileIndex);
+      const isCornerTile = [0, 5, 20, 25].includes(tileIndex);
       const isSelectedTile = tileIndex === selectedTileIndex;
 
       return (
@@ -765,7 +765,7 @@ export default function PlayPage() {
             style={ownershipStyle}
             className={`border bg-white text-neutral-700 ${
               isCurrentTile ? "ring-2 ring-emerald-400/70" : ""
-            } ${isSelectedTile ? "outline outline-2 outline-indigo-300/60 outline-offset-2" : ""} ${isCornerTile ? "rounded-lg px-2.5 py-2.5 md:px-3 md:py-3" : "rounded-md px-2 py-2"} border-neutral-200`}
+            } ${isSelectedTile ? "outline outline-2 outline-indigo-300/60 outline-offset-2" : ""} ${isCornerTile ? "rounded-md px-2 py-2 md:px-2.5 md:py-2.5" : "rounded-sm px-1.5 py-1.5"} border-neutral-200`}
           >
             <div className="relative flex h-full flex-col justify-end gap-2">
               <span className="absolute left-1 top-1 text-[9px] font-medium text-neutral-300/70">
@@ -4104,42 +4104,46 @@ export default function PlayPage() {
                   }}
                 >
                   <div className="w-full max-w-5xl">
-                    <div className="aspect-[3/4] w-full">
-                      <div className="grid h-full w-full grid-cols-[minmax(0,1.1fr)_minmax(0,7.6fr)_minmax(0,1.1fr)] grid-rows-[minmax(0,1fr)_minmax(0,9fr)_minmax(0,1fr)] gap-1.5 rounded-2xl border border-neutral-200 bg-white p-1.5 text-neutral-700 sm:p-2">
-                        <div className="flex">
-                          {renderExpandedTile(20)}
-                        </div>
-                        <div className="grid grid-cols-9 gap-1.5">
-                          {expandedBoardEdges.top.map((index) =>
-                            renderExpandedTile(index),
-                          )}
-                        </div>
-                        <div className="flex">
-                          {renderExpandedTile(30)}
-                        </div>
-                        <div className="grid grid-rows-14 gap-1.5">
-                          {expandedBoardEdges.left.map((index) =>
-                            renderExpandedTile(index),
-                          )}
-                        </div>
-                        <div className="flex items-center justify-center rounded-xl border border-dashed border-neutral-200 bg-neutral-50 text-xs font-semibold uppercase tracking-[0.3em] text-neutral-400 sm:text-sm">
+                    <div className="aspect-[3/8] w-full">
+                      <div className="grid h-full w-full grid-cols-[repeat(6,minmax(0,1fr))] grid-rows-[repeat(16,minmax(0,1fr))] gap-1 rounded-xl border border-neutral-200 bg-white p-1 text-neutral-700 sm:gap-1.5 sm:p-1.5">
+                        {expandedBoardEdges.top.map((index, position) => (
+                          <div
+                            key={`top-${index}`}
+                            className="col-span-1 row-span-1 flex"
+                            style={{ gridColumn: position + 1, gridRow: 1 }}
+                          >
+                            {renderExpandedTile(index)}
+                          </div>
+                        ))}
+                        {expandedBoardEdges.left.map((index, position) => (
+                          <div
+                            key={`left-${index}`}
+                            className="col-span-1 row-span-1 flex"
+                            style={{ gridColumn: 1, gridRow: position + 2 }}
+                          >
+                            {renderExpandedTile(index)}
+                          </div>
+                        ))}
+                        {expandedBoardEdges.right.map((index, position) => (
+                          <div
+                            key={`right-${index}`}
+                            className="col-span-1 row-span-1 flex"
+                            style={{ gridColumn: 6, gridRow: position + 2 }}
+                          >
+                            {renderExpandedTile(index)}
+                          </div>
+                        ))}
+                        {expandedBoardEdges.bottom.map((index, position) => (
+                          <div
+                            key={`bottom-${index}`}
+                            className="col-span-1 row-span-1 flex"
+                            style={{ gridColumn: position + 1, gridRow: 16 }}
+                          >
+                            {renderExpandedTile(index)}
+                          </div>
+                        ))}
+                        <div className="col-start-2 row-start-2 col-span-4 row-span-14 flex items-center justify-center rounded-lg border border-dashed border-neutral-200 bg-neutral-50 text-xs font-semibold uppercase tracking-[0.3em] text-neutral-400 sm:text-sm">
                           The Bank
-                        </div>
-                        <div className="grid grid-rows-9 gap-1.5">
-                          {expandedBoardEdges.right.map((index) =>
-                            renderExpandedTile(index),
-                          )}
-                        </div>
-                        <div className="flex">
-                          {renderExpandedTile(5)}
-                        </div>
-                        <div className="grid grid-cols-4 gap-1.5">
-                          {expandedBoardEdges.bottom.map((index) =>
-                            renderExpandedTile(index),
-                          )}
-                        </div>
-                        <div className="flex">
-                          {renderExpandedTile(0)}
                         </div>
                       </div>
                     </div>
