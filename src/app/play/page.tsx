@@ -708,8 +708,8 @@ export default function PlayPage() {
   }, [players]);
   const expandedBoardEdges = useMemo(
     () => ({
-      bottom: [9, 8, 7, 6, 5, 4, 3, 2, 1],
-      left: [11, 12, 13, 14, 15, 16, 17, 18, 19],
+      bottom: [4, 3, 2, 1],
+      left: [19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6],
       top: [21, 22, 23, 24, 25, 26, 27, 28, 29],
       right: [31, 32, 33, 34, 35, 36, 37, 38, 39],
     }),
@@ -740,7 +740,7 @@ export default function PlayPage() {
           }
         : undefined;
 
-      const isCornerTile = [0, 10, 20, 30].includes(tileIndex);
+      const isCornerTile = [0, 5, 20, 30].includes(tileIndex);
       const isSelectedTile = tileIndex === selectedTileIndex;
 
       return (
@@ -765,7 +765,7 @@ export default function PlayPage() {
             style={ownershipStyle}
             className={`border bg-white text-neutral-700 ${
               isCurrentTile ? "ring-2 ring-emerald-400/70" : ""
-            } ${isSelectedTile ? "outline outline-2 outline-indigo-300/60 outline-offset-2" : ""} ${isCornerTile ? "rounded-3xl px-3 py-3 md:px-4 md:py-4" : "rounded-2xl px-2.5 py-2.5"} border-neutral-200`}
+            } ${isSelectedTile ? "outline outline-2 outline-indigo-300/60 outline-offset-2" : ""} ${isCornerTile ? "rounded-lg px-2.5 py-2.5 md:px-3 md:py-3" : "rounded-md px-2 py-2"} border-neutral-200`}
           >
             <div className="relative flex h-full flex-col justify-end gap-2">
               <span className="absolute left-1 top-1 text-[9px] font-medium text-neutral-300/70">
@@ -4103,13 +4103,13 @@ export default function PlayPage() {
                     transformOrigin: "center",
                   }}
                 >
-                  <div className="w-full max-w-6xl">
-                    <div className="aspect-square w-full">
-                      <div className="grid h-full w-full grid-cols-[minmax(0,1.15fr)_minmax(0,8.7fr)_minmax(0,1.15fr)] grid-rows-[minmax(0,1.15fr)_minmax(0,8.7fr)_minmax(0,1.15fr)] gap-2.5 rounded-3xl border border-neutral-200 bg-white p-2 text-neutral-700 sm:p-3">
+                  <div className="w-full max-w-5xl">
+                    <div className="aspect-[3/4] w-full">
+                      <div className="grid h-full w-full grid-cols-[minmax(0,1.1fr)_minmax(0,7.6fr)_minmax(0,1.1fr)] grid-rows-[minmax(0,1fr)_minmax(0,9fr)_minmax(0,1fr)] gap-1.5 rounded-2xl border border-neutral-200 bg-white p-1.5 text-neutral-700 sm:p-2">
                         <div className="flex">
                           {renderExpandedTile(20)}
                         </div>
-                        <div className="grid grid-cols-9 gap-2">
+                        <div className="grid grid-cols-9 gap-1.5">
                           {expandedBoardEdges.top.map((index) =>
                             renderExpandedTile(index),
                           )}
@@ -4117,24 +4117,23 @@ export default function PlayPage() {
                         <div className="flex">
                           {renderExpandedTile(30)}
                         </div>
-                        <div className="grid grid-rows-9 gap-2">
-                          {expandedBoardEdges.left
-                            .slice()
-                            .reverse()
-                            .map((index) => renderExpandedTile(index))}
+                        <div className="grid grid-rows-14 gap-1.5">
+                          {expandedBoardEdges.left.map((index) =>
+                            renderExpandedTile(index),
+                          )}
                         </div>
-                        <div className="flex items-center justify-center rounded-2xl border border-dashed border-neutral-200 bg-neutral-50 text-sm font-semibold uppercase tracking-[0.2em] text-neutral-400">
+                        <div className="flex items-center justify-center rounded-xl border border-dashed border-neutral-200 bg-neutral-50 text-xs font-semibold uppercase tracking-[0.3em] text-neutral-400 sm:text-sm">
                           The Bank
                         </div>
-                        <div className="grid grid-rows-9 gap-2">
+                        <div className="grid grid-rows-9 gap-1.5">
                           {expandedBoardEdges.right.map((index) =>
                             renderExpandedTile(index),
                           )}
                         </div>
                         <div className="flex">
-                          {renderExpandedTile(10)}
+                          {renderExpandedTile(5)}
                         </div>
-                        <div className="grid grid-cols-9 gap-2">
+                        <div className="grid grid-cols-4 gap-1.5">
                           {expandedBoardEdges.bottom.map((index) =>
                             renderExpandedTile(index),
                           )}
