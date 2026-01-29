@@ -4142,11 +4142,7 @@ export default function PlayPage() {
                   }}
                 >
                   <div className="w-full max-w-5xl">
-<<<<<<< ours
                     <div className="aspect-[4/7] w-full">
-=======
-                    <div className="aspect-[5/12] w-full">
->>>>>>> theirs
                       <div className="grid h-full w-full grid-cols-[repeat(6,minmax(0,1fr))] grid-rows-[repeat(16,minmax(0,1fr))] gap-1 rounded-xl border border-neutral-200 bg-white p-1 text-neutral-700 sm:gap-1.5 sm:p-1.5">
                         {expandedBoardEdges.top.map((index, position) => (
                           <div
