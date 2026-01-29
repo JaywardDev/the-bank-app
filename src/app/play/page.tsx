@@ -702,32 +702,6 @@ export default function PlayPage() {
       {},
     );
   }, [players]);
-  const getExpandedTileLabel = useCallback((tile: BoardTile) => {
-    switch (tile.type) {
-      case "PROPERTY":
-        return "PROP";
-      case "RAIL":
-        return "RR";
-      case "UTILITY":
-        return "UTIL";
-      case "CHANCE":
-        return "CH";
-      case "COMMUNITY_CHEST":
-        return "CC";
-      case "TAX":
-        return "TAX";
-      case "GO_TO_JAIL":
-        return "G2J";
-      case "JAIL":
-        return "JAIL";
-      case "FREE_PARKING":
-        return "PARK";
-      case "START":
-        return "GO";
-      default:
-        return "TILE";
-    }
-  }, []);
   const expandedBoardEdges = useMemo(
     () => ({
       bottom: [9, 8, 7, 6, 5, 4, 3, 2, 1],
@@ -763,7 +737,6 @@ export default function PlayPage() {
         : undefined;
 
       const isCornerTile = [0, 10, 20, 30].includes(tileIndex);
-      const tileLabel = getExpandedTileLabel(tile);
 
       return (
         <div
@@ -773,35 +746,22 @@ export default function PlayPage() {
             isCurrentTile ? "ring-2 ring-emerald-400/70" : ""
           } ${isCornerTile ? "rounded-3xl px-3 py-3 md:px-4 md:py-4" : "rounded-2xl px-2.5 py-2.5"} border-neutral-200`}
         >
-          <div className="flex h-full flex-col justify-between gap-2">
-            <div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-wide text-neutral-400">
-              <span className="text-neutral-500">{tile.index}</span>
-              <span className="rounded-full bg-neutral-100 px-1.5 py-0.5 text-[9px] text-neutral-500">
-                {tileLabel}
-              </span>
-            </div>
-            <div className="flex flex-1 items-center justify-center">
-              <span className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-400">
-                {tileLabel}
-              </span>
-            </div>
+          <div className="relative flex h-full flex-col justify-end gap-2">
+            <span className="absolute left-1 top-1 text-[9px] font-medium text-neutral-300/70">
+              {tile.index}
+            </span>
             {tilePlayers.length > 0 ? (
-              <div className="flex flex-col gap-1">
+              <div className="flex flex-wrap justify-end gap-1">
                 {tilePlayers.map((player) => (
                   <div
                     key={player.id}
-                    className={`flex items-center gap-1.5 rounded-full bg-neutral-900 px-2 py-1 text-[10px] font-semibold text-white ${
+                    className={`flex h-6 w-6 items-center justify-center rounded-full bg-neutral-900 text-[9px] font-semibold uppercase text-white ${
                       player.id === currentPlayerId
                         ? "ring-2 ring-emerald-300"
                         : ""
                     }`}
                   >
-                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-black/40 text-[9px] uppercase">
-                      {getPlayerInitials(player.display_name)}
-                    </span>
-                    <span className="truncate text-[9px] font-medium">
-                      {player.display_name ?? "Player"}
-                    </span>
+                    {getPlayerInitials(player.display_name)}
                   </div>
                 ))}
               </div>
@@ -815,7 +775,6 @@ export default function PlayPage() {
       expandedOwnershipColorsByPlayer,
       expandedPlayersByTile,
       expandedTilesByIndex,
-      getExpandedTileLabel,
       ownershipByTile,
     ],
   );
