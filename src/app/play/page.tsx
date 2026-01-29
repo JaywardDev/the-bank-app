@@ -4425,11 +4425,6 @@ export default function PlayPage() {
                       <p className="text-xs text-neutral-500">
                         Interest per turn: ${interestPerTurn}
                       </p>
-                      {lastCharged ? (
-                        <p className="text-xs text-neutral-500">
-                          Last charged: ${lastCharged.amount}
-                        </p>
-                      ) : null}
                       <p className="text-xs text-neutral-500">
                         Payoff amount: ${payoffAmount}
                       </p>
