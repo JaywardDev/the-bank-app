@@ -50,15 +50,18 @@ type BankActionRequest =
         | "JAIL_ROLL_FOR_DOUBLES"
         | "USE_GET_OUT_OF_JAIL_FREE"
         | "CONFIRM_PENDING_CARD"
-        | "PAYOFF_COLLATERAL_LOAN",
+        | "PAYOFF_COLLATERAL_LOAN"
+        | "PAYOFF_PURCHASE_MORTGAGE",
         "DECLINE_PROPERTY" | "BUY_PROPERTY"
       >;
       tileIndex?: number;
       loanId?: string;
+      mortgageId?: string;
     })
   | (BaseActionRequest & {
       action: "DECLINE_PROPERTY" | "BUY_PROPERTY";
       tileIndex: number;
+      financing?: "MORTGAGE";
     })
   | (BaseActionRequest & {
       action: "AUCTION_BID";
@@ -74,6 +77,10 @@ type BankActionRequest =
   | (BaseActionRequest & {
       action: "PAYOFF_COLLATERAL_LOAN";
       loanId: string;
+    })
+  | (BaseActionRequest & {
+      action: "PAYOFF_PURCHASE_MORTGAGE";
+      mortgageId: string;
     });
 
 type SupabaseUser = {
@@ -151,11 +158,16 @@ type OwnershipRow = {
   tile_index: number;
   owner_player_id: string | null;
   collateral_loan_id: string | null;
+  purchase_mortgage_id: string | null;
 };
 
 type OwnershipByTile = Record<
   number,
-  { owner_player_id: string; collateral_loan_id: string | null }
+  {
+    owner_player_id: string;
+    collateral_loan_id: string | null;
+    purchase_mortgage_id: string | null;
+  }
 >;
 
 type PlayerLoanRow = {
@@ -169,6 +181,20 @@ type PlayerLoanRow = {
   term_turns: number;
   turns_remaining: number;
   payment_per_turn: number;
+  status: string;
+};
+
+type PurchaseMortgageRow = {
+  id: string;
+  game_id: string;
+  player_id: string;
+  tile_index: number;
+  principal_original: number;
+  principal_remaining: number;
+  rate_per_turn: number;
+  term_turns: number;
+  turns_elapsed: number;
+  accrued_interest_unpaid: number;
   status: string;
 };
 
@@ -431,7 +457,7 @@ const loadOwnershipByTile = async (
   gameId: string,
 ): Promise<OwnershipByTile> => {
   const ownershipRows = (await fetchFromSupabaseWithService<OwnershipRow[]>(
-    `property_ownership?select=tile_index,owner_player_id,collateral_loan_id&game_id=eq.${gameId}`,
+    `property_ownership?select=tile_index,owner_player_id,collateral_loan_id,purchase_mortgage_id&game_id=eq.${gameId}`,
     { method: "GET" },
   )) ?? [];
 
@@ -440,6 +466,7 @@ const loadOwnershipByTile = async (
       acc[row.tile_index] = {
         owner_player_id: row.owner_player_id,
         collateral_loan_id: row.collateral_loan_id ?? null,
+        purchase_mortgage_id: row.purchase_mortgage_id ?? null,
       };
     }
     return acc;
@@ -1727,7 +1754,14 @@ const applyLoanPaymentsForPlayer = async ({
     { method: "GET" },
   )) ?? [];
 
-  if (activeLoans.length === 0) {
+  const activeMortgages = (await fetchFromSupabaseWithService<
+    PurchaseMortgageRow[]
+  >(
+    `purchase_mortgages?select=id,tile_index,principal_original,principal_remaining,rate_per_turn,term_turns,turns_elapsed,accrued_interest_unpaid,status&game_id=eq.${gameId}&player_id=eq.${player.id}&status=eq.active`,
+    { method: "GET" },
+  )) ?? [];
+
+  if (activeLoans.length === 0 && activeMortgages.length === 0) {
     return {
       balances,
       balancesChanged: false,
@@ -1816,6 +1850,36 @@ const applyLoanPaymentsForPlayer = async ({
         },
       });
     }
+  }
+
+  for (const mortgage of activeMortgages) {
+    const interestAmount = Math.round(
+      mortgage.principal_remaining * mortgage.rate_per_turn,
+    );
+    const accruedInterestAfter =
+      (mortgage.accrued_interest_unpaid ?? 0) + interestAmount;
+    const turnsElapsedAfter = (mortgage.turns_elapsed ?? 0) + 1;
+
+    await fetchFromSupabaseWithService(`purchase_mortgages?id=eq.${mortgage.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        accrued_interest_unpaid: accruedInterestAfter,
+        turns_elapsed: turnsElapsedAfter,
+        updated_at: new Date().toISOString(),
+      }),
+    });
+
+    events.push({
+      event_type: "PURCHASE_MORTGAGE_INTEREST_ACCRUED",
+      payload: {
+        player_id: player.id,
+        mortgage_id: mortgage.id,
+        tile_index: mortgage.tile_index,
+        interest_amount: interestAmount,
+        accrued_interest_unpaid_after: accruedInterestAfter,
+        turns_elapsed_after: turnsElapsedAfter,
+      },
+    });
   }
 
   return { balances: updatedBalances, balancesChanged, events, bankruptcyCandidate };
@@ -3832,18 +3896,70 @@ export async function POST(request: Request) {
       const balances = gameState.balances ?? {};
       const currentBalance =
         balances[currentPlayer.id] ?? game.starting_cash ?? 0;
+      const usingMortgage = body.financing === "MORTGAGE";
+      const principal = usingMortgage ? Math.round(price * 0.5) : 0;
+      const downPayment = usingMortgage ? price - principal : price;
 
-      if (currentBalance < price) {
+      if (currentBalance < downPayment) {
         return NextResponse.json(
-          { error: "Insufficient cash to buy this property." },
+          {
+            error: usingMortgage
+              ? "Insufficient cash for the down payment."
+              : "Insufficient cash to buy this property.",
+          },
           { status: 409 },
         );
       }
 
       const updatedBalances = {
         ...balances,
-        [currentPlayer.id]: currentBalance - price,
+        [currentPlayer.id]: currentBalance - downPayment,
       };
+
+      let mortgageId: string | null = null;
+      if (usingMortgage) {
+        const mortgageResponse = await fetch(
+          `${supabaseUrl}/rest/v1/purchase_mortgages`,
+          {
+            method: "POST",
+            headers: {
+              ...bankHeaders,
+              Prefer: "return=representation",
+            },
+            body: JSON.stringify({
+              game_id: gameId,
+              player_id: currentPlayer.id,
+              tile_index: tileIndex,
+              principal_original: principal,
+              principal_remaining: principal,
+              rate_per_turn: rules.loanRatePerTurn,
+              term_turns: rules.loanTermTurns,
+              turns_elapsed: 0,
+              accrued_interest_unpaid: 0,
+              status: "active",
+            }),
+          },
+        );
+
+        if (!mortgageResponse.ok) {
+          const errorText = await mortgageResponse.text();
+          return NextResponse.json(
+            { error: errorText || "Unable to create mortgage." },
+            { status: 500 },
+          );
+        }
+
+        const [mortgageRow] = (await mortgageResponse.json()) as
+          | PurchaseMortgageRow[]
+          | [];
+        mortgageId = mortgageRow?.id ?? null;
+        if (!mortgageId) {
+          return NextResponse.json(
+            { error: "Unable to create mortgage." },
+            { status: 500 },
+          );
+        }
+      }
 
       const ownershipResponse = await fetch(
         `${supabaseUrl}/rest/v1/property_ownership`,
@@ -3857,6 +3973,7 @@ export async function POST(request: Request) {
             game_id: gameId,
             tile_index: tileIndex,
             owner_player_id: currentPlayer.id,
+            ...(mortgageId ? { purchase_mortgage_id: mortgageId } : {}),
           }),
         },
       );
@@ -3890,18 +4007,33 @@ export async function POST(request: Request) {
             tile_index: tileIndex,
             price,
             owner_player_id: currentPlayer.id,
+            ...(usingMortgage ? { financing: "mortgage" } : {}),
           },
         },
         {
           event_type: "CASH_DEBIT",
           payload: {
             player_id: currentPlayer.id,
-            amount: price,
-            reason: "BUY_PROPERTY",
+            amount: downPayment,
+            reason: usingMortgage ? "BUY_PROPERTY_DOWNPAYMENT" : "BUY_PROPERTY",
             tile_index: tileIndex,
           },
         },
       ];
+      if (usingMortgage && mortgageId) {
+        events.push({
+          event_type: "PURCHASE_MORTGAGE_CREATED",
+          payload: {
+            mortgage_id: mortgageId,
+            player_id: currentPlayer.id,
+            tile_index: tileIndex,
+            principal,
+            down_payment: downPayment,
+            rate_per_turn: rules.loanRatePerTurn,
+            term_turns: rules.loanTermTurns,
+          },
+        });
+      }
       const finalVersion = currentVersion + events.length;
 
       const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
@@ -3979,6 +4111,13 @@ export async function POST(request: Request) {
       if (ownership.collateral_loan_id) {
         return NextResponse.json(
           { error: "Property already collateralized." },
+          { status: 409 },
+        );
+      }
+
+      if (ownership.purchase_mortgage_id) {
+        return NextResponse.json(
+          { error: "Property has an active purchase mortgage." },
           { status: 409 },
         );
       }
@@ -4194,6 +4333,138 @@ export async function POST(request: Request) {
         ownership: rpcResult.property_ownership,
         loan: rpcResult.player_loan ?? null,
       });
+    }
+
+    if (body.action === "PAYOFF_PURCHASE_MORTGAGE") {
+      if (!body.mortgageId) {
+        return NextResponse.json(
+          { error: "Missing purchase mortgage." },
+          { status: 400 },
+        );
+      }
+
+      const [mortgage] = (await fetchFromSupabaseWithService<
+        PurchaseMortgageRow[]
+      >(
+        `purchase_mortgages?select=id,tile_index,principal_original,principal_remaining,accrued_interest_unpaid,status&game_id=eq.${gameId}&player_id=eq.${currentPlayer.id}&id=eq.${body.mortgageId}&limit=1`,
+        { method: "GET" },
+      )) ?? [];
+
+      if (!mortgage) {
+        return NextResponse.json(
+          { error: "Mortgage not found." },
+          { status: 404 },
+        );
+      }
+
+      if (mortgage.status !== "active") {
+        return NextResponse.json(
+          { error: "Mortgage already paid." },
+          { status: 409 },
+        );
+      }
+
+      const payoffAmount =
+        (mortgage.principal_remaining ?? 0) +
+        (mortgage.accrued_interest_unpaid ?? 0);
+
+      if (payoffAmount <= 0) {
+        return NextResponse.json(
+          { error: "Mortgage balance already cleared." },
+          { status: 409 },
+        );
+      }
+
+      const balances = gameState.balances ?? {};
+      const currentBalance =
+        balances[currentPlayer.id] ?? game.starting_cash ?? 0;
+
+      if (currentBalance < payoffAmount) {
+        return NextResponse.json(
+          { error: "Not enough cash to pay off mortgage." },
+          { status: 409 },
+        );
+      }
+
+      await fetchFromSupabaseWithService(`purchase_mortgages?id=eq.${mortgage.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          principal_remaining: 0,
+          accrued_interest_unpaid: 0,
+          status: "paid",
+          updated_at: new Date().toISOString(),
+        }),
+      });
+
+      await fetchFromSupabaseWithService(
+        `property_ownership?game_id=eq.${gameId}&tile_index=eq.${mortgage.tile_index}&purchase_mortgage_id=eq.${mortgage.id}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            purchase_mortgage_id: null,
+          }),
+        },
+      );
+
+      const updatedBalances = {
+        ...balances,
+        [currentPlayer.id]: currentBalance - payoffAmount,
+      };
+
+      const events: Array<{
+        event_type: string;
+        payload: Record<string, unknown>;
+      }> = [
+        {
+          event_type: "CASH_DEBIT",
+          payload: {
+            player_id: currentPlayer.id,
+            amount: payoffAmount,
+            reason: "PURCHASE_MORTGAGE_PAYOFF",
+            tile_index: mortgage.tile_index,
+            mortgage_id: mortgage.id,
+          },
+        },
+        {
+          event_type: "PURCHASE_MORTGAGE_PAID",
+          payload: {
+            mortgage_id: mortgage.id,
+            player_id: currentPlayer.id,
+            tile_index: mortgage.tile_index,
+            principal_paid: mortgage.principal_remaining,
+            interest_paid: mortgage.accrued_interest_unpaid,
+            total_paid: payoffAmount,
+          },
+        },
+      ];
+
+      const finalVersion = currentVersion + events.length;
+
+      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            version: finalVersion,
+            balances: updatedBalances,
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      )) ?? [];
+
+      if (!updatedState) {
+        return NextResponse.json(
+          { error: "Version mismatch." },
+          { status: 409 },
+        );
+      }
+
+      await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+
+      return NextResponse.json({ gameState: updatedState });
     }
 
     if (body.action === "JAIL_ROLL_FOR_DOUBLES") {

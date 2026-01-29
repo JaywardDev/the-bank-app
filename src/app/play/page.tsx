@@ -123,11 +123,16 @@ type OwnershipRow = {
   tile_index: number;
   owner_player_id: string | null;
   collateral_loan_id: string | null;
+  purchase_mortgage_id: string | null;
 };
 
 type OwnershipByTile = Record<
   number,
-  { owner_player_id: string; collateral_loan_id: string | null }
+  {
+    owner_player_id: string;
+    collateral_loan_id: string | null;
+    purchase_mortgage_id: string | null;
+  }
 >;
 
 type PlayerLoan = {
@@ -140,6 +145,19 @@ type PlayerLoan = {
   term_turns: number;
   turns_remaining: number;
   payment_per_turn: number;
+  status: string;
+};
+
+type PurchaseMortgage = {
+  id: string;
+  player_id: string;
+  tile_index: number;
+  principal_original: number;
+  principal_remaining: number;
+  rate_per_turn: number;
+  term_turns: number;
+  turns_elapsed: number;
+  accrued_interest_unpaid: number;
   status: string;
 };
 
@@ -582,6 +600,9 @@ export default function PlayPage() {
   const [events, setEvents] = useState<GameEvent[]>([]);
   const [ownershipByTile, setOwnershipByTile] = useState<OwnershipByTile>({});
   const [playerLoans, setPlayerLoans] = useState<PlayerLoan[]>([]);
+  const [purchaseMortgages, setPurchaseMortgages] = useState<PurchaseMortgage[]>(
+    [],
+  );
   const [payoffLoan, setPayoffLoan] = useState<PlayerLoan | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1686,7 +1707,7 @@ export default function PlayPage() {
       const ownershipRows = await supabaseClient.fetchFromSupabase<
         OwnershipRow[]
       >(
-        `property_ownership?select=tile_index,owner_player_id,collateral_loan_id&game_id=eq.${activeGameId}`,
+        `property_ownership?select=tile_index,owner_player_id,collateral_loan_id,purchase_mortgage_id&game_id=eq.${activeGameId}`,
         { method: "GET" },
         accessToken,
       );
@@ -1695,6 +1716,7 @@ export default function PlayPage() {
           acc[row.tile_index] = {
             owner_player_id: row.owner_player_id,
             collateral_loan_id: row.collateral_loan_id ?? null,
+            purchase_mortgage_id: row.purchase_mortgage_id ?? null,
           };
         }
         return acc;
@@ -1720,6 +1742,28 @@ export default function PlayPage() {
         accessToken,
       );
       setPlayerLoans(loanRows);
+    },
+    [],
+  );
+
+  const loadPurchaseMortgages = useCallback(
+    async (
+      activeGameId: string,
+      accessToken?: string,
+      playerId?: string | null,
+    ) => {
+      if (!playerId) {
+        setPurchaseMortgages([]);
+        return;
+      }
+      const mortgageRows = await supabaseClient.fetchFromSupabase<
+        PurchaseMortgage[]
+      >(
+        `purchase_mortgages?select=id,player_id,tile_index,principal_original,principal_remaining,rate_per_turn,term_turns,turns_elapsed,accrued_interest_unpaid,status&game_id=eq.${activeGameId}&player_id=eq.${playerId}`,
+        { method: "GET" },
+        accessToken,
+      );
+      setPurchaseMortgages(mortgageRows);
     },
     [],
   );
@@ -1954,6 +1998,31 @@ export default function PlayPage() {
         {
           event: "*",
           schema: "public",
+          table: "purchase_mortgages",
+          filter: `game_id=eq.${gameId}`,
+        },
+        async () => {
+          try {
+            await loadPurchaseMortgages(
+              gameId,
+              session?.access_token,
+              currentUserPlayer?.id,
+            );
+          } catch (error) {
+            if (DEBUG) {
+              console.error(
+                "[Play][Realtime] purchase_mortgages handler error",
+                error,
+              );
+            }
+          }
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
           table: "games",
           filter: `id=eq.${gameId}`,
         },
@@ -2001,6 +2070,7 @@ export default function PlayPage() {
     loadGameMeta,
     loadGameState,
     loadLoans,
+    loadPurchaseMortgages,
     loadPlayers,
     loadOwnership,
     loadGameData,
@@ -2061,6 +2131,7 @@ export default function PlayPage() {
           loadEvents(gameId, accessToken),
           loadOwnership(gameId, accessToken),
           loadLoans(gameId, accessToken, currentUserPlayer?.id),
+          loadPurchaseMortgages(gameId, accessToken, currentUserPlayer?.id),
         ]);
       }, 350);
     },
@@ -2071,6 +2142,7 @@ export default function PlayPage() {
       loadEvents,
       loadGameState,
       loadLoans,
+      loadPurchaseMortgages,
       loadPlayers,
       loadOwnership,
       session?.access_token,
@@ -2429,6 +2501,15 @@ export default function PlayPage() {
   const canAffordPendingPurchase = pendingPurchase
     ? myPlayerBalance >= pendingPurchase.price
     : false;
+  const pendingMortgagePrincipal = pendingPurchase
+    ? Math.round(pendingPurchase.price * 0.5)
+    : 0;
+  const pendingMortgageDownPayment = pendingPurchase
+    ? pendingPurchase.price - pendingMortgagePrincipal
+    : 0;
+  const canAffordPendingMortgage = pendingPurchase
+    ? myPlayerBalance >= pendingMortgageDownPayment
+    : false;
   const hasPendingCard = Boolean(pendingCard);
   const canAct =
     initialSnapshotReady &&
@@ -2508,6 +2589,12 @@ export default function PlayPage() {
       : !canAffordPendingPurchase
         ? "Not enough cash"
         : null;
+  const mortgageBuyDisabledReason =
+    actionLoading === "BUY_PROPERTY"
+      ? "Buying…"
+      : !canAffordPendingMortgage
+        ? "Not enough cash for down payment"
+        : null;
   const jailPayDisabledReason =
     actionLoading === "JAIL_PAY_FINE" ? "Paying…" : null;
   const confirmCardDisabledReason =
@@ -2569,15 +2656,21 @@ export default function PlayPage() {
         isCollateralized: Boolean(
           ownershipByTile[tile.index]?.collateral_loan_id,
         ),
+        isPurchaseMortgaged: Boolean(
+          ownershipByTile[tile.index]?.purchase_mortgage_id,
+        ),
       }));
   }, [boardPack?.tiles, currentUserPlayer, ownershipByTile]);
   const eligibleCollateralTiles = ownedProperties.filter(
-    (entry) => !entry.isCollateralized,
+    (entry) => !entry.isCollateralized && !entry.isPurchaseMortgaged,
   );
   const activeLoans = playerLoans.filter((loan) => loan.status === "active");
+  const activePurchaseMortgages = purchaseMortgages.filter(
+    (mortgage) => mortgage.status === "active",
+  );
   const netWorth = useMemo(() => {
     const propertyValue = ownedProperties.reduce((total, entry) => {
-      if (entry.isCollateralized) {
+      if (entry.isCollateralized || entry.isPurchaseMortgaged) {
         return total;
       }
       return total + (entry.tile.price ?? 0);
@@ -2588,8 +2681,18 @@ export default function PlayPage() {
       }
       return total + loan.principal;
     }, 0);
-    return myPlayerBalance + propertyValue - outstandingPrincipal;
-  }, [activeLoans, myPlayerBalance, ownedProperties]);
+    const mortgageBalance = activePurchaseMortgages.reduce((total, mortgage) => {
+      const principal = mortgage.principal_remaining ?? 0;
+      const interest = mortgage.accrued_interest_unpaid ?? 0;
+      return total + principal + interest;
+    }, 0);
+    return myPlayerBalance + propertyValue - outstandingPrincipal - mortgageBalance;
+  }, [
+    activeLoans,
+    activePurchaseMortgages,
+    myPlayerBalance,
+    ownedProperties,
+  ]);
   const auctionTurnPlayerId = gameState?.auction_turn_player_id ?? null;
   const auctionTileIndex = gameState?.auction_tile_index ?? null;
   const auctionTile =
@@ -2800,7 +2903,18 @@ export default function PlayPage() {
       return;
     }
     void loadLoans(gameId, session.access_token, currentUserPlayer?.id);
-  }, [currentUserPlayer?.id, gameId, loadLoans, session?.access_token]);
+    void loadPurchaseMortgages(
+      gameId,
+      session.access_token,
+      currentUserPlayer?.id,
+    );
+  }, [
+    currentUserPlayer?.id,
+    gameId,
+    loadLoans,
+    loadPurchaseMortgages,
+    session?.access_token,
+  ]);
 
   useEffect(() => {
     if (!isAuctionActive) {
@@ -2897,16 +3011,25 @@ export default function PlayPage() {
             | "USE_GET_OUT_OF_JAIL_FREE"
             | "CONFIRM_PENDING_CARD";
         }
-        | { action: "DECLINE_PROPERTY" | "BUY_PROPERTY"; tileIndex: number }
+        | {
+          action: "DECLINE_PROPERTY" | "BUY_PROPERTY";
+          tileIndex: number;
+          financing?: "MORTGAGE";
+        }
         | { action: "AUCTION_BID"; amount: number }
         | { action: "AUCTION_PASS" }
         | { action: "TAKE_COLLATERAL_LOAN"; tileIndex: number }
-        | { action: "PAYOFF_COLLATERAL_LOAN"; loanId: string },
+        | { action: "PAYOFF_COLLATERAL_LOAN"; loanId: string }
+        | { action: "PAYOFF_PURCHASE_MORTGAGE"; mortgageId: string },
     ) => {
       const { action } = request;
       const tileIndex = "tileIndex" in request ? request.tileIndex : undefined;
       const amount = "amount" in request ? request.amount : undefined;
       const loanId = "loanId" in request ? request.loanId : undefined;
+      const mortgageId =
+        "mortgageId" in request ? request.mortgageId : undefined;
+      const financing =
+        "financing" in request ? request.financing : undefined;
       if (!session || !gameId) {
         setNotice("Join a game lobby first.");
         return;
@@ -2970,6 +3093,8 @@ export default function PlayPage() {
               tileIndex,
               amount,
               loanId,
+              mortgageId,
+              financing,
               expectedVersion: snapshotVersion,
             }),
           });
@@ -3069,6 +3194,8 @@ export default function PlayPage() {
                 owner_player_id: responseBody.ownership.owner_player_id,
                 collateral_loan_id:
                   responseBody.ownership.collateral_loan_id ?? null,
+                purchase_mortgage_id:
+                  responseBody.ownership.purchase_mortgage_id ?? null,
               },
             };
           });
@@ -3091,6 +3218,7 @@ export default function PlayPage() {
           loadPlayers(gameId, accessToken),
           loadEvents(gameId, accessToken),
           loadOwnership(gameId, accessToken),
+          loadPurchaseMortgages(gameId, accessToken, currentUserPlayer?.id),
         ]);
 
         if (firstRoundResyncEnabled) {
@@ -3114,7 +3242,9 @@ export default function PlayPage() {
       loadEvents,
       loadGameData,
       loadOwnership,
+      loadPurchaseMortgages,
       loadPlayers,
+      currentUserPlayer?.id,
       requestFirstRoundResync,
       session,
     ],
@@ -3139,6 +3269,18 @@ export default function PlayPage() {
     void handleBankAction({
       action: "BUY_PROPERTY",
       tileIndex: pendingPurchase.tile_index,
+    });
+  }, [handleBankAction, pendingPurchase]);
+
+  const handleBuyPropertyWithMortgage = useCallback(() => {
+    if (!pendingPurchase) {
+      return;
+    }
+
+    void handleBankAction({
+      action: "BUY_PROPERTY",
+      tileIndex: pendingPurchase.tile_index,
+      financing: "MORTGAGE",
     });
   }, [handleBankAction, pendingPurchase]);
 
@@ -3572,9 +3714,31 @@ export default function PlayPage() {
                   >
                     {actionLoading === "BUY_PROPERTY" ? "Buying…" : "Buy"}
                   </button>
+                  <button
+                    className="rounded-2xl border border-amber-700 px-4 py-2 text-sm font-semibold text-amber-900 disabled:cursor-not-allowed disabled:border-amber-200 disabled:text-amber-400"
+                    type="button"
+                    onClick={handleBuyPropertyWithMortgage}
+                    disabled={
+                      actionLoading === "BUY_PROPERTY" || !canAffordPendingMortgage
+                    }
+                    title={
+                      canAffordPendingMortgage
+                        ? "Buy with a 50% down payment"
+                        : "Not enough cash for down payment"
+                    }
+                  >
+                    {actionLoading === "BUY_PROPERTY"
+                      ? "Buying…"
+                      : `Buy with Mortgage ($${pendingMortgageDownPayment} down)`}
+                  </button>
                   {buyDisabledReason ? (
                     <p className="text-xs text-neutral-400">
                       {buyDisabledReason}
+                    </p>
+                  ) : null}
+                  {!buyDisabledReason && mortgageBuyDisabledReason ? (
+                    <p className="text-xs text-neutral-400">
+                      {mortgageBuyDisabledReason}
                     </p>
                   ) : null}
                 </div>
@@ -4051,6 +4215,73 @@ export default function PlayPage() {
                       title={
                         canPayoff
                           ? "Pay off this loan"
+                          : "Not enough cash to pay off"
+                      }
+                    >
+                      Pay off
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+            Purchase mortgages
+          </p>
+          {activePurchaseMortgages.length === 0 ? (
+            <p className="text-sm text-neutral-500">No purchase mortgages.</p>
+          ) : (
+            <div className="space-y-2">
+              {activePurchaseMortgages.map((mortgage) => {
+                const tile =
+                  boardPack?.tiles?.find(
+                    (entry) => entry.index === mortgage.tile_index,
+                  ) ?? null;
+                const tileName = tile?.name ?? `Tile ${mortgage.tile_index}`;
+                const groupLabel = getTileGroupLabel(tile);
+                const payoffAmount =
+                  (mortgage.principal_remaining ?? 0) +
+                  (mortgage.accrued_interest_unpaid ?? 0);
+                const canPayoff =
+                  canAct && payoffAmount > 0 && myPlayerBalance >= payoffAmount;
+                return (
+                  <div
+                    key={mortgage.id}
+                    className="flex items-center justify-between rounded-2xl border px-4 py-3 text-sm"
+                  >
+                    <div>
+                      <p className="font-semibold text-neutral-900">
+                        {tileName}
+                      </p>
+                      <p className="text-xs text-neutral-500">{groupLabel}</p>
+                      <p className="text-xs text-neutral-500">
+                        Principal remaining: ${mortgage.principal_remaining}
+                      </p>
+                      <p className="text-xs text-neutral-500">
+                        Accrued interest: ${mortgage.accrued_interest_unpaid}
+                      </p>
+                      <p className="text-xs text-neutral-500">
+                        Payoff amount: ${payoffAmount}
+                      </p>
+                    </div>
+                    <button
+                      className="rounded-full border border-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
+                      type="button"
+                      onClick={() =>
+                        void handleBankAction({
+                          action: "PAYOFF_PURCHASE_MORTGAGE",
+                          mortgageId: mortgage.id,
+                        })
+                      }
+                      disabled={
+                        !canPayoff ||
+                        actionLoading === "PAYOFF_PURCHASE_MORTGAGE"
+                      }
+                      title={
+                        canPayoff
+                          ? "Pay off this mortgage"
                           : "Not enough cash to pay off"
                       }
                     >
