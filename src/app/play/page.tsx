@@ -561,6 +561,7 @@ export default function PlayPage() {
   const [needsAuth, setNeedsAuth] = useState(false);
   const [isActivityPanelOpen, setIsActivityPanelOpen] = useState(false);
   const [activityTab, setActivityTab] = useState<"log" | "transactions">("log");
+  const [isBoardExpanded, setIsBoardExpanded] = useState(false);
   const [initialSnapshotReady, setInitialSnapshotReady] = useState(false);
   const [realtimeReady, setRealtimeReady] = useState(false);
   const [firstRoundResyncEnabled, setFirstRoundResyncEnabled] = useState(true);
@@ -2362,6 +2363,14 @@ export default function PlayPage() {
     currentUserPlayer && gameState?.balances
       ? gameState.balances[currentUserPlayer.id] ?? 0
       : 0;
+  const isDecisionOverlayActive =
+    showJailDecisionPanel ||
+    pendingCard !== null ||
+    isCardResolving ||
+    payoffLoan !== null ||
+    isLoanPayoffResolving ||
+    isAuctionActive ||
+    isAuctionResolving;
   const isEventLogSuppressed =
     showJailDecisionPanel ||
     pendingCard !== null ||
@@ -2397,6 +2406,35 @@ export default function PlayPage() {
       setIsActivityPanelOpen(false);
     }
   }, [isActivityPanelOpen, isEventLogSuppressed]);
+  useEffect(() => {
+    if (isDecisionOverlayActive && isBoardExpanded) {
+      setIsBoardExpanded(false);
+    }
+  }, [isBoardExpanded, isDecisionOverlayActive]);
+  useEffect(() => {
+    if (!isBoardExpanded) {
+      return undefined;
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsBoardExpanded(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isBoardExpanded]);
+  useEffect(() => {
+    if (!isBoardExpanded) {
+      return undefined;
+    }
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isBoardExpanded]);
   const auctionRemainingSeconds = useMemo(() => {
     if (!auctionTurnEndsAt) {
       return null;
@@ -2974,6 +3012,19 @@ export default function PlayPage() {
               Board pack: {boardPack?.displayName ?? "Unknown"}
             </p>
           </div>
+          <button
+            className="rounded-full border border-neutral-200 px-3 py-1.5 text-xs font-semibold text-neutral-600 transition hover:border-neutral-300 hover:text-neutral-800 disabled:cursor-not-allowed disabled:border-neutral-100 disabled:text-neutral-300"
+            type="button"
+            onClick={() => setIsBoardExpanded(true)}
+            disabled={isDecisionOverlayActive}
+            title={
+              isDecisionOverlayActive
+                ? "Resolve the current decision to open the full board."
+                : "Open the full board view"
+            }
+          >
+            Expand board
+          </button>
         </div>
         <div className="overflow-x-auto">
           <div className="min-w-[320px]">
@@ -3713,6 +3764,53 @@ export default function PlayPage() {
           </button>
         </div>
       </section>
+      {isBoardExpanded ? (
+        <div
+          className="fixed inset-0 z-50 flex bg-black/60 p-3 sm:p-6"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Board"
+          onClick={() => setIsBoardExpanded(false)}
+        >
+          <div
+            className="flex h-full w-full flex-col overflow-hidden rounded-3xl bg-white shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 px-4 py-3 sm:px-6">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                  Board
+                </p>
+                <p className="hidden text-xs text-neutral-400 [@media(orientation:portrait)]:block">
+                  Rotate your phone for full board view.
+                </p>
+              </div>
+              <button
+                className="rounded-full border border-neutral-200 px-2.5 py-1.5 text-xs font-semibold text-neutral-500 transition hover:border-neutral-300 hover:text-neutral-700"
+                type="button"
+                onClick={() => setIsBoardExpanded(false)}
+                aria-label="Close board"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="flex min-h-0 flex-1 flex-col px-4 pb-6 pt-4 sm:px-6">
+              <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-auto">
+                <div className="w-full max-w-6xl">
+                  <BoardMiniMap
+                    tiles={boardPack?.tiles}
+                    players={players}
+                    currentPlayerId={currentPlayer?.id}
+                    ownershipByTile={ownershipByTile}
+                    showOwnership
+                    size="large"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {!isEventLogSuppressed ? (
         <>
           <button
