@@ -715,6 +715,36 @@ export default function PlayPage() {
     }),
     [],
   );
+  const getExpandedTileFaceLabel = useCallback((tileType: string) => {
+    const normalized = tileType.toUpperCase();
+    if (normalized === "PROPERTY") {
+      return null;
+    }
+    switch (normalized) {
+      case "START":
+        return "GO";
+      case "JAIL":
+        return "JAIL";
+      case "FREE_PARKING":
+        return "FREE";
+      case "GO_TO_JAIL":
+        return "G2J";
+      case "CHANCE":
+        return "CHANCE";
+      case "COMMUNITY_CHEST":
+        return "CHEST";
+      case "TAX":
+        return "TAX";
+      case "RAILROAD":
+        return "RR";
+      case "UTILITY":
+        return "UTIL";
+      default: {
+        const fallback = normalized.replace(/_/g, " ");
+        return fallback.length > 8 ? fallback.slice(0, 8) : fallback;
+      }
+    }
+  }, []);
   const renderExpandedTile = useCallback(
     (tileIndex: number) => {
       const tile =
@@ -740,15 +770,15 @@ export default function PlayPage() {
           }
         : undefined;
 
-      const isCornerTile = [0, 5, 20, 25].includes(tileIndex);
       const isSelectedTile = tileIndex === selectedTileIndex;
+      const tileFaceLabel = getExpandedTileFaceLabel(tile.type);
 
       return (
         <div
           key={tile.tile_id}
           role="button"
           tabIndex={0}
-          className="focus:outline-none"
+          className="h-full w-full focus:outline-none"
           onClick={(event) => {
             event.stopPropagation();
             setSelectedTileIndex(tileIndex);
@@ -765,12 +795,19 @@ export default function PlayPage() {
             style={ownershipStyle}
             className={`border bg-white text-neutral-700 ${
               isCurrentTile ? "ring-2 ring-emerald-400/70" : ""
-            } ${isSelectedTile ? "outline outline-2 outline-indigo-300/60 outline-offset-2" : ""} ${isCornerTile ? "rounded-md px-2 py-2 md:px-2.5 md:py-2.5" : "rounded-sm px-1.5 py-1.5"} border-neutral-200`}
+            } ${isSelectedTile ? "outline outline-2 outline-indigo-300/60 outline-offset-2" : ""} h-full w-full rounded-md border-neutral-200 p-1.5 sm:p-2`}
           >
             <div className="relative flex h-full flex-col justify-end gap-2">
               <span className="absolute left-1 top-1 text-[9px] font-medium text-neutral-300/70">
                 {tile.index}
               </span>
+              {tileFaceLabel ? (
+                <span className="pointer-events-none absolute inset-0 flex items-center justify-center px-1 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
+                  <span className="w-full truncate text-center">
+                    {tileFaceLabel}
+                  </span>
+                </span>
+              ) : null}
               {tilePlayers.length > 0 ? (
                 <div className="flex flex-wrap justify-end gap-1">
                   {tilePlayers.map((player) => (
@@ -797,6 +834,7 @@ export default function PlayPage() {
       expandedOwnershipColorsByPlayer,
       expandedPlayersByTile,
       expandedTilesByIndex,
+      getExpandedTileFaceLabel,
       ownershipByTile,
       selectedTileIndex,
     ],
