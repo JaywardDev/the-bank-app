@@ -261,6 +261,16 @@ const parseNumber = (value: unknown): number | null => {
   return null;
 };
 
+const calculateMortgageInterestPerTurn = (
+  principalRemaining: number | null | undefined,
+  ratePerTurn: number | null | undefined,
+) => {
+  if (typeof principalRemaining !== "number" || typeof ratePerTurn !== "number") {
+    return 0;
+  }
+  return Math.round(principalRemaining * ratePerTurn);
+};
+
 const getTileGroupLabel = (tile: BoardTile | null | undefined) => {
   if (!tile) {
     return "Property";
@@ -307,6 +317,30 @@ const derivePlayerTransactions = ({
   };
 
   const transactions: TransactionItem[] = [];
+  const mortgageInterestDebitKeys = new Set<string>();
+
+  for (const event of events) {
+    const payload =
+      event.payload && typeof event.payload === "object" ? event.payload : null;
+    if (!payload) {
+      continue;
+    }
+    if (event.event_type !== "CASH_DEBIT") {
+      continue;
+    }
+    const reason = typeof payload.reason === "string" ? payload.reason : null;
+    if (reason !== "PURCHASE_MORTGAGE_INTEREST") {
+      continue;
+    }
+    const mortgageId =
+      typeof payload.mortgage_id === "string" ? payload.mortgage_id : "unknown";
+    const amount = parseNumber(payload.amount);
+    if (amount === null) {
+      continue;
+    }
+    const key = `${mortgageId}-${amount}-${event.created_at ?? ""}`;
+    mortgageInterestDebitKeys.add(key);
+  }
 
   for (const event of events) {
     const payload =
@@ -388,6 +422,59 @@ const derivePlayerTransactions = ({
           title: "Card payout",
           subtitle: cardTitle,
           amount,
+        });
+        break;
+      }
+      case "CASH_DEBIT": {
+        const playerId =
+          typeof payload.player_id === "string" ? payload.player_id : null;
+        if (playerId !== currentPlayerId) {
+          break;
+        }
+        const reason =
+          typeof payload.reason === "string" ? payload.reason : null;
+        if (reason !== "PURCHASE_MORTGAGE_INTEREST") {
+          break;
+        }
+        const amount = parseNumber(payload.amount);
+        if (amount === null) {
+          break;
+        }
+        const tileIndex = parseNumber(payload.tile_index);
+        const tileName = getTileName(tileIndex);
+        transactions.push({
+          ...recordBase,
+          id: event.id,
+          title: "Mortgage interest",
+          subtitle: tileName,
+          amount: -amount,
+        });
+        break;
+      }
+      case "PURCHASE_MORTGAGE_INTEREST_PAID": {
+        const playerId =
+          typeof payload.player_id === "string" ? payload.player_id : null;
+        if (playerId !== currentPlayerId) {
+          break;
+        }
+        const amount = parseNumber(payload.interest_amount);
+        if (amount === null) {
+          break;
+        }
+        const mortgageId =
+          typeof payload.mortgage_id === "string" ? payload.mortgage_id : "unknown";
+        const key = `${mortgageId}-${amount}-${event.created_at ?? ""}`;
+        if (mortgageInterestDebitKeys.has(key)) {
+          break;
+        }
+        const tileIndex = parseNumber(payload.tile_index);
+        const tileName = getTileName(tileIndex);
+        transactions.push({
+          ...recordBase,
+          id: event.id,
+          title: "Mortgage interest",
+          subtitle: tileName,
+          amount: -amount,
         });
         break;
       }
@@ -2668,6 +2755,71 @@ export default function PlayPage() {
   const activePurchaseMortgages = purchaseMortgages.filter(
     (mortgage) => mortgage.status === "active",
   );
+  const latestMortgageInterestById = useMemo(() => {
+    const latestById = new Map<
+      string,
+      { amount: number; version: number; ts: string | null }
+    >();
+    for (const event of events) {
+      const payload =
+        event.payload && typeof event.payload === "object"
+          ? event.payload
+          : null;
+      if (!payload) {
+        continue;
+      }
+      const version = typeof event.version === "number" ? event.version : 0;
+      if (event.event_type === "CASH_DEBIT") {
+        const reason =
+          typeof payload.reason === "string" ? payload.reason : null;
+        if (reason !== "PURCHASE_MORTGAGE_INTEREST") {
+          continue;
+        }
+        const mortgageId =
+          typeof payload.mortgage_id === "string" ? payload.mortgage_id : null;
+        if (!mortgageId) {
+          continue;
+        }
+        const amount = parseNumber(payload.amount);
+        if (amount === null) {
+          continue;
+        }
+        const existing = latestById.get(mortgageId);
+        if (!existing || version > existing.version) {
+          latestById.set(mortgageId, {
+            amount,
+            version,
+            ts: event.created_at ?? null,
+          });
+        }
+        continue;
+      }
+      if (
+        event.event_type !== "PURCHASE_MORTGAGE_INTEREST_PAID" &&
+        event.event_type !== "PURCHASE_MORTGAGE_INTEREST_ACCRUED"
+      ) {
+        continue;
+      }
+      const mortgageId =
+        typeof payload.mortgage_id === "string" ? payload.mortgage_id : null;
+      if (!mortgageId) {
+        continue;
+      }
+      const amount = parseNumber(payload.interest_amount);
+      if (amount === null) {
+        continue;
+      }
+      const existing = latestById.get(mortgageId);
+      if (!existing || version > existing.version) {
+        latestById.set(mortgageId, {
+          amount,
+          version,
+          ts: event.created_at ?? null,
+        });
+      }
+    }
+    return latestById;
+  }, [events]);
   const netWorth = useMemo(() => {
     const propertyValue = ownedProperties.reduce((total, entry) => {
       if (entry.isCollateralized || entry.isPurchaseMortgaged) {
@@ -4247,6 +4399,11 @@ export default function PlayPage() {
                 const payoffAmount =
                   (mortgage.principal_remaining ?? 0) +
                   (mortgage.accrued_interest_unpaid ?? 0);
+                const interestPerTurn = calculateMortgageInterestPerTurn(
+                  mortgage.principal_remaining,
+                  mortgage.rate_per_turn,
+                );
+                const lastCharged = latestMortgageInterestById.get(mortgage.id);
                 const canPayoff =
                   canAct && payoffAmount > 0 && myPlayerBalance >= payoffAmount;
                 return (
@@ -4265,6 +4422,14 @@ export default function PlayPage() {
                       <p className="text-xs text-neutral-500">
                         Accrued interest: ${mortgage.accrued_interest_unpaid}
                       </p>
+                      <p className="text-xs text-neutral-500">
+                        Interest per turn: ${interestPerTurn}
+                      </p>
+                      {lastCharged ? (
+                        <p className="text-xs text-neutral-500">
+                          Last charged: ${lastCharged.amount}
+                        </p>
+                      ) : null}
                       <p className="text-xs text-neutral-500">
                         Payoff amount: ${payoffAmount}
                       </p>
