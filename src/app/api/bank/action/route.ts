@@ -1856,9 +1856,12 @@ const applyLoanPaymentsForPlayer = async ({
     const interestAmount = Math.round(
       mortgage.principal_remaining * mortgage.rate_per_turn,
     );
-    const accruedInterestAfter =
-      (mortgage.accrued_interest_unpaid ?? 0) + interestAmount;
     const turnsElapsedAfter = (mortgage.turns_elapsed ?? 0) + 1;
+    const currentBalance = updatedBalances[player.id] ?? startingCash;
+    const canPayInterest = currentBalance >= interestAmount;
+    const accruedInterestAfter = canPayInterest
+      ? mortgage.accrued_interest_unpaid ?? 0
+      : (mortgage.accrued_interest_unpaid ?? 0) + interestAmount;
 
     await fetchFromSupabaseWithService(`purchase_mortgages?id=eq.${mortgage.id}`, {
       method: "PATCH",
@@ -1869,17 +1872,51 @@ const applyLoanPaymentsForPlayer = async ({
       }),
     });
 
-    events.push({
-      event_type: "PURCHASE_MORTGAGE_INTEREST_ACCRUED",
-      payload: {
-        player_id: player.id,
-        mortgage_id: mortgage.id,
-        tile_index: mortgage.tile_index,
-        interest_amount: interestAmount,
-        accrued_interest_unpaid_after: accruedInterestAfter,
-        turns_elapsed_after: turnsElapsedAfter,
-      },
-    });
+    if (canPayInterest) {
+      updatedBalances = {
+        ...updatedBalances,
+        [player.id]: currentBalance - interestAmount,
+      };
+      if (interestAmount !== 0) {
+        balancesChanged = true;
+      }
+      events.push(
+        {
+          event_type: "CASH_DEBIT",
+          payload: {
+            player_id: player.id,
+            amount: interestAmount,
+            reason: "PURCHASE_MORTGAGE_INTEREST",
+            tile_index: mortgage.tile_index,
+            mortgage_id: mortgage.id,
+          },
+        },
+        {
+          event_type: "PURCHASE_MORTGAGE_INTEREST_PAID",
+          payload: {
+            player_id: player.id,
+            mortgage_id: mortgage.id,
+            tile_index: mortgage.tile_index,
+            interest_amount: interestAmount,
+            turns_elapsed_after: turnsElapsedAfter,
+          },
+        },
+      );
+    } else {
+      events.push({
+        event_type: "PURCHASE_MORTGAGE_INTEREST_ACCRUED",
+        payload: {
+          player_id: player.id,
+          mortgage_id: mortgage.id,
+          tile_index: mortgage.tile_index,
+          interest_amount: interestAmount,
+          accrued_interest_unpaid_after: accruedInterestAfter,
+          turns_elapsed_after: turnsElapsedAfter,
+          paid: false,
+          unpaid: interestAmount,
+        },
+      });
+    }
   }
 
   return { balances: updatedBalances, balancesChanged, events, bankruptcyCandidate };

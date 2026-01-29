@@ -4230,6 +4230,9 @@ export default function PlayPage() {
           <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
             Purchase mortgages
           </p>
+          <p className="text-xs text-neutral-500">
+            Interest is charged each turn; unpaid interest accumulates.
+          </p>
           {activePurchaseMortgages.length === 0 ? (
             <p className="text-sm text-neutral-500">No purchase mortgages.</p>
           ) : (
