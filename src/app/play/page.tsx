@@ -592,6 +592,9 @@ export default function PlayPage() {
   const [isActivityPanelOpen, setIsActivityPanelOpen] = useState(false);
   const [activityTab, setActivityTab] = useState<"log" | "transactions">("log");
   const [isBoardExpanded, setIsBoardExpanded] = useState(false);
+  const [selectedTileIndex, setSelectedTileIndex] = useState<number | null>(
+    null,
+  );
   const [expandedBoardScale, setExpandedBoardScale] = useState(1);
   const [initialSnapshotReady, setInitialSnapshotReady] = useState(false);
   const [realtimeReady, setRealtimeReady] = useState(false);
@@ -599,6 +602,7 @@ export default function PlayPage() {
   const [sessionInvalid, setSessionInvalid] = useState(false);
   const expandedBoardContainerRef = useRef<HTMLDivElement | null>(null);
   const expandedBoardRef = useRef<HTMLDivElement | null>(null);
+  const expandedTileSheetRef = useRef<HTMLDivElement | null>(null);
   const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshInFlightRef = useRef(false);
   const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
@@ -737,35 +741,53 @@ export default function PlayPage() {
         : undefined;
 
       const isCornerTile = [0, 10, 20, 30].includes(tileIndex);
+      const isSelectedTile = tileIndex === selectedTileIndex;
 
       return (
         <div
           key={tile.tile_id}
-          style={ownershipStyle}
-          className={`border bg-white text-neutral-700 ${
-            isCurrentTile ? "ring-2 ring-emerald-400/70" : ""
-          } ${isCornerTile ? "rounded-3xl px-3 py-3 md:px-4 md:py-4" : "rounded-2xl px-2.5 py-2.5"} border-neutral-200`}
+          role="button"
+          tabIndex={0}
+          className="focus:outline-none"
+          onClick={(event) => {
+            event.stopPropagation();
+            setSelectedTileIndex(tileIndex);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              event.stopPropagation();
+              setSelectedTileIndex(tileIndex);
+            }
+          }}
         >
-          <div className="relative flex h-full flex-col justify-end gap-2">
-            <span className="absolute left-1 top-1 text-[9px] font-medium text-neutral-300/70">
-              {tile.index}
-            </span>
-            {tilePlayers.length > 0 ? (
-              <div className="flex flex-wrap justify-end gap-1">
-                {tilePlayers.map((player) => (
-                  <div
-                    key={player.id}
-                    className={`flex h-6 w-6 items-center justify-center rounded-full bg-neutral-900 text-[9px] font-semibold uppercase text-white ${
-                      player.id === currentPlayerId
-                        ? "ring-2 ring-emerald-300"
-                        : ""
-                    }`}
-                  >
-                    {getPlayerInitials(player.display_name)}
-                  </div>
-                ))}
-              </div>
-            ) : null}
+          <div
+            style={ownershipStyle}
+            className={`border bg-white text-neutral-700 ${
+              isCurrentTile ? "ring-2 ring-emerald-400/70" : ""
+            } ${isSelectedTile ? "outline outline-2 outline-indigo-300/60 outline-offset-2" : ""} ${isCornerTile ? "rounded-3xl px-3 py-3 md:px-4 md:py-4" : "rounded-2xl px-2.5 py-2.5"} border-neutral-200`}
+          >
+            <div className="relative flex h-full flex-col justify-end gap-2">
+              <span className="absolute left-1 top-1 text-[9px] font-medium text-neutral-300/70">
+                {tile.index}
+              </span>
+              {tilePlayers.length > 0 ? (
+                <div className="flex flex-wrap justify-end gap-1">
+                  {tilePlayers.map((player) => (
+                    <div
+                      key={player.id}
+                      className={`flex h-6 w-6 items-center justify-center rounded-full bg-neutral-900 text-[9px] font-semibold uppercase text-white ${
+                        player.id === currentPlayerId
+                          ? "ring-2 ring-emerald-300"
+                          : ""
+                      }`}
+                    >
+                      {getPlayerInitials(player.display_name)}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           </div>
         </div>
       );
@@ -776,8 +798,79 @@ export default function PlayPage() {
       expandedPlayersByTile,
       expandedTilesByIndex,
       ownershipByTile,
+      selectedTileIndex,
     ],
   );
+  const getExpandedTileTypeLabel = useCallback((tileType: string) => {
+    const normalized = tileType.toUpperCase();
+    switch (normalized) {
+      case "PROPERTY":
+        return "Property";
+      case "RAILROAD":
+        return "Railroad";
+      case "UTILITY":
+        return "Utility";
+      case "CHANCE":
+        return "Chance";
+      case "COMMUNITY_CHEST":
+        return "Community Chest";
+      case "TAX":
+        return "Tax";
+      case "JAIL":
+        return "Jail";
+      case "START":
+        return "Go";
+      case "GO_TO_JAIL":
+        return "Go To Jail";
+      case "FREE_PARKING":
+        return "Free Parking";
+      default:
+        return "Other";
+    }
+  }, []);
+  const selectedExpandedTile = useMemo(() => {
+    if (selectedTileIndex === null) {
+      return null;
+    }
+    return (
+      expandedTilesByIndex.get(selectedTileIndex) ??
+      ({
+        index: selectedTileIndex,
+        tile_id: `tile-${selectedTileIndex}`,
+        type: selectedTileIndex === 0 ? "START" : "PROPERTY",
+        name: `Tile ${selectedTileIndex}`,
+      } satisfies BoardTile)
+    );
+  }, [expandedTilesByIndex, selectedTileIndex]);
+  const selectedTileTypeLabel = useMemo(() => {
+    if (!selectedExpandedTile) {
+      return null;
+    }
+    return getExpandedTileTypeLabel(selectedExpandedTile.type);
+  }, [getExpandedTileTypeLabel, selectedExpandedTile]);
+  const selectedTileOwnerLabel = useMemo(() => {
+    if (!selectedExpandedTile || selectedTileIndex === null) {
+      return null;
+    }
+    const ownableTypes = new Set(["PROPERTY", "RAILROAD", "UTILITY"]);
+    if (!ownableTypes.has(selectedExpandedTile.type)) {
+      return "Not ownable";
+    }
+    const ownership = ownershipByTile[selectedTileIndex];
+    if (!ownership?.owner_player_id) {
+      return "Unowned";
+    }
+    const owner = players.find(
+      (player) => player.id === ownership.owner_player_id,
+    );
+    return owner?.display_name ?? "Player";
+  }, [ownershipByTile, players, selectedExpandedTile, selectedTileIndex]);
+  const selectedTilePlayers = useMemo(() => {
+    if (selectedTileIndex === null) {
+      return [];
+    }
+    return expandedPlayersByTile[selectedTileIndex] ?? [];
+  }, [expandedPlayersByTile, selectedTileIndex]);
   const rules = useMemo(() => getRules(gameState?.rules), [gameState?.rules]);
   const latestRolledDoubleConfirmed = useMemo(() => {
     if (!latestRollEvent || !latestRolledDoubleEvent) {
@@ -2578,10 +2671,19 @@ export default function PlayPage() {
   }, [isBoardExpanded, isDecisionOverlayActive]);
   useEffect(() => {
     if (!isBoardExpanded) {
+      setSelectedTileIndex(null);
+    }
+  }, [isBoardExpanded]);
+  useEffect(() => {
+    if (!isBoardExpanded) {
       return undefined;
     }
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        if (selectedTileIndex !== null) {
+          setSelectedTileIndex(null);
+          return;
+        }
         setIsBoardExpanded(false);
       }
     };
@@ -2589,7 +2691,7 @@ export default function PlayPage() {
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [isBoardExpanded]);
+  }, [isBoardExpanded, selectedTileIndex]);
   useEffect(() => {
     if (!isBoardExpanded) {
       return undefined;
@@ -3957,8 +4059,18 @@ export default function PlayPage() {
           onClick={() => setIsBoardExpanded(false)}
         >
           <div
-            className="flex h-full w-full flex-col overflow-hidden rounded-3xl bg-white shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
+            className="relative flex h-full w-full flex-col overflow-hidden rounded-3xl bg-white shadow-2xl"
+            onClick={(event) => {
+              event.stopPropagation();
+              if (selectedTileIndex === null) {
+                return;
+              }
+              const target = event.target as Node;
+              if (expandedTileSheetRef.current?.contains(target)) {
+                return;
+              }
+              setSelectedTileIndex(null);
+            }}
           >
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 px-4 py-3 sm:px-6">
               <div>
@@ -4035,6 +4147,93 @@ export default function PlayPage() {
                   </div>
                 </div>
               </div>
+              {selectedTileIndex !== null && selectedExpandedTile ? (
+                <div className="absolute inset-x-0 bottom-0 z-20 flex justify-center px-4 pb-4 sm:px-6 sm:pb-6">
+                  <div
+                    ref={expandedTileSheetRef}
+                    className="w-full max-w-3xl rounded-3xl border border-neutral-200 bg-white p-4 shadow-2xl sm:p-6"
+                    onClick={(event) => event.stopPropagation()}
+                    role="dialog"
+                    aria-label="Tile details"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                          Tile details · {selectedTileIndex}
+                        </p>
+                      </div>
+                      <button
+                        className="rounded-full border border-neutral-200 px-2 py-1 text-xs font-semibold text-neutral-500 transition hover:border-neutral-300 hover:text-neutral-700"
+                        type="button"
+                        onClick={() => setSelectedTileIndex(null)}
+                        aria-label="Close tile details"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    <div className="mt-4">
+                      <p className="text-lg font-semibold text-neutral-900 sm:text-xl">
+                        {selectedExpandedTile.name?.trim() ||
+                          selectedTileTypeLabel ||
+                          "Tile"}
+                      </p>
+                    </div>
+                    <div className="mt-4 space-y-3 text-sm text-neutral-600">
+                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-neutral-50 px-3 py-2">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+                          Type
+                        </span>
+                        <span className="font-medium text-neutral-800">
+                          {selectedTileTypeLabel ?? "Other"}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-neutral-50 px-3 py-2">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+                          Owner
+                        </span>
+                        <span className="font-medium text-neutral-800">
+                          {selectedTileOwnerLabel ?? "Unowned"}
+                        </span>
+                      </div>
+                      <div className="rounded-2xl bg-neutral-50 px-3 py-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+                            Players here
+                          </span>
+                          {currentUserPlayer &&
+                          currentUserPlayer.position === selectedTileIndex ? (
+                            <span className="text-xs font-semibold uppercase tracking-wide text-emerald-500">
+                              You are here
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {selectedTilePlayers.length > 0 ? (
+                            selectedTilePlayers.map((player) => (
+                              <div
+                                key={player.id}
+                                className="flex items-center gap-2 rounded-full border border-neutral-200 bg-white px-2.5 py-1 text-xs font-semibold text-neutral-700"
+                              >
+                                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-neutral-900 text-[9px] font-semibold uppercase text-white">
+                                  {getPlayerInitials(player.display_name)}
+                                </span>
+                                <span>
+                                  {player.display_name ||
+                                    getPlayerInitials(player.display_name)}
+                                </span>
+                              </div>
+                            ))
+                          ) : (
+                            <span className="text-xs text-neutral-400">
+                              None
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
