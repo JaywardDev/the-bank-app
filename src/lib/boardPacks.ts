@@ -44,6 +44,8 @@ export type BoardTileType =
   | "PROPERTY"
   | "TAX"
   | "EVENT"
+  | "CHANCE"
+  | "COMMUNITY_CHEST"
   | "JAIL"
   | "FREE_PARKING"
   | "GO_TO_JAIL"
