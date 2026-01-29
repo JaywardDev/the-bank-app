@@ -795,15 +795,15 @@ export default function PlayPage() {
             style={ownershipStyle}
             className={`border bg-white text-neutral-700 ${
               isCurrentTile ? "ring-2 ring-emerald-400/70" : ""
-            } ${isSelectedTile ? "outline outline-2 outline-indigo-300/60 outline-offset-2" : ""} h-full w-full rounded-md border-neutral-200 p-1.5 sm:p-2`}
+            } ${isSelectedTile ? "outline outline-2 outline-indigo-300/60 outline-offset-2" : ""} h-full w-full rounded-md border-neutral-200 p-0.2 sm:p-0.2`}
           >
             <div className="relative flex h-full flex-col justify-end gap-2">
               <span className="absolute left-1 top-1 text-[9px] font-medium text-neutral-300/70">
                 {tile.index}
               </span>
               {tileFaceLabel ? (
-                <span className="pointer-events-none absolute inset-0 flex items-center justify-center px-1 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
-                  <span className="w-full truncate text-center">
+                <span className="pointer-events-none absolute inset-0 flex items-center justify-center px-0.5 text-[10px] font-semibold uppercase tracking-normal text-neutral-500">
+                  <span className="w-full line-clamp-2 text-center">
                     {tileFaceLabel}
                   </span>
                 </span>
@@ -4142,7 +4142,7 @@ export default function PlayPage() {
                   }}
                 >
                   <div className="w-full max-w-5xl">
-                    <div className="aspect-[4/7] w-full">
+                    <div className="aspect-[6/16] w-full">
                       <div className="grid h-full w-full grid-cols-[repeat(6,minmax(0,1fr))] grid-rows-[repeat(16,minmax(0,1fr))] gap-1 rounded-xl border border-neutral-200 bg-white p-1 text-neutral-700 sm:gap-1.5 sm:p-1.5">
                         {expandedBoardEdges.top.map((index, position) => (
                           <div
