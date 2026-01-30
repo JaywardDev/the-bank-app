@@ -193,6 +193,38 @@ type PurchaseMortgage = {
   status: string;
 };
 
+type TradeSnapshotTile = {
+  tile_index: number;
+  collateral_loan_id: string | null;
+  purchase_mortgage_id: string | null;
+  houses: number;
+};
+
+type TradeProposal = {
+  id: string;
+  game_id: string;
+  proposer_player_id: string;
+  counterparty_player_id: string;
+  offer_cash: number;
+  offer_tile_indices: number[];
+  request_cash: number;
+  request_tile_indices: number[];
+  snapshot: TradeSnapshotTile[] | { tiles: TradeSnapshotTile[] } | null;
+  status: string;
+  created_at: string | null;
+};
+
+type TradeExecutionSummary = {
+  tradeId: string;
+  proposerPlayerId: string;
+  counterpartyPlayerId: string;
+  offerCash: number;
+  offerTiles: number[];
+  requestCash: number;
+  requestTiles: number[];
+  snapshotTiles: TradeSnapshotTile[];
+};
+
 type PendingPurchaseAction = {
   type: "BUY_PROPERTY";
   tile_index: number;
@@ -301,6 +333,25 @@ const calculateMortgageInterestPerTurn = (
     return 0;
   }
   return Math.round(principalRemaining * ratePerTurn);
+};
+
+const normalizeTradeSnapshot = (
+  snapshot: TradeProposal["snapshot"],
+): TradeSnapshotTile[] => {
+  if (!snapshot) {
+    return [];
+  }
+  if (Array.isArray(snapshot)) {
+    return snapshot;
+  }
+  if (
+    typeof snapshot === "object" &&
+    "tiles" in snapshot &&
+    Array.isArray(snapshot.tiles)
+  ) {
+    return snapshot.tiles;
+  }
+  return [];
 };
 
 const getTileGroupLabel = (tile: BoardTile | null | undefined) => {
@@ -469,6 +520,23 @@ const derivePlayerTransactions = ({
         if (amount === null) {
           break;
         }
+        if (reason === "TRADE") {
+          const counterpartyId =
+            typeof payload.counterparty_player_id === "string"
+              ? payload.counterparty_player_id
+              : null;
+          const counterpartyName = counterpartyId
+            ? getPlayerName(counterpartyId)
+            : "another player";
+          transactions.push({
+            ...recordBase,
+            id: event.id,
+            title: "Trade payment",
+            subtitle: `To ${counterpartyName}`,
+            amount: -amount,
+          });
+          break;
+        }
         if (reason === "PURCHASE_MORTGAGE_INTEREST") {
           const tileIndex = parseNumber(payload.tile_index);
           const tileName = getTileName(tileIndex);
@@ -508,6 +576,36 @@ const derivePlayerTransactions = ({
             title: "Macro interest surcharge",
             subtitle: tileName,
             amount: -amount,
+          });
+        }
+        break;
+      }
+      case "CASH_CREDIT": {
+        const playerId =
+          typeof payload.player_id === "string" ? payload.player_id : null;
+        if (playerId !== currentPlayerId) {
+          break;
+        }
+        const reason =
+          typeof payload.reason === "string" ? payload.reason : null;
+        const amount = parseNumber(payload.amount);
+        if (amount === null) {
+          break;
+        }
+        if (reason === "TRADE") {
+          const counterpartyId =
+            typeof payload.counterparty_player_id === "string"
+              ? payload.counterparty_player_id
+              : null;
+          const counterpartyName = counterpartyId
+            ? getPlayerName(counterpartyId)
+            : "another player";
+          transactions.push({
+            ...recordBase,
+            id: event.id,
+            title: "Trade proceeds",
+            subtitle: `From ${counterpartyName}`,
+            amount,
           });
         }
         break;
@@ -751,6 +849,13 @@ export default function PlayPage() {
   const [purchaseMortgages, setPurchaseMortgages] = useState<PurchaseMortgage[]>(
     [],
   );
+  const [tradeProposals, setTradeProposals] = useState<TradeProposal[]>([]);
+  const [tradeLoanDetails, setTradeLoanDetails] = useState<PlayerLoan[]>([]);
+  const [tradeMortgageDetails, setTradeMortgageDetails] = useState<
+    PurchaseMortgage[]
+  >([]);
+  const [tradeExecutionSummary, setTradeExecutionSummary] =
+    useState<TradeExecutionSummary | null>(null);
   const [payoffLoan, setPayoffLoan] = useState<PlayerLoan | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -785,6 +890,7 @@ export default function PlayPage() {
     accessToken: string;
     channelName: string;
   } | null>(null);
+  const lastTradeEventIdRef = useRef<string | null>(null);
   const activeGameIdRef = useRef<string | null>(null);
   const unmountingRef = useRef(false);
   const invalidTokenRef = useRef<string | null>(null);
@@ -843,6 +949,28 @@ export default function PlayPage() {
     () => players.find((player) => session && player.user_id === session.user.id),
     [players, session],
   );
+  const tradeLoansById = useMemo(() => {
+    const lookup = new Map<string, PlayerLoan>();
+    tradeLoanDetails.forEach((loan) => lookup.set(loan.id, loan));
+    return lookup;
+  }, [tradeLoanDetails]);
+  const tradeMortgagesById = useMemo(() => {
+    const lookup = new Map<string, PurchaseMortgage>();
+    tradeMortgageDetails.forEach((mortgage) => lookup.set(mortgage.id, mortgage));
+    return lookup;
+  }, [tradeMortgageDetails]);
+  const incomingTradeProposal = useMemo(() => {
+    if (!currentUserPlayer) {
+      return null;
+    }
+    return (
+      tradeProposals.find(
+        (proposal) =>
+          proposal.status === "PENDING" &&
+          proposal.counterparty_player_id === currentUserPlayer.id,
+      ) ?? null
+    );
+  }, [currentUserPlayer, tradeProposals]);
   const boardPack = getBoardPackById(gameMeta?.board_pack_id);
   const currentPlayerId = gameState?.current_player_id ?? null;
   const expandedBoardTiles =
@@ -1100,6 +1228,23 @@ export default function PlayPage() {
     }
     return false;
   }, [latestDiceValues, latestRolledDoubleConfirmed]);
+  const getPlayerNameById = useCallback(
+    (playerId: string | null) =>
+      players.find((player) => player.id === playerId)?.display_name ?? "Player",
+    [players],
+  );
+  const getTileNameByIndex = useCallback(
+    (tileIndex: number | null) => {
+      if (tileIndex === null || Number.isNaN(tileIndex)) {
+        return "Tile";
+      }
+      return (
+        boardPack?.tiles?.find((entry) => entry.index === tileIndex)?.name ??
+        `Tile ${tileIndex}`
+      );
+    },
+    [boardPack?.tiles],
+  );
   const getOwnershipLabel = useCallback(
     (tileIndex: number | null) => {
       if (tileIndex === null || Number.isNaN(tileIndex)) {
@@ -1164,6 +1309,94 @@ export default function PlayPage() {
 
     if (event.event_type === "END_TURN" && payload?.to_player_name) {
       return `Turn → ${payload.to_player_name}`;
+    }
+
+    if (event.event_type === "TRADE_PROPOSED") {
+      const proposerId =
+        typeof payload?.proposer_player_id === "string"
+          ? payload.proposer_player_id
+          : null;
+      const counterpartyId =
+        typeof payload?.counterparty_player_id === "string"
+          ? payload.counterparty_player_id
+          : null;
+      const proposerName = proposerId
+        ? players.find((player) => player.id === proposerId)?.display_name ??
+          "Player"
+        : "Player";
+      const counterpartyName = counterpartyId
+        ? players.find((player) => player.id === counterpartyId)?.display_name ??
+          "Player"
+        : "Player";
+      return `Trade proposed · ${proposerName} → ${counterpartyName}`;
+    }
+
+    if (event.event_type === "TRADE_ACCEPTED") {
+      const proposerId =
+        typeof payload?.proposer_player_id === "string"
+          ? payload.proposer_player_id
+          : null;
+      const counterpartyId =
+        typeof payload?.counterparty_player_id === "string"
+          ? payload.counterparty_player_id
+          : null;
+      const proposerName = proposerId
+        ? players.find((player) => player.id === proposerId)?.display_name ??
+          "Player"
+        : "Player";
+      const counterpartyName = counterpartyId
+        ? players.find((player) => player.id === counterpartyId)?.display_name ??
+          "Player"
+        : "Player";
+      return `Trade executed · ${proposerName} ⇄ ${counterpartyName}`;
+    }
+
+    if (event.event_type === "TRADE_REJECTED") {
+      const rejectedId =
+        typeof payload?.rejected_by_player_id === "string"
+          ? payload.rejected_by_player_id
+          : null;
+      const rejectedName = rejectedId
+        ? players.find((player) => player.id === rejectedId)?.display_name ??
+          "Player"
+        : "Player";
+      return `Trade rejected · ${rejectedName}`;
+    }
+
+    if (event.event_type === "PROPERTY_TRANSFERRED") {
+      const tileIndex = parseNumber(payload?.tile_index);
+      const tileName = getTileNameByIndex(tileIndex);
+      const fromId =
+        typeof payload?.from_player_id === "string"
+          ? payload.from_player_id
+          : null;
+      const toId =
+        typeof payload?.to_player_id === "string"
+          ? payload.to_player_id
+          : null;
+      const fromName = fromId
+        ? players.find((player) => player.id === fromId)?.display_name ??
+          "Player"
+        : "Player";
+      const toName = toId
+        ? players.find((player) => player.id === toId)?.display_name ??
+          "Player"
+        : "Player";
+      return `Property transferred · ${tileName} (${fromName} → ${toName})`;
+    }
+
+    if (event.event_type === "LOAN_ASSUMED") {
+      const tileIndex = parseNumber(payload?.tile_index);
+      const tileName = getTileNameByIndex(tileIndex);
+      const toId =
+        typeof payload?.to_player_id === "string"
+          ? payload.to_player_id
+          : null;
+      const toName = toId
+        ? players.find((player) => player.id === toId)?.display_name ??
+          "Player"
+        : "Player";
+      return `Loan assumed · ${tileName} (${toName})`;
     }
 
     if (event.event_type === "START_GAME") {
@@ -1916,7 +2149,7 @@ export default function PlayPage() {
     }
 
     return "Update received";
-  }, [boardPack?.tiles, getOwnershipLabel, players]);
+  }, [boardPack?.tiles, getOwnershipLabel, getTileNameByIndex, players]);
 
   const clearResumeStorage = useCallback(() => {
     if (typeof window === "undefined") {
@@ -2013,6 +2246,54 @@ export default function PlayPage() {
     [],
   );
 
+  const loadTradeProposals = useCallback(
+    async (activeGameId: string, accessToken?: string) => {
+      const proposalRows = await supabaseClient.fetchFromSupabase<
+        TradeProposal[]
+      >(
+        `trade_proposals?select=id,game_id,proposer_player_id,counterparty_player_id,offer_cash,offer_tile_indices,request_cash,request_tile_indices,snapshot,status,created_at&game_id=eq.${activeGameId}&order=created_at.desc`,
+        { method: "GET" },
+        accessToken,
+      );
+      setTradeProposals(proposalRows);
+    },
+    [],
+  );
+
+  const loadTradeLiabilities = useCallback(
+    async (
+      activeGameId: string,
+      accessToken: string,
+      loanIds: string[],
+      mortgageIds: string[],
+    ) => {
+      if (loanIds.length === 0) {
+        setTradeLoanDetails([]);
+      } else {
+        const loanRows = await supabaseClient.fetchFromSupabase<PlayerLoan[]>(
+          `player_loans?select=id,player_id,collateral_tile_index,principal,remaining_principal,rate_per_turn,term_turns,turns_remaining,payment_per_turn,status&game_id=eq.${activeGameId}&id=in.(${loanIds.join(",")})`,
+          { method: "GET" },
+          accessToken,
+        );
+        setTradeLoanDetails(loanRows);
+      }
+
+      if (mortgageIds.length === 0) {
+        setTradeMortgageDetails([]);
+      } else {
+        const mortgageRows = await supabaseClient.fetchFromSupabase<
+          PurchaseMortgage[]
+        >(
+          `purchase_mortgages?select=id,player_id,tile_index,principal_original,principal_remaining,rate_per_turn,term_turns,turns_elapsed,accrued_interest_unpaid,status&game_id=eq.${activeGameId}&id=in.(${mortgageIds.join(",")})`,
+          { method: "GET" },
+          accessToken,
+        );
+        setTradeMortgageDetails(mortgageRows);
+      }
+    },
+    [],
+  );
+
   const loadGameMeta = useCallback(
     async (activeGameId: string, accessToken?: string) => {
       const [game] = await supabaseClient.fetchFromSupabase<GameMeta[]>(
@@ -2066,12 +2347,20 @@ export default function PlayPage() {
         loadGameState(activeGameId, accessToken),
         loadEvents(activeGameId, accessToken),
         loadOwnership(activeGameId, accessToken),
+        loadTradeProposals(activeGameId, accessToken),
       ]);
       if (!activeGameIdRef.current || activeGameIdRef.current === activeGameId) {
         setInitialSnapshotReady(true);
       }
     },
-    [loadEvents, loadGameMeta, loadGameState, loadOwnership, loadPlayers],
+    [
+      loadEvents,
+      loadGameMeta,
+      loadGameState,
+      loadOwnership,
+      loadPlayers,
+      loadTradeProposals,
+    ],
   );
 
   const setupRealtimeChannel = useCallback(() => {
@@ -2225,6 +2514,34 @@ export default function PlayPage() {
         {
           event: "*",
           schema: "public",
+          table: "trade_proposals",
+          filter: `game_id=eq.${gameId}`,
+        },
+        async (payload) => {
+          if (DEBUG) {
+            console.info("[Play][Realtime] payload", {
+              table: "trade_proposals",
+              eventType: payload.eventType,
+              gameId,
+            });
+          }
+          try {
+            await loadTradeProposals(gameId, session?.access_token);
+          } catch (error) {
+            if (DEBUG) {
+              console.error(
+                "[Play][Realtime] trade_proposals handler error",
+                error,
+              );
+            }
+          }
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
           table: "player_loans",
           filter: `game_id=eq.${gameId}`,
         },
@@ -2318,6 +2635,7 @@ export default function PlayPage() {
     loadPurchaseMortgages,
     loadPlayers,
     loadOwnership,
+    loadTradeProposals,
     loadGameData,
     session?.access_token,
   ]);
@@ -3203,6 +3521,84 @@ export default function PlayPage() {
   );
   const formatSignedCurrency = (amount: number) =>
     `${amount < 0 ? "-" : "+"}$${Math.abs(amount)}`;
+  const incomingTradeSnapshotTiles = useMemo(
+    () =>
+      incomingTradeProposal
+        ? normalizeTradeSnapshot(incomingTradeProposal.snapshot)
+        : [],
+    [incomingTradeProposal],
+  );
+  const incomingTradeOfferTiles =
+    incomingTradeProposal?.offer_tile_indices ?? [];
+  const incomingTradeRequestTiles =
+    incomingTradeProposal?.request_tile_indices ?? [];
+  const incomingTradeOfferCash = incomingTradeProposal?.offer_cash ?? 0;
+  const incomingTradeRequestCash = incomingTradeProposal?.request_cash ?? 0;
+  const incomingTradeCounterpartyName = incomingTradeProposal
+    ? getPlayerNameById(incomingTradeProposal.proposer_player_id)
+    : "Player";
+  const incomingTradeLiabilities = useMemo(() => {
+    if (!incomingTradeProposal) {
+      return [];
+    }
+    return incomingTradeOfferTiles.map((tileIndex) => {
+      const snapshot = incomingTradeSnapshotTiles.find(
+        (entry) => entry.tile_index === tileIndex,
+      );
+      const collateralLoan = snapshot?.collateral_loan_id
+        ? tradeLoansById.get(snapshot.collateral_loan_id)
+        : null;
+      const mortgage = snapshot?.purchase_mortgage_id
+        ? tradeMortgagesById.get(snapshot.purchase_mortgage_id)
+        : null;
+      return {
+        tileIndex,
+        collateralPayment: collateralLoan?.payment_per_turn ?? null,
+        mortgageInterest: mortgage
+          ? calculateMortgageInterestPerTurn(
+              mortgage.principal_remaining,
+              mortgage.rate_per_turn,
+            )
+          : null,
+      };
+    });
+  }, [
+    incomingTradeOfferTiles,
+    incomingTradeProposal,
+    incomingTradeSnapshotTiles,
+    tradeLoansById,
+    tradeMortgagesById,
+  ]);
+  const tradeExecutionPerspective = useMemo(() => {
+    if (!tradeExecutionSummary || !currentUserPlayer) {
+      return null;
+    }
+    const isProposer =
+      currentUserPlayer.id === tradeExecutionSummary.proposerPlayerId;
+    const giveTiles = isProposer
+      ? tradeExecutionSummary.offerTiles
+      : tradeExecutionSummary.requestTiles;
+    const receiveTiles = isProposer
+      ? tradeExecutionSummary.requestTiles
+      : tradeExecutionSummary.offerTiles;
+    const giveCash = isProposer
+      ? tradeExecutionSummary.offerCash
+      : tradeExecutionSummary.requestCash;
+    const receiveCash = isProposer
+      ? tradeExecutionSummary.requestCash
+      : tradeExecutionSummary.offerCash;
+    const counterpartyName = isProposer
+      ? getPlayerNameById(tradeExecutionSummary.counterpartyPlayerId)
+      : getPlayerNameById(tradeExecutionSummary.proposerPlayerId);
+    return {
+      giveTiles,
+      receiveTiles,
+      giveCash,
+      receiveCash,
+      counterpartyName,
+      snapshotTiles: tradeExecutionSummary.snapshotTiles,
+    };
+  }, [currentUserPlayer, getPlayerNameById, tradeExecutionSummary]);
   const updateExpandedBoardScale = useCallback(() => {
     const container = expandedBoardContainerRef.current;
     const board = expandedBoardRef.current;
@@ -3346,6 +3742,39 @@ export default function PlayPage() {
   ]);
 
   useEffect(() => {
+    if (!gameId || !session?.access_token) {
+      return;
+    }
+    const pendingTrades = tradeProposals.filter(
+      (proposal) => proposal.status === "PENDING",
+    );
+    const loanIds = new Set<string>();
+    const mortgageIds = new Set<string>();
+    for (const proposal of pendingTrades) {
+      const snapshotTiles = normalizeTradeSnapshot(proposal.snapshot);
+      for (const tile of snapshotTiles) {
+        if (tile.collateral_loan_id) {
+          loanIds.add(tile.collateral_loan_id);
+        }
+        if (tile.purchase_mortgage_id) {
+          mortgageIds.add(tile.purchase_mortgage_id);
+        }
+      }
+    }
+    void loadTradeLiabilities(
+      gameId,
+      session.access_token,
+      Array.from(loanIds),
+      Array.from(mortgageIds),
+    );
+  }, [
+    gameId,
+    loadTradeLiabilities,
+    session?.access_token,
+    tradeProposals,
+  ]);
+
+  useEffect(() => {
     if (!isAuctionActive) {
       return;
     }
@@ -3394,6 +3823,91 @@ export default function PlayPage() {
     pendingCardDescription,
     pendingDeckLabel,
   ]);
+
+  useEffect(() => {
+    if (!initialSnapshotReady || lastTradeEventIdRef.current) {
+      return;
+    }
+    const tradeEvent = events.find(
+      (event) => event.event_type === "TRADE_ACCEPTED",
+    );
+    if (tradeEvent) {
+      lastTradeEventIdRef.current = tradeEvent.id;
+    }
+  }, [events, initialSnapshotReady]);
+
+  useEffect(() => {
+    if (!currentUserPlayer) {
+      return;
+    }
+    const tradeEvent = events.find(
+      (event) => event.event_type === "TRADE_ACCEPTED",
+    );
+    if (!tradeEvent || tradeEvent.id === lastTradeEventIdRef.current) {
+      return;
+    }
+    const payload =
+      tradeEvent.payload && typeof tradeEvent.payload === "object"
+        ? tradeEvent.payload
+        : null;
+    const tradeId =
+      payload && typeof payload.trade_id === "string" ? payload.trade_id : null;
+    if (!tradeId) {
+      return;
+    }
+    const proposerId =
+      payload && typeof payload.proposer_player_id === "string"
+        ? payload.proposer_player_id
+        : null;
+    const counterpartyId =
+      payload && typeof payload.counterparty_player_id === "string"
+        ? payload.counterparty_player_id
+        : null;
+    if (
+      currentUserPlayer.id !== proposerId &&
+      currentUserPlayer.id !== counterpartyId
+    ) {
+      return;
+    }
+    const proposal = tradeProposals.find((trade) => trade.id === tradeId);
+    const offerCash =
+      proposal?.offer_cash ??
+      (payload && typeof payload.offer_cash === "number" ? payload.offer_cash : 0);
+    const requestCash =
+      proposal?.request_cash ??
+      (payload && typeof payload.request_cash === "number"
+        ? payload.request_cash
+        : 0);
+    const offerTiles =
+      proposal?.offer_tile_indices ??
+      (Array.isArray(payload?.offer_tile_indices)
+        ? payload?.offer_tile_indices.filter((entry): entry is number =>
+            typeof entry === "number",
+          )
+        : []);
+    const requestTiles =
+      proposal?.request_tile_indices ??
+      (Array.isArray(payload?.request_tile_indices)
+        ? payload?.request_tile_indices.filter((entry): entry is number =>
+            typeof entry === "number",
+          )
+        : []);
+    const snapshotTiles = proposal
+      ? normalizeTradeSnapshot(proposal.snapshot)
+      : [];
+    setTradeExecutionSummary({
+      tradeId,
+      proposerPlayerId: proposerId ?? proposal?.proposer_player_id ?? "",
+      counterpartyPlayerId:
+        counterpartyId ?? proposal?.counterparty_player_id ?? "",
+      offerCash,
+      offerTiles,
+      requestCash,
+      requestTiles,
+      snapshotTiles,
+    });
+    lastTradeEventIdRef.current = tradeEvent.id;
+  }, [currentUserPlayer, events, tradeProposals]);
 
   useEffect(() => {
     if (!isAuctionActive && auctionDisplaySnapshot) {
@@ -3451,7 +3965,16 @@ export default function PlayPage() {
         | { action: "TAKE_COLLATERAL_LOAN"; tileIndex: number }
         | { action: "BUILD_HOUSE" | "SELL_HOUSE"; tileIndex: number }
         | { action: "PAYOFF_COLLATERAL_LOAN"; loanId: string }
-        | { action: "PAYOFF_PURCHASE_MORTGAGE"; mortgageId: string },
+        | { action: "PAYOFF_PURCHASE_MORTGAGE"; mortgageId: string }
+        | {
+            action: "PROPOSE_TRADE";
+            counterpartyPlayerId: string;
+            offerCash?: number;
+            offerTiles?: number[];
+            requestCash?: number;
+            requestTiles?: number[];
+          }
+        | { action: "ACCEPT_TRADE" | "REJECT_TRADE" | "CANCEL_TRADE"; tradeId: string },
     ) => {
       const { action } = request;
       const tileIndex = "tileIndex" in request ? request.tileIndex : undefined;
@@ -3461,6 +3984,17 @@ export default function PlayPage() {
         "mortgageId" in request ? request.mortgageId : undefined;
       const financing =
         "financing" in request ? request.financing : undefined;
+      const tradeId = "tradeId" in request ? request.tradeId : undefined;
+      const counterpartyPlayerId =
+        "counterpartyPlayerId" in request
+          ? request.counterpartyPlayerId
+          : undefined;
+      const offerCash = "offerCash" in request ? request.offerCash : undefined;
+      const offerTiles = "offerTiles" in request ? request.offerTiles : undefined;
+      const requestCash =
+        "requestCash" in request ? request.requestCash : undefined;
+      const requestTiles =
+        "requestTiles" in request ? request.requestTiles : undefined;
       if (!session || !gameId) {
         setNotice("Join a game lobby first.");
         return;
@@ -3526,6 +4060,12 @@ export default function PlayPage() {
               loanId,
               mortgageId,
               financing,
+              tradeId,
+              counterpartyPlayerId,
+              offerCash,
+              offerTiles,
+              requestCash,
+              requestTiles,
               expectedVersion: snapshotVersion,
             }),
           });
@@ -3658,6 +4198,7 @@ export default function PlayPage() {
           loadEvents(gameId, accessToken),
           loadOwnership(gameId, accessToken),
           loadPurchaseMortgages(gameId, accessToken, currentUserPlayer?.id),
+          loadTradeProposals(gameId, accessToken),
         ]);
 
         if (firstRoundResyncEnabled) {
@@ -3683,6 +4224,7 @@ export default function PlayPage() {
       loadOwnership,
       loadPurchaseMortgages,
       loadPlayers,
+      loadTradeProposals,
       currentUserPlayer?.id,
       requestFirstRoundResync,
       session,
@@ -3722,6 +4264,20 @@ export default function PlayPage() {
       financing: "MORTGAGE",
     });
   }, [handleBankAction, pendingPurchase]);
+
+  const handleAcceptTrade = useCallback(
+    (tradeId: string) => {
+      void handleBankAction({ action: "ACCEPT_TRADE", tradeId });
+    },
+    [handleBankAction],
+  );
+
+  const handleRejectTrade = useCallback(
+    (tradeId: string) => {
+      void handleBankAction({ action: "REJECT_TRADE", tradeId });
+    },
+    [handleBankAction],
+  );
 
   const handleConfirmPendingCard = useCallback(() => {
     if (!canConfirmPendingCard) {
@@ -4335,6 +4891,227 @@ export default function PlayPage() {
                         } to confirm…`}
                   </p>
                 )}
+              </div>
+            </div>
+          </>
+        ) : null}
+        {incomingTradeProposal ? (
+          <>
+            <div className="fixed inset-0 z-20 bg-black/45 backdrop-blur-[2px]" />
+            <div className="fixed inset-0 z-30 flex items-center justify-center p-4">
+              <div className="w-full max-w-lg rounded-3xl border border-indigo-200 bg-white/95 p-5 shadow-2xl ring-1 ring-black/10 backdrop-blur">
+                <p className="text-xs font-semibold uppercase tracking-wide text-indigo-500">
+                  Incoming trade offer
+                </p>
+                <p className="text-lg font-semibold text-neutral-900">
+                  {incomingTradeCounterpartyName} wants to trade
+                </p>
+                <div className="mt-4 grid gap-3">
+                  <div className="rounded-2xl border border-neutral-200 bg-white p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+                      You give
+                    </p>
+                    <ul className="mt-2 space-y-1 text-sm text-neutral-700">
+                      {incomingTradeRequestCash > 0 ? (
+                        <li>Cash: ${incomingTradeRequestCash}</li>
+                      ) : null}
+                      {incomingTradeRequestTiles.length > 0 ? (
+                        incomingTradeRequestTiles.map((tileIndex) => {
+                          const snapshot = incomingTradeSnapshotTiles.find(
+                            (entry) => entry.tile_index === tileIndex,
+                          );
+                          const houses = snapshot?.houses ?? 0;
+                          return (
+                            <li key={`give-${tileIndex}`}>
+                              {getTileNameByIndex(tileIndex)}
+                              {houses > 0
+                                ? ` · ${houses} ${houses === 1 ? "house" : "houses"}`
+                                : ""}
+                            </li>
+                          );
+                        })
+                      ) : incomingTradeRequestCash === 0 ? (
+                        <li className="text-neutral-400">No properties</li>
+                      ) : null}
+                    </ul>
+                  </div>
+                  <div className="rounded-2xl border border-neutral-200 bg-white p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+                      You receive
+                    </p>
+                    <ul className="mt-2 space-y-1 text-sm text-neutral-700">
+                      {incomingTradeOfferCash > 0 ? (
+                        <li>Cash: ${incomingTradeOfferCash}</li>
+                      ) : null}
+                      {incomingTradeOfferTiles.length > 0 ? (
+                        incomingTradeOfferTiles.map((tileIndex) => {
+                          const snapshot = incomingTradeSnapshotTiles.find(
+                            (entry) => entry.tile_index === tileIndex,
+                          );
+                          const houses = snapshot?.houses ?? 0;
+                          return (
+                            <li key={`receive-${tileIndex}`}>
+                              {getTileNameByIndex(tileIndex)}
+                              {houses > 0
+                                ? ` · ${houses} ${houses === 1 ? "house" : "houses"}`
+                                : ""}
+                            </li>
+                          );
+                        })
+                      ) : incomingTradeOfferCash === 0 ? (
+                        <li className="text-neutral-400">No properties</li>
+                      ) : null}
+                    </ul>
+                  </div>
+                  <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+                      Liabilities assumed
+                    </p>
+                    {incomingTradeLiabilities.some(
+                      (entry) =>
+                        entry.collateralPayment !== null ||
+                        entry.mortgageInterest !== null,
+                    ) ? (
+                      <ul className="mt-2 space-y-2 text-sm text-neutral-700">
+                        {incomingTradeLiabilities.map((entry) => {
+                          const details = [];
+                          if (entry.collateralPayment !== null) {
+                            details.push(
+                              `Collateral: $${entry.collateralPayment}/turn`,
+                            );
+                          }
+                          if (entry.mortgageInterest !== null) {
+                            details.push(
+                              `Mortgage interest: $${entry.mortgageInterest}/turn`,
+                            );
+                          }
+                          if (details.length === 0) {
+                            return null;
+                          }
+                          return (
+                            <li
+                              key={`liability-${entry.tileIndex}`}
+                              className="rounded-xl bg-white px-3 py-2"
+                            >
+                              <p className="text-xs font-semibold text-neutral-500">
+                                {getTileNameByIndex(entry.tileIndex)}
+                              </p>
+                              <p className="text-sm text-neutral-800">
+                                {details.join(" · ")}
+                              </p>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    ) : (
+                      <p className="mt-2 text-sm text-neutral-500">
+                        No liabilities on incoming properties.
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                  <button
+                    className="rounded-2xl border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:border-neutral-100 disabled:text-neutral-400"
+                    type="button"
+                    onClick={() => handleRejectTrade(incomingTradeProposal.id)}
+                    disabled={actionLoading === "REJECT_TRADE"}
+                  >
+                    {actionLoading === "REJECT_TRADE" ? "Rejecting…" : "Reject"}
+                  </button>
+                  <button
+                    className="rounded-2xl bg-neutral-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
+                    type="button"
+                    onClick={() => handleAcceptTrade(incomingTradeProposal.id)}
+                    disabled={actionLoading === "ACCEPT_TRADE"}
+                  >
+                    {actionLoading === "ACCEPT_TRADE" ? "Accepting…" : "Accept"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </>
+        ) : null}
+        {tradeExecutionSummary && tradeExecutionPerspective ? (
+          <>
+            <div className="fixed inset-0 z-20 bg-black/45 backdrop-blur-[2px]" />
+            <div className="fixed inset-0 z-30 flex items-center justify-center p-4">
+              <div className="w-full max-w-lg rounded-3xl border border-emerald-200 bg-white/95 p-5 shadow-2xl ring-1 ring-black/10 backdrop-blur">
+                <p className="text-xs font-semibold uppercase tracking-wide text-emerald-500">
+                  Trade executed
+                </p>
+                <p className="text-lg font-semibold text-neutral-900">
+                  Trade completed with {tradeExecutionPerspective.counterpartyName}
+                </p>
+                <div className="mt-4 grid gap-3">
+                  <div className="rounded-2xl border border-neutral-200 bg-white p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+                      You gave
+                    </p>
+                    <ul className="mt-2 space-y-1 text-sm text-neutral-700">
+                      {tradeExecutionPerspective.giveCash > 0 ? (
+                        <li>Cash: ${tradeExecutionPerspective.giveCash}</li>
+                      ) : null}
+                      {tradeExecutionPerspective.giveTiles.length > 0 ? (
+                        tradeExecutionPerspective.giveTiles.map((tileIndex) => {
+                          const snapshot =
+                            tradeExecutionPerspective.snapshotTiles.find(
+                              (entry) => entry.tile_index === tileIndex,
+                            );
+                          const houses = snapshot?.houses ?? 0;
+                          return (
+                            <li key={`gave-${tileIndex}`}>
+                              {getTileNameByIndex(tileIndex)}
+                              {houses > 0
+                                ? ` · ${houses} ${houses === 1 ? "house" : "houses"}`
+                                : ""}
+                            </li>
+                          );
+                        })
+                      ) : tradeExecutionPerspective.giveCash === 0 ? (
+                        <li className="text-neutral-400">Nothing</li>
+                      ) : null}
+                    </ul>
+                  </div>
+                  <div className="rounded-2xl border border-neutral-200 bg-white p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+                      You received
+                    </p>
+                    <ul className="mt-2 space-y-1 text-sm text-neutral-700">
+                      {tradeExecutionPerspective.receiveCash > 0 ? (
+                        <li>Cash: ${tradeExecutionPerspective.receiveCash}</li>
+                      ) : null}
+                      {tradeExecutionPerspective.receiveTiles.length > 0 ? (
+                        tradeExecutionPerspective.receiveTiles.map((tileIndex) => {
+                          const snapshot =
+                            tradeExecutionPerspective.snapshotTiles.find(
+                              (entry) => entry.tile_index === tileIndex,
+                            );
+                          const houses = snapshot?.houses ?? 0;
+                          return (
+                            <li key={`received-${tileIndex}`}>
+                              {getTileNameByIndex(tileIndex)}
+                              {houses > 0
+                                ? ` · ${houses} ${houses === 1 ? "house" : "houses"}`
+                                : ""}
+                            </li>
+                          );
+                        })
+                      ) : tradeExecutionPerspective.receiveCash === 0 ? (
+                        <li className="text-neutral-400">Nothing</li>
+                      ) : null}
+                    </ul>
+                  </div>
+                </div>
+                <div className="mt-4">
+                  <button
+                    className="w-full rounded-2xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white"
+                    type="button"
+                    onClick={() => setTradeExecutionSummary(null)}
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
             </div>
           </>
