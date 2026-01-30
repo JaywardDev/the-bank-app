@@ -4154,15 +4154,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ gameState: updatedState });
     }
 
-    if (body.action === "BUILD_HOUSE" || body.action === "SELL_HOUSE") {
-      if (!Number.isInteger(body.tileIndex)) {
-        return NextResponse.json(
-          { error: "Missing property tile." },
-          { status: 400 },
-        );
-      }
-
-      const tileIndex = body.tileIndex;
+    const handleHouseAction = async (
+      action: "BUILD_HOUSE" | "SELL_HOUSE",
+      tileIndex: number,
+    ) => {
       const boardPack = getBoardPackById(game.board_pack_id);
       const boardTiles = boardPack?.tiles ?? [];
       const tile = boardTiles.find((entry) => entry.index === tileIndex);
@@ -4208,7 +4203,7 @@ export async function POST(request: Request) {
       const houses = ownership.houses ?? 0;
       const houseCost = tile.houseCost ?? 0;
 
-      if (body.action === "BUILD_HOUSE") {
+      if (action === "BUILD_HOUSE") {
         if (houses >= MAX_HOUSES_PER_PROPERTY) {
           return NextResponse.json(
             { error: "Maximum houses already built." },
@@ -4406,6 +4401,30 @@ export async function POST(request: Request) {
       await emitGameEvents(gameId, currentVersion + 1, events, user.id);
 
       return NextResponse.json({ gameState: updatedState });
+    };
+
+    if (body.action === "BUILD_HOUSE") {
+      const tileIndex = body.tileIndex;
+      if (typeof tileIndex !== "number") {
+        return NextResponse.json(
+          { error: "Missing property tile." },
+          { status: 400 },
+        );
+      }
+
+      return await handleHouseAction("BUILD_HOUSE", tileIndex);
+    }
+
+    if (body.action === "SELL_HOUSE") {
+      const tileIndex = body.tileIndex;
+      if (typeof tileIndex !== "number") {
+        return NextResponse.json(
+          { error: "Missing property tile." },
+          { status: 400 },
+        );
+      }
+
+      return await handleHouseAction("SELL_HOUSE", tileIndex);
     }
 
     if (body.action === "TAKE_COLLATERAL_LOAN") {
