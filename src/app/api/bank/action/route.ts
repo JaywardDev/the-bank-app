@@ -61,6 +61,7 @@ type BankActionRequest =
         | "JAIL_ROLL_FOR_DOUBLES"
         | "USE_GET_OUT_OF_JAIL_FREE"
         | "CONFIRM_PENDING_CARD"
+        | "CONFIRM_MACRO_EVENT"
         | "PAYOFF_COLLATERAL_LOAN"
         | "PAYOFF_PURCHASE_MORTGAGE"
         | "BUILD_HOUSE"
@@ -2764,6 +2765,19 @@ export async function POST(request: Request) {
       );
     }
 
+    const pendingMacroAction = gameState.pending_action as
+      | { type?: unknown }
+      | null;
+    if (
+      pendingMacroAction?.type === "MACRO_EVENT" &&
+      body.action !== "CONFIRM_MACRO_EVENT"
+    ) {
+      return NextResponse.json(
+        { error: "Confirm the macro event before continuing." },
+        { status: 409 },
+      );
+    }
+
     if (isAuctionAction) {
       if (!gameState.auction_active) {
         return NextResponse.json(
@@ -4164,6 +4178,60 @@ export async function POST(request: Request) {
       }
 
       await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+
+      return NextResponse.json({ gameState: updatedState });
+    }
+
+    if (body.action === "CONFIRM_MACRO_EVENT") {
+      const pendingAction = gameState.pending_action as
+        | {
+            type?: unknown;
+            macro_id?: unknown;
+            return_turn_phase?: unknown;
+          }
+        | null;
+
+      if (!pendingAction || pendingAction.type !== "MACRO_EVENT") {
+        return NextResponse.json(
+          { error: "No pending macro event to confirm." },
+          { status: 409 },
+        );
+      }
+
+      if (gameState.turn_phase !== "AWAITING_CONFIRMATION") {
+        return NextResponse.json(
+          { error: "Not ready to confirm the macro event yet." },
+          { status: 409 },
+        );
+      }
+
+      const returnTurnPhase =
+        typeof pendingAction.return_turn_phase === "string"
+          ? pendingAction.return_turn_phase
+          : "AWAITING_ROLL";
+      const finalVersion = currentVersion + 1;
+      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            version: finalVersion,
+            pending_action: null,
+            turn_phase: returnTurnPhase,
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      )) ?? [];
+
+      if (!updatedState) {
+        return NextResponse.json(
+          { error: "Version mismatch." },
+          { status: 409 },
+        );
+      }
 
       return NextResponse.json({ gameState: updatedState });
     }
@@ -6115,6 +6183,16 @@ export async function POST(request: Request) {
         }
       }
 
+      const nextTurnPhase = nextPlayer.is_in_jail
+        ? "AWAITING_JAIL_DECISION"
+        : "AWAITING_ROLL";
+      const nextPendingAction = triggeredMacroEvent
+        ? {
+            type: "MACRO_EVENT",
+            macro_id: triggeredMacroEvent.id,
+            return_turn_phase: nextTurnPhase,
+          }
+        : null;
       const finalVersion = currentVersion + events.length;
       const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
         `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
@@ -6132,9 +6210,10 @@ export async function POST(request: Request) {
             last_macro_event_id: nextLastMacroEventId,
             active_macro_effects: nextActiveMacroEffects,
             ...(balancesChanged ? { balances: updatedBalances } : {}),
-            turn_phase: nextPlayer.is_in_jail
-              ? "AWAITING_JAIL_DECISION"
-              : "AWAITING_ROLL",
+            pending_action: nextPendingAction,
+            turn_phase: triggeredMacroEvent
+              ? "AWAITING_CONFIRMATION"
+              : nextTurnPhase,
             updated_at: new Date().toISOString(),
           }),
         },

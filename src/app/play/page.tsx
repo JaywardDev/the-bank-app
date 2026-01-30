@@ -7,6 +7,11 @@ import PageShell from "../components/PageShell";
 import BoardMiniMap from "../components/BoardMiniMap";
 import HousesDots from "../components/HousesDots";
 import { getBoardPackById, type BoardTile } from "@/lib/boardPacks";
+import {
+  defaultMacroDeckId,
+  getMacroDeckById,
+  type MacroEventEffect,
+} from "@/lib/macroDecks";
 import { getRules } from "@/lib/rules";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 
@@ -45,6 +50,30 @@ const getPlayerInitials = (name: string | null) => {
   }
 
   return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
+};
+
+const formatSignedPercent = (value: number) =>
+  `${value >= 0 ? "+" : ""}${(value * 100).toFixed(1)}%`;
+
+const formatMultiplier = (value: number) => `${value.toFixed(2)}×`;
+
+const describeMacroEffect = (effect: MacroEventEffect) => {
+  switch (effect.type) {
+    case "rent_multiplier":
+      return `Rent multiplier: ${formatMultiplier(effect.value)}`;
+    case "loan_rate_modifier":
+      return `Interest delta: ${formatSignedPercent(effect.value)} per turn`;
+    case "maintenance_cost_multiplier":
+      return `Maintenance multiplier: ${formatMultiplier(effect.value)}`;
+    case "development_cost_multiplier":
+      return `Development cost multiplier: ${formatMultiplier(effect.value)}`;
+    case "cash_bonus":
+      return `Cash bonus: +$${effect.value}`;
+    case "cash_shock":
+      return `Cash shock: -$${Math.abs(effect.value)}`;
+    default:
+      return effect.description ?? `Effect: ${effect.type}`;
+  }
 };
 
 type Player = {
@@ -2654,6 +2683,36 @@ export default function PlayPage() {
       price: candidate.price,
     };
   }, [gameState?.pending_action]);
+  const pendingMacroEvent = useMemo(() => {
+    const pendingAction = gameState?.pending_action;
+    if (!pendingAction || typeof pendingAction !== "object") {
+      return null;
+    }
+
+    const candidate = pendingAction as {
+      type?: unknown;
+      macro_id?: unknown;
+    };
+
+    if (candidate.type !== "MACRO_EVENT" || typeof candidate.macro_id !== "string") {
+      return null;
+    }
+
+    const macroDeck = getMacroDeckById(defaultMacroDeckId);
+    const macroEvent =
+      macroDeck?.events.find((event) => event.id === candidate.macro_id) ?? null;
+
+    if (macroEvent) {
+      return macroEvent;
+    }
+
+    return {
+      id: candidate.macro_id,
+      name: "Macroeconomic Shift",
+      durationRounds: 0,
+      effects: [],
+    };
+  }, [gameState?.pending_action]);
   const pendingCard = useMemo(() => {
     if (!gameState?.pending_card_active) {
       return null;
@@ -2689,6 +2748,29 @@ export default function PlayPage() {
       "Player"
     );
   }, [pendingCard?.drawnBy, players]);
+  const pendingMacroDescription = useMemo(() => {
+    if (!pendingMacroEvent) {
+      return null;
+    }
+    const descriptions = pendingMacroEvent.effects
+      .map((effect) => effect.description)
+      .filter(Boolean);
+    return descriptions.length > 0
+      ? descriptions.join(" ")
+      : "Market conditions are shifting across the board.";
+  }, [pendingMacroEvent]);
+  const pendingMacroEffects = useMemo(() => {
+    if (!pendingMacroEvent) {
+      return [];
+    }
+    const items = pendingMacroEvent.effects.map((effect) =>
+      describeMacroEffect(effect),
+    );
+    if (pendingMacroEvent.durationRounds > 0) {
+      items.push(`Duration: ${pendingMacroEvent.durationRounds} rounds`);
+    }
+    return items;
+  }, [pendingMacroEvent]);
   const pendingTile = useMemo(() => {
     if (!pendingPurchase) {
       return null;
@@ -2706,6 +2788,7 @@ export default function PlayPage() {
     pendingTile?.name ??
     (pendingPurchase ? `Tile ${pendingPurchase.tile_index}` : null);
   const hasPendingDecision = Boolean(pendingPurchase);
+  const hasPendingMacroEvent = Boolean(pendingMacroEvent);
   const showPendingDecisionCard =
     hasPendingDecision && isMyTurn && !isAuctionActive;
   const showPendingDecisionBanner =
@@ -2732,7 +2815,8 @@ export default function PlayPage() {
     isMyTurn &&
     !isEliminated &&
     !isAuctionActive &&
-    !hasPendingCard;
+    !hasPendingCard &&
+    !hasPendingMacroEvent;
   const isAwaitingJailDecision =
     isMyTurn && gameState?.turn_phase === "AWAITING_JAIL_DECISION";
   const showJailDecisionPanel =
@@ -2753,6 +2837,10 @@ export default function PlayPage() {
     Boolean(pendingCard) &&
     currentUserPlayer?.id === pendingCard?.drawnBy &&
     gameState?.turn_phase === "AWAITING_CARD_CONFIRM";
+  const canConfirmMacroEvent =
+    hasPendingMacroEvent &&
+    isMyTurn &&
+    gameState?.turn_phase === "AWAITING_CONFIRMATION";
   const rollDiceDisabledReason = useMemo(() => {
     if (!(actionLoading === "ROLL_DICE" || !canRoll)) {
       return null;
@@ -2771,6 +2859,9 @@ export default function PlayPage() {
     }
     if (hasPendingCard) {
       return "Resolve card to continue";
+    }
+    if (hasPendingMacroEvent) {
+      return "Resolve macro event to continue";
     }
     if (hasPendingDecision) {
       return "Resolve property decision";
@@ -2792,6 +2883,7 @@ export default function PlayPage() {
     gameState?.doubles_count,
     gameState?.last_roll,
     hasPendingCard,
+    hasPendingMacroEvent,
     hasPendingDecision,
     initialSnapshotReady,
     isAuctionActive,
@@ -2815,6 +2907,8 @@ export default function PlayPage() {
     actionLoading === "JAIL_PAY_FINE" ? "Paying…" : null;
   const confirmCardDisabledReason =
     actionLoading === "CONFIRM_PENDING_CARD" ? "Confirming…" : null;
+  const confirmMacroDisabledReason =
+    actionLoading === "CONFIRM_MACRO_EVENT" ? "Confirming…" : null;
   const payoffLoanDisabledReason =
     actionLoading === "PAYOFF_COLLATERAL_LOAN"
       ? "Paying…"
@@ -2840,6 +2934,12 @@ export default function PlayPage() {
     ) {
       return "Resolving card";
     }
+    if (
+      gameState?.turn_phase === "AWAITING_CONFIRMATION" ||
+      hasPendingMacroEvent
+    ) {
+      return "Resolving macro event";
+    }
     if (gameState?.turn_phase === "AWAITING_ROLL") {
       return "Rolling";
     }
@@ -2852,6 +2952,7 @@ export default function PlayPage() {
     gameState?.current_player_id,
     gameState?.pending_card_active,
     gameState?.turn_phase,
+    hasPendingMacroEvent,
   ]);
   const realtimeStatusLabel = realtimeReady ? "Live" : "Syncing…";
   const isHost = Boolean(
@@ -3040,6 +3141,7 @@ export default function PlayPage() {
     currentUserPlayer?.id === auctionTurnPlayerId;
   const UI_RESOLVE_DELAY_MS = 250;
   const [isCardResolving, setIsCardResolving] = useState(false);
+  const [isMacroResolving, setIsMacroResolving] = useState(false);
   const [isAuctionResolving, setIsAuctionResolving] = useState(false);
   const [isLoanPayoffResolving, setIsLoanPayoffResolving] = useState(false);
   const [cardDisplaySnapshot, setCardDisplaySnapshot] = useState<{
@@ -3064,6 +3166,8 @@ export default function PlayPage() {
     showJailDecisionPanel ||
     pendingCard !== null ||
     isCardResolving ||
+    pendingMacroEvent !== null ||
+    isMacroResolving ||
     payoffLoan !== null ||
     isLoanPayoffResolving ||
     isAuctionActive ||
@@ -3072,6 +3176,8 @@ export default function PlayPage() {
     showJailDecisionPanel ||
     pendingCard !== null ||
     isCardResolving ||
+    pendingMacroEvent !== null ||
+    isMacroResolving ||
     payoffLoan !== null ||
     isLoanPayoffResolving ||
     isAuctionActive;
@@ -3332,7 +3438,8 @@ export default function PlayPage() {
             | "JAIL_PAY_FINE"
             | "JAIL_ROLL_FOR_DOUBLES"
             | "USE_GET_OUT_OF_JAIL_FREE"
-            | "CONFIRM_PENDING_CARD";
+            | "CONFIRM_PENDING_CARD"
+            | "CONFIRM_MACRO_EVENT";
         }
         | {
           action: "DECLINE_PROPERTY" | "BUY_PROPERTY";
@@ -3626,6 +3733,17 @@ export default function PlayPage() {
     }, UI_RESOLVE_DELAY_MS);
     void handleBankAction({ action: "CONFIRM_PENDING_CARD" });
   }, [UI_RESOLVE_DELAY_MS, canConfirmPendingCard, handleBankAction]);
+
+  const handleConfirmMacroEvent = useCallback(() => {
+    if (!canConfirmMacroEvent) {
+      return;
+    }
+    setIsMacroResolving(true);
+    window.setTimeout(() => {
+      setIsMacroResolving(false);
+    }, UI_RESOLVE_DELAY_MS);
+    void handleBankAction({ action: "CONFIRM_MACRO_EVENT" });
+  }, [UI_RESOLVE_DELAY_MS, canConfirmMacroEvent, handleBankAction]);
 
   const handleAuctionBid = useCallback(() => {
     if (!isCurrentAuctionBidder) {
@@ -4104,6 +4222,67 @@ export default function PlayPage() {
             <p className="text-xs text-neutral-400">Loading snapshot…</p>
           ) : null}
         </div>
+        {pendingMacroEvent || isMacroResolving ? (
+          <>
+            <div className="fixed inset-0 z-20 bg-black/45 backdrop-blur-[2px]" />
+            <div className="fixed inset-0 z-30 flex items-center justify-center p-4">
+              <div className="w-full max-w-md rounded-3xl border border-sky-200 bg-white/95 p-5 shadow-2xl ring-1 ring-black/10 backdrop-blur">
+                <p className="text-xs font-semibold uppercase tracking-wide text-sky-500">
+                  Macroeconomic Shift
+                </p>
+                <p className="text-lg font-semibold text-neutral-900">
+                  {pendingMacroEvent?.name ?? "Macroeconomic Shift"}
+                </p>
+                {pendingMacroDescription ? (
+                  <p className="mt-1 text-sm text-neutral-600">
+                    {pendingMacroDescription}
+                  </p>
+                ) : null}
+                {pendingMacroEffects.length > 0 ? (
+                  <ul className="mt-3 space-y-1 text-sm text-neutral-700">
+                    {pendingMacroEffects.map((effect) => (
+                      <li key={effect} className="flex gap-2">
+                        <span className="mt-2 h-1.5 w-1.5 rounded-full bg-sky-400" />
+                        <span>{effect}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                {canConfirmMacroEvent && !isMacroResolving ? (
+                  <div className="mt-4 space-y-1">
+                    <button
+                      className="w-full rounded-2xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-sky-200"
+                      type="button"
+                      onClick={handleConfirmMacroEvent}
+                      disabled={
+                        actionLoading === "CONFIRM_MACRO_EVENT" || isMacroResolving
+                      }
+                    >
+                      {actionLoading === "CONFIRM_MACRO_EVENT"
+                        ? "Confirming…"
+                        : isMacroResolving
+                          ? "Resolving…"
+                          : "Acknowledge"}
+                    </button>
+                    {confirmMacroDisabledReason ? (
+                      <p className="text-xs text-neutral-400">
+                        {confirmMacroDisabledReason}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p className="mt-4 text-sm text-neutral-500">
+                    {isMacroResolving
+                      ? "Resolving…"
+                      : `Waiting for ${
+                          currentPlayer?.display_name ?? "the current player"
+                        } to acknowledge…`}
+                  </p>
+                )}
+              </div>
+            </div>
+          </>
+        ) : null}
         {pendingCard || isCardResolving ? (
           <>
             <div className="fixed inset-0 z-20 bg-black/45 backdrop-blur-[2px]" />
