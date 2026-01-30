@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useRouter } from "next/navigation";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import PageShell from "../components/PageShell";
@@ -62,6 +69,28 @@ const getPlayerInitials = (name: string | null) => {
 
   return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
 };
+
+const getTileBandColor = (tile?: BoardTile | null) =>
+  tile?.colorGroup
+    ? PROPERTY_GROUP_COLORS[tile.colorGroup] ?? DEFAULT_PROPERTY_BAND_COLOR
+    : DEFAULT_PROPERTY_BAND_COLOR;
+
+type PropertyCardShellProps = {
+  bandColor: string;
+  children: ReactNode;
+  bodyClassName?: string;
+};
+
+const PropertyCardShell = ({
+  bandColor,
+  children,
+  bodyClassName,
+}: PropertyCardShellProps) => (
+  <div className="overflow-hidden rounded-2xl border">
+    <div className="h-2 w-full" style={{ backgroundColor: bandColor }} />
+    <div className={`p-3 ${bodyClassName ?? ""}`}>{children}</div>
+  </div>
+);
 
 const formatSignedPercent = (value: number) =>
   `${value >= 0 ? "+" : ""}${(value * 100).toFixed(1)}%`;
@@ -3144,9 +3173,7 @@ export default function PlayPage() {
   const pendingTileLabel =
     pendingTile?.name ??
     (pendingPurchase ? `Tile ${pendingPurchase.tile_index}` : null);
-  const pendingBandColor = pendingTile?.colorGroup
-    ? PROPERTY_GROUP_COLORS[pendingTile.colorGroup] ?? DEFAULT_PROPERTY_BAND_COLOR
-    : DEFAULT_PROPERTY_BAND_COLOR;
+  const pendingBandColor = getTileBandColor(pendingTile);
   const hasPendingDecision = Boolean(pendingPurchase);
   const hasPendingMacroEvent = Boolean(pendingMacroEvent);
   const showPendingDecisionCard =
@@ -5816,98 +5843,103 @@ export default function PlayPage() {
                   typeof tile.baseRent === "number" ? tile.baseRent : null;
                 const groupLabel = getTileGroupLabel(tile);
                 return (
-                  <div
+                  <PropertyCardShell
                     key={tile.index}
-                    className="flex items-center justify-between rounded-2xl border px-4 py-3 text-sm"
+                    bandColor={getTileBandColor(tile)}
+                    bodyClassName="text-sm"
                   >
-                    <div className="space-y-1">
-                      <div>
-                        <p className="font-semibold text-neutral-900">
-                          {tile.name}
-                        </p>
-                        <p className="text-xs text-neutral-500">
-                          {groupLabel}
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-3 text-xs text-neutral-500">
-                        <span className="font-semibold text-neutral-700">
-                          Principal: ${principalPreview}
-                        </span>
-                        <span className="uppercase tracking-wide text-neutral-400">
-                          Rent
-                        </span>
-                        <span className="font-semibold text-neutral-700">
-                          {baseRent !== null ? `$${baseRent}` : "—"}
-                        </span>
-                        <span className="uppercase tracking-wide text-neutral-400">
-                          Houses
-                        </span>
-                        <span className="font-semibold text-neutral-700">
-                          {tile.type === "PROPERTY" ? houses : "—"}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flex flex-col items-end gap-2">
-                      {tile.type === "PROPERTY" ? (
-                        <div className="flex items-center gap-2">
-                          <button
-                            className="rounded-full bg-neutral-900 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
-                            type="button"
-                            onClick={() =>
-                              void handleBankAction({
-                                action: "BUILD_HOUSE",
-                                tileIndex: tile.index,
-                              })
-                            }
-                            disabled={
-                              !canBuildHouse || actionLoading === "BUILD_HOUSE"
-                            }
-                          >
-                            {actionLoading === "BUILD_HOUSE"
-                              ? "Building…"
-                              : "Build"}
-                          </button>
-                          <button
-                            className="rounded-full border border-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
-                            type="button"
-                            onClick={() =>
-                              void handleBankAction({
-                                action: "SELL_HOUSE",
-                                tileIndex: tile.index,
-                              })
-                            }
-                            disabled={
-                              !canSellHouse || actionLoading === "SELL_HOUSE"
-                            }
-                          >
-                            {actionLoading === "SELL_HOUSE"
-                              ? "Selling…"
-                              : "Sell"}
-                          </button>
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-1">
+                        <div>
+                          <p className="font-semibold text-neutral-900">
+                            {tile.name}
+                          </p>
+                          <p className="text-xs text-neutral-500">
+                            {groupLabel}
+                          </p>
                         </div>
-                      ) : null}
-                      <button
-                        className="rounded-full bg-neutral-900 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
-                        type="button"
-                        onClick={() =>
-                          void handleBankAction({
-                            action: "TAKE_COLLATERAL_LOAN",
-                            tileIndex: tile.index,
-                          })
-                        }
-                        disabled={
-                          !canAct ||
-                          !rules.loanCollateralEnabled ||
-                          !isCollateralEligible ||
-                          actionLoading === "TAKE_COLLATERAL_LOAN"
-                        }
-                      >
-                        {actionLoading === "TAKE_COLLATERAL_LOAN"
-                          ? "Collateralizing…"
-                          : "Collateralize"}
-                      </button>
+                        <div className="flex flex-wrap items-center gap-3 text-xs text-neutral-500">
+                          <span className="font-semibold text-neutral-700">
+                            Principal: ${principalPreview}
+                          </span>
+                          <span className="uppercase tracking-wide text-neutral-400">
+                            Rent
+                          </span>
+                          <span className="font-semibold text-neutral-700">
+                            {baseRent !== null ? `$${baseRent}` : "—"}
+                          </span>
+                          <span className="uppercase tracking-wide text-neutral-400">
+                            Houses
+                          </span>
+                          <span className="font-semibold text-neutral-700">
+                            {tile.type === "PROPERTY" ? houses : "—"}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-end gap-2">
+                        {tile.type === "PROPERTY" ? (
+                          <div className="flex items-center gap-2">
+                            <button
+                              className="rounded-full bg-neutral-900 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
+                              type="button"
+                              onClick={() =>
+                                void handleBankAction({
+                                  action: "BUILD_HOUSE",
+                                  tileIndex: tile.index,
+                                })
+                              }
+                              disabled={
+                                !canBuildHouse ||
+                                actionLoading === "BUILD_HOUSE"
+                              }
+                            >
+                              {actionLoading === "BUILD_HOUSE"
+                                ? "Building…"
+                                : "Build"}
+                            </button>
+                            <button
+                              className="rounded-full border border-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
+                              type="button"
+                              onClick={() =>
+                                void handleBankAction({
+                                  action: "SELL_HOUSE",
+                                  tileIndex: tile.index,
+                                })
+                              }
+                              disabled={
+                                !canSellHouse ||
+                                actionLoading === "SELL_HOUSE"
+                              }
+                            >
+                              {actionLoading === "SELL_HOUSE"
+                                ? "Selling…"
+                                : "Sell"}
+                            </button>
+                          </div>
+                        ) : null}
+                        <button
+                          className="rounded-full bg-neutral-900 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
+                          type="button"
+                          onClick={() =>
+                            void handleBankAction({
+                              action: "TAKE_COLLATERAL_LOAN",
+                              tileIndex: tile.index,
+                            })
+                          }
+                          disabled={
+                            !canAct ||
+                            !rules.loanCollateralEnabled ||
+                            !isCollateralEligible ||
+                            actionLoading === "TAKE_COLLATERAL_LOAN"
+                          }
+                        >
+                          {actionLoading === "TAKE_COLLATERAL_LOAN"
+                            ? "Collateralizing…"
+                            : "Collateralize"}
+                        </button>
+                      </div>
                     </div>
-                  </div>
+                  </PropertyCardShell>
                 );
               })}
             </div>
@@ -5938,43 +5970,46 @@ export default function PlayPage() {
                   payoffAmount > 0 &&
                   myPlayerBalance >= payoffAmount;
                 return (
-                  <div
+                  <PropertyCardShell
                     key={loan.id}
-                    className="flex items-center justify-between rounded-2xl border px-4 py-3 text-sm"
+                    bandColor={getTileBandColor(tile)}
+                    bodyClassName="text-sm"
                   >
-                    <div>
-                      <p className="font-semibold text-neutral-900">
-                        {tileName}
-                      </p>
-                      <p className="text-xs text-neutral-500">{groupLabel}</p>
-                      <p className="text-xs text-neutral-400">
-                        Rent paused while collateralized.
-                      </p>
-                      <p className="text-xs text-neutral-500">
-                        Payment: ${loan.payment_per_turn} · Turns remaining:{" "}
-                        {loan.turns_remaining}
-                      </p>
-                      <p className="text-xs text-neutral-500">
-                        Remaining balance: ${payoffAmount}
-                      </p>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-semibold text-neutral-900">
+                          {tileName}
+                        </p>
+                        <p className="text-xs text-neutral-500">{groupLabel}</p>
+                        <p className="text-xs text-neutral-400">
+                          Rent paused while collateralized.
+                        </p>
+                        <p className="text-xs text-neutral-500">
+                          Payment: ${loan.payment_per_turn} · Turns remaining:{" "}
+                          {loan.turns_remaining}
+                        </p>
+                        <p className="text-xs text-neutral-500">
+                          Remaining balance: ${payoffAmount}
+                        </p>
+                      </div>
+                      <button
+                        className="rounded-full border border-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
+                        type="button"
+                        onClick={() => setPayoffLoan(loan)}
+                        disabled={
+                          !canPayoff ||
+                          actionLoading === "PAYOFF_COLLATERAL_LOAN"
+                        }
+                        title={
+                          canPayoff
+                            ? "Pay off this loan"
+                            : "Not enough cash to pay off"
+                        }
+                      >
+                        Pay off
+                      </button>
                     </div>
-                    <button
-                      className="rounded-full border border-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
-                      type="button"
-                      onClick={() => setPayoffLoan(loan)}
-                      disabled={
-                        !canPayoff ||
-                        actionLoading === "PAYOFF_COLLATERAL_LOAN"
-                      }
-                      title={
-                        canPayoff
-                          ? "Pay off this loan"
-                          : "Not enough cash to pay off"
-                      }
-                    >
-                      Pay off
-                    </button>
-                  </div>
+                  </PropertyCardShell>
                 );
               })}
             </div>
@@ -6009,50 +6044,53 @@ export default function PlayPage() {
                 const canPayoff =
                   canAct && payoffAmount > 0 && myPlayerBalance >= payoffAmount;
                 return (
-                  <div
+                  <PropertyCardShell
                     key={mortgage.id}
-                    className="flex items-center justify-between rounded-2xl border px-4 py-3 text-sm"
+                    bandColor={getTileBandColor(tile)}
+                    bodyClassName="text-sm"
                   >
-                    <div>
-                      <p className="font-semibold text-neutral-900">
-                        {tileName}
-                      </p>
-                      <p className="text-xs text-neutral-500">{groupLabel}</p>
-                      <p className="text-xs text-neutral-500">
-                        Principal remaining: ${mortgage.principal_remaining}
-                      </p>
-                      <p className="text-xs text-neutral-500">
-                        Accrued interest: ${mortgage.accrued_interest_unpaid}
-                      </p>
-                      <p className="text-xs text-neutral-500">
-                        Interest per turn: ${interestPerTurn}
-                      </p>
-                      <p className="text-xs text-neutral-500">
-                        Payoff amount: ${payoffAmount}
-                      </p>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-semibold text-neutral-900">
+                          {tileName}
+                        </p>
+                        <p className="text-xs text-neutral-500">{groupLabel}</p>
+                        <p className="text-xs text-neutral-500">
+                          Principal remaining: ${mortgage.principal_remaining}
+                        </p>
+                        <p className="text-xs text-neutral-500">
+                          Accrued interest: ${mortgage.accrued_interest_unpaid}
+                        </p>
+                        <p className="text-xs text-neutral-500">
+                          Interest per turn: ${interestPerTurn}
+                        </p>
+                        <p className="text-xs text-neutral-500">
+                          Payoff amount: ${payoffAmount}
+                        </p>
+                      </div>
+                      <button
+                        className="rounded-full border border-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
+                        type="button"
+                        onClick={() =>
+                          void handleBankAction({
+                            action: "PAYOFF_PURCHASE_MORTGAGE",
+                            mortgageId: mortgage.id,
+                          })
+                        }
+                        disabled={
+                          !canPayoff ||
+                          actionLoading === "PAYOFF_PURCHASE_MORTGAGE"
+                        }
+                        title={
+                          canPayoff
+                            ? "Pay off this mortgage"
+                            : "Not enough cash to pay off"
+                        }
+                      >
+                        Pay off
+                      </button>
                     </div>
-                    <button
-                      className="rounded-full border border-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
-                      type="button"
-                      onClick={() =>
-                        void handleBankAction({
-                          action: "PAYOFF_PURCHASE_MORTGAGE",
-                          mortgageId: mortgage.id,
-                        })
-                      }
-                      disabled={
-                        !canPayoff ||
-                        actionLoading === "PAYOFF_PURCHASE_MORTGAGE"
-                      }
-                      title={
-                        canPayoff
-                          ? "Pay off this mortgage"
-                          : "Not enough cash to pay off"
-                      }
-                    >
-                      Pay off
-                    </button>
-                  </div>
+                  </PropertyCardShell>
                 );
               })}
             </div>
