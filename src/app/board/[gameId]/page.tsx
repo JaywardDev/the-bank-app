@@ -613,6 +613,88 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
         return `Macro event: ${eventName}${rarityLabel}${durationLabel}`;
       }
 
+      if (event.event_type === "MACRO_EVENT_TRIGGERED") {
+        const payload = event.payload as
+          | {
+              event_name?: unknown;
+              rarity?: unknown;
+              duration_rounds?: unknown;
+            }
+          | null;
+        const eventName =
+          typeof payload?.event_name === "string"
+            ? payload.event_name
+            : "Macroeconomic shift";
+        const rarityRaw =
+          typeof payload?.rarity === "string" ? payload.rarity : null;
+        const rarity = rarityRaw ? rarityRaw.replaceAll("_", " ") : null;
+        const duration =
+          typeof payload?.duration_rounds === "number"
+            ? payload.duration_rounds
+            : typeof payload?.duration_rounds === "string"
+              ? Number.parseInt(payload.duration_rounds, 10)
+              : null;
+        const durationLabel = duration !== null ? ` · ${duration} rounds` : "";
+        const rarityLabel = rarity ? ` (${rarity})` : "";
+        return `Macro event triggered: ${eventName}${rarityLabel}${durationLabel}`;
+      }
+
+      if (event.event_type === "MACRO_EVENT_EXPIRED") {
+        const payload = event.payload as { event_name?: unknown } | null;
+        const eventName =
+          typeof payload?.event_name === "string"
+            ? payload.event_name
+            : "Macroeconomic shift";
+        return `Macro event expired: ${eventName}`;
+      }
+
+      if (event.event_type === "MACRO_MAINTENANCE_CHARGED") {
+        const payload = event.payload as
+          | { event_name?: unknown; per_house?: unknown }
+          | null;
+        const perHouse =
+          typeof payload?.per_house === "number"
+            ? payload.per_house
+            : typeof payload?.per_house === "string"
+              ? Number.parseInt(payload.per_house, 10)
+              : null;
+        const eventName =
+          typeof payload?.event_name === "string"
+            ? payload.event_name
+            : "Macro maintenance";
+        return perHouse !== null
+          ? `${eventName} maintenance charged ($${perHouse} per house)`
+          : `${eventName} maintenance charged`;
+      }
+
+      if (event.event_type === "MACRO_INTEREST_SURCHARGE") {
+        const payload = event.payload as
+          | { amount?: unknown; tile_index?: unknown }
+          | null;
+        const amount =
+          typeof payload?.amount === "number"
+            ? payload.amount
+            : typeof payload?.amount === "string"
+              ? Number.parseInt(payload.amount, 10)
+              : null;
+        const tileIndexRaw = payload?.tile_index;
+        const tileIndex =
+          typeof tileIndexRaw === "number"
+            ? tileIndexRaw
+            : typeof tileIndexRaw === "string"
+              ? Number.parseInt(tileIndexRaw, 10)
+              : null;
+        const tileNameFromBoard =
+          tileIndex !== null
+            ? boardPack?.tiles?.find((entry) => entry.index === tileIndex)?.name
+            : null;
+        const tileLabel =
+          tileNameFromBoard ?? (tileIndex !== null ? `Tile ${tileIndex}` : "tile");
+        return amount !== null
+          ? `Macro interest surcharge: $${amount} (${tileLabel})`
+          : `Macro interest surcharge (${tileLabel})`;
+      }
+
       if (event.event_type === "DRAW_CARD") {
         const payload = event.payload as
           | {
@@ -862,6 +944,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
               dice_total?: unknown;
               multiplier?: unknown;
               rent_type?: unknown;
+              rent_multiplier_total?: unknown;
               to_player_id?: unknown;
             }
           | null;
@@ -909,10 +992,20 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
           rentType === "UTILITY" && diceTotal !== null && multiplier !== null
             ? ` (dice ${diceTotal} × ${multiplier})`
             : "";
+        const rentMultiplierTotal =
+          typeof payload?.rent_multiplier_total === "number"
+            ? payload.rent_multiplier_total
+            : typeof payload?.rent_multiplier_total === "string"
+              ? Number.parseFloat(payload.rent_multiplier_total)
+              : null;
+        const macroLabel =
+          rentMultiplierTotal !== null && rentMultiplierTotal !== 1
+            ? ` (macro ×${rentMultiplierTotal.toFixed(2)})`
+            : "";
 
         return rentAmount !== null
-          ? `Paid $${rentAmount} rent to ${ownerName} (${tileLabel})${detailLabel}`
-          : `Paid rent to ${ownerName} (${tileLabel})`;
+          ? `Paid $${rentAmount} rent to ${ownerName} (${tileLabel})${detailLabel}${macroLabel}`
+          : `Paid rent to ${ownerName} (${tileLabel})${macroLabel}`;
       }
 
       if (event.event_type === "RENT_SKIPPED_COLLATERAL") {

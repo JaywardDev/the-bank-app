@@ -13,6 +13,7 @@ import {
   defaultMacroDeckId,
   drawMacroEvent,
   getMacroDeckById,
+  type MacroEventEffect,
 } from "@/lib/macroDecks";
 import { DEFAULT_RULES, getRules } from "@/lib/rules";
 
@@ -123,6 +124,14 @@ type PlayerRow = {
   eliminated_at: string | null;
 };
 
+type ActiveMacroEffect = {
+  id: string;
+  name: string;
+  effects: MacroEventEffect[];
+  remaining_rounds: number;
+  started_round: number;
+};
+
 type GameStateRow = {
   game_id: string;
   version: number;
@@ -133,6 +142,7 @@ type GameStateRow = {
   doubles_count: number | null;
   rounds_elapsed: number | null;
   last_macro_event_id: string | null;
+  active_macro_effects: ActiveMacroEffect[] | null;
   turn_phase: string | null;
   pending_action: Record<string, unknown> | null;
   chance_index: number | null;
@@ -259,6 +269,128 @@ const hashStringToUint32 = (value: string) => {
     hash = Math.imul(hash, 16777619);
   }
   return hash >>> 0;
+};
+
+const normalizeActiveMacroEffects = (
+  raw: unknown,
+): ActiveMacroEffect[] => {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+      const data = entry as Record<string, unknown>;
+      const effects = Array.isArray(data.effects)
+        ? (data.effects as MacroEventEffect[])
+        : [];
+      const remainingRounds =
+        typeof data.remaining_rounds === "number" ? data.remaining_rounds : 0;
+      return {
+        id: typeof data.id === "string" ? data.id : "unknown",
+        name: typeof data.name === "string" ? data.name : "Macroeconomic event",
+        effects,
+        remaining_rounds: remainingRounds,
+        started_round:
+          typeof data.started_round === "number" ? data.started_round : 0,
+      };
+    })
+    .filter((entry): entry is ActiveMacroEffect => Boolean(entry));
+};
+
+const tickMacroEffects = (activeEffects: ActiveMacroEffect[]) => {
+  const expired: ActiveMacroEffect[] = [];
+  const updated = activeEffects
+    .map((effect) => {
+      const remaining = effect.remaining_rounds - 1;
+      if (remaining <= 0) {
+        expired.push(effect);
+        return null;
+      }
+      return {
+        ...effect,
+        remaining_rounds: remaining,
+      };
+    })
+    .filter((entry): entry is ActiveMacroEffect => Boolean(entry));
+  return { updated, expired };
+};
+
+const getMacroInterestDeltaPerTurn = (activeEffects: ActiveMacroEffect[]) =>
+  activeEffects.reduce((total, effect) => {
+    const delta = effect.effects.reduce((sum, detail) => {
+      if (
+        detail.type === "loan_rate_modifier" ||
+        detail.type === "interest_rate_delta_per_turn" ||
+        detail.type === "interestRateDeltaPerTurn"
+      ) {
+        return sum + detail.value;
+      }
+      return sum;
+    }, 0);
+    return total + delta;
+  }, 0);
+
+const getMaintenancePerHouse = (effects: MacroEventEffect[]) =>
+  effects.reduce((sum, detail) => {
+    if (
+      detail.type === "maintenance_per_house" ||
+      detail.type === "maintenancePerHouse"
+    ) {
+      return sum + detail.value;
+    }
+    return sum;
+  }, 0);
+
+const getMacroRentMultipliers = (
+  activeEffects: ActiveMacroEffect[],
+  tile: TileInfo,
+) => {
+  let globalMultiplier = 1;
+  let groupMultiplier = 1;
+  const appliedGroups: string[] = [];
+
+  for (const effect of activeEffects) {
+    for (const detail of effect.effects) {
+      if (detail.type === "rent_multiplier" || detail.type === "rentMultiplier") {
+        globalMultiplier *= detail.value;
+        continue;
+      }
+      if (
+        detail.type === "rent_multiplier_group" ||
+        detail.type === "rent_multiplier_sector" ||
+        detail.type === "rent_multiplier_color_group"
+      ) {
+        const detailRecord = detail as MacroEventEffect & {
+          group?: string;
+          sector?: string;
+        };
+        const group =
+          typeof detailRecord.group === "string"
+            ? detailRecord.group
+            : typeof detailRecord.sector === "string"
+              ? detailRecord.sector
+              : null;
+        if (!group) {
+          continue;
+        }
+        const matchesGroup =
+          tile.colorGroup === group || tile.type === group;
+        if (matchesGroup) {
+          groupMultiplier *= detail.value;
+          appliedGroups.push(group);
+        }
+      }
+    }
+  }
+
+  return {
+    globalMultiplier,
+    groupMultiplier,
+    appliedGroups,
+  };
 };
 
 const mulberry32 = (seed: number) => {
@@ -979,6 +1111,7 @@ const calculateRent = ({
   boardTiles,
   ownershipByTile,
   diceTotal,
+  activeMacroEffects,
 }: {
   tile: TileInfo;
   ownerId: string | null;
@@ -986,10 +1119,24 @@ const calculateRent = ({
   boardTiles: TileInfo[];
   ownershipByTile: OwnershipByTile;
   diceTotal?: number | null;
+  activeMacroEffects: ActiveMacroEffect[];
 }) => {
   if (!ownerId || ownerId === currentPlayerId) {
     return { amount: 0, meta: null };
   }
+
+  const { globalMultiplier, groupMultiplier, appliedGroups } =
+    getMacroRentMultipliers(activeMacroEffects, tile);
+  const macroMultiplier = globalMultiplier * groupMultiplier;
+  const macroMeta =
+    macroMultiplier !== 1
+      ? {
+          rent_multiplier_global: globalMultiplier,
+          rent_multiplier_group: groupMultiplier,
+          rent_multiplier_total: macroMultiplier,
+          rent_multiplier_groups: appliedGroups,
+        }
+      : null;
 
   if (tile.type === "RAIL") {
     const railCount = countOwnedTilesByType(
@@ -998,12 +1145,15 @@ const calculateRent = ({
       ownerId,
       "RAIL",
     );
-    const amount = RAIL_RENT_BY_COUNT[railCount] ?? 0;
+    const baseAmount = RAIL_RENT_BY_COUNT[railCount] ?? 0;
+    const amount = Math.round(baseAmount * macroMultiplier);
     return {
       amount,
       meta: {
         rent_type: "RAIL",
         railroads_owned: railCount,
+        base_rent: baseAmount,
+        ...(macroMeta ?? {}),
       },
     };
   }
@@ -1017,13 +1167,17 @@ const calculateRent = ({
     );
     const multiplier = utilityCount >= 2 ? 10 : 4;
     const total = diceTotal ?? 0;
+    const baseAmount = multiplier * total;
+    const amount = Math.round(baseAmount * macroMultiplier);
     return {
-      amount: multiplier * total,
+      amount,
       meta: {
         rent_type: "UTILITY",
         utilities_owned: utilityCount,
         dice_total: total,
         multiplier,
+        base_rent: baseAmount,
+        ...(macroMeta ?? {}),
       },
     };
   }
@@ -1039,19 +1193,25 @@ const calculateRent = ({
       rentByHouses && rentByHouses.length > 0
         ? rentByHouses[clampedHouses] ?? tile.baseRent ?? 0
         : tile.baseRent ?? 0;
+    const finalAmount = Math.round(amount * macroMultiplier);
     return {
-      amount,
+      amount: finalAmount,
       meta: {
         rent_type: "PROPERTY",
         houses: clampedHouses,
+        base_rent: amount,
+        ...(macroMeta ?? {}),
       },
     };
   }
 
+  const amount = tile.baseRent ?? 0;
   return {
-    amount: tile.baseRent ?? 0,
+    amount: Math.round(amount * macroMultiplier),
     meta: {
       rent_type: "PROPERTY",
+      base_rent: amount,
+      ...(macroMeta ?? {}),
     },
   };
 };
@@ -1444,6 +1604,7 @@ const finalizeMoveResolution = async ({
   boardTiles,
   rules,
   startingCash,
+  activeMacroEffects,
   nextChanceIndex,
   nextCommunityIndex,
   nextChanceOrder,
@@ -1489,6 +1650,7 @@ const finalizeMoveResolution = async ({
   boardTiles: TileInfo[];
   rules: ReturnType<typeof getRules>;
   startingCash: number;
+  activeMacroEffects: ActiveMacroEffect[];
   nextChanceIndex: number;
   nextCommunityIndex: number;
   nextChanceOrder: number[] | null;
@@ -1524,6 +1686,7 @@ const finalizeMoveResolution = async ({
           boardTiles,
           ownershipByTile,
           diceTotal: rentDiceTotal,
+          activeMacroEffects,
         });
       })();
   if (activeLandingTile.type === "UTILITY" && cardUtilityRollOverride) {
@@ -1804,11 +1967,13 @@ const applyLoanPaymentsForPlayer = async ({
   player,
   balances,
   startingCash,
+  macroInterestDeltaPerTurn,
 }: {
   gameId: string;
   player: PlayerRow;
   balances: Record<string, number>;
   startingCash: number;
+  macroInterestDeltaPerTurn: number;
 }) => {
   const activeLoans = (await fetchFromSupabaseWithService<PlayerLoanRow[]>(
     `player_loans?select=id,collateral_tile_index,principal,remaining_principal,rate_per_turn,term_turns,turns_remaining,payment_per_turn,status&game_id=eq.${gameId}&player_id=eq.${player.id}&status=eq.active`,
@@ -1892,6 +2057,51 @@ const applyLoanPaymentsForPlayer = async ({
       },
     });
 
+    const macroInterestSurcharge = Math.round(
+      remainingPrincipal * macroInterestDeltaPerTurn,
+    );
+    if (macroInterestSurcharge > 0) {
+      const surchargeBalance = updatedBalances[player.id] ?? startingCash;
+      const surchargeAfter = surchargeBalance - macroInterestSurcharge;
+      updatedBalances = {
+        ...updatedBalances,
+        [player.id]: surchargeAfter,
+      };
+      balancesChanged = true;
+      if (surchargeAfter < 0 && !bankruptcyCandidate) {
+        bankruptcyCandidate = {
+          reason: "MACRO_INTEREST_SURCHARGE",
+          cashBefore: surchargeBalance,
+          cashAfter: surchargeAfter,
+        };
+      }
+      events.push(
+        {
+          event_type: "CASH_DEBIT",
+          payload: {
+            player_id: player.id,
+            amount: macroInterestSurcharge,
+            reason: "MACRO_INTEREST_SURCHARGE",
+            loan_id: loan.id,
+            tile_index: loan.collateral_tile_index,
+            principal_remaining: remainingPrincipal,
+            macro_interest_delta_per_turn: macroInterestDeltaPerTurn,
+          },
+        },
+        {
+          event_type: "MACRO_INTEREST_SURCHARGE",
+          payload: {
+            player_id: player.id,
+            loan_id: loan.id,
+            tile_index: loan.collateral_tile_index,
+            amount: macroInterestSurcharge,
+            principal_remaining: remainingPrincipal,
+            macro_interest_delta_per_turn: macroInterestDeltaPerTurn,
+          },
+        },
+      );
+    }
+
     if (status === "paid") {
       await fetchFromSupabaseWithService(
         `property_ownership?game_id=eq.${gameId}&tile_index=eq.${loan.collateral_tile_index}`,
@@ -1914,8 +2124,10 @@ const applyLoanPaymentsForPlayer = async ({
   }
 
   for (const mortgage of activeMortgages) {
+    const effectiveRatePerTurn =
+      mortgage.rate_per_turn + macroInterestDeltaPerTurn;
     const interestAmount = Math.round(
-      mortgage.principal_remaining * mortgage.rate_per_turn,
+      mortgage.principal_remaining * effectiveRatePerTurn,
     );
     const turnsElapsedAfter = (mortgage.turns_elapsed ?? 0) + 1;
     const currentBalance = updatedBalances[player.id] ?? startingCash;
@@ -1950,6 +2162,9 @@ const applyLoanPaymentsForPlayer = async ({
             reason: "PURCHASE_MORTGAGE_INTEREST",
             tile_index: mortgage.tile_index,
             mortgage_id: mortgage.id,
+            base_rate_per_turn: mortgage.rate_per_turn,
+            macro_interest_delta_per_turn: macroInterestDeltaPerTurn,
+            effective_rate_per_turn: effectiveRatePerTurn,
           },
         },
         {
@@ -1960,6 +2175,9 @@ const applyLoanPaymentsForPlayer = async ({
             tile_index: mortgage.tile_index,
             interest_amount: interestAmount,
             turns_elapsed_after: turnsElapsedAfter,
+            base_rate_per_turn: mortgage.rate_per_turn,
+            macro_interest_delta_per_turn: macroInterestDeltaPerTurn,
+            effective_rate_per_turn: effectiveRatePerTurn,
           },
         },
       );
@@ -1975,6 +2193,9 @@ const applyLoanPaymentsForPlayer = async ({
           turns_elapsed_after: turnsElapsedAfter,
           paid: false,
           unpaid: interestAmount,
+          base_rate_per_turn: mortgage.rate_per_turn,
+          macro_interest_delta_per_turn: macroInterestDeltaPerTurn,
+          effective_rate_per_turn: effectiveRatePerTurn,
         },
       });
     }
@@ -2075,7 +2296,7 @@ export async function POST(request: Request) {
       }
 
       await fetchFromSupabaseWithService<GameStateRow[]>(
-        "game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment",
+        "game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment",
         {
           method: "POST",
           headers: {
@@ -2088,6 +2309,7 @@ export async function POST(request: Request) {
             balances: {},
             last_roll: null,
             doubles_count: 0,
+            active_macro_effects: [],
             turn_phase: "AWAITING_ROLL",
             pending_action: null,
             free_parking_pot: 0,
@@ -2212,7 +2434,7 @@ export async function POST(request: Request) {
     )) ?? [];
 
     const [gameState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
-      `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
+      `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
       { method: "GET" },
     )) ?? [];
 
@@ -2330,7 +2552,7 @@ export async function POST(request: Request) {
       );
 
       const upsertResponse = await fetch(
-        `${supabaseUrl}/rest/v1/game_state?on_conflict=game_id&select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment`,
+        `${supabaseUrl}/rest/v1/game_state?on_conflict=game_id&select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment`,
         {
           method: "POST",
           headers: {
@@ -2346,6 +2568,7 @@ export async function POST(request: Request) {
             doubles_count: 0,
             rounds_elapsed: 0,
             last_macro_event_id: null,
+            active_macro_effects: [],
             turn_phase: "AWAITING_ROLL",
             pending_action: null,
             chance_index: 0,
@@ -3117,6 +3340,9 @@ export async function POST(request: Request) {
         boardTiles,
         rules,
         startingCash: game.starting_cash ?? 0,
+        activeMacroEffects: normalizeActiveMacroEffects(
+          gameState?.active_macro_effects,
+        ),
         nextChanceIndex: gameState.chance_index ?? 0,
         nextCommunityIndex: gameState.community_index ?? 0,
         nextChanceOrder: gameState.chance_order ?? null,
@@ -3296,6 +3522,9 @@ export async function POST(request: Request) {
           player: nextPlayer,
           balances: updatedBalances,
           startingCash: game.starting_cash ?? 0,
+          macroInterestDeltaPerTurn: getMacroInterestDeltaPerTurn(
+            normalizeActiveMacroEffects(gameState?.active_macro_effects),
+          ),
         });
         updatedBalances = loanResult.balances;
         balancesChanged = balancesChanged || loanResult.balancesChanged;
@@ -3657,6 +3886,9 @@ export async function POST(request: Request) {
         boardTiles,
         rules,
         startingCash: game.starting_cash ?? 0,
+        activeMacroEffects: normalizeActiveMacroEffects(
+          gameState?.active_macro_effects,
+        ),
         nextChanceIndex,
         nextCommunityIndex,
         nextChanceOrder,
@@ -4956,6 +5188,9 @@ export async function POST(request: Request) {
           player: nextPlayer,
           balances: updatedBalances,
           startingCash: game.starting_cash ?? 0,
+          macroInterestDeltaPerTurn: getMacroInterestDeltaPerTurn(
+            normalizeActiveMacroEffects(gameState?.active_macro_effects),
+          ),
         });
         updatedBalances = loanResult.balances;
         balancesChanged = balancesChanged || loanResult.balancesChanged;
@@ -5427,6 +5662,9 @@ export async function POST(request: Request) {
         boardTiles,
         rules,
         startingCash: game.starting_cash ?? 0,
+        activeMacroEffects: normalizeActiveMacroEffects(
+          gameState?.active_macro_effects,
+        ),
         nextChanceIndex,
         nextCommunityIndex,
         nextChanceOrder,
@@ -5677,6 +5915,9 @@ export async function POST(request: Request) {
       const balances = gameState.balances ?? {};
       let updatedBalances = balances;
       let balancesChanged = false;
+      let bankruptcyCandidate:
+        | { reason: string; cashBefore: number; cashAfter: number }
+        | null = null;
       const events: Array<{
         event_type: string;
         payload: Record<string, unknown>;
@@ -5692,26 +5933,171 @@ export async function POST(request: Request) {
         },
       ];
 
+      const nextRound = (gameState.rounds_elapsed ?? 0) + 1;
+      const macroDeck = getMacroDeckById(defaultMacroDeckId);
+      let nextLastMacroEventId = gameState.last_macro_event_id ?? null;
+      const activeMacroEffects = normalizeActiveMacroEffects(
+        gameState.active_macro_effects,
+      );
+      const { updated: tickedMacroEffects, expired: expiredMacroEffects } =
+        tickMacroEffects(activeMacroEffects);
+      let nextActiveMacroEffects = tickedMacroEffects;
+
+      for (const expiredEffect of expiredMacroEffects) {
+        events.push({
+          event_type: "MACRO_EVENT_EXPIRED",
+          payload: {
+            event_id: expiredEffect.id,
+            event_name: expiredEffect.name,
+            started_round: expiredEffect.started_round,
+            expired_round: nextRound,
+          },
+        });
+      }
+
+      let triggeredMacroEvent: {
+        id: string;
+        name: string;
+        durationRounds: number;
+        effects: MacroEventEffect[];
+        rarity?: "common" | "uncommon" | "black_swan";
+      } | null = null;
+
+      if (
+        macroDeck &&
+        nextRound % MACRO_EVENT_INTERVAL_ROUNDS === 0 &&
+        macroDeck.events.length > 0
+      ) {
+        const macroEvent = drawMacroEvent(
+          macroDeck,
+          nextLastMacroEventId,
+          DEFAULT_MACRO_DRAW_MODE,
+        );
+        nextLastMacroEventId = macroEvent.id;
+        triggeredMacroEvent = macroEvent;
+        const activeMacroEffect: ActiveMacroEffect = {
+          id: macroEvent.id,
+          name: macroEvent.name,
+          effects: macroEvent.effects,
+          remaining_rounds: macroEvent.durationRounds,
+          started_round: nextRound,
+        };
+        nextActiveMacroEffects = [...nextActiveMacroEffects, activeMacroEffect];
+        events.push({
+          event_type: "MACRO_EVENT_TRIGGERED",
+          payload: {
+            deck_id: macroDeck.id,
+            deck_name: macroDeck.name,
+            event_id: macroEvent.id,
+            event_name: macroEvent.name,
+            duration_rounds: macroEvent.durationRounds,
+            effects: macroEvent.effects,
+            rarity: macroEvent.rarity ?? null,
+            mode: DEFAULT_MACRO_DRAW_MODE,
+            round_index: nextRound,
+          },
+        });
+      }
+
+      if (triggeredMacroEvent) {
+        const maintenancePerHouse = getMaintenancePerHouse(
+          triggeredMacroEvent.effects,
+        );
+        if (maintenancePerHouse > 0) {
+          const ownershipByTile = await loadOwnershipByTile(gameId);
+          const housesByPlayer = Object.values(ownershipByTile).reduce<
+            Record<string, number>
+          >((acc, ownership) => {
+            acc[ownership.owner_player_id] =
+              (acc[ownership.owner_player_id] ?? 0) + ownership.houses;
+            return acc;
+          }, {});
+          const charges: Array<{
+            player_id: string;
+            player_name: string | null;
+            houses: number;
+            amount: number;
+          }> = [];
+          for (const player of players) {
+            const totalHouses = housesByPlayer[player.id] ?? 0;
+            if (totalHouses <= 0) {
+              continue;
+            }
+            const amount = totalHouses * maintenancePerHouse;
+            const currentBalance = updatedBalances[player.id] ?? game.starting_cash ?? 0;
+            const nextBalance = currentBalance - amount;
+            updatedBalances = {
+              ...updatedBalances,
+              [player.id]: nextBalance,
+            };
+            balancesChanged = true;
+            if (nextBalance < 0 && !bankruptcyCandidate) {
+              bankruptcyCandidate = {
+                reason: "MACRO_MAINTENANCE",
+                cashBefore: currentBalance,
+                cashAfter: nextBalance,
+              };
+            }
+            charges.push({
+              player_id: player.id,
+              player_name: player.display_name,
+              houses: totalHouses,
+              amount,
+            });
+            events.push({
+              event_type: "CASH_DEBIT",
+              payload: {
+                player_id: player.id,
+                amount,
+                reason: "MACRO_MAINTENANCE",
+                event_id: triggeredMacroEvent.id,
+                event_name: triggeredMacroEvent.name,
+                houses: totalHouses,
+                per_house: maintenancePerHouse,
+              },
+            });
+          }
+          if (charges.length > 0) {
+            events.push({
+              event_type: "MACRO_MAINTENANCE_CHARGED",
+              payload: {
+                event_id: triggeredMacroEvent.id,
+                event_name: triggeredMacroEvent.name,
+                per_house: maintenancePerHouse,
+                charges,
+                round_index: nextRound,
+              },
+            });
+          }
+        }
+      }
+
       const loanResult = await applyLoanPaymentsForPlayer({
         gameId,
         player: nextPlayer,
         balances: updatedBalances,
         startingCash: game.starting_cash ?? 0,
+        macroInterestDeltaPerTurn: getMacroInterestDeltaPerTurn(
+          nextActiveMacroEffects,
+        ),
       });
       updatedBalances = loanResult.balances;
       balancesChanged = balancesChanged || loanResult.balancesChanged;
       events.push(...loanResult.events);
+      if (!bankruptcyCandidate && loanResult.bankruptcyCandidate) {
+        bankruptcyCandidate = loanResult.bankruptcyCandidate;
+      }
 
-      if (loanResult.bankruptcyCandidate) {
+      if (bankruptcyCandidate) {
         const bankruptcyResult = await resolveBankruptcyIfNeeded({
           gameId,
           gameState,
           players,
           player: nextPlayer,
           updatedBalances,
-          cashBefore: loanResult.bankruptcyCandidate.cashBefore,
-          cashAfter: loanResult.bankruptcyCandidate.cashAfter,
-          reason: loanResult.bankruptcyCandidate.reason,
+          cashBefore: bankruptcyCandidate.cashBefore,
+          cashAfter: bankruptcyCandidate.cashAfter,
+          reason: bankruptcyCandidate.reason,
           events,
           currentVersion,
           userId: user.id,
@@ -5729,37 +6115,6 @@ export async function POST(request: Request) {
         }
       }
 
-      const nextRound = (gameState.rounds_elapsed ?? 0) + 1;
-      const macroDeck = getMacroDeckById(defaultMacroDeckId);
-      let nextLastMacroEventId = gameState.last_macro_event_id ?? null;
-
-      if (
-        macroDeck &&
-        nextRound % MACRO_EVENT_INTERVAL_ROUNDS === 0 &&
-        macroDeck.events.length > 0
-      ) {
-        const macroEvent = drawMacroEvent(
-          macroDeck,
-          nextLastMacroEventId,
-          DEFAULT_MACRO_DRAW_MODE,
-        );
-        nextLastMacroEventId = macroEvent.id;
-        events.push({
-          event_type: "MACRO_EVENT",
-          payload: {
-            deck_id: macroDeck.id,
-            deck_name: macroDeck.name,
-            event_id: macroEvent.id,
-            event_name: macroEvent.name,
-            duration_rounds: macroEvent.durationRounds,
-            effects: macroEvent.effects,
-            rarity: macroEvent.rarity ?? null,
-            mode: DEFAULT_MACRO_DRAW_MODE,
-            round_index: nextRound,
-          },
-        });
-      }
-
       const finalVersion = currentVersion + events.length;
       const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
         `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
@@ -5775,6 +6130,7 @@ export async function POST(request: Request) {
             doubles_count: 0,
             rounds_elapsed: nextRound,
             last_macro_event_id: nextLastMacroEventId,
+            active_macro_effects: nextActiveMacroEffects,
             ...(balancesChanged ? { balances: updatedBalances } : {}),
             turn_phase: nextPlayer.is_in_jail
               ? "AWAITING_JAIL_DECISION"

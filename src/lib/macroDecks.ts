@@ -2,6 +2,8 @@ export type MacroEventEffect = {
   type: string;
   value: number;
   description: string;
+  group?: string;
+  sector?: string;
 };
 
 export type MacroEvent = {

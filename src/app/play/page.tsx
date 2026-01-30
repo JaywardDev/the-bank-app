@@ -436,22 +436,51 @@ const derivePlayerTransactions = ({
         }
         const reason =
           typeof payload.reason === "string" ? payload.reason : null;
-        if (reason !== "PURCHASE_MORTGAGE_INTEREST") {
-          break;
-        }
         const amount = parseNumber(payload.amount);
         if (amount === null) {
           break;
         }
-        const tileIndex = parseNumber(payload.tile_index);
-        const tileName = getTileName(tileIndex);
-        transactions.push({
-          ...recordBase,
-          id: event.id,
-          title: "Mortgage interest",
-          subtitle: tileName,
-          amount: -amount,
-        });
+        if (reason === "PURCHASE_MORTGAGE_INTEREST") {
+          const tileIndex = parseNumber(payload.tile_index);
+          const tileName = getTileName(tileIndex);
+          transactions.push({
+            ...recordBase,
+            id: event.id,
+            title: "Mortgage interest",
+            subtitle: tileName,
+            amount: -amount,
+          });
+          break;
+        }
+        if (reason === "MACRO_MAINTENANCE") {
+          const eventName =
+            typeof payload.event_name === "string" ? payload.event_name : null;
+          const houses = parseNumber(payload.houses);
+          const subtitle = eventName
+            ? `${eventName}${houses !== null ? ` · ${houses} houses` : ""}`
+            : houses !== null
+              ? `${houses} houses`
+              : null;
+          transactions.push({
+            ...recordBase,
+            id: event.id,
+            title: "Macro maintenance",
+            subtitle: subtitle ?? undefined,
+            amount: -amount,
+          });
+          break;
+        }
+        if (reason === "MACRO_INTEREST_SURCHARGE") {
+          const tileIndex = parseNumber(payload.tile_index);
+          const tileName = getTileName(tileIndex);
+          transactions.push({
+            ...recordBase,
+            id: event.id,
+            title: "Macro interest surcharge",
+            subtitle: tileName,
+            amount: -amount,
+          });
+        }
         break;
       }
       case "PURCHASE_MORTGAGE_INTEREST_PAID": {
@@ -1130,6 +1159,73 @@ export default function PlayPage() {
       return `Macro event: ${eventName}${rarityLabel}${durationLabel}`;
     }
 
+    if (event.event_type === "MACRO_EVENT_TRIGGERED") {
+      const eventName =
+        typeof payload?.event_name === "string"
+          ? payload.event_name
+          : "Macroeconomic shift";
+      const rarityRaw = typeof payload?.rarity === "string" ? payload.rarity : null;
+      const rarity = rarityRaw ? rarityRaw.replaceAll("_", " ") : null;
+      const duration =
+        typeof payload?.duration_rounds === "number"
+          ? payload.duration_rounds
+          : typeof payload?.duration_rounds === "string"
+            ? Number.parseInt(payload.duration_rounds, 10)
+            : null;
+      const durationLabel = duration !== null ? ` · ${duration} rounds` : "";
+      const rarityLabel = rarity ? ` (${rarity})` : "";
+      return `Macro event triggered: ${eventName}${rarityLabel}${durationLabel}`;
+    }
+
+    if (event.event_type === "MACRO_EVENT_EXPIRED") {
+      const eventName =
+        typeof payload?.event_name === "string"
+          ? payload.event_name
+          : "Macroeconomic shift";
+      return `Macro event expired: ${eventName}`;
+    }
+
+    if (event.event_type === "MACRO_MAINTENANCE_CHARGED") {
+      const perHouse =
+        typeof payload?.per_house === "number"
+          ? payload.per_house
+          : typeof payload?.per_house === "string"
+            ? Number.parseInt(payload.per_house, 10)
+          : null;
+      const eventName =
+        typeof payload?.event_name === "string"
+          ? payload.event_name
+          : "Macro maintenance";
+      return perHouse !== null
+        ? `${eventName} maintenance charged ($${perHouse} per house)`
+        : `${eventName} maintenance charged`;
+    }
+
+    if (event.event_type === "MACRO_INTEREST_SURCHARGE") {
+      const amount =
+        typeof payload?.amount === "number"
+          ? payload.amount
+          : typeof payload?.amount === "string"
+            ? Number.parseInt(payload.amount, 10)
+            : null;
+      const tileIndexRaw = payload?.tile_index;
+      const tileIndex =
+        typeof tileIndexRaw === "number"
+          ? tileIndexRaw
+          : typeof tileIndexRaw === "string"
+            ? Number.parseInt(tileIndexRaw, 10)
+            : null;
+      const tileNameFromBoard =
+        tileIndex !== null
+          ? boardPack?.tiles?.find((entry) => entry.index === tileIndex)?.name
+          : null;
+      const tileLabel =
+        tileNameFromBoard ?? (tileIndex !== null ? `Tile ${tileIndex}` : "tile");
+      return amount !== null
+        ? `Macro interest surcharge: $${amount} (${tileLabel})`
+        : `Macro interest surcharge (${tileLabel})`;
+    }
+
     if (event.event_type === "COLLECT_GO") {
       const amount =
         typeof payload?.amount === "number"
@@ -1514,10 +1610,15 @@ export default function PlayPage() {
         rentType === "UTILITY" && diceTotal !== null && multiplier !== null
           ? ` (dice ${diceTotal} × ${multiplier})`
           : "";
+      const rentMultiplierTotal = parseNumber(payload?.rent_multiplier_total);
+      const macroLabel =
+        rentMultiplierTotal !== null && rentMultiplierTotal !== 1
+          ? ` (macro ×${rentMultiplierTotal.toFixed(2)})`
+          : "";
 
       return rentAmount !== null
-        ? `Paid $${rentAmount} rent to ${ownerName} (${tileLabel})${detailLabel}`
-        : `Paid rent to ${ownerName} (${tileLabel})`;
+        ? `Paid $${rentAmount} rent to ${ownerName} (${tileLabel})${detailLabel}${macroLabel}`
+        : `Paid rent to ${ownerName} (${tileLabel})${macroLabel}`;
     }
 
     if (event.event_type === "RENT_SKIPPED_COLLATERAL") {
