@@ -124,7 +124,7 @@ type OwnershipRow = {
   owner_player_id: string | null;
   collateral_loan_id: string | null;
   purchase_mortgage_id: string | null;
-  houses: number | null;
+  houses?: number | null;
 };
 
 type OwnershipByTile = Record<
@@ -3386,14 +3386,22 @@ export default function PlayPage() {
             if (!responseBody.ownership?.owner_player_id) {
               return prev;
             }
+            const tileIndex = responseBody.ownership.tile_index;
+            const existing = prev[tileIndex];
             return {
               ...prev,
-              [responseBody.ownership.tile_index]: {
+              [tileIndex]: {
                 owner_player_id: responseBody.ownership.owner_player_id,
                 collateral_loan_id:
-                  responseBody.ownership.collateral_loan_id ?? null,
+                  responseBody.ownership.collateral_loan_id ??
+                  existing?.collateral_loan_id ??
+                  null,
                 purchase_mortgage_id:
-                  responseBody.ownership.purchase_mortgage_id ?? null,
+                  responseBody.ownership.purchase_mortgage_id ??
+                  existing?.purchase_mortgage_id ??
+                  null,
+                houses:
+                  responseBody.ownership.houses ?? existing?.houses ?? 0,
               },
             };
           });
