@@ -465,7 +465,7 @@ const derivePlayerTransactions = ({
             ...recordBase,
             id: event.id,
             title: "Macro maintenance",
-            subtitle: subtitle ?? undefined,
+            subtitle: subtitle ?? null,
             amount: -amount,
           });
           break;
