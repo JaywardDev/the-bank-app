@@ -831,6 +831,45 @@ const normalizeTradeSnapshot = (
   return [];
 };
 
+const computeTradeCashDeltas = (trade: TradeProposalRow) => {
+  const offerCash = Math.max(0, trade.offer_cash ?? 0);
+  const requestCash = Math.max(0, trade.request_cash ?? 0);
+  const proposerDelta = -offerCash + requestCash;
+  const counterpartyDelta = -requestCash + offerCash;
+  const transfers: Array<{
+    from_player_id: string;
+    to_player_id: string;
+    amount: number;
+    side: "offer_cash" | "request_cash";
+  }> = [];
+
+  if (offerCash > 0) {
+    transfers.push({
+      from_player_id: trade.proposer_player_id,
+      to_player_id: trade.counterparty_player_id,
+      amount: offerCash,
+      side: "offer_cash",
+    });
+  }
+
+  if (requestCash > 0) {
+    transfers.push({
+      from_player_id: trade.counterparty_player_id,
+      to_player_id: trade.proposer_player_id,
+      amount: requestCash,
+      side: "request_cash",
+    });
+  }
+
+  return {
+    offerCash,
+    requestCash,
+    proposerDelta,
+    counterpartyDelta,
+    transfers,
+  };
+};
+
 const rollDice = () => {
   const dieOne = Math.floor(Math.random() * 6) + 1;
   const dieTwo = Math.floor(Math.random() * 6) + 1;
@@ -3199,8 +3238,9 @@ export async function POST(request: Request) {
         );
       };
 
-      const offerCash = tradeProposal.offer_cash ?? 0;
-      const requestCash = tradeProposal.request_cash ?? 0;
+      const cashDeltas = computeTradeCashDeltas(tradeProposal);
+      const offerCash = cashDeltas.offerCash;
+      const requestCash = cashDeltas.requestCash;
       const offerTiles = tradeProposal.offer_tile_indices ?? [];
       const requestTiles = tradeProposal.request_tile_indices ?? [];
 
@@ -3288,9 +3328,9 @@ export async function POST(request: Request) {
 
       const updatedBalances = { ...balances };
       updatedBalances[tradeProposal.proposer_player_id] =
-        proposerBalance - offerCash + requestCash;
+        proposerBalance + cashDeltas.proposerDelta;
       updatedBalances[tradeProposal.counterparty_player_id] =
-        counterpartyBalance - requestCash + offerCash;
+        counterpartyBalance + cashDeltas.counterpartyDelta;
 
       const propertyTransferUpdates: Array<{
         tile_index: number;
@@ -3468,51 +3508,32 @@ export async function POST(request: Request) {
           },
         ];
 
-      if (offerCash > 0) {
+      for (const transfer of cashDeltas.transfers) {
         events.push(
           {
             event_type: "CASH_DEBIT",
             payload: {
-              player_id: tradeProposal.proposer_player_id,
-              amount: offerCash,
+              player_id: transfer.from_player_id,
+              amount: transfer.amount,
               reason: "TRADE",
-              counterparty_player_id: tradeProposal.counterparty_player_id,
+              counterparty_player_id: transfer.to_player_id,
               trade_id: tradeProposal.id,
+              from_player_id: transfer.from_player_id,
+              to_player_id: transfer.to_player_id,
+              side: transfer.side,
             },
           },
           {
             event_type: "CASH_CREDIT",
             payload: {
-              player_id: tradeProposal.counterparty_player_id,
-              amount: offerCash,
+              player_id: transfer.to_player_id,
+              amount: transfer.amount,
               reason: "TRADE",
-              counterparty_player_id: tradeProposal.proposer_player_id,
+              counterparty_player_id: transfer.from_player_id,
               trade_id: tradeProposal.id,
-            },
-          },
-        );
-      }
-
-      if (requestCash > 0) {
-        events.push(
-          {
-            event_type: "CASH_DEBIT",
-            payload: {
-              player_id: tradeProposal.counterparty_player_id,
-              amount: requestCash,
-              reason: "TRADE",
-              counterparty_player_id: tradeProposal.proposer_player_id,
-              trade_id: tradeProposal.id,
-            },
-          },
-          {
-            event_type: "CASH_CREDIT",
-            payload: {
-              player_id: tradeProposal.proposer_player_id,
-              amount: requestCash,
-              reason: "TRADE",
-              counterparty_player_id: tradeProposal.counterparty_player_id,
-              trade_id: tradeProposal.id,
+              from_player_id: transfer.from_player_id,
+              to_player_id: transfer.to_player_id,
+              side: transfer.side,
             },
           },
         );

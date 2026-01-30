@@ -4328,10 +4328,13 @@ export default function PlayPage() {
       setNotice("Select a player to trade with.");
       return;
     }
+    // Trade contract: offer_* is what the proposer gives; request_* is what they receive.
+    const offerCash = tradeOfferCash;
+    const requestCash = tradeRequestCash;
     const hasTradeValue =
-      tradeOfferCash > 0 ||
+      offerCash > 0 ||
       tradeOfferTiles.length > 0 ||
-      tradeRequestCash > 0 ||
+      requestCash > 0 ||
       tradeRequestTiles.length > 0;
     if (!hasTradeValue) {
       setNotice("Add cash or properties to the trade.");
@@ -4340,9 +4343,9 @@ export default function PlayPage() {
     const success = await handleBankAction({
       action: "PROPOSE_TRADE",
       counterpartyPlayerId: tradeCounterpartyId,
-      offerCash: tradeOfferCash > 0 ? tradeOfferCash : undefined,
+      offerCash: offerCash > 0 ? offerCash : undefined,
       offerTiles: tradeOfferTiles.length > 0 ? tradeOfferTiles : undefined,
-      requestCash: tradeRequestCash > 0 ? tradeRequestCash : undefined,
+      requestCash: requestCash > 0 ? requestCash : undefined,
       requestTiles: tradeRequestTiles.length > 0 ? tradeRequestTiles : undefined,
     });
     if (success) {
