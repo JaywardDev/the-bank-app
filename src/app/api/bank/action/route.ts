@@ -4200,10 +4200,38 @@ export async function POST(request: Request) {
         );
       }
 
+      if (!tile.colorGroup) {
+        return NextResponse.json(
+          { error: "Property color group not configured." },
+          { status: 409 },
+        );
+      }
+
+      const groupTiles = boardTiles.filter(
+        (entry) =>
+          entry.type === "PROPERTY" && entry.colorGroup === tile.colorGroup,
+      );
+      const groupHouseCounts = groupTiles.map(
+        (entry) => ownershipByTile[entry.index]?.houses ?? 0,
+      );
+      const minGroupHouses =
+        groupHouseCounts.length > 0 ? Math.min(...groupHouseCounts) : 0;
+      const maxGroupHouses =
+        groupHouseCounts.length > 0 ? Math.max(...groupHouseCounts) : 0;
+
       const houses = ownership.houses ?? 0;
       const houseCost = tile.houseCost ?? 0;
 
       if (action === "BUILD_HOUSE") {
+        if (houses !== minGroupHouses) {
+          return NextResponse.json(
+            {
+              error:
+                "Houses must be built evenly across the color group.",
+            },
+            { status: 409 },
+          );
+        }
         if (houses >= MAX_HOUSES_PER_PROPERTY) {
           return NextResponse.json(
             { error: "Maximum houses already built." },
@@ -4309,6 +4337,13 @@ export async function POST(request: Request) {
       if (houses <= 0) {
         return NextResponse.json(
           { error: "No houses to sell." },
+          { status: 409 },
+        );
+      }
+
+      if (houses !== maxGroupHouses) {
+        return NextResponse.json(
+          { error: "Houses must be sold evenly across the color group." },
           { status: 409 },
         );
       }
