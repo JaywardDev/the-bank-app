@@ -26,6 +26,8 @@ const bankHeaders = {
   "Content-Type": "application/json",
 };
 
+const PURCHASE_MORTGAGE_RATE_PER_TURN = 0.015;
+
 type BaseActionRequest = {
   gameId?: string;
   playerName?: string;
@@ -3969,7 +3971,7 @@ export async function POST(request: Request) {
               tile_index: tileIndex,
               principal_original: principal,
               principal_remaining: principal,
-              rate_per_turn: rules.loanRatePerTurn,
+              rate_per_turn: PURCHASE_MORTGAGE_RATE_PER_TURN,
               term_turns: rules.loanTermTurns,
               turns_elapsed: 0,
               accrued_interest_unpaid: 0,
@@ -4066,7 +4068,7 @@ export async function POST(request: Request) {
             tile_index: tileIndex,
             principal,
             down_payment: downPayment,
-            rate_per_turn: rules.loanRatePerTurn,
+            rate_per_turn: PURCHASE_MORTGAGE_RATE_PER_TURN,
             term_turns: rules.loanTermTurns,
           },
         });
