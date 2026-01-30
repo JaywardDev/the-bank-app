@@ -21,6 +21,17 @@ const JAIL_FINE_AMOUNT = 50;
 const EVENT_FETCH_LIMIT = 100;
 const EVENT_LOG_LIMIT = 10;
 const TRANSACTION_DISPLAY_LIMIT = 30;
+const PROPERTY_GROUP_COLORS: Record<string, string> = {
+  brown: "#9a6b3f",
+  "light-blue": "#7dd3fc",
+  pink: "#f9a8d4",
+  orange: "#fb923c",
+  red: "#f87171",
+  yellow: "#facc15",
+  green: "#4ade80",
+  "dark-blue": "#2563eb",
+};
+const DEFAULT_PROPERTY_BAND_COLOR = "#e5e7eb";
 const fallbackExpandedTiles: BoardTile[] = Array.from(
   { length: 40 },
   (_, index) => ({
@@ -3109,9 +3120,33 @@ export default function PlayPage() {
     pendingTile && typeof pendingTile.baseRent === "number"
       ? pendingTile.baseRent
       : null;
+  const pendingRentByHouses =
+    pendingTile?.rentByHouses && pendingTile.rentByHouses.length > 0
+      ? pendingTile.rentByHouses
+      : null;
+  const pendingBaseRentDisplay =
+    pendingRentByHouses?.[0] ?? pendingBaseRent ?? null;
+  const pendingMaxRentDisplay =
+    pendingRentByHouses && pendingRentByHouses.length > 0
+      ? pendingRentByHouses[pendingRentByHouses.length - 1] ?? null
+      : pendingBaseRent ?? null;
+  const pendingMaxRentLabel = pendingRentByHouses
+    ? "Rent with hotel (max build)"
+    : "Rent with max build";
+  const pendingRentRows = [
+    { label: "Base rent", value: pendingBaseRentDisplay },
+    { label: "Rent with 1 house", value: pendingRentByHouses?.[1] ?? null },
+    { label: "Rent with 2 houses", value: pendingRentByHouses?.[2] ?? null },
+    { label: "Rent with 3 houses", value: pendingRentByHouses?.[3] ?? null },
+    { label: "Rent with 4 houses", value: pendingRentByHouses?.[4] ?? null },
+    { label: pendingMaxRentLabel, value: pendingMaxRentDisplay },
+  ];
   const pendingTileLabel =
     pendingTile?.name ??
     (pendingPurchase ? `Tile ${pendingPurchase.tile_index}` : null);
+  const pendingBandColor = pendingTile?.colorGroup
+    ? PROPERTY_GROUP_COLORS[pendingTile.colorGroup] ?? DEFAULT_PROPERTY_BAND_COLOR
+    : DEFAULT_PROPERTY_BAND_COLOR;
   const hasPendingDecision = Boolean(pendingPurchase);
   const hasPendingMacroEvent = Boolean(pendingMacroEvent);
   const showPendingDecisionCard =
@@ -4818,84 +4853,109 @@ export default function PlayPage() {
             </div>
           </div>
           {showPendingDecisionCard && pendingPurchase ? (
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-              <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
-                Pending decision
-              </p>
-              <p className="mt-1 text-base font-semibold text-amber-900">
-                {pendingTileLabel}
-              </p>
-              <p className="text-sm text-amber-800">
-                Price: ${pendingPurchase.price}
-              </p>
-              {pendingBaseRent !== null ? (
-                <p className="text-xs text-amber-700">
-                  Base rent preview: ${pendingBaseRent}
+            <div className="overflow-hidden rounded-2xl border border-neutral-200 bg-white text-sm text-neutral-900 shadow-sm">
+              <div
+                className="h-4 w-full"
+                style={{ backgroundColor: pendingBandColor }}
+              />
+              <div className="px-4 pb-4 pt-3">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-neutral-500">
+                  Pending decision
                 </p>
-              ) : null}
-              <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                <div className="space-y-1">
-                  <button
-                    className="rounded-2xl bg-amber-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-amber-300"
-                    type="button"
-                    onClick={handleBuyProperty}
-                    disabled={
-                      actionLoading === "BUY_PROPERTY" || !canAffordPendingPurchase
-                    }
-                    title={
-                      canAffordPendingPurchase
-                        ? "Buy this property"
-                        : "Not enough cash to buy"
-                    }
-                  >
-                    {actionLoading === "BUY_PROPERTY" ? "Buying…" : "Buy"}
-                  </button>
-                  <button
-                    className="rounded-2xl border border-amber-700 px-4 py-2 text-sm font-semibold text-amber-900 disabled:cursor-not-allowed disabled:border-amber-200 disabled:text-amber-400"
-                    type="button"
-                    onClick={handleBuyPropertyWithMortgage}
-                    disabled={
-                      actionLoading === "BUY_PROPERTY" || !canAffordPendingMortgage
-                    }
-                    title={
-                      canAffordPendingMortgage
-                        ? "Buy with a 50% down payment"
-                        : "Not enough cash for down payment"
-                    }
-                  >
-                    {actionLoading === "BUY_PROPERTY"
-                      ? "Buying…"
-                      : `Buy with Mortgage ($${pendingMortgageDownPayment} down)`}
-                  </button>
+                <p className="mt-1 text-lg font-black uppercase tracking-wide text-neutral-900">
+                  {pendingTileLabel}
+                </p>
+                <p className="text-xs font-medium text-neutral-500">
+                  Price ${pendingPurchase.price}
+                </p>
+                <div className="mt-3 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+                    Rent
+                  </p>
+                  <div className="mt-2 space-y-1 text-xs">
+                    {pendingRentRows.map((row) => (
+                      <div
+                        key={row.label}
+                        className="flex items-center justify-between text-neutral-600"
+                      >
+                        <span>{row.label}</span>
+                        <span className="font-semibold text-neutral-900">
+                          {row.value !== null ? `$${row.value}` : "—"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-2 border-t border-neutral-200 pt-2 text-xs font-medium text-neutral-700">
+                    House cost:{" "}
+                    {pendingTile?.houseCost
+                      ? `$${pendingTile.houseCost} each`
+                      : "—"}
+                  </div>
+                </div>
+                <div className="mt-4 border-t border-neutral-200 pt-3">
+                  <div className="grid gap-2">
+                    <button
+                      className="rounded-2xl bg-neutral-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
+                      type="button"
+                      onClick={handleBuyProperty}
+                      disabled={
+                        actionLoading === "BUY_PROPERTY" || !canAffordPendingPurchase
+                      }
+                      title={
+                        canAffordPendingPurchase
+                          ? "Buy this property"
+                          : "Not enough cash to buy"
+                      }
+                    >
+                      {actionLoading === "BUY_PROPERTY" ? "Buying…" : "Buy"}
+                    </button>
+                    <button
+                      className="rounded-2xl border border-neutral-300 px-4 py-2 text-sm font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-400"
+                      type="button"
+                      onClick={handleBuyPropertyWithMortgage}
+                      disabled={
+                        actionLoading === "BUY_PROPERTY" || !canAffordPendingMortgage
+                      }
+                      title={
+                        canAffordPendingMortgage
+                          ? "Buy with a 50% down payment"
+                          : "Not enough cash for down payment"
+                      }
+                    >
+                      {actionLoading === "BUY_PROPERTY"
+                        ? "Buying…"
+                        : `Buy with Mortgage ($${pendingMortgageDownPayment} down)`}
+                    </button>
+                    <button
+                      className="rounded-2xl border border-neutral-300 px-4 py-2 text-sm font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-400"
+                      type="button"
+                      onClick={handleDeclineProperty}
+                      disabled={actionLoading === "DECLINE_PROPERTY"}
+                      title="Start auction for this property"
+                    >
+                      {actionLoading === "DECLINE_PROPERTY"
+                        ? "Auctioning…"
+                        : "Auction"}
+                    </button>
+                  </div>
                   {buyDisabledReason ? (
-                    <p className="text-xs text-neutral-400">
+                    <p className="mt-2 text-xs text-neutral-400">
                       {buyDisabledReason}
                     </p>
                   ) : null}
                   {!buyDisabledReason && mortgageBuyDisabledReason ? (
-                    <p className="text-xs text-neutral-400">
+                    <p className="mt-2 text-xs text-neutral-400">
                       {mortgageBuyDisabledReason}
                     </p>
                   ) : null}
+                  {!canAffordPendingPurchase ? (
+                    <p className="mt-2 text-[11px] text-neutral-500">
+                      You need ${pendingPurchase.price - myPlayerBalance} more to
+                      buy this property.
+                    </p>
+                  ) : null}
                 </div>
-                <button
-                  className="rounded-2xl border border-amber-300 px-4 py-2 text-sm font-semibold text-amber-900 disabled:cursor-not-allowed disabled:border-amber-200 disabled:text-amber-400"
-                  type="button"
-                  onClick={handleDeclineProperty}
-                  disabled={actionLoading === "DECLINE_PROPERTY"}
-                  title="Start auction for this property"
-                >
-                  {actionLoading === "DECLINE_PROPERTY"
-                    ? "Auctioning…"
-                    : "Auction"}
-                </button>
               </div>
-              {!canAffordPendingPurchase ? (
-                <p className="mt-2 text-[11px] text-amber-700">
-                  You need ${pendingPurchase.price - myPlayerBalance} more to buy
-                  this property.
-                </p>
-              ) : null}
             </div>
           ) : null}
           {showPendingDecisionBanner ? (
