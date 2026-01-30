@@ -38,6 +38,16 @@ const PROPERTY_GROUP_COLORS: Record<string, string> = {
   green: "#4ade80",
   "dark-blue": "#2563eb",
 };
+const MUTED_PROPERTY_GROUP_TINT_CLASSES: Record<string, string> = {
+  brown: "bg-amber-200/30",
+  "light-blue": "bg-sky-200/30",
+  pink: "bg-pink-200/30",
+  orange: "bg-orange-200/30",
+  red: "bg-red-200/30",
+  yellow: "bg-yellow-200/30",
+  green: "bg-emerald-200/30",
+  "dark-blue": "bg-blue-200/30",
+};
 const DEFAULT_PROPERTY_BAND_COLOR = "#e5e7eb";
 const fallbackExpandedTiles: BoardTile[] = Array.from(
   { length: 40 },
@@ -74,6 +84,10 @@ const getTileBandColor = (tile?: BoardTile | null) =>
   tile?.colorGroup
     ? PROPERTY_GROUP_COLORS[tile.colorGroup] ?? DEFAULT_PROPERTY_BAND_COLOR
     : DEFAULT_PROPERTY_BAND_COLOR;
+const getMutedGroupTintClass = (tile?: BoardTile | null) =>
+  tile?.type === "PROPERTY" && tile.colorGroup
+    ? MUTED_PROPERTY_GROUP_TINT_CLASSES[tile.colorGroup] ?? "bg-neutral-200/30"
+    : "";
 
 type PropertyCardShellProps = {
   bandColor: string;
@@ -1117,6 +1131,7 @@ export default function PlayPage() {
 
       const isSelectedTile = tileIndex === selectedTileIndex;
       const tileFaceLabel = getExpandedTileFaceLabel(tile.type);
+      const mutedGroupTintClass = getMutedGroupTintClass(tile);
 
       return (
         <div
@@ -1138,11 +1153,16 @@ export default function PlayPage() {
         >
           <div
             style={ownershipStyle}
-            className={`border bg-white text-neutral-700 ${
+            className={`border bg-white text-neutral-700 overflow-hidden ${
               isCurrentTile ? "ring-2 ring-emerald-400/70" : ""
             } ${isSelectedTile ? "outline outline-2 outline-indigo-300/60 outline-offset-2" : ""} h-full w-full rounded-md border-neutral-200 p-0.2 sm:p-0.2`}
           >
             <div className="relative flex h-full flex-col justify-end gap-2">
+              {mutedGroupTintClass ? (
+                <div
+                  className={`pointer-events-none absolute left-0 top-0 h-1.5 w-full ${mutedGroupTintClass}`}
+                />
+              ) : null}
               <span className="absolute left-1 top-1 text-[9px] font-medium text-neutral-300/70">
                 {tile.index}
               </span>
