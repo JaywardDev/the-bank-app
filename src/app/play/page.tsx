@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import PageShell from "../components/PageShell";
 import BoardMiniMap from "../components/BoardMiniMap";
+import HousesDots from "../components/HousesDots";
 import { getBoardPackById, type BoardTile } from "@/lib/boardPacks";
 import { getRules } from "@/lib/rules";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
@@ -873,6 +874,7 @@ export default function PlayPage() {
       const ownershipColor = ownerId
         ? expandedOwnershipColorsByPlayer[ownerId]
         : undefined;
+      const houses = ownershipByTile?.[tileIndex]?.houses ?? 0;
       const ownershipStyle = ownershipColor
         ? {
             borderColor: ownershipColor.border,
@@ -917,6 +919,11 @@ export default function PlayPage() {
                     {tileFaceLabel}
                   </span>
                 </span>
+              ) : null}
+              {tile.type === "PROPERTY" ? (
+                <div className="flex justify-end">
+                  <HousesDots houses={houses} size="md" />
+                </div>
               ) : null}
               {tilePlayers.length > 0 ? (
                 <div className="flex flex-wrap justify-end gap-1">
