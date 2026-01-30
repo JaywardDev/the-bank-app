@@ -1,4 +1,5 @@
 import type { BoardTile } from "@/lib/boardPacks";
+import HousesDots from "@/app/components/HousesDots";
 
 type PlayerMarker = {
   id: string;
@@ -6,7 +7,10 @@ type PlayerMarker = {
   position: number;
 };
 
-type OwnershipByTile = Record<number, { owner_player_id: string }>;
+type OwnershipByTile = Record<
+  number,
+  { owner_player_id: string; houses?: number | null }
+>;
 
 type BoardMiniMapProps = {
   tiles?: BoardTile[];
@@ -146,6 +150,7 @@ export default function BoardMiniMap({
             (player) => player.id === lastMovedPlayerId,
           );
           const ownerId = ownershipByTile?.[tile.index]?.owner_player_id;
+          const houses = ownershipByTile?.[tile.index]?.houses ?? 0;
           const ownershipColor =
             showOwnership && ownerId ? ownershipColorsByPlayer[ownerId] : undefined;
           const ownershipStyle = ownershipColor
@@ -182,6 +187,11 @@ export default function BoardMiniMap({
               <div className={`truncate font-medium ${sizing.name}`}>
                 {tile.name}
               </div>
+              {houses > 0 ? (
+                <div className="mt-1 flex justify-end">
+                  <HousesDots houses={houses} size="sm" />
+                </div>
+              ) : null}
               {tilePlayers.length > 0 ? (
                 <div className="mt-2 flex flex-col gap-1">
                   {tilePlayers.map((player) => (

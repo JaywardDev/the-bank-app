@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageShell from "@/app/components/PageShell";
 import BoardMiniMap from "@/app/components/BoardMiniMap";
+import HousesDots from "@/app/components/HousesDots";
 import { getBoardPackById } from "@/lib/boardPacks";
 import { getRules } from "@/lib/rules";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
@@ -523,6 +524,19 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
       : pendingCard?.deck === "COMMUNITY"
         ? "Community"
         : "Card";
+  const currentPlayerTile = useMemo(() => {
+    if (!currentPlayer || !boardPack?.tiles) {
+      return null;
+    }
+    return (
+      boardPack.tiles.find((tile) => tile.index === currentPlayer.position) ??
+      null
+    );
+  }, [boardPack?.tiles, currentPlayer]);
+  const currentTileHouses =
+    currentPlayerTile?.index !== undefined
+      ? ownershipByTile[currentPlayerTile.index]?.houses ?? 0
+      : 0;
   const getOwnershipLabel = useCallback(
     (tileIndex: number | null) => {
       if (tileIndex === null || Number.isNaN(tileIndex)) {
@@ -1259,6 +1273,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
               currentPlayerId={currentPlayer?.id}
               lastMovedPlayerId={lastMovedPlayerId}
               lastMovedTileIndex={lastMovedTileIndex}
+              ownershipByTile={ownershipByTile}
               variant="dark"
               size="large"
             />
@@ -1281,6 +1296,17 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
               <p className="text-sm text-white/70">
                 Last roll: {gameState?.last_roll ?? "—"}
               </p>
+              {currentPlayerTile ? (
+                <div className="mt-3">
+                  <p className="text-xs uppercase tracking-wide text-white/50">
+                    Current tile
+                  </p>
+                  <p className="text-sm font-semibold text-white/80">
+                    {currentPlayerTile.name}
+                  </p>
+                  <HousesDots houses={currentTileHouses} size="md" />
+                </div>
+              ) : null}
             </div>
             <div className="rounded-2xl border border-white/10 bg-black/30 p-4 space-y-3">
               <p className="text-xs uppercase tracking-wide text-white/50">
