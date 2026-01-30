@@ -27,6 +27,7 @@ const bankHeaders = {
 };
 
 const PURCHASE_MORTGAGE_RATE_PER_TURN = 0.015;
+const MAX_HOUSES_PER_PROPERTY = 4;
 
 type BaseActionRequest = {
   gameId?: string;
@@ -53,7 +54,9 @@ type BankActionRequest =
         | "USE_GET_OUT_OF_JAIL_FREE"
         | "CONFIRM_PENDING_CARD"
         | "PAYOFF_COLLATERAL_LOAN"
-        | "PAYOFF_PURCHASE_MORTGAGE",
+        | "PAYOFF_PURCHASE_MORTGAGE"
+        | "BUILD_HOUSE"
+        | "SELL_HOUSE",
         "DECLINE_PROPERTY" | "BUY_PROPERTY"
       >;
       tileIndex?: number;
@@ -161,6 +164,7 @@ type OwnershipRow = {
   owner_player_id: string | null;
   collateral_loan_id: string | null;
   purchase_mortgage_id: string | null;
+  houses: number | null;
 };
 
 type OwnershipByTile = Record<
@@ -169,6 +173,7 @@ type OwnershipByTile = Record<
     owner_player_id: string;
     collateral_loan_id: string | null;
     purchase_mortgage_id: string | null;
+    houses: number;
   }
 >;
 
@@ -208,6 +213,9 @@ type TileInfo = {
   price?: number;
   baseRent?: number;
   taxAmount?: number;
+  colorGroup?: string;
+  houseCost?: number;
+  rentByHouses?: number[];
 };
 
 type DiceEventPayload = {
@@ -459,7 +467,7 @@ const loadOwnershipByTile = async (
   gameId: string,
 ): Promise<OwnershipByTile> => {
   const ownershipRows = (await fetchFromSupabaseWithService<OwnershipRow[]>(
-    `property_ownership?select=tile_index,owner_player_id,collateral_loan_id,purchase_mortgage_id&game_id=eq.${gameId}`,
+    `property_ownership?select=tile_index,owner_player_id,collateral_loan_id,purchase_mortgage_id,houses&game_id=eq.${gameId}`,
     { method: "GET" },
   )) ?? [];
 
@@ -469,6 +477,7 @@ const loadOwnershipByTile = async (
         owner_player_id: row.owner_player_id,
         collateral_loan_id: row.collateral_loan_id ?? null,
         purchase_mortgage_id: row.purchase_mortgage_id ?? null,
+        houses: row.houses ?? 0,
       };
     }
     return acc;
@@ -933,6 +942,27 @@ const countOwnedTilesByType = (
       ownershipByTile[tile.index]?.owner_player_id === ownerId,
   ).length;
 
+const ownsFullColorSet = (
+  tile: TileInfo,
+  boardTiles: TileInfo[],
+  ownershipByTile: OwnershipByTile,
+  ownerId: string,
+) => {
+  if (tile.type !== "PROPERTY" || !tile.colorGroup) {
+    return false;
+  }
+  const groupTiles = boardTiles.filter(
+    (entry) =>
+      entry.type === "PROPERTY" && entry.colorGroup === tile.colorGroup,
+  );
+  if (groupTiles.length === 0) {
+    return false;
+  }
+  return groupTiles.every(
+    (entry) => ownershipByTile[entry.index]?.owner_player_id === ownerId,
+  );
+};
+
 const calculateRent = ({
   tile,
   ownerId,
@@ -985,6 +1015,26 @@ const calculateRent = ({
         utilities_owned: utilityCount,
         dice_total: total,
         multiplier,
+      },
+    };
+  }
+
+  if (tile.type === "PROPERTY") {
+    const houses = ownershipByTile[tile.index]?.houses ?? 0;
+    const rentByHouses = tile.rentByHouses;
+    const clampedHouses =
+      rentByHouses && rentByHouses.length > 0
+        ? Math.min(Math.max(houses, 0), rentByHouses.length - 1)
+        : Math.max(houses, 0);
+    const amount =
+      rentByHouses && rentByHouses.length > 0
+        ? rentByHouses[clampedHouses] ?? tile.baseRent ?? 0
+        : tile.baseRent ?? 0;
+    return {
+      amount,
+      meta: {
+        rent_type: "PROPERTY",
+        houses: clampedHouses,
       },
     };
   }
@@ -4087,6 +4137,260 @@ export async function POST(request: Request) {
             balances: updatedBalances,
             turn_phase: "AWAITING_ROLL",
             pending_action: null,
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      )) ?? [];
+
+      if (!updatedState) {
+        return NextResponse.json(
+          { error: "Version mismatch." },
+          { status: 409 },
+        );
+      }
+
+      await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+
+      return NextResponse.json({ gameState: updatedState });
+    }
+
+    if (body.action === "BUILD_HOUSE" || body.action === "SELL_HOUSE") {
+      if (!Number.isInteger(body.tileIndex)) {
+        return NextResponse.json(
+          { error: "Missing property tile." },
+          { status: 400 },
+        );
+      }
+
+      const tileIndex = body.tileIndex;
+      const boardPack = getBoardPackById(game.board_pack_id);
+      const boardTiles = boardPack?.tiles ?? [];
+      const tile = boardTiles.find((entry) => entry.index === tileIndex);
+
+      if (!tile) {
+        return NextResponse.json(
+          { error: "Property not found." },
+          { status: 404 },
+        );
+      }
+
+      if (tile.type !== "PROPERTY") {
+        return NextResponse.json(
+          { error: "Houses can only be built on properties." },
+          { status: 409 },
+        );
+      }
+
+      const ownershipByTile = await loadOwnershipByTile(gameId);
+      const ownership = ownershipByTile[tileIndex];
+
+      if (!ownership || ownership.owner_player_id !== currentPlayer.id) {
+        return NextResponse.json(
+          { error: "You do not own this property." },
+          { status: 409 },
+        );
+      }
+
+      if (ownership.collateral_loan_id) {
+        return NextResponse.json(
+          { error: "Collateralized properties cannot be upgraded." },
+          { status: 409 },
+        );
+      }
+
+      if (!ownsFullColorSet(tile, boardTiles, ownershipByTile, currentPlayer.id)) {
+        return NextResponse.json(
+          { error: "You must own the full color set to modify houses." },
+          { status: 409 },
+        );
+      }
+
+      const houses = ownership.houses ?? 0;
+      const houseCost = tile.houseCost ?? 0;
+
+      if (body.action === "BUILD_HOUSE") {
+        if (houses >= MAX_HOUSES_PER_PROPERTY) {
+          return NextResponse.json(
+            { error: "Maximum houses already built." },
+            { status: 409 },
+          );
+        }
+        if (!houseCost) {
+          return NextResponse.json(
+            { error: "House cost not configured for this property." },
+            { status: 409 },
+          );
+        }
+        const balances = gameState.balances ?? {};
+        const currentBalance =
+          balances[currentPlayer.id] ?? game.starting_cash ?? 0;
+        if (currentBalance < houseCost) {
+          return NextResponse.json(
+            { error: "Not enough cash to build a house." },
+            { status: 409 },
+          );
+        }
+
+        const nextHouses = houses + 1;
+        const updatedBalances = {
+          ...balances,
+          [currentPlayer.id]: currentBalance - houseCost,
+        };
+
+        const ownershipResponse = await fetchFromSupabaseWithService(
+          `property_ownership?game_id=eq.${gameId}&tile_index=eq.${tileIndex}&owner_player_id=eq.${currentPlayer.id}`,
+          {
+            method: "PATCH",
+            headers: {
+              Prefer: "return=representation",
+            },
+            body: JSON.stringify({
+              houses: nextHouses,
+            }),
+          },
+        );
+
+        if (!ownershipResponse) {
+          return NextResponse.json(
+            { error: "Unable to update houses." },
+            { status: 500 },
+          );
+        }
+
+        const events: Array<{
+          event_type: string;
+          payload: Record<string, unknown>;
+        }> = [
+          {
+            event_type: "HOUSE_BUILT",
+            payload: {
+              player_id: currentPlayer.id,
+              tile_index: tileIndex,
+              tile_id: tile.tile_id,
+              house_cost: houseCost,
+              houses_before: houses,
+              houses_after: nextHouses,
+            },
+          },
+          {
+            event_type: "CASH_DEBIT",
+            payload: {
+              player_id: currentPlayer.id,
+              amount: houseCost,
+              reason: "BUILD_HOUSE",
+              tile_index: tileIndex,
+            },
+          },
+        ];
+
+        const finalVersion = currentVersion + events.length;
+        const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+          `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+          {
+            method: "PATCH",
+            headers: {
+              Prefer: "return=representation",
+            },
+            body: JSON.stringify({
+              version: finalVersion,
+              balances: updatedBalances,
+              updated_at: new Date().toISOString(),
+            }),
+          },
+        )) ?? [];
+
+        if (!updatedState) {
+          return NextResponse.json(
+            { error: "Version mismatch." },
+            { status: 409 },
+          );
+        }
+
+        await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+
+        return NextResponse.json({ gameState: updatedState });
+      }
+
+      if (houses <= 0) {
+        return NextResponse.json(
+          { error: "No houses to sell." },
+          { status: 409 },
+        );
+      }
+
+      if (!houseCost) {
+        return NextResponse.json(
+          { error: "House cost not configured for this property." },
+          { status: 409 },
+        );
+      }
+
+      const sellValue = Math.round(houseCost * 0.5);
+      const balances = gameState.balances ?? {};
+      const currentBalance = balances[currentPlayer.id] ?? game.starting_cash ?? 0;
+      const nextHouses = houses - 1;
+      const updatedBalances = {
+        ...balances,
+        [currentPlayer.id]: currentBalance + sellValue,
+      };
+
+      const ownershipResponse = await fetchFromSupabaseWithService(
+        `property_ownership?game_id=eq.${gameId}&tile_index=eq.${tileIndex}&owner_player_id=eq.${currentPlayer.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            houses: nextHouses,
+          }),
+        },
+      );
+
+      if (!ownershipResponse) {
+        return NextResponse.json(
+          { error: "Unable to update houses." },
+          { status: 500 },
+        );
+      }
+
+      const events: Array<{
+        event_type: string;
+        payload: Record<string, unknown>;
+      }> = [
+        {
+          event_type: "HOUSE_SOLD",
+          payload: {
+            player_id: currentPlayer.id,
+            tile_index: tileIndex,
+            tile_id: tile.tile_id,
+            house_cost: houseCost,
+            houses_before: houses,
+            houses_after: nextHouses,
+          },
+        },
+        {
+          event_type: "CASH_CREDIT",
+          payload: {
+            player_id: currentPlayer.id,
+            amount: sellValue,
+            reason: "SELL_HOUSE",
+            tile_index: tileIndex,
+          },
+        },
+      ];
+
+      const finalVersion = currentVersion + events.length;
+      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            version: finalVersion,
+            balances: updatedBalances,
             updated_at: new Date().toISOString(),
           }),
         },

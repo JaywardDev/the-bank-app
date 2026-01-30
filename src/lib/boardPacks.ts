@@ -60,7 +60,44 @@ export type BoardTile = {
   price?: number;
   baseRent?: number;
   taxAmount?: number;
+  colorGroup?: string;
+  houseCost?: number;
+  rentByHouses?: number[];
 };
+
+type PropertyGroupConfig = {
+  id: string;
+  tileIds: string[];
+  houseCost: number;
+};
+
+const HOUSE_RENT_MULTIPLIERS = [1, 5, 15, 45, 80];
+
+const buildRentByHouses = (baseRent: number) =>
+  HOUSE_RENT_MULTIPLIERS.map((multiplier) => baseRent * multiplier);
+
+const applyPropertyGroupConfig = (
+  tiles: BoardTile[],
+  groups: PropertyGroupConfig[],
+) =>
+  tiles.map((tile) => {
+    if (tile.type !== "PROPERTY") {
+      return tile;
+    }
+    const group = groups.find((entry) =>
+      entry.tileIds.includes(tile.tile_id),
+    );
+    if (!group) {
+      return tile;
+    }
+    const baseRent = tile.baseRent ?? 0;
+    return {
+      ...tile,
+      colorGroup: group.id,
+      houseCost: group.houseCost,
+      rentByHouses: buildRentByHouses(baseRent),
+    };
+  });
 
 export const chanceCards: CardDefinition[] = [
   {
@@ -542,6 +579,92 @@ export const classicUkCommunityCards: CardDefinition[] = [
   },
 ];
 
+const CLASSIC_US_PROPERTY_GROUPS: PropertyGroupConfig[] = [
+  {
+    id: "brown",
+    houseCost: 50,
+    tileIds: ["mediterranean-avenue", "baltic-avenue"],
+  },
+  {
+    id: "light-blue",
+    houseCost: 50,
+    tileIds: ["oriental-avenue", "vermont-avenue", "connecticut-avenue"],
+  },
+  {
+    id: "pink",
+    houseCost: 100,
+    tileIds: ["st-charles-place", "states-avenue", "virginia-avenue"],
+  },
+  {
+    id: "orange",
+    houseCost: 100,
+    tileIds: ["st-james-place", "tennessee-avenue", "new-york-avenue"],
+  },
+  {
+    id: "red",
+    houseCost: 150,
+    tileIds: ["kentucky-avenue", "indiana-avenue", "illinois-avenue"],
+  },
+  {
+    id: "yellow",
+    houseCost: 150,
+    tileIds: ["atlantic-avenue", "ventnor-avenue", "marvin-gardens"],
+  },
+  {
+    id: "green",
+    houseCost: 200,
+    tileIds: ["pacific-avenue", "north-carolina-avenue", "pennsylvania-avenue"],
+  },
+  {
+    id: "dark-blue",
+    houseCost: 200,
+    tileIds: ["park-place", "boardwalk"],
+  },
+];
+
+const CLASSIC_UK_PROPERTY_GROUPS: PropertyGroupConfig[] = [
+  {
+    id: "brown",
+    houseCost: 50,
+    tileIds: ["old-kent-road", "whitechapel-road"],
+  },
+  {
+    id: "light-blue",
+    houseCost: 50,
+    tileIds: ["the-angel-islington", "euston-road", "pentonville-road"],
+  },
+  {
+    id: "pink",
+    houseCost: 100,
+    tileIds: ["pall-mall", "whitehall", "northumberland-avenue"],
+  },
+  {
+    id: "orange",
+    houseCost: 100,
+    tileIds: ["bow-street", "marlborough-street", "vine-street"],
+  },
+  {
+    id: "red",
+    houseCost: 150,
+    tileIds: ["strand", "fleet-street", "trafalgar-square"],
+  },
+  {
+    id: "yellow",
+    houseCost: 150,
+    tileIds: ["leicester-square", "coventry-street", "piccadilly"],
+  },
+  {
+    id: "green",
+    houseCost: 200,
+    tileIds: ["regent-street", "oxford-street", "bond-street"],
+  },
+  {
+    id: "dark-blue",
+    houseCost: 200,
+    tileIds: ["park-lane", "mayfair"],
+  },
+];
+
 export const boardPacks: BoardPack[] = [
   {
     id: "classic-us",
@@ -551,7 +674,7 @@ export const boardPacks: BoardPack[] = [
       chance: classicUsChanceCards,
       community: classicUsCommunityCards,
     },
-    tiles: [
+    tiles: applyPropertyGroupConfig([
       { index: 0, tile_id: "go", type: "START", name: "Go" },
       {
         index: 1,
@@ -823,7 +946,7 @@ export const boardPacks: BoardPack[] = [
         price: 400,
         baseRent: 50,
       },
-    ],
+    ], CLASSIC_US_PROPERTY_GROUPS),
   },
   {
     id: "classic-uk",
@@ -833,7 +956,7 @@ export const boardPacks: BoardPack[] = [
       chance: classicUkChanceCards,
       community: classicUkCommunityCards,
     },
-    tiles: [
+    tiles: applyPropertyGroupConfig([
       { index: 0, tile_id: "go", type: "START", name: "Go" },
       {
         index: 1,
@@ -1105,7 +1228,7 @@ export const boardPacks: BoardPack[] = [
         price: 400,
         baseRent: 50,
       },
-    ],
+    ], CLASSIC_UK_PROPERTY_GROUPS),
   },
   {
     id: "philippines",

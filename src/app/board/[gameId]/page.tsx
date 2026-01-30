@@ -146,6 +146,7 @@ type OwnershipRow = {
   owner_player_id: string | null;
   collateral_loan_id: string | null;
   purchase_mortgage_id: string | null;
+  houses: number | null;
 };
 
 type OwnershipByTile = Record<
@@ -154,6 +155,7 @@ type OwnershipByTile = Record<
     owner_player_id: string;
     collateral_loan_id: string | null;
     purchase_mortgage_id: string | null;
+    houses: number;
   }
 >;
 
@@ -229,7 +231,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
       const ownershipRows = await supabaseClient.fetchFromSupabase<
         OwnershipRow[]
       >(
-        `property_ownership?select=tile_index,owner_player_id,collateral_loan_id,purchase_mortgage_id&game_id=eq.${params.gameId}`,
+        `property_ownership?select=tile_index,owner_player_id,collateral_loan_id,purchase_mortgage_id,houses&game_id=eq.${params.gameId}`,
         { method: "GET" },
         accessToken,
       );
@@ -239,6 +241,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
             owner_player_id: row.owner_player_id,
             collateral_loan_id: row.collateral_loan_id ?? null,
             purchase_mortgage_id: row.purchase_mortgage_id ?? null,
+            houses: row.houses ?? 0,
           };
         }
         return acc;

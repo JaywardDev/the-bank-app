@@ -124,6 +124,7 @@ type OwnershipRow = {
   owner_player_id: string | null;
   collateral_loan_id: string | null;
   purchase_mortgage_id: string | null;
+  houses: number | null;
 };
 
 type OwnershipByTile = Record<
@@ -132,6 +133,7 @@ type OwnershipByTile = Record<
     owner_player_id: string;
     collateral_loan_id: string | null;
     purchase_mortgage_id: string | null;
+    houses: number;
   }
 >;
 
@@ -1794,7 +1796,7 @@ export default function PlayPage() {
       const ownershipRows = await supabaseClient.fetchFromSupabase<
         OwnershipRow[]
       >(
-        `property_ownership?select=tile_index,owner_player_id,collateral_loan_id,purchase_mortgage_id&game_id=eq.${activeGameId}`,
+        `property_ownership?select=tile_index,owner_player_id,collateral_loan_id,purchase_mortgage_id,houses&game_id=eq.${activeGameId}`,
         { method: "GET" },
         accessToken,
       );
@@ -1804,6 +1806,7 @@ export default function PlayPage() {
             owner_player_id: row.owner_player_id,
             collateral_loan_id: row.collateral_loan_id ?? null,
             purchase_mortgage_id: row.purchase_mortgage_id ?? null,
+            houses: row.houses ?? 0,
           };
         }
         return acc;
@@ -2738,19 +2741,61 @@ export default function PlayPage() {
           ["PROPERTY", "RAIL", "UTILITY"].includes(tile.type) &&
           ownershipByTile[tile.index]?.owner_player_id === currentUserPlayer.id,
       )
-      .map((tile) => ({
-        tile,
-        isCollateralized: Boolean(
-          ownershipByTile[tile.index]?.collateral_loan_id,
-        ),
-        isPurchaseMortgaged: Boolean(
-          ownershipByTile[tile.index]?.purchase_mortgage_id,
-        ),
-      }));
-  }, [boardPack?.tiles, currentUserPlayer, ownershipByTile]);
-  const eligibleCollateralTiles = ownedProperties.filter(
-    (entry) => !entry.isCollateralized && !entry.isPurchaseMortgaged,
-  );
+      .map((tile) => {
+        const ownership = ownershipByTile[tile.index];
+        const isCollateralized = Boolean(ownership?.collateral_loan_id);
+        const isPurchaseMortgaged = Boolean(ownership?.purchase_mortgage_id);
+        const colorGroup = tile.colorGroup ?? null;
+        const groupTiles = colorGroup
+          ? boardPack.tiles.filter(
+              (entry) =>
+                entry.type === "PROPERTY" && entry.colorGroup === colorGroup,
+            )
+          : [];
+        const hasFullSet =
+          colorGroup &&
+          groupTiles.length > 0 &&
+          groupTiles.every(
+            (entry) =>
+              ownershipByTile[entry.index]?.owner_player_id ===
+              currentUserPlayer.id,
+          );
+        const houses = ownership?.houses ?? 0;
+        const houseCost = tile.houseCost ?? 0;
+        const canBuildHouse =
+          canAct &&
+          tile.type === "PROPERTY" &&
+          hasFullSet &&
+          !isCollateralized &&
+          houseCost > 0 &&
+          houses < 4 &&
+          myPlayerBalance >= houseCost;
+        const canSellHouse =
+          canAct &&
+          tile.type === "PROPERTY" &&
+          hasFullSet &&
+          !isCollateralized &&
+          houseCost > 0 &&
+          houses > 0;
+        return {
+          tile,
+          isCollateralized,
+          isPurchaseMortgaged,
+          isCollateralEligible: !isCollateralized && !isPurchaseMortgaged,
+          hasFullSet,
+          houses,
+          houseCost,
+          canBuildHouse,
+          canSellHouse,
+        };
+      });
+  }, [
+    boardPack?.tiles,
+    canAct,
+    currentUserPlayer,
+    myPlayerBalance,
+    ownershipByTile,
+  ]);
   const activeLoans = playerLoans.filter((loan) => loan.status === "active");
   const activePurchaseMortgages = purchaseMortgages.filter(
     (mortgage) => mortgage.status === "active",
@@ -3171,6 +3216,7 @@ export default function PlayPage() {
         | { action: "AUCTION_BID"; amount: number }
         | { action: "AUCTION_PASS" }
         | { action: "TAKE_COLLATERAL_LOAN"; tileIndex: number }
+        | { action: "BUILD_HOUSE" | "SELL_HOUSE"; tileIndex: number }
         | { action: "PAYOFF_COLLATERAL_LOAN"; loanId: string }
         | { action: "PAYOFF_PURCHASE_MORTGAGE"; mortgageId: string },
     ) => {
@@ -4247,13 +4293,20 @@ export default function PlayPage() {
           <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
             Owned properties
           </p>
-          {eligibleCollateralTiles.length === 0 ? (
+          {ownedProperties.length === 0 ? (
             <p className="text-sm text-neutral-500">
-              No eligible properties available.
+              No owned properties available.
             </p>
           ) : (
             <div className="space-y-2">
-              {eligibleCollateralTiles.map(({ tile }) => {
+              {ownedProperties.map(
+                ({
+                  tile,
+                  houses,
+                  isCollateralEligible,
+                  canBuildHouse,
+                  canSellHouse,
+                }) => {
                 const principalPreview = Math.round(
                   (tile.price ?? 0) * rules.collateralLtv,
                 );
@@ -4284,27 +4337,74 @@ export default function PlayPage() {
                         <span className="font-semibold text-neutral-700">
                           {baseRent !== null ? `$${baseRent}` : "—"}
                         </span>
+                        <span className="uppercase tracking-wide text-neutral-400">
+                          Houses
+                        </span>
+                        <span className="font-semibold text-neutral-700">
+                          {tile.type === "PROPERTY" ? houses : "—"}
+                        </span>
                       </div>
                     </div>
-                    <button
-                      className="rounded-full bg-neutral-900 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
-                      type="button"
-                      onClick={() =>
-                        void handleBankAction({
-                          action: "TAKE_COLLATERAL_LOAN",
-                          tileIndex: tile.index,
-                        })
-                      }
-                      disabled={
-                        !canAct ||
-                        !rules.loanCollateralEnabled ||
-                        actionLoading === "TAKE_COLLATERAL_LOAN"
-                      }
-                    >
-                      {actionLoading === "TAKE_COLLATERAL_LOAN"
-                        ? "Collateralizing…"
-                        : "Collateralize"}
-                    </button>
+                    <div className="flex flex-col items-end gap-2">
+                      {tile.type === "PROPERTY" ? (
+                        <div className="flex items-center gap-2">
+                          <button
+                            className="rounded-full bg-neutral-900 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
+                            type="button"
+                            onClick={() =>
+                              void handleBankAction({
+                                action: "BUILD_HOUSE",
+                                tileIndex: tile.index,
+                              })
+                            }
+                            disabled={
+                              !canBuildHouse || actionLoading === "BUILD_HOUSE"
+                            }
+                          >
+                            {actionLoading === "BUILD_HOUSE"
+                              ? "Building…"
+                              : "Build"}
+                          </button>
+                          <button
+                            className="rounded-full border border-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
+                            type="button"
+                            onClick={() =>
+                              void handleBankAction({
+                                action: "SELL_HOUSE",
+                                tileIndex: tile.index,
+                              })
+                            }
+                            disabled={
+                              !canSellHouse || actionLoading === "SELL_HOUSE"
+                            }
+                          >
+                            {actionLoading === "SELL_HOUSE"
+                              ? "Selling…"
+                              : "Sell"}
+                          </button>
+                        </div>
+                      ) : null}
+                      <button
+                        className="rounded-full bg-neutral-900 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
+                        type="button"
+                        onClick={() =>
+                          void handleBankAction({
+                            action: "TAKE_COLLATERAL_LOAN",
+                            tileIndex: tile.index,
+                          })
+                        }
+                        disabled={
+                          !canAct ||
+                          !rules.loanCollateralEnabled ||
+                          !isCollateralEligible ||
+                          actionLoading === "TAKE_COLLATERAL_LOAN"
+                        }
+                      >
+                        {actionLoading === "TAKE_COLLATERAL_LOAN"
+                          ? "Collateralizing…"
+                          : "Collateralize"}
+                      </button>
+                    </div>
                   </div>
                 );
               })}
