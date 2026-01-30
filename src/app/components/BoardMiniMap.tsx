@@ -1,5 +1,6 @@
 import type { BoardTile } from "@/lib/boardPacks";
 import HousesDots from "@/app/components/HousesDots";
+import { getMutedGroupTintClass } from "@/lib/boardTileStyles";
 
 type PlayerMarker = {
   id: string;
@@ -160,6 +161,8 @@ export default function BoardMiniMap({
               }
             : undefined;
 
+          const mutedGroupTintClass = getMutedGroupTintClass(tile);
+
           return (
             <div
               key={tile.tile_id}
@@ -172,20 +175,27 @@ export default function BoardMiniMap({
                 isCurrentTile ? "ring-2 ring-emerald-400/70" : ""
               } ${isLastMovedTile ? "ring-2 ring-amber-300/80 animate-[pulse_1.2s_ease-in-out_3]" : ""}`}
             >
-              <div
-                className={`flex items-center justify-between gap-1 font-semibold ${sizing.heading}`}
-              >
-                <span>{tile.index}</span>
-                <span
-                  className={`truncate text-[10px] uppercase ${
-                    isDark ? "text-white/50" : "text-neutral-400"
-                  }`}
+              <div className="relative">
+                {mutedGroupTintClass ? (
+                  <div
+                    className={`pointer-events-none absolute left-0 top-0 h-1.5 w-full ${mutedGroupTintClass}`}
+                  />
+                ) : null}
+                <div
+                  className={`flex items-center justify-between gap-1 font-semibold ${sizing.heading}`}
                 >
-                  {getShortName(tile.name)}
-                </span>
-              </div>
-              <div className={`truncate font-medium ${sizing.name}`}>
-                {tile.name}
+                  <span>{tile.index}</span>
+                  <span
+                    className={`truncate text-[10px] uppercase ${
+                      isDark ? "text-white/50" : "text-neutral-400"
+                    }`}
+                  >
+                    {getShortName(tile.name)}
+                  </span>
+                </div>
+                <div className={`truncate font-medium ${sizing.name}`}>
+                  {tile.name}
+                </div>
               </div>
               {houses > 0 ? (
                 <div className="mt-1 flex justify-end">
