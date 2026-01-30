@@ -587,6 +587,32 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
           : `Landed on ${tileLabel}`;
       }
 
+      if (event.event_type === "MACRO_EVENT") {
+        const payload = event.payload as
+          | {
+              event_name?: unknown;
+              rarity?: unknown;
+              duration_rounds?: unknown;
+            }
+          | null;
+        const eventName =
+          typeof payload?.event_name === "string"
+            ? payload.event_name
+            : "Macroeconomic shift";
+        const rarityRaw =
+          typeof payload?.rarity === "string" ? payload.rarity : null;
+        const rarity = rarityRaw ? rarityRaw.replaceAll("_", " ") : null;
+        const duration =
+          typeof payload?.duration_rounds === "number"
+            ? payload.duration_rounds
+            : typeof payload?.duration_rounds === "string"
+              ? Number.parseInt(payload.duration_rounds, 10)
+              : null;
+        const durationLabel = duration !== null ? ` · ${duration} rounds` : "";
+        const rarityLabel = rarity ? ` (${rarity})` : "";
+        return `Macro event: ${eventName}${rarityLabel}${durationLabel}`;
+      }
+
       if (event.event_type === "DRAW_CARD") {
         const payload = event.payload as
           | {

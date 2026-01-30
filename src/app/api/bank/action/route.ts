@@ -7,6 +7,13 @@ import {
 } from "@/lib/boardPacks";
 import type { BoardTileType } from "@/lib/boardPacks";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "@/lib/env";
+import {
+  DEFAULT_MACRO_DRAW_MODE,
+  MACRO_EVENT_INTERVAL_ROUNDS,
+  defaultMacroDeckId,
+  drawMacroEvent,
+  getMacroDeckById,
+} from "@/lib/macroDecks";
 import { DEFAULT_RULES, getRules } from "@/lib/rules";
 
 const supabaseUrl = (process.env.SUPABASE_URL ?? SUPABASE_URL ?? "").trim();
@@ -124,6 +131,8 @@ type GameStateRow = {
   balances: Record<string, number> | null;
   last_roll: number | null;
   doubles_count: number | null;
+  rounds_elapsed: number | null;
+  last_macro_event_id: string | null;
   turn_phase: string | null;
   pending_action: Record<string, unknown> | null;
   chance_index: number | null;
@@ -2066,7 +2075,7 @@ export async function POST(request: Request) {
       }
 
       await fetchFromSupabaseWithService<GameStateRow[]>(
-        "game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment",
+        "game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment",
         {
           method: "POST",
           headers: {
@@ -2203,7 +2212,7 @@ export async function POST(request: Request) {
     )) ?? [];
 
     const [gameState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
-      `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
+      `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
       { method: "GET" },
     )) ?? [];
 
@@ -2321,7 +2330,7 @@ export async function POST(request: Request) {
       );
 
       const upsertResponse = await fetch(
-        `${supabaseUrl}/rest/v1/game_state?on_conflict=game_id&select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment`,
+        `${supabaseUrl}/rest/v1/game_state?on_conflict=game_id&select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment`,
         {
           method: "POST",
           headers: {
@@ -2335,6 +2344,8 @@ export async function POST(request: Request) {
             balances,
             last_roll: null,
             doubles_count: 0,
+            rounds_elapsed: 0,
+            last_macro_event_id: null,
             turn_phase: "AWAITING_ROLL",
             pending_action: null,
             chance_index: 0,
@@ -5718,6 +5729,37 @@ export async function POST(request: Request) {
         }
       }
 
+      const nextRound = (gameState.rounds_elapsed ?? 0) + 1;
+      const macroDeck = getMacroDeckById(defaultMacroDeckId);
+      let nextLastMacroEventId = gameState.last_macro_event_id ?? null;
+
+      if (
+        macroDeck &&
+        nextRound % MACRO_EVENT_INTERVAL_ROUNDS === 0 &&
+        macroDeck.events.length > 0
+      ) {
+        const macroEvent = drawMacroEvent(
+          macroDeck,
+          nextLastMacroEventId,
+          DEFAULT_MACRO_DRAW_MODE,
+        );
+        nextLastMacroEventId = macroEvent.id;
+        events.push({
+          event_type: "MACRO_EVENT",
+          payload: {
+            deck_id: macroDeck.id,
+            deck_name: macroDeck.name,
+            event_id: macroEvent.id,
+            event_name: macroEvent.name,
+            duration_rounds: macroEvent.durationRounds,
+            effects: macroEvent.effects,
+            rarity: macroEvent.rarity ?? null,
+            mode: DEFAULT_MACRO_DRAW_MODE,
+            round_index: nextRound,
+          },
+        });
+      }
+
       const finalVersion = currentVersion + events.length;
       const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
         `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
@@ -5731,6 +5773,8 @@ export async function POST(request: Request) {
             current_player_id: nextPlayer.id,
             last_roll: null,
             doubles_count: 0,
+            rounds_elapsed: nextRound,
+            last_macro_event_id: nextLastMacroEventId,
             ...(balancesChanged ? { balances: updatedBalances } : {}),
             turn_phase: nextPlayer.is_in_jail
               ? "AWAITING_JAIL_DECISION"
