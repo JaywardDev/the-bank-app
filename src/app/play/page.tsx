@@ -856,6 +856,13 @@ export default function PlayPage() {
   >([]);
   const [tradeExecutionSummary, setTradeExecutionSummary] =
     useState<TradeExecutionSummary | null>(null);
+  const [isProposeTradeOpen, setIsProposeTradeOpen] = useState(false);
+  const [isIncomingTradeOpen, setIsIncomingTradeOpen] = useState(false);
+  const [tradeCounterpartyId, setTradeCounterpartyId] = useState<string>("");
+  const [tradeOfferCash, setTradeOfferCash] = useState<number>(0);
+  const [tradeOfferTiles, setTradeOfferTiles] = useState<number[]>([]);
+  const [tradeRequestCash, setTradeRequestCash] = useState<number>(0);
+  const [tradeRequestTiles, setTradeRequestTiles] = useState<number[]>([]);
   const [payoffLoan, setPayoffLoan] = useState<PlayerLoan | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -3341,6 +3348,46 @@ export default function PlayPage() {
     myPlayerBalance,
     ownershipByTile,
   ]);
+  const availableTradeCounterparties = useMemo(() => {
+    if (!currentUserPlayer) {
+      return [];
+    }
+    return players.filter(
+      (player) => player.id !== currentUserPlayer.id && !player.is_eliminated,
+    );
+  }, [currentUserPlayer, players]);
+  const counterpartyOwnedProperties = useMemo(() => {
+    if (!tradeCounterpartyId || !boardPack?.tiles) {
+      return [];
+    }
+    return boardPack.tiles
+      .filter(
+        (tile) =>
+          ["PROPERTY", "RAIL", "UTILITY"].includes(tile.type) &&
+          ownershipByTile[tile.index]?.owner_player_id === tradeCounterpartyId,
+      )
+      .map((tile) => {
+        const ownership = ownershipByTile[tile.index];
+        return {
+          tile,
+          houses: ownership?.houses ?? 0,
+        };
+      });
+  }, [boardPack?.tiles, ownershipByTile, tradeCounterpartyId]);
+  const canSubmitTradeProposal = useMemo(() => {
+    const hasAssets =
+      tradeOfferCash > 0 ||
+      tradeOfferTiles.length > 0 ||
+      tradeRequestCash > 0 ||
+      tradeRequestTiles.length > 0;
+    return Boolean(tradeCounterpartyId) && hasAssets;
+  }, [
+    tradeCounterpartyId,
+    tradeOfferCash,
+    tradeOfferTiles.length,
+    tradeRequestCash,
+    tradeRequestTiles.length,
+  ]);
   const activeLoans = playerLoans.filter((loan) => loan.status === "active");
   const activePurchaseMortgages = purchaseMortgages.filter(
     (mortgage) => mortgage.status === "active",
@@ -3742,6 +3789,16 @@ export default function PlayPage() {
   ]);
 
   useEffect(() => {
+    setTradeRequestTiles([]);
+  }, [tradeCounterpartyId]);
+
+  useEffect(() => {
+    if (!incomingTradeProposal) {
+      setIsIncomingTradeOpen(false);
+    }
+  }, [incomingTradeProposal]);
+
+  useEffect(() => {
     if (!gameId || !session?.access_token) {
       return;
     }
@@ -3997,12 +4054,12 @@ export default function PlayPage() {
         "requestTiles" in request ? request.requestTiles : undefined;
       if (!session || !gameId) {
         setNotice("Join a game lobby first.");
-        return;
+        return false;
       }
 
       if (!isInProgress) {
         setNotice("Waiting for the host to start the game.");
-        return;
+        return false;
       }
 
       const snapshotVersion = gameState?.version ?? 0;
@@ -4113,7 +4170,7 @@ export default function PlayPage() {
             invalidTokenRef.current = session.access_token ?? null;
             setSessionInvalid(true);
             setNotice("Invalid session. Tap to re-auth.");
-            return;
+            return false;
           }
 
           accessToken = refreshedSession.access_token;
@@ -4132,7 +4189,7 @@ export default function PlayPage() {
             invalidTokenRef.current = accessToken;
             setSessionInvalid(true);
             setNotice("Invalid session. Tap to re-auth.");
-            return;
+            return false;
           }
 
           response = retryResult.response;
@@ -4204,12 +4261,14 @@ export default function PlayPage() {
         if (firstRoundResyncEnabled) {
           requestFirstRoundResync(accessToken);
         }
+        return true;
       } catch (error) {
         if (error instanceof Error) {
           setNotice(error.message);
         } else {
           setNotice("Unable to perform action.");
         }
+        return false;
       } finally {
         setActionLoading(null);
       }
@@ -4230,6 +4289,74 @@ export default function PlayPage() {
       session,
     ],
   );
+
+  const openIncomingTradeModal = useCallback(() => {
+    if (!incomingTradeProposal) {
+      console.info("[Play] No incoming trades to review.");
+      setNotice("No incoming trades yet.");
+      return;
+    }
+    setIsIncomingTradeOpen(true);
+  }, [incomingTradeProposal]);
+
+  const openProposeTradeModal = useCallback(() => {
+    if (!currentUserPlayer) {
+      setNotice("Join a game lobby first.");
+      return;
+    }
+    const availableCounterparties = players.filter(
+      (player) => player.id !== currentUserPlayer.id && !player.is_eliminated,
+    );
+    if (availableCounterparties.length === 0) {
+      setNotice("No other players are available to trade.");
+      return;
+    }
+    if (ownedProperties.length === 0 && myPlayerBalance <= 0) {
+      setNotice("You don't have any assets to offer yet.");
+    }
+    const defaultCounterparty = availableCounterparties[0]?.id ?? "";
+    setTradeCounterpartyId(defaultCounterparty);
+    setTradeOfferCash(0);
+    setTradeOfferTiles([]);
+    setTradeRequestCash(0);
+    setTradeRequestTiles([]);
+    setIsProposeTradeOpen(true);
+  }, [currentUserPlayer, myPlayerBalance, ownedProperties.length, players]);
+
+  const handleSubmitTradeProposal = useCallback(async () => {
+    if (!tradeCounterpartyId) {
+      setNotice("Select a player to trade with.");
+      return;
+    }
+    const hasTradeValue =
+      tradeOfferCash > 0 ||
+      tradeOfferTiles.length > 0 ||
+      tradeRequestCash > 0 ||
+      tradeRequestTiles.length > 0;
+    if (!hasTradeValue) {
+      setNotice("Add cash or properties to the trade.");
+      return;
+    }
+    const success = await handleBankAction({
+      action: "PROPOSE_TRADE",
+      counterpartyPlayerId: tradeCounterpartyId,
+      offerCash: tradeOfferCash > 0 ? tradeOfferCash : undefined,
+      offerTiles: tradeOfferTiles.length > 0 ? tradeOfferTiles : undefined,
+      requestCash: tradeRequestCash > 0 ? tradeRequestCash : undefined,
+      requestTiles: tradeRequestTiles.length > 0 ? tradeRequestTiles : undefined,
+    });
+    if (success) {
+      setNotice("Trade sent.");
+      setIsProposeTradeOpen(false);
+    }
+  }, [
+    handleBankAction,
+    tradeCounterpartyId,
+    tradeOfferCash,
+    tradeOfferTiles,
+    tradeRequestCash,
+    tradeRequestTiles,
+  ]);
 
   const handleDeclineProperty = useCallback(() => {
     if (!pendingPurchase) {
@@ -4895,17 +5022,233 @@ export default function PlayPage() {
             </div>
           </>
         ) : null}
-        {incomingTradeProposal ? (
+        {isProposeTradeOpen ? (
+          <>
+            <div className="fixed inset-0 z-20 bg-black/45 backdrop-blur-[2px]" />
+            <div className="fixed inset-0 z-30 flex items-center justify-center p-4">
+              <div className="w-full max-w-2xl rounded-3xl border border-indigo-200 bg-white/95 p-5 shadow-2xl ring-1 ring-black/10 backdrop-blur">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-indigo-500">
+                      Propose trade
+                    </p>
+                    <p className="text-lg font-semibold text-neutral-900">
+                      Craft a trade offer
+                    </p>
+                  </div>
+                  <button
+                    className="rounded-full border border-neutral-200 px-2.5 py-1.5 text-xs font-semibold text-neutral-500 transition hover:border-neutral-300 hover:text-neutral-700"
+                    type="button"
+                    onClick={() => setIsProposeTradeOpen(false)}
+                    aria-label="Close trade proposal"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="mt-4 space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                      Counterparty
+                    </label>
+                    <select
+                      className="w-full rounded-2xl border border-neutral-200 px-3 py-2 text-sm text-neutral-700"
+                      value={tradeCounterpartyId}
+                      onChange={(event) =>
+                        setTradeCounterpartyId(event.target.value)
+                      }
+                    >
+                      {availableTradeCounterparties.map((player) => (
+                        <option key={player.id} value={player.id}>
+                          {player.display_name ?? "Player"}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2 rounded-2xl border border-neutral-200 bg-white p-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+                        Offer
+                      </p>
+                      <label className="text-xs text-neutral-500">
+                        Cash
+                        <input
+                          className="mt-1 w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm text-neutral-700"
+                          type="number"
+                          min={0}
+                          max={myPlayerBalance}
+                          value={tradeOfferCash}
+                          onChange={(event) =>
+                            setTradeOfferCash(
+                              Math.max(0, Number(event.target.value)),
+                            )
+                          }
+                        />
+                      </label>
+                      <div className="space-y-1">
+                        <p className="text-xs text-neutral-500">Properties</p>
+                        {ownedProperties.length === 0 ? (
+                          <p className="text-xs text-neutral-400">
+                            No owned properties to offer.
+                          </p>
+                        ) : (
+                          <div className="max-h-40 space-y-2 overflow-y-auto pr-2 text-sm text-neutral-700">
+                            {ownedProperties.map(({ tile, houses }) => (
+                              <label
+                                key={`offer-${tile.index}`}
+                                className="flex items-center gap-2"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={tradeOfferTiles.includes(tile.index)}
+                                  onChange={(event) => {
+                                    setTradeOfferTiles((prev) =>
+                                      event.target.checked
+                                        ? [...prev, tile.index]
+                                        : prev.filter(
+                                            (entry) => entry !== tile.index,
+                                          ),
+                                    );
+                                  }}
+                                />
+                                <span>
+                                  {tile.name}
+                                  {houses > 0
+                                    ? ` · ${houses} ${
+                                        houses === 1 ? "house" : "houses"
+                                      }`
+                                    : ""}
+                                </span>
+                              </label>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="space-y-2 rounded-2xl border border-neutral-200 bg-white p-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+                        Request
+                      </p>
+                      <label className="text-xs text-neutral-500">
+                        Cash
+                        <input
+                          className="mt-1 w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm text-neutral-700"
+                          type="number"
+                          min={0}
+                          value={tradeRequestCash}
+                          onChange={(event) =>
+                            setTradeRequestCash(
+                              Math.max(0, Number(event.target.value)),
+                            )
+                          }
+                        />
+                      </label>
+                      <div className="space-y-1">
+                        <p className="text-xs text-neutral-500">Properties</p>
+                        {tradeCounterpartyId ? (
+                          counterpartyOwnedProperties.length === 0 ? (
+                            <p className="text-xs text-neutral-400">
+                              No properties owned by the selected player.
+                            </p>
+                          ) : (
+                            <div className="max-h-40 space-y-2 overflow-y-auto pr-2 text-sm text-neutral-700">
+                              {counterpartyOwnedProperties.map(
+                                ({ tile, houses }) => (
+                                  <label
+                                    key={`request-${tile.index}`}
+                                    className="flex items-center gap-2"
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={tradeRequestTiles.includes(
+                                        tile.index,
+                                      )}
+                                      onChange={(event) => {
+                                        setTradeRequestTiles((prev) =>
+                                          event.target.checked
+                                            ? [...prev, tile.index]
+                                            : prev.filter(
+                                                (entry) =>
+                                                  entry !== tile.index,
+                                              ),
+                                        );
+                                      }}
+                                    />
+                                    <span>
+                                      {tile.name}
+                                      {houses > 0
+                                        ? ` · ${houses} ${
+                                            houses === 1 ? "house" : "houses"
+                                          }`
+                                        : ""}
+                                    </span>
+                                  </label>
+                                ),
+                              )}
+                            </div>
+                          )
+                        ) : (
+                          <p className="text-xs text-neutral-400">
+                            Select a player to see their properties.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <p className="text-xs text-neutral-400">
+                      Trades are sent to the bank for review before delivery.
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        className="rounded-2xl border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700"
+                        type="button"
+                        onClick={() => setIsProposeTradeOpen(false)}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        className="rounded-2xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-indigo-200"
+                        type="button"
+                        onClick={handleSubmitTradeProposal}
+                        disabled={
+                          actionLoading === "PROPOSE_TRADE" ||
+                          !canSubmitTradeProposal
+                        }
+                      >
+                        {actionLoading === "PROPOSE_TRADE"
+                          ? "Sending…"
+                          : "Send trade"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </>
+        ) : null}
+        {incomingTradeProposal && isIncomingTradeOpen ? (
           <>
             <div className="fixed inset-0 z-20 bg-black/45 backdrop-blur-[2px]" />
             <div className="fixed inset-0 z-30 flex items-center justify-center p-4">
               <div className="w-full max-w-lg rounded-3xl border border-indigo-200 bg-white/95 p-5 shadow-2xl ring-1 ring-black/10 backdrop-blur">
-                <p className="text-xs font-semibold uppercase tracking-wide text-indigo-500">
-                  Incoming trade offer
-                </p>
-                <p className="text-lg font-semibold text-neutral-900">
-                  {incomingTradeCounterpartyName} wants to trade
-                </p>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-indigo-500">
+                      Incoming trade offer
+                    </p>
+                    <p className="text-lg font-semibold text-neutral-900">
+                      {incomingTradeCounterpartyName} wants to trade
+                    </p>
+                  </div>
+                  <button
+                    className="rounded-full border border-neutral-200 px-2.5 py-1.5 text-xs font-semibold text-neutral-500 transition hover:border-neutral-300 hover:text-neutral-700"
+                    type="button"
+                    onClick={() => setIsIncomingTradeOpen(false)}
+                    aria-label="Close incoming trade"
+                  >
+                    ✕
+                  </button>
+                </div>
                 <div className="mt-4 grid gap-3">
                   <div className="rounded-2xl border border-neutral-200 bg-white p-3">
                     <p className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
@@ -5014,7 +5357,10 @@ export default function PlayPage() {
                   <button
                     className="rounded-2xl border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:border-neutral-100 disabled:text-neutral-400"
                     type="button"
-                    onClick={() => handleRejectTrade(incomingTradeProposal.id)}
+                    onClick={() => {
+                      setIsIncomingTradeOpen(false);
+                      handleRejectTrade(incomingTradeProposal.id);
+                    }}
                     disabled={actionLoading === "REJECT_TRADE"}
                   >
                     {actionLoading === "REJECT_TRADE" ? "Rejecting…" : "Reject"}
@@ -5022,7 +5368,10 @@ export default function PlayPage() {
                   <button
                     className="rounded-2xl bg-neutral-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
                     type="button"
-                    onClick={() => handleAcceptTrade(incomingTradeProposal.id)}
+                    onClick={() => {
+                      setIsIncomingTradeOpen(false);
+                      handleAcceptTrade(incomingTradeProposal.id);
+                    }}
                     disabled={actionLoading === "ACCEPT_TRADE"}
                   >
                     {actionLoading === "ACCEPT_TRADE" ? "Accepting…" : "Accept"}
@@ -5661,15 +6010,23 @@ export default function PlayPage() {
           <button
             className="rounded-2xl border px-4 py-3 text-sm font-semibold text-neutral-700"
             type="button"
+            onClick={openProposeTradeModal}
           >
             Propose Trade
           </button>
-          <button
-            className="rounded-2xl bg-neutral-900 px-4 py-3 text-sm font-semibold text-white"
-            type="button"
-          >
-            Accept Trade
-          </button>
+          {incomingTradeProposal ? (
+            <button
+              className="rounded-2xl bg-neutral-900 px-4 py-3 text-sm font-semibold text-white"
+              type="button"
+              onClick={openIncomingTradeModal}
+            >
+              Accept Trade
+            </button>
+          ) : (
+            <div className="flex items-center rounded-2xl border border-dashed border-neutral-200 px-4 py-3 text-sm text-neutral-400">
+              No incoming trades yet.
+            </div>
+          )}
         </div>
       </section>
       {isBoardExpanded ? (
