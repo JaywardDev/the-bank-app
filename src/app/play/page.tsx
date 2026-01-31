@@ -988,6 +988,11 @@ export default function PlayPage() {
   const [realtimeReady, setRealtimeReady] = useState(false);
   const [firstRoundResyncEnabled, setFirstRoundResyncEnabled] = useState(true);
   const [sessionInvalid, setSessionInvalid] = useState(false);
+  const [pendingGoToJail, setPendingGoToJail] = useState<{
+    eventId: string;
+    eventVersion: number;
+  } | null>(null);
+  const [isGoToJailAcknowledging, setIsGoToJailAcknowledging] = useState(false);
   const expandedBoardContainerRef = useRef<HTMLDivElement | null>(null);
   const expandedBoardRef = useRef<HTMLDivElement | null>(null);
   const expandedTileSheetRef = useRef<HTMLDivElement | null>(null);
@@ -1009,6 +1014,8 @@ export default function PlayPage() {
   const unmountingRef = useRef(false);
   const invalidTokenRef = useRef<string | null>(null);
   const tradeConfirmSectionRef = useRef<HTMLElement | null>(null);
+  const lastGoToJailAckVersionRef = useRef<number | null>(null);
+  const goToJailOkButtonRef = useRef<HTMLButtonElement | null>(null);
 
   const isConfigured = useMemo(() => supabaseClient.isConfigured(), []);
   const latestRollEvent = useMemo(
@@ -1086,6 +1093,49 @@ export default function PlayPage() {
       ) ?? null
     );
   }, [currentUserPlayer, tradeProposals]);
+
+  useEffect(() => {
+    if (!currentUserPlayer) {
+      return;
+    }
+    let latestGoToJailLanding: GameEvent | null = null;
+    for (const event of events) {
+      if (event.event_type !== "LAND_GO_TO_JAIL") {
+        continue;
+      }
+      const payload = event.payload;
+      const playerId =
+        payload && typeof payload.player_id === "string"
+          ? payload.player_id
+          : null;
+      if (playerId === currentUserPlayer.id) {
+        latestGoToJailLanding = event;
+        break;
+      }
+    }
+    if (!latestGoToJailLanding) {
+      return;
+    }
+    if (lastGoToJailAckVersionRef.current === latestGoToJailLanding.version) {
+      return;
+    }
+    setPendingGoToJail({
+      eventId: latestGoToJailLanding.id,
+      eventVersion: latestGoToJailLanding.version,
+    });
+  }, [currentUserPlayer, events]);
+
+  useEffect(() => {
+    if (pendingGoToJail) {
+      goToJailOkButtonRef.current?.focus();
+    }
+  }, [pendingGoToJail]);
+
+  useEffect(() => {
+    if (!pendingGoToJail && isGoToJailAcknowledging) {
+      setIsGoToJailAcknowledging(false);
+    }
+  }, [isGoToJailAcknowledging, pendingGoToJail]);
   const boardPack = getBoardPackById(gameMeta?.board_pack_id);
   const currentPlayerId = gameState?.current_player_id ?? null;
   const expandedBoardTiles =
@@ -3327,11 +3377,14 @@ export default function PlayPage() {
     !isEliminated &&
     !isAuctionActive &&
     !hasPendingCard &&
-    !hasPendingMacroEvent;
+    !hasPendingMacroEvent &&
+    !pendingGoToJail;
   const isAwaitingJailDecision =
     isMyTurn && gameState?.turn_phase === "AWAITING_JAIL_DECISION";
   const showJailDecisionPanel =
-    isAwaitingJailDecision && currentUserPlayer?.is_in_jail;
+    isAwaitingJailDecision &&
+    currentUserPlayer?.is_in_jail &&
+    !pendingGoToJail;
   const canRollForDoubles =
     isAwaitingJailDecision && currentUserPlayer?.is_in_jail;
   const getOutOfJailFreeCount =
@@ -3374,6 +3427,9 @@ export default function PlayPage() {
     if (hasPendingMacroEvent) {
       return "Resolve macro event to continue";
     }
+    if (pendingGoToJail) {
+      return "Acknowledge Go To Jail";
+    }
     if (hasPendingDecision) {
       return "Resolve property decision";
     }
@@ -3401,6 +3457,7 @@ export default function PlayPage() {
     isAwaitingJailDecision,
     isEliminated,
     isMyTurn,
+    pendingGoToJail,
   ]);
   const buyDisabledReason =
     actionLoading === "BUY_PROPERTY"
@@ -3735,6 +3792,7 @@ export default function PlayPage() {
       : 0;
   const isDecisionOverlayActive =
     showJailDecisionPanel ||
+    pendingGoToJail !== null ||
     pendingCard !== null ||
     isCardResolving ||
     pendingMacroEvent !== null ||
@@ -3745,6 +3803,7 @@ export default function PlayPage() {
     isAuctionResolving;
   const isEventLogSuppressed =
     showJailDecisionPanel ||
+    pendingGoToJail !== null ||
     pendingCard !== null ||
     isCardResolving ||
     pendingMacroEvent !== null ||
@@ -4644,6 +4703,15 @@ export default function PlayPage() {
     void handleBankAction({ action: "CONFIRM_MACRO_EVENT" });
   }, [UI_RESOLVE_DELAY_MS, canConfirmMacroEvent, handleBankAction]);
 
+  const handleAcknowledgeGoToJail = useCallback(() => {
+    if (!pendingGoToJail || isGoToJailAcknowledging) {
+      return;
+    }
+    setIsGoToJailAcknowledging(true);
+    lastGoToJailAckVersionRef.current = pendingGoToJail.eventVersion;
+    setPendingGoToJail(null);
+  }, [isGoToJailAcknowledging, pendingGoToJail]);
+
   const handleAuctionBid = useCallback(() => {
     if (!isCurrentAuctionBidder) {
       return;
@@ -4999,6 +5067,45 @@ export default function PlayPage() {
                       ? "Rolling…"
                       : "Roll for doubles"}
                   </button>
+                </div>
+              </div>
+            </>
+          ) : null}
+          {pendingGoToJail ? (
+            <>
+              <div className="fixed inset-0 z-20 bg-black/50 backdrop-blur-[2px]" />
+              <div className="fixed inset-0 z-30 flex items-center justify-center p-4">
+                <div
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="go-to-jail-title"
+                  className="w-full max-w-sm rounded-3xl border border-neutral-200 bg-white p-6 text-center shadow-2xl ring-1 ring-black/10"
+                >
+                  <div className="flex flex-col items-center gap-4">
+                    <Image
+                      src="/icons/go_to_jail.svg"
+                      alt=""
+                      width={140}
+                      height={140}
+                      className="h-32 w-32 object-contain"
+                      aria-hidden
+                    />
+                    <p
+                      id="go-to-jail-title"
+                      className="text-2xl font-black tracking-wide text-neutral-900"
+                    >
+                      GO TO JAIL
+                    </p>
+                    <button
+                      ref={goToJailOkButtonRef}
+                      className="w-full rounded-2xl bg-neutral-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
+                      type="button"
+                      onClick={handleAcknowledgeGoToJail}
+                      disabled={isGoToJailAcknowledging}
+                    >
+                      {isGoToJailAcknowledging ? "Acknowledging…" : "OK"}
+                    </button>
+                  </div>
                 </div>
               </div>
             </>
