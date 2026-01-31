@@ -904,6 +904,9 @@ export default function PlayPage() {
   const [isActivityPanelOpen, setIsActivityPanelOpen] = useState(false);
   const [activityTab, setActivityTab] = useState<"log" | "transactions">("log");
   const [isBoardExpanded, setIsBoardExpanded] = useState(false);
+  const [walletPanelView, setWalletPanelView] = useState<
+    "owned" | "loans" | "mortgages"
+  >("owned");
   const [selectedTileIndex, setSelectedTileIndex] = useState<number | null>(
     null,
   );
@@ -5965,367 +5968,426 @@ export default function PlayPage() {
             {rules.loanTermTurns} turns
           </p>
         </div>
-        <div className="space-y-2">
-          <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
-            Owned properties
-          </p>
-          {ownedProperties.length === 0 ? (
-            <p className="text-sm text-neutral-500">
-              No owned properties available.
-            </p>
-          ) : (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2 rounded-full border border-neutral-200 bg-neutral-50 p-1">
+            {[
+              { id: "owned", label: "Owned", count: ownedProperties.length },
+              {
+                id: "loans",
+                label: "Loans",
+                count: activeLoans.length,
+                hasIndicator: activeLoans.length > 0,
+              },
+              {
+                id: "mortgages",
+                label: "Mortgages",
+                count: activePurchaseMortgages.length,
+                hasIndicator: activePurchaseMortgages.length > 0,
+              },
+            ].map((tab) => {
+              const isActive = walletPanelView === tab.id;
+              const showIndicator = tab.hasIndicator && !isActive;
+              return (
+                <button
+                  key={tab.id}
+                  className={`relative rounded-full px-4 py-2 text-xs font-semibold transition ${
+                    isActive
+                      ? "bg-white text-neutral-900 shadow-sm ring-1 ring-neutral-300"
+                      : "text-neutral-500 hover:text-neutral-700"
+                  }`}
+                  type="button"
+                  onClick={() =>
+                    setWalletPanelView(
+                      tab.id as "owned" | "loans" | "mortgages",
+                    )
+                  }
+                >
+                  {tab.label} ({tab.count})
+                  {showIndicator ? (
+                    <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-amber-400/80 shadow-sm" />
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+          {walletPanelView === "owned" ? (
             <div className="space-y-2">
-              {ownedProperties.map(
-                ({
-                  tile,
-                  houses,
-                  isCollateralEligible,
-                  canBuildHouse,
-                  canSellHouse,
-                }) => {
-                const principalPreview = Math.round(
-                  (tile.price ?? 0) * rules.collateralLtv,
-                );
-                const isProperty = tile.type === "PROPERTY";
-                const isRail = tile.type === "RAIL";
-                const isUtility = tile.type === "UTILITY";
-                const baseRent =
-                  typeof tile.baseRent === "number" ? tile.baseRent : null;
-                const railBaseRent =
-                  RAIL_RENT_BY_COUNT[1] ?? baseRent ?? null;
-                const railCurrentRent =
-                  RAIL_RENT_BY_COUNT[
-                    Math.min(ownedRailCount, RAIL_RENT_BY_COUNT.length - 1)
-                  ] ?? railBaseRent;
-                const utilityMultiplier =
-                  ownedUtilityCount >= 2
-                    ? UTILITY_RENT_MULTIPLIERS.double
-                    : UTILITY_RENT_MULTIPLIERS.single;
-                const lastRoll =
-                  typeof gameState?.last_roll === "number"
-                    ? gameState.last_roll
-                    : null;
-                const utilityRentPreview =
-                  lastRoll !== null ? lastRoll * utilityMultiplier : null;
-                const groupLabel = getTileGroupLabel(tile);
-                return (
-                  <PropertyCardShell
-                    key={tile.index}
-                    bandColor={getTileBandColor(tile)}
-                    bodyClassName="text-sm"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-1">
-                        <div>
-                          <p className="font-semibold text-neutral-900">
-                            {tile.name}
-                          </p>
-                          <p className="text-xs text-neutral-500">
-                            {groupLabel}
-                          </p>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-3 text-xs text-neutral-500">
-                          <span className="font-semibold text-neutral-700">
-                            Principal: ${principalPreview}
-                          </span>
-                          {isProperty ? (
-                            <>
-                              <span className="uppercase tracking-wide text-neutral-400">
-                                Rent
-                              </span>
-                              <span className="font-semibold text-neutral-700">
-                                {baseRent !== null ? `$${baseRent}` : "—"}
-                              </span>
-                              <span className="uppercase tracking-wide text-neutral-400">
-                                Houses
-                              </span>
-                              <span className="font-semibold text-neutral-700">
-                                {houses}
-                              </span>
-                            </>
-                          ) : null}
-                          {isRail ? (
-                            <>
-                              <span className="uppercase tracking-wide text-neutral-400">
-                                Base rent
-                              </span>
-                              <span className="font-semibold text-neutral-700">
-                                {railBaseRent !== null
-                                  ? `$${railBaseRent}`
-                                  : "—"}
-                              </span>
-                              <span className="uppercase tracking-wide text-neutral-400">
-                                Owned RR
-                              </span>
-                              <span className="font-semibold text-neutral-700">
-                                {ownedRailCount}
-                              </span>
-                              <span className="uppercase tracking-wide text-neutral-400">
-                                Current rent
-                              </span>
-                              <span className="font-semibold text-neutral-700">
-                                {railCurrentRent !== null
-                                  ? `$${railCurrentRent}`
-                                  : "—"}
-                              </span>
-                            </>
-                          ) : null}
-                          {isUtility ? (
-                            <>
-                              <span className="uppercase tracking-wide text-neutral-400">
-                                Owned util
-                              </span>
-                              <span className="font-semibold text-neutral-700">
-                                {ownedUtilityCount}
-                              </span>
-                              <span className="uppercase tracking-wide text-neutral-400">
-                                Rent rule
-                              </span>
-                              <span className="font-semibold text-neutral-700">
-                                {UTILITY_RENT_MULTIPLIERS.single}× /{" "}
-                                {UTILITY_RENT_MULTIPLIERS.double}×
-                              </span>
-                              {lastRoll !== null ? (
-                                <>
-                                  <span className="uppercase tracking-wide text-neutral-400">
-                                    Last roll
-                                  </span>
-                                  <span className="font-semibold text-neutral-700">
-                                    {lastRoll}
-                                  </span>
-                                  <span className="uppercase tracking-wide text-neutral-400">
-                                    Current rent
-                                  </span>
-                                  <span className="font-semibold text-neutral-700">
-                                    {utilityRentPreview !== null
-                                      ? `$${utilityRentPreview}`
-                                      : "—"}
-                                  </span>
-                                </>
-                              ) : null}
-                            </>
-                          ) : null}
-                        </div>
-                      </div>
-                      <div className="flex flex-col items-end gap-2">
-                        {isProperty ? (
-                          <div className="flex items-center gap-2">
-                            <button
-                              className="rounded-full bg-neutral-900 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
-                              type="button"
-                              onClick={() =>
-                                void handleBankAction({
-                                  action: "BUILD_HOUSE",
-                                  tileIndex: tile.index,
-                                })
-                              }
-                              disabled={
-                                !canBuildHouse ||
-                                actionLoading === "BUILD_HOUSE"
-                              }
-                            >
-                              {actionLoading === "BUILD_HOUSE"
-                                ? "Building…"
-                                : "Build"}
-                            </button>
-                            <button
-                              className="rounded-full border border-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
-                              type="button"
-                              onClick={() =>
-                                void handleBankAction({
-                                  action: "SELL_HOUSE",
-                                  tileIndex: tile.index,
-                                })
-                              }
-                              disabled={
-                                !canSellHouse ||
-                                actionLoading === "SELL_HOUSE"
-                              }
-                            >
-                              {actionLoading === "SELL_HOUSE"
-                                ? "Selling…"
-                                : "Sell"}
-                            </button>
-                          </div>
-                        ) : null}
-                        <button
-                          className="rounded-full bg-neutral-900 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
-                          type="button"
-                          onClick={() =>
-                            void handleBankAction({
-                              action: "TAKE_COLLATERAL_LOAN",
-                              tileIndex: tile.index,
-                            })
-                          }
-                          disabled={
-                            !canAct ||
-                            !rules.loanCollateralEnabled ||
-                            !isCollateralEligible ||
-                            actionLoading === "TAKE_COLLATERAL_LOAN"
-                          }
+              {ownedProperties.length === 0 ? (
+                <p className="text-sm text-neutral-500">
+                  No owned properties available.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {ownedProperties.map(
+                    ({
+                      tile,
+                      houses,
+                      isCollateralEligible,
+                      canBuildHouse,
+                      canSellHouse,
+                    }) => {
+                      const principalPreview = Math.round(
+                        (tile.price ?? 0) * rules.collateralLtv,
+                      );
+                      const isProperty = tile.type === "PROPERTY";
+                      const isRail = tile.type === "RAIL";
+                      const isUtility = tile.type === "UTILITY";
+                      const baseRent =
+                        typeof tile.baseRent === "number"
+                          ? tile.baseRent
+                          : null;
+                      const railBaseRent =
+                        RAIL_RENT_BY_COUNT[1] ?? baseRent ?? null;
+                      const railCurrentRent =
+                        RAIL_RENT_BY_COUNT[
+                          Math.min(
+                            ownedRailCount,
+                            RAIL_RENT_BY_COUNT.length - 1,
+                          )
+                        ] ?? railBaseRent;
+                      const utilityMultiplier =
+                        ownedUtilityCount >= 2
+                          ? UTILITY_RENT_MULTIPLIERS.double
+                          : UTILITY_RENT_MULTIPLIERS.single;
+                      const lastRoll =
+                        typeof gameState?.last_roll === "number"
+                          ? gameState.last_roll
+                          : null;
+                      const utilityRentPreview =
+                        lastRoll !== null ? lastRoll * utilityMultiplier : null;
+                      const groupLabel = getTileGroupLabel(tile);
+                      return (
+                        <PropertyCardShell
+                          key={tile.index}
+                          bandColor={getTileBandColor(tile)}
+                          bodyClassName="text-sm"
                         >
-                          {actionLoading === "TAKE_COLLATERAL_LOAN"
-                            ? "Collateralizing…"
-                            : "Collateralize"}
-                        </button>
-                      </div>
-                    </div>
-                  </PropertyCardShell>
-                );
-              })}
+                          <div className="flex items-center justify-between">
+                            <div className="space-y-1">
+                              <div>
+                                <p className="font-semibold text-neutral-900">
+                                  {tile.name}
+                                </p>
+                                <p className="text-xs text-neutral-500">
+                                  {groupLabel}
+                                </p>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-3 text-xs text-neutral-500">
+                                <span className="font-semibold text-neutral-700">
+                                  Principal: ${principalPreview}
+                                </span>
+                                {isProperty ? (
+                                  <>
+                                    <span className="uppercase tracking-wide text-neutral-400">
+                                      Rent
+                                    </span>
+                                    <span className="font-semibold text-neutral-700">
+                                      {baseRent !== null ? `$${baseRent}` : "—"}
+                                    </span>
+                                    <span className="uppercase tracking-wide text-neutral-400">
+                                      Houses
+                                    </span>
+                                    <span className="font-semibold text-neutral-700">
+                                      {houses}
+                                    </span>
+                                  </>
+                                ) : null}
+                                {isRail ? (
+                                  <>
+                                    <span className="uppercase tracking-wide text-neutral-400">
+                                      Base rent
+                                    </span>
+                                    <span className="font-semibold text-neutral-700">
+                                      {railBaseRent !== null
+                                        ? `$${railBaseRent}`
+                                        : "—"}
+                                    </span>
+                                    <span className="uppercase tracking-wide text-neutral-400">
+                                      Owned RR
+                                    </span>
+                                    <span className="font-semibold text-neutral-700">
+                                      {ownedRailCount}
+                                    </span>
+                                    <span className="uppercase tracking-wide text-neutral-400">
+                                      Current rent
+                                    </span>
+                                    <span className="font-semibold text-neutral-700">
+                                      {railCurrentRent !== null
+                                        ? `$${railCurrentRent}`
+                                        : "—"}
+                                    </span>
+                                  </>
+                                ) : null}
+                                {isUtility ? (
+                                  <>
+                                    <span className="uppercase tracking-wide text-neutral-400">
+                                      Owned util
+                                    </span>
+                                    <span className="font-semibold text-neutral-700">
+                                      {ownedUtilityCount}
+                                    </span>
+                                    <span className="uppercase tracking-wide text-neutral-400">
+                                      Rent rule
+                                    </span>
+                                    <span className="font-semibold text-neutral-700">
+                                      {UTILITY_RENT_MULTIPLIERS.single}× /{" "}
+                                      {UTILITY_RENT_MULTIPLIERS.double}×
+                                    </span>
+                                    {lastRoll !== null ? (
+                                      <>
+                                        <span className="uppercase tracking-wide text-neutral-400">
+                                          Last roll
+                                        </span>
+                                        <span className="font-semibold text-neutral-700">
+                                          {lastRoll}
+                                        </span>
+                                        <span className="uppercase tracking-wide text-neutral-400">
+                                          Current rent
+                                        </span>
+                                        <span className="font-semibold text-neutral-700">
+                                          {utilityRentPreview !== null
+                                            ? `$${utilityRentPreview}`
+                                            : "—"}
+                                        </span>
+                                      </>
+                                    ) : null}
+                                  </>
+                                ) : null}
+                              </div>
+                            </div>
+                            <div className="flex flex-col items-end gap-2">
+                              {isProperty ? (
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    className="rounded-full bg-neutral-900 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
+                                    type="button"
+                                    onClick={() =>
+                                      void handleBankAction({
+                                        action: "BUILD_HOUSE",
+                                        tileIndex: tile.index,
+                                      })
+                                    }
+                                    disabled={
+                                      !canBuildHouse ||
+                                      actionLoading === "BUILD_HOUSE"
+                                    }
+                                  >
+                                    {actionLoading === "BUILD_HOUSE"
+                                      ? "Building…"
+                                      : "Build"}
+                                  </button>
+                                  <button
+                                    className="rounded-full border border-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
+                                    type="button"
+                                    onClick={() =>
+                                      void handleBankAction({
+                                        action: "SELL_HOUSE",
+                                        tileIndex: tile.index,
+                                      })
+                                    }
+                                    disabled={
+                                      !canSellHouse ||
+                                      actionLoading === "SELL_HOUSE"
+                                    }
+                                  >
+                                    {actionLoading === "SELL_HOUSE"
+                                      ? "Selling…"
+                                      : "Sell"}
+                                  </button>
+                                </div>
+                              ) : null}
+                              <button
+                                className="rounded-full bg-neutral-900 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
+                                type="button"
+                                onClick={() =>
+                                  void handleBankAction({
+                                    action: "TAKE_COLLATERAL_LOAN",
+                                    tileIndex: tile.index,
+                                  })
+                                }
+                                disabled={
+                                  !canAct ||
+                                  !rules.loanCollateralEnabled ||
+                                  !isCollateralEligible ||
+                                  actionLoading === "TAKE_COLLATERAL_LOAN"
+                                }
+                              >
+                                {actionLoading === "TAKE_COLLATERAL_LOAN"
+                                  ? "Collateralizing…"
+                                  : "Collateralize"}
+                              </button>
+                            </div>
+                          </div>
+                        </PropertyCardShell>
+                      );
+                    },
+                  )}
+                </div>
+              )}
             </div>
-          )}
-        </div>
-        <div className="space-y-2">
-          <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
-            Active loans
-          </p>
-          {activeLoans.length === 0 ? (
-            <p className="text-sm text-neutral-500">No active loans.</p>
-          ) : (
+          ) : null}
+          {walletPanelView === "loans" ? (
             <div className="space-y-2">
-              {activeLoans.map((loan) => {
-                const tile =
-                  boardPack?.tiles?.find(
-                    (entry) => entry.index === loan.collateral_tile_index,
-                  ) ?? null;
-                const tileName =
-                  tile?.name ?? `Tile ${loan.collateral_tile_index}`;
-                const groupLabel = getTileGroupLabel(tile);
-                const payoffAmount =
-                  typeof loan.remaining_principal === "number"
-                    ? loan.remaining_principal
-                    : loan.principal;
-                const canPayoff =
-                  canAct &&
-                  payoffAmount > 0 &&
-                  myPlayerBalance >= payoffAmount;
-                return (
-                  <PropertyCardShell
-                    key={loan.id}
-                    bandColor={getTileBandColor(tile)}
-                    bodyClassName="text-sm"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-semibold text-neutral-900">
-                          {tileName}
-                        </p>
-                        <p className="text-xs text-neutral-500">{groupLabel}</p>
-                        <p className="text-xs text-neutral-400">
-                          Rent paused while collateralized.
-                        </p>
-                        <p className="text-xs text-neutral-500">
-                          Payment: ${loan.payment_per_turn} · Turns remaining:{" "}
-                          {loan.turns_remaining}
-                        </p>
-                        <p className="text-xs text-neutral-500">
-                          Remaining balance: ${payoffAmount}
-                        </p>
-                      </div>
-                      <button
-                        className="rounded-full border border-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
-                        type="button"
-                        onClick={() => setPayoffLoan(loan)}
-                        disabled={
-                          !canPayoff ||
-                          actionLoading === "PAYOFF_COLLATERAL_LOAN"
-                        }
-                        title={
-                          canPayoff
-                            ? "Pay off this loan"
-                            : "Not enough cash to pay off"
-                        }
+              {activeLoans.length === 0 ? (
+                <p className="text-sm text-neutral-500">No active loans.</p>
+              ) : (
+                <div className="space-y-2">
+                  {activeLoans.map((loan) => {
+                    const tile =
+                      boardPack?.tiles?.find(
+                        (entry) => entry.index === loan.collateral_tile_index,
+                      ) ?? null;
+                    const tileName =
+                      tile?.name ?? `Tile ${loan.collateral_tile_index}`;
+                    const groupLabel = getTileGroupLabel(tile);
+                    const payoffAmount =
+                      typeof loan.remaining_principal === "number"
+                        ? loan.remaining_principal
+                        : loan.principal;
+                    const canPayoff =
+                      canAct &&
+                      payoffAmount > 0 &&
+                      myPlayerBalance >= payoffAmount;
+                    return (
+                      <PropertyCardShell
+                        key={loan.id}
+                        bandColor={getTileBandColor(tile)}
+                        bodyClassName="text-sm"
                       >
-                        Pay off
-                      </button>
-                    </div>
-                  </PropertyCardShell>
-                );
-              })}
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="font-semibold text-neutral-900">
+                              {tileName}
+                            </p>
+                            <p className="text-xs text-neutral-500">
+                              {groupLabel}
+                            </p>
+                            <p className="text-xs text-neutral-400">
+                              Rent paused while collateralized.
+                            </p>
+                            <p className="text-xs text-neutral-500">
+                              Payment: ${loan.payment_per_turn} · Turns
+                              remaining: {loan.turns_remaining}
+                            </p>
+                            <p className="text-xs text-neutral-500">
+                              Remaining balance: ${payoffAmount}
+                            </p>
+                          </div>
+                          <button
+                            className="rounded-full border border-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
+                            type="button"
+                            onClick={() => setPayoffLoan(loan)}
+                            disabled={
+                              !canPayoff ||
+                              actionLoading === "PAYOFF_COLLATERAL_LOAN"
+                            }
+                            title={
+                              canPayoff
+                                ? "Pay off this loan"
+                                : "Not enough cash to pay off"
+                            }
+                          >
+                            Pay off
+                          </button>
+                        </div>
+                      </PropertyCardShell>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-          )}
-        </div>
-        <div className="space-y-2">
-          <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
-            Purchase mortgages
-          </p>
-          <p className="text-xs text-neutral-500">
-            Interest is charged each turn; unpaid interest accumulates.
-          </p>
-          {activePurchaseMortgages.length === 0 ? (
-            <p className="text-sm text-neutral-500">No purchase mortgages.</p>
-          ) : (
+          ) : null}
+          {walletPanelView === "mortgages" ? (
             <div className="space-y-2">
-              {activePurchaseMortgages.map((mortgage) => {
-                const tile =
-                  boardPack?.tiles?.find(
-                    (entry) => entry.index === mortgage.tile_index,
-                  ) ?? null;
-                const tileName = tile?.name ?? `Tile ${mortgage.tile_index}`;
-                const groupLabel = getTileGroupLabel(tile);
-                const payoffAmount =
-                  (mortgage.principal_remaining ?? 0) +
-                  (mortgage.accrued_interest_unpaid ?? 0);
-                const interestPerTurn = calculateMortgageInterestPerTurn(
-                  mortgage.principal_remaining,
-                  mortgage.rate_per_turn,
-                );
-                const lastCharged = latestMortgageInterestById.get(mortgage.id);
-                const canPayoff =
-                  canAct && payoffAmount > 0 && myPlayerBalance >= payoffAmount;
-                return (
-                  <PropertyCardShell
-                    key={mortgage.id}
-                    bandColor={getTileBandColor(tile)}
-                    bodyClassName="text-sm"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-semibold text-neutral-900">
-                          {tileName}
-                        </p>
-                        <p className="text-xs text-neutral-500">{groupLabel}</p>
-                        <p className="text-xs text-neutral-500">
-                          Principal remaining: ${mortgage.principal_remaining}
-                        </p>
-                        <p className="text-xs text-neutral-500">
-                          Accrued interest: ${mortgage.accrued_interest_unpaid}
-                        </p>
-                        <p className="text-xs text-neutral-500">
-                          Interest per turn: ${interestPerTurn}
-                        </p>
-                        <p className="text-xs text-neutral-500">
-                          Payoff amount: ${payoffAmount}
-                        </p>
-                      </div>
-                      <button
-                        className="rounded-full border border-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
-                        type="button"
-                        onClick={() =>
-                          void handleBankAction({
-                            action: "PAYOFF_PURCHASE_MORTGAGE",
-                            mortgageId: mortgage.id,
-                          })
-                        }
-                        disabled={
-                          !canPayoff ||
-                          actionLoading === "PAYOFF_PURCHASE_MORTGAGE"
-                        }
-                        title={
-                          canPayoff
-                            ? "Pay off this mortgage"
-                            : "Not enough cash to pay off"
-                        }
+              <p className="text-xs text-neutral-500">
+                Interest is charged each turn; unpaid interest accumulates.
+              </p>
+              {activePurchaseMortgages.length === 0 ? (
+                <p className="text-sm text-neutral-500">
+                  No purchase mortgages.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {activePurchaseMortgages.map((mortgage) => {
+                    const tile =
+                      boardPack?.tiles?.find(
+                        (entry) => entry.index === mortgage.tile_index,
+                      ) ?? null;
+                    const tileName =
+                      tile?.name ?? `Tile ${mortgage.tile_index}`;
+                    const groupLabel = getTileGroupLabel(tile);
+                    const payoffAmount =
+                      (mortgage.principal_remaining ?? 0) +
+                      (mortgage.accrued_interest_unpaid ?? 0);
+                    const interestPerTurn = calculateMortgageInterestPerTurn(
+                      mortgage.principal_remaining,
+                      mortgage.rate_per_turn,
+                    );
+                    const lastCharged = latestMortgageInterestById.get(
+                      mortgage.id,
+                    );
+                    const canPayoff =
+                      canAct &&
+                      payoffAmount > 0 &&
+                      myPlayerBalance >= payoffAmount;
+                    return (
+                      <PropertyCardShell
+                        key={mortgage.id}
+                        bandColor={getTileBandColor(tile)}
+                        bodyClassName="text-sm"
                       >
-                        Pay off
-                      </button>
-                    </div>
-                  </PropertyCardShell>
-                );
-              })}
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="font-semibold text-neutral-900">
+                              {tileName}
+                            </p>
+                            <p className="text-xs text-neutral-500">
+                              {groupLabel}
+                            </p>
+                            <p className="text-xs text-neutral-500">
+                              Principal remaining: $
+                              {mortgage.principal_remaining}
+                            </p>
+                            <p className="text-xs text-neutral-500">
+                              Accrued interest: $
+                              {mortgage.accrued_interest_unpaid}
+                            </p>
+                            <p className="text-xs text-neutral-500">
+                              Interest per turn: ${interestPerTurn}
+                            </p>
+                            <p className="text-xs text-neutral-500">
+                              Payoff amount: ${payoffAmount}
+                            </p>
+                          </div>
+                          <button
+                            className="rounded-full border border-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
+                            type="button"
+                            onClick={() =>
+                              void handleBankAction({
+                                action: "PAYOFF_PURCHASE_MORTGAGE",
+                                mortgageId: mortgage.id,
+                              })
+                            }
+                            disabled={
+                              !canPayoff ||
+                              actionLoading === "PAYOFF_PURCHASE_MORTGAGE"
+                            }
+                            title={
+                              canPayoff
+                                ? "Pay off this mortgage"
+                                : "Not enough cash to pay off"
+                            }
+                          >
+                            Pay off
+                          </button>
+                        </div>
+                      </PropertyCardShell>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-          )}
+          ) : null}
         </div>
       </section>
 
