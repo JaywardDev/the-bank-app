@@ -84,23 +84,6 @@ const PropertyCardShell = ({
   </div>
 );
 
-const DiceIcon = () => (
-  <svg
-    width="22"
-    height="22"
-    viewBox="0 0 24 24"
-    fill="currentColor"
-    aria-hidden
-  >
-    <rect x="3" y="3" width="18" height="18" rx="4" />
-    <circle cx="8" cy="8" r="1.5" />
-    <circle cx="16" cy="16" r="1.5" />
-    <circle cx="8" cy="16" r="1.5" />
-    <circle cx="16" cy="8" r="1.5" />
-  </svg>
-);
-
-
 type FloatingTurnActionsProps = {
   isVisible: boolean;
   canRoll: boolean;
@@ -146,7 +129,15 @@ const FloatingTurnActions = ({
         <span className="sr-only">
           {isRolling ? "Rolling…" : "Roll dice"}
         </span>
-        <DiceIcon />
+        {/* TODO: swap to /public/icons/dice.png if we need a raster asset. */}
+        <Image
+          src="/icons/dice.svg"
+          alt=""
+          width={24}
+          height={24}
+          className="h-6 w-6 object-contain"
+          aria-hidden
+        />
       </button>
       <button
         className={`flex h-12 w-12 items-center justify-center rounded-full border text-xs font-semibold shadow-lg transition ${
