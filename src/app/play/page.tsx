@@ -391,9 +391,9 @@ const getTileGroupLabel = (tile: BoardTile | null | undefined) => {
   }
   switch (tile.type) {
     case "RAIL":
-      return "Railroads";
+      return "Railroad";
     case "UTILITY":
-      return "Utilities";
+      return "Utility";
     case "PROPERTY":
       return "Property";
     default:
@@ -3457,6 +3457,26 @@ export default function PlayPage() {
     myPlayerBalance,
     ownershipByTile,
   ]);
+  const ownedRailCount = useMemo(() => {
+    if (!boardPack?.tiles || !currentUserPlayer) {
+      return 0;
+    }
+    return boardPack.tiles.filter(
+      (tile) =>
+        tile.type === "RAIL" &&
+        ownershipByTile[tile.index]?.owner_player_id === currentUserPlayer.id,
+    ).length;
+  }, [boardPack?.tiles, currentUserPlayer, ownershipByTile]);
+  const ownedUtilityCount = useMemo(() => {
+    if (!boardPack?.tiles || !currentUserPlayer) {
+      return 0;
+    }
+    return boardPack.tiles.filter(
+      (tile) =>
+        tile.type === "UTILITY" &&
+        ownershipByTile[tile.index]?.owner_player_id === currentUserPlayer.id,
+    ).length;
+  }, [boardPack?.tiles, currentUserPlayer, ownershipByTile]);
   const availableTradeCounterparties = useMemo(() => {
     if (!currentUserPlayer) {
       return [];
@@ -5966,8 +5986,27 @@ export default function PlayPage() {
                 const principalPreview = Math.round(
                   (tile.price ?? 0) * rules.collateralLtv,
                 );
+                const isProperty = tile.type === "PROPERTY";
+                const isRail = tile.type === "RAIL";
+                const isUtility = tile.type === "UTILITY";
                 const baseRent =
                   typeof tile.baseRent === "number" ? tile.baseRent : null;
+                const railBaseRent =
+                  RAIL_RENT_BY_COUNT[1] ?? baseRent ?? null;
+                const railCurrentRent =
+                  RAIL_RENT_BY_COUNT[
+                    Math.min(ownedRailCount, RAIL_RENT_BY_COUNT.length - 1)
+                  ] ?? railBaseRent;
+                const utilityMultiplier =
+                  ownedUtilityCount >= 2
+                    ? UTILITY_RENT_MULTIPLIERS.double
+                    : UTILITY_RENT_MULTIPLIERS.single;
+                const lastRoll =
+                  typeof gameState?.last_roll === "number"
+                    ? gameState.last_roll
+                    : null;
+                const utilityRentPreview =
+                  lastRoll !== null ? lastRoll * utilityMultiplier : null;
                 const groupLabel = getTileGroupLabel(tile);
                 return (
                   <PropertyCardShell
@@ -5989,22 +6028,87 @@ export default function PlayPage() {
                           <span className="font-semibold text-neutral-700">
                             Principal: ${principalPreview}
                           </span>
-                          <span className="uppercase tracking-wide text-neutral-400">
-                            Rent
-                          </span>
-                          <span className="font-semibold text-neutral-700">
-                            {baseRent !== null ? `$${baseRent}` : "—"}
-                          </span>
-                          <span className="uppercase tracking-wide text-neutral-400">
-                            Houses
-                          </span>
-                          <span className="font-semibold text-neutral-700">
-                            {tile.type === "PROPERTY" ? houses : "—"}
-                          </span>
+                          {isProperty ? (
+                            <>
+                              <span className="uppercase tracking-wide text-neutral-400">
+                                Rent
+                              </span>
+                              <span className="font-semibold text-neutral-700">
+                                {baseRent !== null ? `$${baseRent}` : "—"}
+                              </span>
+                              <span className="uppercase tracking-wide text-neutral-400">
+                                Houses
+                              </span>
+                              <span className="font-semibold text-neutral-700">
+                                {houses}
+                              </span>
+                            </>
+                          ) : null}
+                          {isRail ? (
+                            <>
+                              <span className="uppercase tracking-wide text-neutral-400">
+                                Base rent
+                              </span>
+                              <span className="font-semibold text-neutral-700">
+                                {railBaseRent !== null
+                                  ? `$${railBaseRent}`
+                                  : "—"}
+                              </span>
+                              <span className="uppercase tracking-wide text-neutral-400">
+                                Owned RR
+                              </span>
+                              <span className="font-semibold text-neutral-700">
+                                {ownedRailCount}
+                              </span>
+                              <span className="uppercase tracking-wide text-neutral-400">
+                                Current rent
+                              </span>
+                              <span className="font-semibold text-neutral-700">
+                                {railCurrentRent !== null
+                                  ? `$${railCurrentRent}`
+                                  : "—"}
+                              </span>
+                            </>
+                          ) : null}
+                          {isUtility ? (
+                            <>
+                              <span className="uppercase tracking-wide text-neutral-400">
+                                Owned util
+                              </span>
+                              <span className="font-semibold text-neutral-700">
+                                {ownedUtilityCount}
+                              </span>
+                              <span className="uppercase tracking-wide text-neutral-400">
+                                Rent rule
+                              </span>
+                              <span className="font-semibold text-neutral-700">
+                                {UTILITY_RENT_MULTIPLIERS.single}× /{" "}
+                                {UTILITY_RENT_MULTIPLIERS.double}×
+                              </span>
+                              {lastRoll !== null ? (
+                                <>
+                                  <span className="uppercase tracking-wide text-neutral-400">
+                                    Last roll
+                                  </span>
+                                  <span className="font-semibold text-neutral-700">
+                                    {lastRoll}
+                                  </span>
+                                  <span className="uppercase tracking-wide text-neutral-400">
+                                    Current rent
+                                  </span>
+                                  <span className="font-semibold text-neutral-700">
+                                    {utilityRentPreview !== null
+                                      ? `$${utilityRentPreview}`
+                                      : "—"}
+                                  </span>
+                                </>
+                              ) : null}
+                            </>
+                          ) : null}
                         </div>
                       </div>
                       <div className="flex flex-col items-end gap-2">
-                        {tile.type === "PROPERTY" ? (
+                        {isProperty ? (
                           <div className="flex items-center gap-2">
                             <button
                               className="rounded-full bg-neutral-900 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
