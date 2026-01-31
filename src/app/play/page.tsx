@@ -25,6 +25,7 @@ import {
 } from "@/lib/macroDecks";
 import { getRules } from "@/lib/rules";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
+import Image from "next/image";
 
 const lastGameKey = "bank.lastGameId";
 const DEBUG = process.env.NEXT_PUBLIC_DEBUG === "true";
@@ -83,11 +84,16 @@ const PropertyCardShell = ({
   </div>
 );
 
-const DiceIconPlaceholder = ({ className }: { className?: string }) => (
+const DiceIcon = ({ className }: { className?: string }) => (
   <div
-    className={`flex h-6 w-6 items-center justify-center rounded-md border border-current text-[9px] font-semibold ${className ?? ""}`}
+    className={`flex h-6 w-6 items-center justify-center ${className ?? ""}`}
   >
-    DICE
+    <Image
+      src="/dice-icon.svg"
+      alt="Dice"
+      width={24}
+      height={24}
+    />
   </div>
 );
 
@@ -136,7 +142,7 @@ const FloatingTurnActions = ({
         <span className="sr-only">
           {isRolling ? "Rolling…" : "Roll dice"}
         </span>
-        <DiceIconPlaceholder />
+        <DiceIcon />
       </button>
       <button
         className={`flex h-12 w-12 items-center justify-center rounded-full border text-xs font-semibold shadow-lg transition ${
