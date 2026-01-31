@@ -16,6 +16,7 @@ import {
   MACRO_DECK_V1,
   drawMacroCardV1,
   type MacroEffectsV1,
+  type MacroRarity,
 } from "@/lib/macroDeckV1";
 import { DEFAULT_RULES, getRules } from "@/lib/rules";
 
@@ -147,6 +148,15 @@ type ActiveMacroEffect = {
   started_round: number;
 };
 
+type ActiveMacroEffectV1 = {
+  id: string;
+  name: string;
+  rarity: MacroRarity | null;
+  effects: MacroEffectsV1;
+  roundsRemaining: number;
+  roundsApplied: number;
+};
+
 type GameStateRow = {
   game_id: string;
   version: number;
@@ -158,6 +168,7 @@ type GameStateRow = {
   rounds_elapsed: number | null;
   last_macro_event_id: string | null;
   active_macro_effects: ActiveMacroEffect[] | null;
+  active_macro_effects_v1: ActiveMacroEffectV1[] | null;
   turn_phase: string | null;
   pending_action: Record<string, unknown> | null;
   chance_index: number | null;
@@ -334,11 +345,45 @@ const normalizeActiveMacroEffects = (raw: unknown): ActiveMacroEffect[] => {
     .filter((entry): entry is ActiveMacroEffect => Boolean(entry));
 };
 
+const normalizeActiveMacroEffectsV1 = (raw: unknown): ActiveMacroEffectV1[] => {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+      const data = entry as Record<string, unknown>;
+      const effects =
+        data.effects && typeof data.effects === "object"
+          ? (data.effects as MacroEffectsV1)
+          : {};
+      return {
+        id: typeof data.id === "string" ? data.id : "unknown",
+        name: typeof data.name === "string" ? data.name : "Macroeconomic event",
+        rarity: typeof data.rarity === "string" ? (data.rarity as MacroRarity) : null,
+        effects,
+        roundsRemaining:
+          typeof data.roundsRemaining === "number" ? data.roundsRemaining : 0,
+        roundsApplied:
+          typeof data.roundsApplied === "number" ? data.roundsApplied : 0,
+      };
+    })
+    .filter((entry): entry is ActiveMacroEffectV1 => Boolean(entry));
+};
+
 const getActiveMacroEffectsForRules = (
   raw: unknown,
   macroEnabled: boolean,
 ): ActiveMacroEffect[] =>
   macroEnabled ? normalizeActiveMacroEffects(raw) : [];
+
+const getActiveMacroEffectsV1ForRules = (
+  raw: unknown,
+  macroEnabled: boolean,
+): ActiveMacroEffectV1[] =>
+  macroEnabled ? normalizeActiveMacroEffectsV1(raw) : [];
 
 const normalizeMacroEffectsV1 = (effects: MacroEffectsV1): MacroEventEffect[] => {
   const normalized: MacroEventEffect[] = [];
@@ -384,6 +429,25 @@ const tickMacroEffects = (activeEffects: ActiveMacroEffect[]) => {
   return { updated, expired };
 };
 
+const tickMacroEffectsV1 = (activeEffects: ActiveMacroEffectV1[]) => {
+  const expired: ActiveMacroEffectV1[] = [];
+  const updated = activeEffects
+    .map((effect) => {
+      const remaining = effect.roundsRemaining - 1;
+      if (remaining <= 0) {
+        expired.push(effect);
+        return null;
+      }
+      return {
+        ...effect,
+        roundsRemaining: remaining,
+        roundsApplied: effect.roundsApplied + 1,
+      };
+    })
+    .filter((entry): entry is ActiveMacroEffectV1 => Boolean(entry));
+  return { updated, expired };
+};
+
 const getMacroInterestDeltaPerTurn = (activeEffects: ActiveMacroEffect[]) =>
   activeEffects.reduce((total, effect) => {
     const delta = effect.effects.reduce((sum, detail) => {
@@ -394,6 +458,76 @@ const getMacroInterestDeltaPerTurn = (activeEffects: ActiveMacroEffect[]) =>
     }, 0);
     return total + delta;
   }, 0);
+
+const getMacroRentMultiplierV1 = (activeEffects: ActiveMacroEffectV1[]) =>
+  activeEffects.reduce((product, effect) => {
+    const multiplier = effect.effects.rent_multiplier;
+    if (typeof multiplier === "number") {
+      return product * multiplier;
+    }
+    return product;
+  }, 1);
+
+const getMacroRailRentMultiplierV1 = (activeEffects: ActiveMacroEffectV1[]) =>
+  activeEffects.reduce((product, effect) => {
+    const multiplier = effect.effects.rail_rent_multiplier;
+    if (typeof multiplier === "number") {
+      return product * multiplier;
+    }
+    return product;
+  }, 1);
+
+const getMacroUtilityRentBonusPctPerHouseV1 = (
+  activeEffects: ActiveMacroEffectV1[],
+) =>
+  activeEffects.reduce((total, effect) => {
+    const bonus = effect.effects.utility_rent_bonus_per_house_pct;
+    if (typeof bonus === "number") {
+      return total + bonus;
+    }
+    return total;
+  }, 0);
+
+const getMacroBuildCostMultiplierV1 = (activeEffects: ActiveMacroEffectV1[]) =>
+  activeEffects.reduce((product, effect) => {
+    const multiplier = effect.effects.build_cost_multiplier;
+    if (typeof multiplier === "number") {
+      return product * multiplier;
+    }
+    return product;
+  }, 1);
+
+const getMacroHouseSellMultiplierV1 = (activeEffects: ActiveMacroEffectV1[]) =>
+  activeEffects.reduce((product, effect) => {
+    const multiplier = effect.effects.house_sell_multiplier;
+    if (typeof multiplier === "number") {
+      return product * multiplier;
+    }
+    return product;
+  }, 1);
+
+const getMacroMortgageFlatDeltaV1 = (activeEffects: ActiveMacroEffectV1[]) =>
+  activeEffects.reduce((total, effect) => {
+    const delta = effect.effects.mortgage_interest_flat_delta;
+    if (typeof delta === "number") {
+      return total + delta;
+    }
+    return total;
+  }, 0);
+
+const getMacroInterestTrendAccumulatorV1 = (
+  activeEffects: ActiveMacroEffectV1[],
+) =>
+  activeEffects.reduce((total, effect) => {
+    const trend = effect.effects.interest_trend_per_round;
+    if (typeof trend === "number") {
+      return total + trend * effect.roundsApplied;
+    }
+    return total;
+  }, 0);
+
+const getMacroLoanMortgageBlockedV1 = (activeEffects: ActiveMacroEffectV1[]) =>
+  activeEffects.some((effect) => effect.effects.loan_mortgage_new_blocked === true);
 
 const getMaintenancePerHouse = (effects: MacroEventEffect[]) =>
   effects.reduce((sum, detail) => {
@@ -1276,22 +1410,23 @@ const calculateRent = ({
   boardTiles: TileInfo[];
   ownershipByTile: OwnershipByTile;
   diceTotal?: number | null;
-  activeMacroEffects: ActiveMacroEffect[];
+  activeMacroEffects: ActiveMacroEffectV1[];
 }) => {
   if (!ownerId || ownerId === currentPlayerId) {
     return { amount: 0, meta: null };
   }
 
-  const { globalMultiplier, groupMultiplier, appliedGroups } =
-    getMacroRentMultipliers(activeMacroEffects, tile);
-  const macroMultiplier = globalMultiplier * groupMultiplier;
+  const rentMultiplier = getMacroRentMultiplierV1(activeMacroEffects);
+  const railMultiplier = getMacroRailRentMultiplierV1(activeMacroEffects);
+  const utilityBonusPctPerHouse = getMacroUtilityRentBonusPctPerHouseV1(
+    activeMacroEffects,
+  );
   const macroMeta =
-    macroMultiplier !== 1
+    rentMultiplier !== 1 || railMultiplier !== 1 || utilityBonusPctPerHouse !== 0
       ? {
-          rent_multiplier_global: globalMultiplier,
-          rent_multiplier_group: groupMultiplier,
-          rent_multiplier_total: macroMultiplier,
-          rent_multiplier_groups: appliedGroups,
+          rent_multiplier: rentMultiplier,
+          rail_rent_multiplier: railMultiplier,
+          utility_rent_bonus_per_house_pct: utilityBonusPctPerHouse,
         }
       : null;
 
@@ -1303,7 +1438,7 @@ const calculateRent = ({
       "RAIL",
     );
     const baseAmount = RAIL_RENT_BY_COUNT[railCount] ?? 0;
-    const amount = Math.round(baseAmount * macroMultiplier);
+    const amount = Math.round(baseAmount * rentMultiplier * railMultiplier);
     return {
       amount,
       meta: {
@@ -1325,7 +1460,16 @@ const calculateRent = ({
     const multiplier = utilityCount >= 2 ? 10 : 4;
     const total = diceTotal ?? 0;
     const baseAmount = multiplier * total;
-    const amount = Math.round(baseAmount * macroMultiplier);
+    const totalHousesOwned = Object.values(ownershipByTile).reduce(
+      (sum, ownership) =>
+        ownership.owner_player_id === ownerId ? sum + ownership.houses : sum,
+      0,
+    );
+    const utilityBonusMultiplier =
+      1 + utilityBonusPctPerHouse * totalHousesOwned;
+    const amount = Math.round(
+      baseAmount * rentMultiplier * utilityBonusMultiplier,
+    );
     return {
       amount,
       meta: {
@@ -1334,6 +1478,8 @@ const calculateRent = ({
         dice_total: total,
         multiplier,
         base_rent: baseAmount,
+        utility_bonus_multiplier: utilityBonusMultiplier,
+        utility_houses_owned: totalHousesOwned,
         ...(macroMeta ?? {}),
       },
     };
@@ -1350,7 +1496,7 @@ const calculateRent = ({
       rentByHouses && rentByHouses.length > 0
         ? rentByHouses[clampedHouses] ?? tile.baseRent ?? 0
         : tile.baseRent ?? 0;
-    const finalAmount = Math.round(amount * macroMultiplier);
+    const finalAmount = Math.round(amount * rentMultiplier);
     return {
       amount: finalAmount,
       meta: {
@@ -1364,7 +1510,7 @@ const calculateRent = ({
 
   const amount = tile.baseRent ?? 0;
   return {
-    amount: Math.round(amount * macroMultiplier),
+    amount: Math.round(amount * rentMultiplier),
     meta: {
       rent_type: "PROPERTY",
       base_rent: amount,
@@ -1807,7 +1953,7 @@ const finalizeMoveResolution = async ({
   boardTiles: TileInfo[];
   rules: ReturnType<typeof getRules>;
   startingCash: number;
-  activeMacroEffects: ActiveMacroEffect[];
+  activeMacroEffects: ActiveMacroEffectV1[];
   nextChanceIndex: number;
   nextCommunityIndex: number;
   nextChanceOrder: number[] | null;
@@ -2124,13 +2270,15 @@ const applyLoanPaymentsForPlayer = async ({
   player,
   balances,
   startingCash,
-  macroInterestDeltaPerTurn,
+  macroInterestTrendAccumulator,
+  macroMortgageFlatDelta,
 }: {
   gameId: string;
   player: PlayerRow;
   balances: Record<string, number>;
   startingCash: number;
-  macroInterestDeltaPerTurn: number;
+  macroInterestTrendAccumulator: number;
+  macroMortgageFlatDelta: number;
 }) => {
   const activeLoans = (await fetchFromSupabaseWithService<PlayerLoanRow[]>(
     `player_loans?select=id,collateral_tile_index,principal,remaining_principal,rate_per_turn,term_turns,turns_remaining,payment_per_turn,status&game_id=eq.${gameId}&player_id=eq.${player.id}&status=eq.active`,
@@ -2215,9 +2363,9 @@ const applyLoanPaymentsForPlayer = async ({
     });
 
     const macroInterestSurcharge = Math.round(
-      remainingPrincipal * macroInterestDeltaPerTurn,
+      remainingPrincipal * macroInterestTrendAccumulator,
     );
-    if (macroInterestSurcharge > 0) {
+    if (macroInterestSurcharge !== 0) {
       const surchargeBalance = updatedBalances[player.id] ?? startingCash;
       const surchargeAfter = surchargeBalance - macroInterestSurcharge;
       updatedBalances = {
@@ -2234,15 +2382,15 @@ const applyLoanPaymentsForPlayer = async ({
       }
       events.push(
         {
-          event_type: "CASH_DEBIT",
+          event_type: macroInterestSurcharge > 0 ? "CASH_DEBIT" : "CASH_CREDIT",
           payload: {
             player_id: player.id,
-            amount: macroInterestSurcharge,
+            amount: Math.abs(macroInterestSurcharge),
             reason: "MACRO_INTEREST_SURCHARGE",
             loan_id: loan.id,
             tile_index: loan.collateral_tile_index,
             principal_remaining: remainingPrincipal,
-            macro_interest_delta_per_turn: macroInterestDeltaPerTurn,
+            macro_interest_delta_per_turn: macroInterestTrendAccumulator,
           },
         },
         {
@@ -2253,7 +2401,7 @@ const applyLoanPaymentsForPlayer = async ({
             tile_index: loan.collateral_tile_index,
             amount: macroInterestSurcharge,
             principal_remaining: remainingPrincipal,
-            macro_interest_delta_per_turn: macroInterestDeltaPerTurn,
+            macro_interest_delta_per_turn: macroInterestTrendAccumulator,
           },
         },
       );
@@ -2282,7 +2430,9 @@ const applyLoanPaymentsForPlayer = async ({
 
   for (const mortgage of activeMortgages) {
     const effectiveRatePerTurn =
-      mortgage.rate_per_turn + macroInterestDeltaPerTurn;
+      mortgage.rate_per_turn +
+      macroInterestTrendAccumulator +
+      macroMortgageFlatDelta;
     const interestAmount = Math.round(
       mortgage.principal_remaining * effectiveRatePerTurn,
     );
@@ -2320,7 +2470,8 @@ const applyLoanPaymentsForPlayer = async ({
             tile_index: mortgage.tile_index,
             mortgage_id: mortgage.id,
             base_rate_per_turn: mortgage.rate_per_turn,
-            macro_interest_delta_per_turn: macroInterestDeltaPerTurn,
+            macro_interest_delta_per_turn: macroInterestTrendAccumulator,
+            macro_mortgage_flat_delta: macroMortgageFlatDelta,
             effective_rate_per_turn: effectiveRatePerTurn,
           },
         },
@@ -2333,7 +2484,8 @@ const applyLoanPaymentsForPlayer = async ({
             interest_amount: interestAmount,
             turns_elapsed_after: turnsElapsedAfter,
             base_rate_per_turn: mortgage.rate_per_turn,
-            macro_interest_delta_per_turn: macroInterestDeltaPerTurn,
+            macro_interest_delta_per_turn: macroInterestTrendAccumulator,
+            macro_mortgage_flat_delta: macroMortgageFlatDelta,
             effective_rate_per_turn: effectiveRatePerTurn,
           },
         },
@@ -2351,7 +2503,8 @@ const applyLoanPaymentsForPlayer = async ({
           paid: false,
           unpaid: interestAmount,
           base_rate_per_turn: mortgage.rate_per_turn,
-          macro_interest_delta_per_turn: macroInterestDeltaPerTurn,
+          macro_interest_delta_per_turn: macroInterestTrendAccumulator,
+          macro_mortgage_flat_delta: macroMortgageFlatDelta,
           effective_rate_per_turn: effectiveRatePerTurn,
         },
       });
@@ -2453,7 +2606,7 @@ export async function POST(request: Request) {
       }
 
       await fetchFromSupabaseWithService<GameStateRow[]>(
-        "game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment",
+        "game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment",
         {
           method: "POST",
           headers: {
@@ -2467,6 +2620,7 @@ export async function POST(request: Request) {
             last_roll: null,
             doubles_count: 0,
             active_macro_effects: [],
+            active_macro_effects_v1: [],
             turn_phase: "AWAITING_ROLL",
             pending_action: null,
             free_parking_pot: 0,
@@ -2591,7 +2745,7 @@ export async function POST(request: Request) {
     )) ?? [];
 
     const [gameState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
-      `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
+      `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
       { method: "GET" },
     )) ?? [];
 
@@ -2709,7 +2863,7 @@ export async function POST(request: Request) {
       );
 
       const upsertResponse = await fetch(
-        `${supabaseUrl}/rest/v1/game_state?on_conflict=game_id&select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment`,
+        `${supabaseUrl}/rest/v1/game_state?on_conflict=game_id&select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment`,
         {
           method: "POST",
           headers: {
@@ -2726,6 +2880,7 @@ export async function POST(request: Request) {
             rounds_elapsed: 0,
             last_macro_event_id: null,
             active_macro_effects: [],
+            active_macro_effects_v1: [],
             turn_phase: "AWAITING_ROLL",
             pending_action: null,
             chance_index: 0,
@@ -3078,7 +3233,7 @@ export async function POST(request: Request) {
         const finalVersion = currentVersion + events.length;
         const [updatedState] =
           (await fetchFromSupabaseWithService<GameStateRow[]>(
-            `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
+            `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
             {
               method: "PATCH",
               headers: {
@@ -3167,7 +3322,7 @@ export async function POST(request: Request) {
         const finalVersion = currentVersion + events.length;
         const [updatedState] =
           (await fetchFromSupabaseWithService<GameStateRow[]>(
-            `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
+            `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
             {
               method: "PATCH",
               headers: {
@@ -3261,7 +3416,7 @@ export async function POST(request: Request) {
         const finalVersion = currentVersion + events.length;
         const [updatedState] =
           (await fetchFromSupabaseWithService<GameStateRow[]>(
-            `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
+            `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
             {
               method: "PATCH",
               headers: {
@@ -3615,7 +3770,7 @@ export async function POST(request: Request) {
       const finalVersion = currentVersion + events.length;
       const [updatedState] =
         (await fetchFromSupabaseWithService<GameStateRow[]>(
-          `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
+          `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
           {
             method: "PATCH",
             headers: {
@@ -4264,8 +4419,8 @@ export async function POST(request: Request) {
         boardTiles,
         rules,
         startingCash: game.starting_cash ?? 0,
-        activeMacroEffects: getActiveMacroEffectsForRules(
-          gameState?.active_macro_effects,
+        activeMacroEffects: getActiveMacroEffectsV1ForRules(
+          gameState?.active_macro_effects_v1,
           rules.macroEnabled,
         ),
         nextChanceIndex: gameState.chance_index ?? 0,
@@ -4447,9 +4602,15 @@ export async function POST(request: Request) {
           player: nextPlayer,
           balances: updatedBalances,
           startingCash: game.starting_cash ?? 0,
-          macroInterestDeltaPerTurn: getMacroInterestDeltaPerTurn(
-            getActiveMacroEffectsForRules(
-              gameState?.active_macro_effects,
+          macroInterestTrendAccumulator: getMacroInterestTrendAccumulatorV1(
+            getActiveMacroEffectsV1ForRules(
+              gameState?.active_macro_effects_v1,
+              rules.macroEnabled,
+            ),
+          ),
+          macroMortgageFlatDelta: getMacroMortgageFlatDeltaV1(
+            getActiveMacroEffectsV1ForRules(
+              gameState?.active_macro_effects_v1,
               rules.macroEnabled,
             ),
           ),
@@ -4814,8 +4975,8 @@ export async function POST(request: Request) {
         boardTiles,
         rules,
         startingCash: game.starting_cash ?? 0,
-        activeMacroEffects: getActiveMacroEffectsForRules(
-          gameState?.active_macro_effects,
+        activeMacroEffects: getActiveMacroEffectsV1ForRules(
+          gameState?.active_macro_effects_v1,
           rules.macroEnabled,
         ),
         nextChanceIndex,
@@ -5158,6 +5319,11 @@ export async function POST(request: Request) {
         pendingAction.effects && typeof pendingAction.effects === "object"
           ? pendingAction.effects
           : null;
+      const macroEnabled = rules.macroEnabled;
+      const activeMacroEffectsV1 = normalizeActiveMacroEffectsV1(
+        gameState.active_macro_effects_v1,
+      );
+      let nextActiveMacroEffectsV1 = activeMacroEffectsV1;
 
       const events: Array<{ event_type: string; payload: Record<string, unknown> }> =
         [
@@ -5178,6 +5344,36 @@ export async function POST(request: Request) {
             },
           },
         ];
+      if (
+        macroEnabled &&
+        macroEffects &&
+        typeof macroDurationRounds === "number" &&
+        macroDurationRounds > 0
+      ) {
+        const activeMacroEffect: ActiveMacroEffectV1 = {
+          id: macroCardId ?? "unknown",
+          name: macroName,
+          rarity:
+            typeof macroRarity === "string" ? (macroRarity as MacroRarity) : null,
+          effects: macroEffects as MacroEffectsV1,
+          roundsRemaining: macroDurationRounds,
+          roundsApplied: 0,
+        };
+        nextActiveMacroEffectsV1 = [
+          ...nextActiveMacroEffectsV1,
+          activeMacroEffect,
+        ];
+        events.push({
+          event_type: "MACRO_APPLIED",
+          payload: {
+            macro_id: activeMacroEffect.id,
+            macro_name: activeMacroEffect.name,
+            rarity: activeMacroEffect.rarity,
+            rounds_remaining: activeMacroEffect.roundsRemaining,
+            effects: activeMacroEffect.effects,
+          },
+        });
+      }
 
       const finalVersion = currentVersion + events.length;
       const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
@@ -5191,6 +5387,7 @@ export async function POST(request: Request) {
             version: finalVersion,
             pending_action: null,
             turn_phase: returnTurnPhase,
+            active_macro_effects_v1: nextActiveMacroEffectsV1,
             updated_at: new Date().toISOString(),
           }),
         },
@@ -5269,6 +5466,18 @@ export async function POST(request: Request) {
       const currentBalance =
         balances[currentPlayer.id] ?? game.starting_cash ?? 0;
       const usingMortgage = body.financing === "MORTGAGE";
+      if (usingMortgage) {
+        const activeMacroEffects = getActiveMacroEffectsV1ForRules(
+          gameState.active_macro_effects_v1,
+          rules.macroEnabled,
+        );
+        if (getMacroLoanMortgageBlockedV1(activeMacroEffects)) {
+          return NextResponse.json(
+            { error: "New loans and mortgages are currently blocked." },
+            { status: 409 },
+          );
+        }
+      }
       const principal = usingMortgage ? Math.round(price * 0.5) : 0;
       const downPayment = usingMortgage ? price - principal : price;
 
@@ -5441,13 +5650,14 @@ export async function POST(request: Request) {
       action: "BUILD_HOUSE" | "SELL_HOUSE",
       tileIndex: number,
     ) => {
-      const activeMacroEffects = getActiveMacroEffectsForRules(
-        gameState.active_macro_effects,
+      const activeMacroEffects = getActiveMacroEffectsV1ForRules(
+        gameState.active_macro_effects_v1,
         rules.macroEnabled,
       );
-      const macroDevelopmentMultiplier = getMacroDevelopmentCostMultiplier(
-        activeMacroEffects,
-      );
+      const macroDevelopmentMultiplier =
+        getMacroBuildCostMultiplierV1(activeMacroEffects);
+      const macroHouseSellMultiplier =
+        getMacroHouseSellMultiplierV1(activeMacroEffects);
       const boardPack = getBoardPackById(game.board_pack_id);
       const boardTiles = boardPack?.tiles ?? [];
       const tile = boardTiles.find((entry) => entry.index === tileIndex);
@@ -5649,7 +5859,9 @@ export async function POST(request: Request) {
         );
       }
 
-      const sellValue = Math.round(houseCost * 0.5);
+      const sellValue = Math.round(
+        houseCost * 0.5 * macroHouseSellMultiplier,
+      );
       const balances = gameState.balances ?? {};
       const currentBalance = balances[currentPlayer.id] ?? game.starting_cash ?? 0;
       const nextHouses = houses - 1;
@@ -5760,6 +5972,16 @@ export async function POST(request: Request) {
       if (!rules.loanCollateralEnabled) {
         return NextResponse.json(
           { error: "Collateral loans are disabled." },
+          { status: 409 },
+        );
+      }
+      const activeMacroEffects = getActiveMacroEffectsV1ForRules(
+        gameState.active_macro_effects_v1,
+        rules.macroEnabled,
+      );
+      if (getMacroLoanMortgageBlockedV1(activeMacroEffects)) {
+        return NextResponse.json(
+          { error: "New loans and mortgages are currently blocked." },
           { status: 409 },
         );
       }
@@ -6239,9 +6461,15 @@ export async function POST(request: Request) {
           player: nextPlayer,
           balances: updatedBalances,
           startingCash: game.starting_cash ?? 0,
-          macroInterestDeltaPerTurn: getMacroInterestDeltaPerTurn(
-            getActiveMacroEffectsForRules(
-              gameState?.active_macro_effects,
+          macroInterestTrendAccumulator: getMacroInterestTrendAccumulatorV1(
+            getActiveMacroEffectsV1ForRules(
+              gameState?.active_macro_effects_v1,
+              rules.macroEnabled,
+            ),
+          ),
+          macroMortgageFlatDelta: getMacroMortgageFlatDeltaV1(
+            getActiveMacroEffectsV1ForRules(
+              gameState?.active_macro_effects_v1,
               rules.macroEnabled,
             ),
           ),
@@ -6716,8 +6944,8 @@ export async function POST(request: Request) {
         boardTiles,
         rules,
         startingCash: game.starting_cash ?? 0,
-        activeMacroEffects: getActiveMacroEffectsForRules(
-          gameState?.active_macro_effects,
+        activeMacroEffects: getActiveMacroEffectsV1ForRules(
+          gameState?.active_macro_effects_v1,
           rules.macroEnabled,
         ),
         nextChanceIndex,
@@ -6991,10 +7219,10 @@ export async function POST(request: Request) {
       const nextRound = (gameState.rounds_elapsed ?? 0) + 1;
       const macroEnabled = rules.macroEnabled;
       let nextLastMacroEventId = gameState.last_macro_event_id ?? null;
-      const activeMacroEffects = normalizeActiveMacroEffects(
-        gameState.active_macro_effects,
+      const activeMacroEffectsV1 = normalizeActiveMacroEffectsV1(
+        gameState.active_macro_effects_v1,
       );
-      let nextActiveMacroEffects = activeMacroEffects;
+      let nextActiveMacroEffectsV1 = activeMacroEffectsV1;
       let triggeredMacroEvent: {
         id: string;
         name: string;
@@ -7008,17 +7236,16 @@ export async function POST(request: Request) {
 
       if (macroEnabled) {
         const { updated: tickedMacroEffects, expired: expiredMacroEffects } =
-          tickMacroEffects(activeMacroEffects);
-        nextActiveMacroEffects = tickedMacroEffects;
+          tickMacroEffectsV1(activeMacroEffectsV1);
+        nextActiveMacroEffectsV1 = tickedMacroEffects;
 
         for (const expiredEffect of expiredMacroEffects) {
           events.push({
-            event_type: "MACRO_EVENT_EXPIRED",
+            event_type: "MACRO_EXPIRED",
             payload: {
-              event_id: expiredEffect.id,
-              event_name: expiredEffect.name,
-              started_round: expiredEffect.started_round,
-              expired_round: nextRound,
+              macro_id: expiredEffect.id,
+              macro_name: expiredEffect.name,
+              round_index: nextRound,
             },
           });
         }
@@ -7028,19 +7255,8 @@ export async function POST(request: Request) {
           MACRO_DECK_V1.length > 0
         ) {
           const macroEvent = drawMacroCardV1(nextLastMacroEventId);
-          const normalizedEffects = normalizeMacroEffects(
-            normalizeMacroEffectsV1(macroEvent.effects),
-          );
           nextLastMacroEventId = macroEvent.id;
           triggeredMacroEvent = macroEvent;
-          const activeMacroEffect: ActiveMacroEffect = {
-            id: macroEvent.id,
-            name: macroEvent.name,
-            effects: normalizedEffects,
-            remaining_rounds: macroEvent.durationRounds,
-            started_round: nextRound,
-          };
-          nextActiveMacroEffects = [...nextActiveMacroEffects, activeMacroEffect];
           events.push({
             event_type: "MACRO_EVENT_TRIGGERED",
             payload: {
@@ -7049,7 +7265,7 @@ export async function POST(request: Request) {
               event_id: macroEvent.id,
               event_name: macroEvent.name,
               duration_rounds: macroEvent.durationRounds,
-              effects: normalizedEffects,
+              effects: macroEvent.effects,
               rarity: macroEvent.rarity ?? null,
               mode: "weighted",
               round_index: nextRound,
@@ -7058,116 +7274,16 @@ export async function POST(request: Request) {
         }
       }
 
-      if (macroEnabled && triggeredMacroEvent) {
-        const normalizedEffects = normalizeMacroEffects(
-          normalizeMacroEffectsV1(triggeredMacroEvent.effects),
-        );
-        const cashDelta = getMacroCashDelta(normalizedEffects);
-        if (cashDelta !== 0) {
-          for (const player of players) {
-            const currentBalance = updatedBalances[player.id] ?? game.starting_cash ?? 0;
-            const nextBalance = currentBalance + cashDelta;
-            updatedBalances = {
-              ...updatedBalances,
-              [player.id]: nextBalance,
-            };
-            balancesChanged = true;
-            if (nextBalance < 0 && !bankruptcyCandidate) {
-              bankruptcyCandidate = {
-                reason: "MACRO_CASH_ADJUSTMENT",
-                cashBefore: currentBalance,
-                cashAfter: nextBalance,
-              };
-            }
-            events.push({
-              event_type: cashDelta >= 0 ? "CASH_CREDIT" : "CASH_DEBIT",
-              payload: {
-                player_id: player.id,
-                amount: Math.abs(cashDelta),
-                reason: cashDelta >= 0 ? "MACRO_CASH_BONUS" : "MACRO_CASH_SHOCK",
-                event_id: triggeredMacroEvent.id,
-                event_name: triggeredMacroEvent.name,
-              },
-            });
-          }
-        }
-        const maintenancePerHouse = getMaintenancePerHouse(normalizedEffects);
-        if (maintenancePerHouse > 0) {
-          const ownershipByTile = await loadOwnershipByTile(gameId);
-          const housesByPlayer = Object.values(ownershipByTile).reduce<
-            Record<string, number>
-          >((acc, ownership) => {
-            acc[ownership.owner_player_id] =
-              (acc[ownership.owner_player_id] ?? 0) + ownership.houses;
-            return acc;
-          }, {});
-          const charges: Array<{
-            player_id: string;
-            player_name: string | null;
-            houses: number;
-            amount: number;
-          }> = [];
-          for (const player of players) {
-            const totalHouses = housesByPlayer[player.id] ?? 0;
-            if (totalHouses <= 0) {
-              continue;
-            }
-            const amount = totalHouses * maintenancePerHouse;
-            const currentBalance = updatedBalances[player.id] ?? game.starting_cash ?? 0;
-            const nextBalance = currentBalance - amount;
-            updatedBalances = {
-              ...updatedBalances,
-              [player.id]: nextBalance,
-            };
-            balancesChanged = true;
-            if (nextBalance < 0 && !bankruptcyCandidate) {
-              bankruptcyCandidate = {
-                reason: "MACRO_MAINTENANCE",
-                cashBefore: currentBalance,
-                cashAfter: nextBalance,
-              };
-            }
-            charges.push({
-              player_id: player.id,
-              player_name: player.display_name,
-              houses: totalHouses,
-              amount,
-            });
-            events.push({
-              event_type: "CASH_DEBIT",
-              payload: {
-                player_id: player.id,
-                amount,
-                reason: "MACRO_MAINTENANCE",
-                event_id: triggeredMacroEvent.id,
-                event_name: triggeredMacroEvent.name,
-                houses: totalHouses,
-                per_house: maintenancePerHouse,
-              },
-            });
-          }
-          if (charges.length > 0) {
-            events.push({
-              event_type: "MACRO_MAINTENANCE_CHARGED",
-              payload: {
-                event_id: triggeredMacroEvent.id,
-                event_name: triggeredMacroEvent.name,
-                per_house: maintenancePerHouse,
-                charges,
-                round_index: nextRound,
-              },
-            });
-          }
-        }
-      }
-
       const loanResult = await applyLoanPaymentsForPlayer({
         gameId,
         player: nextPlayer,
         balances: updatedBalances,
         startingCash: game.starting_cash ?? 0,
-        macroInterestDeltaPerTurn: getMacroInterestDeltaPerTurn(
-          macroEnabled ? nextActiveMacroEffects : [],
+        macroInterestTrendAccumulator: getMacroInterestTrendAccumulatorV1(
+          macroEnabled ? nextActiveMacroEffectsV1 : [],
+        ),
+        macroMortgageFlatDelta: getMacroMortgageFlatDeltaV1(
+          macroEnabled ? nextActiveMacroEffectsV1 : [],
         ),
       });
       updatedBalances = loanResult.balances;
@@ -7237,7 +7353,7 @@ export async function POST(request: Request) {
             doubles_count: 0,
             rounds_elapsed: nextRound,
             last_macro_event_id: nextLastMacroEventId,
-            active_macro_effects: nextActiveMacroEffects,
+            active_macro_effects_v1: nextActiveMacroEffectsV1,
             ...(balancesChanged ? { balances: updatedBalances } : {}),
             pending_action: nextPendingAction,
             turn_phase: triggeredMacroEvent
