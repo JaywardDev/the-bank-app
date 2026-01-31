@@ -83,6 +83,78 @@ const PropertyCardShell = ({
   </div>
 );
 
+const DiceIconPlaceholder = ({ className }: { className?: string }) => (
+  <div
+    className={`flex h-6 w-6 items-center justify-center rounded-md border border-current text-[9px] font-semibold ${className ?? ""}`}
+  >
+    DICE
+  </div>
+);
+
+type FloatingTurnActionsProps = {
+  isVisible: boolean;
+  canRoll: boolean;
+  canEndTurn: boolean;
+  actionLoading: string | null;
+  rollDiceDisabledReason: string | null;
+  onRollDice: () => void;
+  onEndTurn: () => void;
+};
+
+const FloatingTurnActions = ({
+  isVisible,
+  canRoll,
+  canEndTurn,
+  actionLoading,
+  rollDiceDisabledReason,
+  onRollDice,
+  onEndTurn,
+}: FloatingTurnActionsProps) => {
+  if (!isVisible) {
+    return null;
+  }
+
+  const isRolling = actionLoading === "ROLL_DICE";
+  const isEnding = actionLoading === "END_TURN";
+  const rollEmphasized = canRoll && !isRolling;
+  const endEmphasized = canEndTurn && !isEnding;
+
+  return (
+    <div className="fixed bottom-24 right-6 z-20 flex flex-col items-center gap-3">
+      <button
+        className={`flex h-14 w-14 items-center justify-center rounded-full border shadow-lg transition ${
+          rollEmphasized
+            ? "border-neutral-900 bg-neutral-900 text-white shadow-neutral-900/30"
+            : "border-neutral-200 bg-neutral-100 text-neutral-400 shadow-neutral-200/40"
+        }`}
+        type="button"
+        onClick={onRollDice}
+        disabled={!canRoll || isRolling}
+        aria-label={isRolling ? "Rolling dice" : "Roll dice"}
+        title={rollDiceDisabledReason ?? "Roll dice"}
+      >
+        <span className="sr-only">
+          {isRolling ? "Rolling…" : "Roll dice"}
+        </span>
+        <DiceIconPlaceholder />
+      </button>
+      <button
+        className={`flex h-12 w-12 items-center justify-center rounded-full border text-xs font-semibold shadow-lg transition ${
+          endEmphasized
+            ? "border-emerald-600 bg-emerald-600 text-white shadow-emerald-600/30"
+            : "border-neutral-200 bg-neutral-100 text-neutral-400 shadow-neutral-200/40"
+        }`}
+        type="button"
+        onClick={onEndTurn}
+        disabled={!canEndTurn || isEnding}
+        aria-label={isEnding ? "Ending turn" : "End turn"}
+      >
+        {isEnding ? "..." : "END"}
+      </button>
+    </div>
+  );
+};
+
 const formatSignedPercent = (value: number) =>
   `${value >= 0 ? "+" : ""}${(value * 100).toFixed(1)}%`;
 
@@ -4794,11 +4866,11 @@ export default function PlayPage() {
 
       <section className="space-y-4">
         <div className="relative">
-        <div
-          className={`rounded-2xl border bg-white p-5 shadow-sm space-y-4 ${
-            isAuctionActive ? "pointer-events-none opacity-50" : ""
-          }`}
-        >
+          <div
+            className={`rounded-2xl border bg-white p-5 shadow-sm space-y-4 ${
+              isAuctionActive ? "pointer-events-none opacity-50" : ""
+            }`}
+          >
           <div className="flex items-start justify-between">
             <div>
               <div className="flex flex-wrap items-center gap-2">
@@ -4922,33 +4994,6 @@ export default function PlayPage() {
               </div>
             </>
           ) : null}
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1">
-              <button
-                className="rounded-2xl bg-neutral-900 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
-                type="button"
-                onClick={() => void handleBankAction({ action: "ROLL_DICE" })}
-                disabled={!canRoll || actionLoading === "ROLL_DICE"}
-              >
-                {actionLoading === "ROLL_DICE" ? "Rolling…" : "Roll Dice"}
-              </button>
-              {rollDiceDisabledReason ? (
-                <p className="text-xs text-neutral-400">
-                  {rollDiceDisabledReason}
-                </p>
-              ) : null}
-            </div>
-            <div className="space-y-1">
-              <button
-                className="rounded-2xl border px-4 py-3 text-sm font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
-                type="button"
-                onClick={() => void handleBankAction({ action: "END_TURN" })}
-                disabled={!canEndTurn || actionLoading === "END_TURN"}
-              >
-                {actionLoading === "END_TURN" ? "Ending…" : "End Turn"}
-              </button>
-            </div>
-          </div>
           {showPendingDecisionCard && pendingPurchase ? (
             <div className="overflow-hidden rounded-2xl border border-neutral-200 bg-white text-sm text-neutral-900 shadow-sm">
               <div
@@ -6614,6 +6659,15 @@ export default function PlayPage() {
           </div>
         </div>
       ) : null}
+      <FloatingTurnActions
+        isVisible={isMyTurn}
+        canRoll={canRoll}
+        canEndTurn={canEndTurn}
+        actionLoading={actionLoading}
+        rollDiceDisabledReason={rollDiceDisabledReason}
+        onRollDice={() => void handleBankAction({ action: "ROLL_DICE" })}
+        onEndTurn={() => void handleBankAction({ action: "END_TURN" })}
+      />
       {!isEventLogSuppressed ? (
         <>
           <button
