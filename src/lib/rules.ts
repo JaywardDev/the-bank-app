@@ -8,6 +8,7 @@ export type GameRules = {
   auctionMinIncrement: number;
   auctionTurnSeconds: number;
   auctionAllowInitiatorToBid: boolean;
+  macroEnabled: boolean;
 };
 
 export const DEFAULT_RULES: GameRules = {
@@ -20,6 +21,7 @@ export const DEFAULT_RULES: GameRules = {
   auctionMinIncrement: 10,
   auctionTurnSeconds: 60,
   auctionAllowInitiatorToBid: true,
+  macroEnabled: false,
 };
 
 export const getRules = (rules?: Partial<GameRules> | null): GameRules => ({

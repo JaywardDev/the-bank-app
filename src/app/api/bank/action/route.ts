@@ -306,9 +306,7 @@ const hashStringToUint32 = (value: string) => {
   return hash >>> 0;
 };
 
-const normalizeActiveMacroEffects = (
-  raw: unknown,
-): ActiveMacroEffect[] => {
+const normalizeActiveMacroEffects = (raw: unknown): ActiveMacroEffect[] => {
   if (!Array.isArray(raw)) {
     return [];
   }
@@ -334,6 +332,12 @@ const normalizeActiveMacroEffects = (
     })
     .filter((entry): entry is ActiveMacroEffect => Boolean(entry));
 };
+
+const getActiveMacroEffectsForRules = (
+  raw: unknown,
+  macroEnabled: boolean,
+): ActiveMacroEffect[] =>
+  macroEnabled ? normalizeActiveMacroEffects(raw) : [];
 
 const tickMacroEffects = (activeEffects: ActiveMacroEffect[]) => {
   const expired: ActiveMacroEffect[] = [];
@@ -4233,8 +4237,9 @@ export async function POST(request: Request) {
         boardTiles,
         rules,
         startingCash: game.starting_cash ?? 0,
-        activeMacroEffects: normalizeActiveMacroEffects(
+        activeMacroEffects: getActiveMacroEffectsForRules(
           gameState?.active_macro_effects,
+          rules.macroEnabled,
         ),
         nextChanceIndex: gameState.chance_index ?? 0,
         nextCommunityIndex: gameState.community_index ?? 0,
@@ -4416,7 +4421,10 @@ export async function POST(request: Request) {
           balances: updatedBalances,
           startingCash: game.starting_cash ?? 0,
           macroInterestDeltaPerTurn: getMacroInterestDeltaPerTurn(
-            normalizeActiveMacroEffects(gameState?.active_macro_effects),
+            getActiveMacroEffectsForRules(
+              gameState?.active_macro_effects,
+              rules.macroEnabled,
+            ),
           ),
         });
         updatedBalances = loanResult.balances;
@@ -4779,8 +4787,9 @@ export async function POST(request: Request) {
         boardTiles,
         rules,
         startingCash: game.starting_cash ?? 0,
-        activeMacroEffects: normalizeActiveMacroEffects(
+        activeMacroEffects: getActiveMacroEffectsForRules(
           gameState?.active_macro_effects,
+          rules.macroEnabled,
         ),
         nextChanceIndex,
         nextCommunityIndex,
@@ -5348,8 +5357,9 @@ export async function POST(request: Request) {
       action: "BUILD_HOUSE" | "SELL_HOUSE",
       tileIndex: number,
     ) => {
-      const activeMacroEffects = normalizeActiveMacroEffects(
+      const activeMacroEffects = getActiveMacroEffectsForRules(
         gameState.active_macro_effects,
+        rules.macroEnabled,
       );
       const macroDevelopmentMultiplier = getMacroDevelopmentCostMultiplier(
         activeMacroEffects,
@@ -6146,7 +6156,10 @@ export async function POST(request: Request) {
           balances: updatedBalances,
           startingCash: game.starting_cash ?? 0,
           macroInterestDeltaPerTurn: getMacroInterestDeltaPerTurn(
-            normalizeActiveMacroEffects(gameState?.active_macro_effects),
+            getActiveMacroEffectsForRules(
+              gameState?.active_macro_effects,
+              rules.macroEnabled,
+            ),
           ),
         });
         updatedBalances = loanResult.balances;
@@ -6619,8 +6632,9 @@ export async function POST(request: Request) {
         boardTiles,
         rules,
         startingCash: game.starting_cash ?? 0,
-        activeMacroEffects: normalizeActiveMacroEffects(
+        activeMacroEffects: getActiveMacroEffectsForRules(
           gameState?.active_macro_effects,
+          rules.macroEnabled,
         ),
         nextChanceIndex,
         nextCommunityIndex,
@@ -6891,27 +6905,13 @@ export async function POST(request: Request) {
       ];
 
       const nextRound = (gameState.rounds_elapsed ?? 0) + 1;
+      const macroEnabled = rules.macroEnabled;
       const macroDeck = getMacroDeckById(defaultMacroDeckId);
       let nextLastMacroEventId = gameState.last_macro_event_id ?? null;
       const activeMacroEffects = normalizeActiveMacroEffects(
         gameState.active_macro_effects,
       );
-      const { updated: tickedMacroEffects, expired: expiredMacroEffects } =
-        tickMacroEffects(activeMacroEffects);
-      let nextActiveMacroEffects = tickedMacroEffects;
-
-      for (const expiredEffect of expiredMacroEffects) {
-        events.push({
-          event_type: "MACRO_EVENT_EXPIRED",
-          payload: {
-            event_id: expiredEffect.id,
-            event_name: expiredEffect.name,
-            started_round: expiredEffect.started_round,
-            expired_round: nextRound,
-          },
-        });
-      }
-
+      let nextActiveMacroEffects = activeMacroEffects;
       let triggeredMacroEvent: {
         id: string;
         name: string;
@@ -6920,44 +6920,62 @@ export async function POST(request: Request) {
         rarity?: "common" | "uncommon" | "black_swan";
       } | null = null;
 
-      if (
-        macroDeck &&
-        nextRound % MACRO_EVENT_INTERVAL_ROUNDS === 0 &&
-        macroDeck.events.length > 0
-      ) {
-        const macroEvent = drawMacroEvent(
-          macroDeck,
-          nextLastMacroEventId,
-          DEFAULT_MACRO_DRAW_MODE,
-        );
-        const normalizedEffects = normalizeMacroEffects(macroEvent.effects);
-        nextLastMacroEventId = macroEvent.id;
-        triggeredMacroEvent = macroEvent;
-        const activeMacroEffect: ActiveMacroEffect = {
-          id: macroEvent.id,
-          name: macroEvent.name,
-          effects: normalizedEffects,
-          remaining_rounds: macroEvent.durationRounds,
-          started_round: nextRound,
-        };
-        nextActiveMacroEffects = [...nextActiveMacroEffects, activeMacroEffect];
-        events.push({
-          event_type: "MACRO_EVENT_TRIGGERED",
-          payload: {
-            deck_id: macroDeck.id,
-            deck_name: macroDeck.name,
-            event_id: macroEvent.id,
-            event_name: macroEvent.name,
-            duration_rounds: macroEvent.durationRounds,
+      if (macroEnabled) {
+        const { updated: tickedMacroEffects, expired: expiredMacroEffects } =
+          tickMacroEffects(activeMacroEffects);
+        nextActiveMacroEffects = tickedMacroEffects;
+
+        for (const expiredEffect of expiredMacroEffects) {
+          events.push({
+            event_type: "MACRO_EVENT_EXPIRED",
+            payload: {
+              event_id: expiredEffect.id,
+              event_name: expiredEffect.name,
+              started_round: expiredEffect.started_round,
+              expired_round: nextRound,
+            },
+          });
+        }
+
+        if (
+          macroDeck &&
+          nextRound % MACRO_EVENT_INTERVAL_ROUNDS === 0 &&
+          macroDeck.events.length > 0
+        ) {
+          const macroEvent = drawMacroEvent(
+            macroDeck,
+            nextLastMacroEventId,
+            DEFAULT_MACRO_DRAW_MODE,
+          );
+          const normalizedEffects = normalizeMacroEffects(macroEvent.effects);
+          nextLastMacroEventId = macroEvent.id;
+          triggeredMacroEvent = macroEvent;
+          const activeMacroEffect: ActiveMacroEffect = {
+            id: macroEvent.id,
+            name: macroEvent.name,
             effects: normalizedEffects,
-            rarity: macroEvent.rarity ?? null,
-            mode: DEFAULT_MACRO_DRAW_MODE,
-            round_index: nextRound,
-          },
-        });
+            remaining_rounds: macroEvent.durationRounds,
+            started_round: nextRound,
+          };
+          nextActiveMacroEffects = [...nextActiveMacroEffects, activeMacroEffect];
+          events.push({
+            event_type: "MACRO_EVENT_TRIGGERED",
+            payload: {
+              deck_id: macroDeck.id,
+              deck_name: macroDeck.name,
+              event_id: macroEvent.id,
+              event_name: macroEvent.name,
+              duration_rounds: macroEvent.durationRounds,
+              effects: normalizedEffects,
+              rarity: macroEvent.rarity ?? null,
+              mode: DEFAULT_MACRO_DRAW_MODE,
+              round_index: nextRound,
+            },
+          });
+        }
       }
 
-      if (triggeredMacroEvent) {
+      if (macroEnabled && triggeredMacroEvent) {
         const normalizedEffects = normalizeMacroEffects(
           triggeredMacroEvent.effects,
         );
@@ -7066,7 +7084,7 @@ export async function POST(request: Request) {
         balances: updatedBalances,
         startingCash: game.starting_cash ?? 0,
         macroInterestDeltaPerTurn: getMacroInterestDeltaPerTurn(
-          nextActiveMacroEffects,
+          macroEnabled ? nextActiveMacroEffects : [],
         ),
       });
       updatedBalances = loanResult.balances;
