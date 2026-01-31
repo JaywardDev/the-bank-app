@@ -65,7 +65,7 @@ export const macroDecks: MacroDeck[] = [
         durationRounds: 3,
         effects: [
           {
-            type: "maintenance_cost_multiplier",
+            type: "maintenance_per_house",
             value: 1.1,
             description: "Operating costs creep higher.",
           },
@@ -93,7 +93,7 @@ export const macroDecks: MacroDeck[] = [
         durationRounds: 2,
         effects: [
           {
-            type: "maintenance_cost_multiplier",
+            type: "maintenance_per_house",
             value: 1.2,
             description: "Utilities and upkeep costs jump.",
           },

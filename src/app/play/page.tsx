@@ -23,6 +23,7 @@ import {
   getMacroDeckById,
   type MacroEventEffect,
 } from "@/lib/macroDecks";
+import { normalizeMacroEffects } from "@/lib/macroEffects";
 import { getRules } from "@/lib/rules";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 import Image from "next/image";
@@ -360,8 +361,8 @@ const describeMacroEffect = (effect: MacroEventEffect) => {
       return `Rent multiplier: ${formatMultiplier(effect.value)}`;
     case "loan_rate_modifier":
       return `Interest delta: ${formatSignedPercent(effect.value)} per turn`;
-    case "maintenance_cost_multiplier":
-      return `Maintenance multiplier: ${formatMultiplier(effect.value)}`;
+    case "maintenance_per_house":
+      return `Maintenance per house: $${effect.value.toFixed(2)}`;
     case "development_cost_multiplier":
       return `Development cost multiplier: ${formatMultiplier(effect.value)}`;
     case "cash_bonus":
@@ -874,6 +875,18 @@ const derivePlayerTransactions = ({
             subtitle: tileName,
             amount: -amount,
           });
+          break;
+        }
+        if (reason === "MACRO_CASH_SHOCK") {
+          const eventName =
+            typeof payload.event_name === "string" ? payload.event_name : null;
+          transactions.push({
+            ...recordBase,
+            id: event.id,
+            title: "Macro cash shock",
+            subtitle: eventName,
+            amount: -amount,
+          });
         }
         break;
       }
@@ -902,6 +915,18 @@ const derivePlayerTransactions = ({
             id: event.id,
             title: "Trade proceeds",
             subtitle: `From ${counterpartyName}`,
+            amount,
+          });
+          break;
+        }
+        if (reason === "MACRO_CASH_BONUS") {
+          const eventName =
+            typeof payload.event_name === "string" ? payload.event_name : null;
+          transactions.push({
+            ...recordBase,
+            id: event.id,
+            title: "Macro cash bonus",
+            subtitle: eventName,
             amount,
           });
         }
@@ -3430,29 +3455,36 @@ export default function PlayPage() {
       "Player"
     );
   }, [pendingCard?.drawnBy, players]);
+  const normalizedPendingMacroEffects = useMemo(
+    () =>
+      pendingMacroEvent
+        ? normalizeMacroEffects(pendingMacroEvent.effects)
+        : [],
+    [pendingMacroEvent],
+  );
   const pendingMacroDescription = useMemo(() => {
     if (!pendingMacroEvent) {
       return null;
     }
-    const descriptions = pendingMacroEvent.effects
+    const descriptions = normalizedPendingMacroEffects
       .map((effect) => effect.description)
       .filter(Boolean);
     return descriptions.length > 0
       ? descriptions.join(" ")
       : "Market conditions are shifting across the board.";
-  }, [pendingMacroEvent]);
+  }, [normalizedPendingMacroEffects, pendingMacroEvent]);
   const pendingMacroEffects = useMemo(() => {
     if (!pendingMacroEvent) {
       return [];
     }
-    const items = pendingMacroEvent.effects.map((effect) =>
+    const items = normalizedPendingMacroEffects.map((effect) =>
       describeMacroEffect(effect),
     );
     if (pendingMacroEvent.durationRounds > 0) {
       items.push(`Duration: ${pendingMacroEvent.durationRounds} rounds`);
     }
     return items;
-  }, [pendingMacroEvent]);
+  }, [normalizedPendingMacroEffects, pendingMacroEvent]);
   const pendingTile = useMemo(() => {
     if (!pendingPurchase) {
       return null;

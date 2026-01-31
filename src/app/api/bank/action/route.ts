@@ -15,6 +15,7 @@ import {
   getMacroDeckById,
   type MacroEventEffect,
 } from "@/lib/macroDecks";
+import { normalizeMacroEffects } from "@/lib/macroEffects";
 import { DEFAULT_RULES, getRules } from "@/lib/rules";
 
 const supabaseUrl = (process.env.SUPABASE_URL ?? SUPABASE_URL ?? "").trim();
@@ -318,7 +319,7 @@ const normalizeActiveMacroEffects = (
       }
       const data = entry as Record<string, unknown>;
       const effects = Array.isArray(data.effects)
-        ? (data.effects as MacroEventEffect[])
+        ? normalizeMacroEffects(data.effects as MacroEventEffect[])
         : [];
       const remainingRounds =
         typeof data.remaining_rounds === "number" ? data.remaining_rounds : 0;
@@ -355,11 +356,7 @@ const tickMacroEffects = (activeEffects: ActiveMacroEffect[]) => {
 const getMacroInterestDeltaPerTurn = (activeEffects: ActiveMacroEffect[]) =>
   activeEffects.reduce((total, effect) => {
     const delta = effect.effects.reduce((sum, detail) => {
-      if (
-        detail.type === "loan_rate_modifier" ||
-        detail.type === "interest_rate_delta_per_turn" ||
-        detail.type === "interestRateDeltaPerTurn"
-      ) {
+      if (detail.type === "loan_rate_modifier") {
         return sum + detail.value;
       }
       return sum;
@@ -369,10 +366,26 @@ const getMacroInterestDeltaPerTurn = (activeEffects: ActiveMacroEffect[]) =>
 
 const getMaintenancePerHouse = (effects: MacroEventEffect[]) =>
   effects.reduce((sum, detail) => {
-    if (
-      detail.type === "maintenance_per_house" ||
-      detail.type === "maintenancePerHouse"
-    ) {
+    if (detail.type === "maintenance_per_house") {
+      return sum + detail.value;
+    }
+    return sum;
+  }, 0);
+
+const getMacroDevelopmentCostMultiplier = (activeEffects: ActiveMacroEffect[]) =>
+  activeEffects.reduce((multiplier, effect) => {
+    const effectMultiplier = effect.effects.reduce((product, detail) => {
+      if (detail.type === "development_cost_multiplier") {
+        return product * detail.value;
+      }
+      return product;
+    }, 1);
+    return multiplier * effectMultiplier;
+  }, 1);
+
+const getMacroCashDelta = (effects: MacroEventEffect[]) =>
+  effects.reduce((sum, detail) => {
+    if (detail.type === "cash_bonus" || detail.type === "cash_shock") {
       return sum + detail.value;
     }
     return sum;
@@ -388,7 +401,7 @@ const getMacroRentMultipliers = (
 
   for (const effect of activeEffects) {
     for (const detail of effect.effects) {
-      if (detail.type === "rent_multiplier" || detail.type === "rentMultiplier") {
+      if (detail.type === "rent_multiplier") {
         globalMultiplier *= detail.value;
         continue;
       }
@@ -5335,6 +5348,12 @@ export async function POST(request: Request) {
       action: "BUILD_HOUSE" | "SELL_HOUSE",
       tileIndex: number,
     ) => {
+      const activeMacroEffects = normalizeActiveMacroEffects(
+        gameState.active_macro_effects,
+      );
+      const macroDevelopmentMultiplier = getMacroDevelopmentCostMultiplier(
+        activeMacroEffects,
+      );
       const boardPack = getBoardPackById(game.board_pack_id);
       const boardTiles = boardPack?.tiles ?? [];
       const tile = boardTiles.find((entry) => entry.index === tileIndex);
@@ -5398,6 +5417,10 @@ export async function POST(request: Request) {
 
       const houses = ownership.houses ?? 0;
       const houseCost = tile.houseCost ?? 0;
+      const adjustedHouseCost =
+        action === "BUILD_HOUSE"
+          ? Math.round(houseCost * macroDevelopmentMultiplier)
+          : houseCost;
 
       if (action === "BUILD_HOUSE") {
         if (houses !== minGroupHouses) {
@@ -5424,7 +5447,7 @@ export async function POST(request: Request) {
         const balances = gameState.balances ?? {};
         const currentBalance =
           balances[currentPlayer.id] ?? game.starting_cash ?? 0;
-        if (currentBalance < houseCost) {
+        if (currentBalance < adjustedHouseCost) {
           return NextResponse.json(
             { error: "Not enough cash to build a house." },
             { status: 409 },
@@ -5434,7 +5457,7 @@ export async function POST(request: Request) {
         const nextHouses = houses + 1;
         const updatedBalances = {
           ...balances,
-          [currentPlayer.id]: currentBalance - houseCost,
+          [currentPlayer.id]: currentBalance - adjustedHouseCost,
         };
 
         const ownershipResponse = await fetchFromSupabaseWithService(
@@ -5467,7 +5490,7 @@ export async function POST(request: Request) {
               player_id: currentPlayer.id,
               tile_index: tileIndex,
               tile_id: tile.tile_id,
-              house_cost: houseCost,
+              house_cost: adjustedHouseCost,
               houses_before: houses,
               houses_after: nextHouses,
             },
@@ -5476,7 +5499,7 @@ export async function POST(request: Request) {
             event_type: "CASH_DEBIT",
             payload: {
               player_id: currentPlayer.id,
-              amount: houseCost,
+              amount: adjustedHouseCost,
               reason: "BUILD_HOUSE",
               tile_index: tileIndex,
             },
@@ -6907,12 +6930,13 @@ export async function POST(request: Request) {
           nextLastMacroEventId,
           DEFAULT_MACRO_DRAW_MODE,
         );
+        const normalizedEffects = normalizeMacroEffects(macroEvent.effects);
         nextLastMacroEventId = macroEvent.id;
         triggeredMacroEvent = macroEvent;
         const activeMacroEffect: ActiveMacroEffect = {
           id: macroEvent.id,
           name: macroEvent.name,
-          effects: macroEvent.effects,
+          effects: normalizedEffects,
           remaining_rounds: macroEvent.durationRounds,
           started_round: nextRound,
         };
@@ -6925,7 +6949,7 @@ export async function POST(request: Request) {
             event_id: macroEvent.id,
             event_name: macroEvent.name,
             duration_rounds: macroEvent.durationRounds,
-            effects: macroEvent.effects,
+            effects: normalizedEffects,
             rarity: macroEvent.rarity ?? null,
             mode: DEFAULT_MACRO_DRAW_MODE,
             round_index: nextRound,
@@ -6934,9 +6958,39 @@ export async function POST(request: Request) {
       }
 
       if (triggeredMacroEvent) {
-        const maintenancePerHouse = getMaintenancePerHouse(
+        const normalizedEffects = normalizeMacroEffects(
           triggeredMacroEvent.effects,
         );
+        const cashDelta = getMacroCashDelta(normalizedEffects);
+        if (cashDelta !== 0) {
+          for (const player of players) {
+            const currentBalance = updatedBalances[player.id] ?? game.starting_cash ?? 0;
+            const nextBalance = currentBalance + cashDelta;
+            updatedBalances = {
+              ...updatedBalances,
+              [player.id]: nextBalance,
+            };
+            balancesChanged = true;
+            if (nextBalance < 0 && !bankruptcyCandidate) {
+              bankruptcyCandidate = {
+                reason: "MACRO_CASH_ADJUSTMENT",
+                cashBefore: currentBalance,
+                cashAfter: nextBalance,
+              };
+            }
+            events.push({
+              event_type: cashDelta >= 0 ? "CASH_CREDIT" : "CASH_DEBIT",
+              payload: {
+                player_id: player.id,
+                amount: Math.abs(cashDelta),
+                reason: cashDelta >= 0 ? "MACRO_CASH_BONUS" : "MACRO_CASH_SHOCK",
+                event_id: triggeredMacroEvent.id,
+                event_name: triggeredMacroEvent.name,
+              },
+            });
+          }
+        }
+        const maintenancePerHouse = getMaintenancePerHouse(normalizedEffects);
         if (maintenancePerHouse > 0) {
           const ownershipByTile = await loadOwnershipByTile(gameId);
           const housesByPlayer = Object.values(ownershipByTile).reduce<
