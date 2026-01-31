@@ -18,12 +18,6 @@ import {
   getMutedGroupTintClass,
   getTileBandColor,
 } from "@/lib/boardTileStyles";
-import {
-  defaultMacroDeckId,
-  getMacroDeckById,
-  type MacroEventEffect,
-} from "@/lib/macroDecks";
-import { normalizeMacroEffects } from "@/lib/macroEffects";
 import { getRules } from "@/lib/rules";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 import Image from "next/image";
@@ -353,25 +347,6 @@ const getPropertyRentDetails = (tile: BoardTile | null) => {
       { label: maxRentLabel, value: maxRentDisplay },
     ],
   };
-};
-
-const describeMacroEffect = (effect: MacroEventEffect) => {
-  switch (effect.type) {
-    case "rent_multiplier":
-      return `Rent multiplier: ${formatMultiplier(effect.value)}`;
-    case "loan_rate_modifier":
-      return `Interest delta: ${formatSignedPercent(effect.value)} per turn`;
-    case "maintenance_per_house":
-      return `Maintenance per house: $${effect.value.toFixed(2)}`;
-    case "development_cost_multiplier":
-      return `Development cost multiplier: ${formatMultiplier(effect.value)}`;
-    case "cash_bonus":
-      return `Cash bonus: +$${effect.value}`;
-    case "cash_shock":
-      return `Cash shock: -$${Math.abs(effect.value)}`;
-    default:
-      return effect.description ?? `Effect: ${effect.type}`;
-  }
 };
 
 type Player = {
@@ -3399,25 +3374,47 @@ export default function PlayPage() {
     const candidate = pendingAction as {
       type?: unknown;
       macro_id?: unknown;
+      macroCardId?: unknown;
+      name?: unknown;
+      rarity?: unknown;
+      durationRounds?: unknown;
+      headline?: unknown;
+      flavor?: unknown;
+      rulesText?: unknown;
+      effects?: unknown;
     };
 
-    if (candidate.type !== "MACRO_EVENT" || typeof candidate.macro_id !== "string") {
+    if (candidate.type !== "MACRO_EVENT") {
       return null;
     }
 
-    const macroDeck = getMacroDeckById(defaultMacroDeckId);
-    const macroEvent =
-      macroDeck?.events.find((event) => event.id === candidate.macro_id) ?? null;
-
-    if (macroEvent) {
-      return macroEvent;
-    }
+    const macroCardId =
+      typeof candidate.macroCardId === "string"
+        ? candidate.macroCardId
+        : typeof candidate.macro_id === "string"
+          ? candidate.macro_id
+          : null;
+    const rarity = typeof candidate.rarity === "string" ? candidate.rarity : null;
+    const durationRounds =
+      typeof candidate.durationRounds === "number" ? candidate.durationRounds : 0;
+    const headline = typeof candidate.headline === "string" ? candidate.headline : "";
+    const flavor = typeof candidate.flavor === "string" ? candidate.flavor : "";
+    const rulesText =
+      typeof candidate.rulesText === "string" ? candidate.rulesText : "";
+    const effects =
+      candidate.effects && typeof candidate.effects === "object"
+        ? candidate.effects
+        : null;
 
     return {
-      id: candidate.macro_id,
-      name: "Macroeconomic Shift",
-      durationRounds: 0,
-      effects: [],
+      macroCardId,
+      name: typeof candidate.name === "string" ? candidate.name : "Macroeconomic Shift",
+      rarity,
+      durationRounds,
+      headline,
+      flavor,
+      rulesText,
+      effects,
     };
   }, [gameState?.pending_action]);
   const pendingCard = useMemo(() => {
@@ -3455,36 +3452,24 @@ export default function PlayPage() {
       "Player"
     );
   }, [pendingCard?.drawnBy, players]);
-  const normalizedPendingMacroEffects = useMemo(
-    () =>
-      pendingMacroEvent
-        ? normalizeMacroEffects(pendingMacroEvent.effects)
-        : [],
-    [pendingMacroEvent],
-  );
-  const pendingMacroDescription = useMemo(() => {
-    if (!pendingMacroEvent) {
+  const pendingMacroRarityLabel = useMemo(() => {
+    if (!pendingMacroEvent?.rarity) {
       return null;
     }
-    const descriptions = normalizedPendingMacroEffects
-      .map((effect) => effect.description)
-      .filter(Boolean);
-    return descriptions.length > 0
-      ? descriptions.join(" ")
-      : "Market conditions are shifting across the board.";
-  }, [normalizedPendingMacroEffects, pendingMacroEvent]);
-  const pendingMacroEffects = useMemo(() => {
-    if (!pendingMacroEvent) {
-      return [];
+    return pendingMacroEvent.rarity.replaceAll("_", " ");
+  }, [pendingMacroEvent?.rarity]);
+  const pendingMacroRarityClass = useMemo(() => {
+    switch (pendingMacroEvent?.rarity) {
+      case "common":
+        return "bg-emerald-100 text-emerald-700";
+      case "uncommon":
+        return "bg-amber-100 text-amber-700";
+      case "black_swan":
+        return "bg-rose-100 text-rose-700";
+      default:
+        return "bg-slate-100 text-slate-600";
     }
-    const items = normalizedPendingMacroEffects.map((effect) =>
-      describeMacroEffect(effect),
-    );
-    if (pendingMacroEvent.durationRounds > 0) {
-      items.push(`Duration: ${pendingMacroEvent.durationRounds} rounds`);
-    }
-    return items;
-  }, [normalizedPendingMacroEffects, pendingMacroEvent]);
+  }, [pendingMacroEvent?.rarity]);
   const pendingTile = useMemo(() => {
     if (!pendingPurchase) {
       return null;
@@ -5462,25 +5447,39 @@ export default function PlayPage() {
             <div className="fixed inset-0 z-30 flex items-center justify-center p-4">
               <div className="w-full max-w-md rounded-3xl border border-sky-200 bg-white/95 p-5 shadow-2xl ring-1 ring-black/10 backdrop-blur">
                 <p className="text-xs font-semibold uppercase tracking-wide text-sky-500">
-                  Macroeconomic Shift
+                  Macro event
                 </p>
-                <p className="text-lg font-semibold text-neutral-900">
-                  {pendingMacroEvent?.name ?? "Macroeconomic Shift"}
-                </p>
-                {pendingMacroDescription ? (
-                  <p className="mt-1 text-sm text-neutral-600">
-                    {pendingMacroDescription}
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <p className="text-lg font-semibold text-neutral-900">
+                    {pendingMacroEvent?.name ?? "Macroeconomic Shift"}
+                  </p>
+                  {pendingMacroRarityLabel ? (
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${pendingMacroRarityClass}`}
+                    >
+                      {pendingMacroRarityLabel}
+                    </span>
+                  ) : null}
+                </div>
+                {pendingMacroEvent?.headline ? (
+                  <p className="mt-2 text-sm font-semibold text-neutral-800">
+                    {pendingMacroEvent.headline}
                   </p>
                 ) : null}
-                {pendingMacroEffects.length > 0 ? (
-                  <ul className="mt-3 space-y-1 text-sm text-neutral-700">
-                    {pendingMacroEffects.map((effect) => (
-                      <li key={effect} className="flex gap-2">
-                        <span className="mt-2 h-1.5 w-1.5 rounded-full bg-sky-400" />
-                        <span>{effect}</span>
-                      </li>
-                    ))}
-                  </ul>
+                {pendingMacroEvent?.flavor ? (
+                  <p className="mt-1 text-sm text-neutral-600">
+                    {pendingMacroEvent.flavor}
+                  </p>
+                ) : null}
+                {pendingMacroEvent?.rulesText ? (
+                  <div className="mt-3 rounded-2xl border border-sky-100 bg-sky-50/70 px-3 py-2 text-sm font-semibold text-sky-900">
+                    {pendingMacroEvent.rulesText}
+                  </div>
+                ) : null}
+                {pendingMacroEvent && pendingMacroEvent.durationRounds > 0 ? (
+                  <p className="mt-3 text-sm text-neutral-600">
+                    Lasts {pendingMacroEvent.durationRounds} rounds
+                  </p>
                 ) : null}
                 {canConfirmMacroEvent && !isMacroResolving ? (
                   <div className="mt-4 space-y-1">
@@ -5496,7 +5495,7 @@ export default function PlayPage() {
                         ? "Confirming…"
                         : isMacroResolving
                           ? "Resolving…"
-                          : "Acknowledge"}
+                          : "OK"}
                     </button>
                     {confirmMacroDisabledReason ? (
                       <p className="text-xs text-neutral-400">

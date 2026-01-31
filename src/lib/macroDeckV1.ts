@@ -1,6 +1,6 @@
-type MacroRarity = "common" | "uncommon" | "black_swan";
+export type MacroRarity = "common" | "uncommon" | "black_swan";
 
-type MacroEffectsV1 = {
+export type MacroEffectsV1 = {
   rent_multiplier?: number; // e.g. 1.1, 0.8 (applies to property rents)
   rail_rent_multiplier?: number; // e.g. 1.5
   build_cost_multiplier?: number; // e.g. 1.25, 0.75
@@ -34,7 +34,7 @@ type MacroEffectsV1 = {
   house_sell_multiplier?: number; // 1.0 for 100%, 1.1 for 110% if enabled later
 };
 
-type MacroCardV1 = {
+export type MacroCardV1 = {
   id: string;
   name: string;
   rarity: MacroRarity;
@@ -239,7 +239,7 @@ export const MACRO_DECK_V1: MacroCardV1[] = [
     headline: "Confidence evaporates overnight.",
     flavor:
       "A sharp downturn slashes demand and landlords scramble for tenants.",
-    rulesText: "Property rent is reduced by 70% for 3 rounds.",
+    rulesText: "Property rent dropped. Pay only 30% of normal rent for 3 rounds.",
     effects: {
       rent_multiplier: 0.3,
     },
@@ -247,8 +247,8 @@ export const MACRO_DECK_V1: MacroCardV1[] = [
   {
     id: "bond-market-shock",
     name: "Bond Market Shock",
-    rarity: "black_swan",
-    weight: 2,
+    rarity: "uncommon",
+    weight: 6,
     durationRounds: 10,
     headline: "Yields spike and financing costs jump.",
     flavor:
@@ -345,6 +345,38 @@ export const MACRO_DECK_V1: MacroCardV1[] = [
     },
   },
 ];
+
+const pickEqual = (cards: MacroCardV1[]) => {
+  const index = Math.floor(Math.random() * cards.length);
+  return cards[index] ?? cards[0];
+};
+
+const pickWeighted = (cards: MacroCardV1[]) => {
+  const totalWeight = cards.reduce((sum, card) => sum + (card.weight ?? 1), 0);
+  if (totalWeight <= 0) {
+    return pickEqual(cards);
+  }
+  let roll = Math.random() * totalWeight;
+  for (const card of cards) {
+    roll -= card.weight ?? 1;
+    if (roll <= 0) {
+      return card;
+    }
+  }
+  return cards[cards.length - 1] ?? cards[0];
+};
+
+export const drawMacroCardV1 = (lastCardId?: string | null) => {
+  if (MACRO_DECK_V1.length === 0) {
+    throw new Error("Macro deck v1 is empty.");
+  }
+  const filtered =
+    lastCardId == null
+      ? MACRO_DECK_V1
+      : MACRO_DECK_V1.filter((card) => card.id !== lastCardId);
+  const candidates = filtered.length > 0 ? filtered : MACRO_DECK_V1;
+  return pickWeighted(candidates);
+};
 
 export function getMacroCardByIdV1(id: string): MacroCardV1 | undefined {
   return MACRO_DECK_V1.find((card) => card.id === id);

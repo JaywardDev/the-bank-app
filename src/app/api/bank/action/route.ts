@@ -8,14 +8,15 @@ import {
 import type { BoardTileType } from "@/lib/boardPacks";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "@/lib/env";
 import {
-  DEFAULT_MACRO_DRAW_MODE,
   MACRO_EVENT_INTERVAL_ROUNDS,
-  defaultMacroDeckId,
-  drawMacroEvent,
-  getMacroDeckById,
   type MacroEventEffect,
 } from "@/lib/macroDecks";
 import { normalizeMacroEffects } from "@/lib/macroEffects";
+import {
+  MACRO_DECK_V1,
+  drawMacroCardV1,
+  type MacroEffectsV1,
+} from "@/lib/macroDeckV1";
 import { DEFAULT_RULES, getRules } from "@/lib/rules";
 
 const supabaseUrl = (process.env.SUPABASE_URL ?? SUPABASE_URL ?? "").trim();
@@ -338,6 +339,32 @@ const getActiveMacroEffectsForRules = (
   macroEnabled: boolean,
 ): ActiveMacroEffect[] =>
   macroEnabled ? normalizeActiveMacroEffects(raw) : [];
+
+const normalizeMacroEffectsV1 = (effects: MacroEffectsV1): MacroEventEffect[] => {
+  const normalized: MacroEventEffect[] = [];
+  if (typeof effects.rent_multiplier === "number") {
+    normalized.push({
+      type: "rent_multiplier",
+      value: effects.rent_multiplier,
+      description: "",
+    });
+  }
+  if (typeof effects.build_cost_multiplier === "number") {
+    normalized.push({
+      type: "development_cost_multiplier",
+      value: effects.build_cost_multiplier,
+      description: "",
+    });
+  }
+  if (typeof effects.cash_delta === "number" && effects.cash_delta !== 0) {
+    normalized.push({
+      type: effects.cash_delta >= 0 ? "cash_bonus" : "cash_shock",
+      value: effects.cash_delta,
+      description: "",
+    });
+  }
+  return normalized;
+};
 
 const tickMacroEffects = (activeEffects: ActiveMacroEffect[]) => {
   const expired: ActiveMacroEffect[] = [];
@@ -5075,6 +5102,14 @@ export async function POST(request: Request) {
         | {
             type?: unknown;
             macro_id?: unknown;
+            macroCardId?: unknown;
+            name?: unknown;
+            rarity?: unknown;
+            durationRounds?: unknown;
+            headline?: unknown;
+            flavor?: unknown;
+            rulesText?: unknown;
+            effects?: unknown;
             return_turn_phase?: unknown;
           }
         | null;
@@ -5097,7 +5132,54 @@ export async function POST(request: Request) {
         typeof pendingAction.return_turn_phase === "string"
           ? pendingAction.return_turn_phase
           : "AWAITING_ROLL";
-      const finalVersion = currentVersion + 1;
+      const macroCardId =
+        typeof pendingAction.macroCardId === "string"
+          ? pendingAction.macroCardId
+          : typeof pendingAction.macro_id === "string"
+            ? pendingAction.macro_id
+            : null;
+      const macroName =
+        typeof pendingAction.name === "string"
+          ? pendingAction.name
+          : "Macroeconomic shift";
+      const macroRarity =
+        typeof pendingAction.rarity === "string" ? pendingAction.rarity : null;
+      const macroDurationRounds =
+        typeof pendingAction.durationRounds === "number"
+          ? pendingAction.durationRounds
+          : null;
+      const macroHeadline =
+        typeof pendingAction.headline === "string" ? pendingAction.headline : null;
+      const macroFlavor =
+        typeof pendingAction.flavor === "string" ? pendingAction.flavor : null;
+      const macroRulesText =
+        typeof pendingAction.rulesText === "string" ? pendingAction.rulesText : null;
+      const macroEffects =
+        pendingAction.effects && typeof pendingAction.effects === "object"
+          ? pendingAction.effects
+          : null;
+
+      const events: Array<{ event_type: string; payload: Record<string, unknown> }> =
+        [
+          {
+            event_type: "MACRO_EVENT",
+            payload: {
+              macroCardId,
+              name: macroName,
+              rarity: macroRarity,
+              durationRounds: macroDurationRounds,
+              headline: macroHeadline,
+              flavor: macroFlavor,
+              rulesText: macroRulesText,
+              effects: macroEffects,
+              event_id: macroCardId,
+              event_name: macroName,
+              duration_rounds: macroDurationRounds,
+            },
+          },
+        ];
+
+      const finalVersion = currentVersion + events.length;
       const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
         `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
         {
@@ -5120,6 +5202,8 @@ export async function POST(request: Request) {
           { status: 409 },
         );
       }
+
+      await emitGameEvents(gameId, currentVersion + 1, events, user.id);
 
       return NextResponse.json({ gameState: updatedState });
     }
@@ -6906,7 +6990,6 @@ export async function POST(request: Request) {
 
       const nextRound = (gameState.rounds_elapsed ?? 0) + 1;
       const macroEnabled = rules.macroEnabled;
-      const macroDeck = getMacroDeckById(defaultMacroDeckId);
       let nextLastMacroEventId = gameState.last_macro_event_id ?? null;
       const activeMacroEffects = normalizeActiveMacroEffects(
         gameState.active_macro_effects,
@@ -6916,7 +6999,10 @@ export async function POST(request: Request) {
         id: string;
         name: string;
         durationRounds: number;
-        effects: MacroEventEffect[];
+        headline: string;
+        flavor: string;
+        rulesText: string;
+        effects: MacroEffectsV1;
         rarity?: "common" | "uncommon" | "black_swan";
       } | null = null;
 
@@ -6938,16 +7024,13 @@ export async function POST(request: Request) {
         }
 
         if (
-          macroDeck &&
           nextRound % MACRO_EVENT_INTERVAL_ROUNDS === 0 &&
-          macroDeck.events.length > 0
+          MACRO_DECK_V1.length > 0
         ) {
-          const macroEvent = drawMacroEvent(
-            macroDeck,
-            nextLastMacroEventId,
-            DEFAULT_MACRO_DRAW_MODE,
+          const macroEvent = drawMacroCardV1(nextLastMacroEventId);
+          const normalizedEffects = normalizeMacroEffects(
+            normalizeMacroEffectsV1(macroEvent.effects),
           );
-          const normalizedEffects = normalizeMacroEffects(macroEvent.effects);
           nextLastMacroEventId = macroEvent.id;
           triggeredMacroEvent = macroEvent;
           const activeMacroEffect: ActiveMacroEffect = {
@@ -6961,14 +7044,14 @@ export async function POST(request: Request) {
           events.push({
             event_type: "MACRO_EVENT_TRIGGERED",
             payload: {
-              deck_id: macroDeck.id,
-              deck_name: macroDeck.name,
+              deck_id: "macro-v1",
+              deck_name: "Macro V1",
               event_id: macroEvent.id,
               event_name: macroEvent.name,
               duration_rounds: macroEvent.durationRounds,
               effects: normalizedEffects,
               rarity: macroEvent.rarity ?? null,
-              mode: DEFAULT_MACRO_DRAW_MODE,
+              mode: "weighted",
               round_index: nextRound,
             },
           });
@@ -6977,7 +7060,7 @@ export async function POST(request: Request) {
 
       if (macroEnabled && triggeredMacroEvent) {
         const normalizedEffects = normalizeMacroEffects(
-          triggeredMacroEvent.effects,
+          normalizeMacroEffectsV1(triggeredMacroEvent.effects),
         );
         const cashDelta = getMacroCashDelta(normalizedEffects);
         if (cashDelta !== 0) {
@@ -7128,6 +7211,14 @@ export async function POST(request: Request) {
         ? {
             type: "MACRO_EVENT",
             macro_id: triggeredMacroEvent.id,
+            macroCardId: triggeredMacroEvent.id,
+            name: triggeredMacroEvent.name,
+            rarity: triggeredMacroEvent.rarity ?? null,
+            durationRounds: triggeredMacroEvent.durationRounds,
+            headline: triggeredMacroEvent.headline,
+            flavor: triggeredMacroEvent.flavor,
+            rulesText: triggeredMacroEvent.rulesText,
+            effects: triggeredMacroEvent.effects,
             return_turn_phase: nextTurnPhase,
           }
         : null;
