@@ -133,9 +133,9 @@ const FloatingTurnActions = ({
         <Image
           src="/icons/dice.svg"
           alt=""
-          width={24}
-          height={24}
-          className="h-6 w-6 object-contain"
+          width={30}
+          height={30}
+          className="h-10 w-10 object-contain"
           aria-hidden
         />
       </button>
