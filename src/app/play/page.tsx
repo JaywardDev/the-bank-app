@@ -84,6 +84,171 @@ const PropertyCardShell = ({
   </div>
 );
 
+type TitleDeedCardProps = {
+  bandColor: string;
+  eyebrow?: string;
+  header: ReactNode;
+  subheader?: ReactNode;
+  rentSection?: ReactNode;
+  footer?: ReactNode;
+};
+
+const TitleDeedCard = ({
+  bandColor,
+  eyebrow,
+  header,
+  subheader,
+  rentSection,
+  footer,
+}: TitleDeedCardProps) => (
+  <div className="overflow-hidden rounded-2xl border border-neutral-200 bg-white text-sm text-neutral-900 shadow-sm">
+    <div className="h-4 w-full" style={{ backgroundColor: bandColor }} />
+    <div className="px-4 pb-4 pt-3">
+      {eyebrow ? (
+        <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-neutral-500">
+          {eyebrow}
+        </p>
+      ) : null}
+      {header}
+      {subheader}
+      {rentSection}
+      {footer ? (
+        <div className="mt-4 border-t border-neutral-200 pt-3">{footer}</div>
+      ) : null}
+    </div>
+  </div>
+);
+
+type RentRow = { label: string; value: number | null };
+
+const PropertyRentTable = ({
+  rentRows,
+  houseCost,
+  className,
+}: {
+  rentRows: RentRow[];
+  houseCost: number | null;
+  className?: string;
+}) => (
+  <div
+    className={`rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 ${
+      className ?? ""
+    }`}
+  >
+    <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+      Rent
+    </p>
+    <div className="mt-2 space-y-1 text-xs">
+      {rentRows.map((row) => (
+        <div
+          key={row.label}
+          className="flex items-center justify-between text-neutral-600"
+        >
+          <span>{row.label}</span>
+          <span className="font-semibold text-neutral-900">
+            {row.value !== null ? `$${row.value}` : "—"}
+          </span>
+        </div>
+      ))}
+    </div>
+    <div className="mt-2 border-t border-neutral-200 pt-2 text-xs font-medium text-neutral-700">
+      House cost: {houseCost ? `$${houseCost} each` : "—"}
+    </div>
+  </div>
+);
+
+const RailRentTable = ({
+  rentRows,
+  ownedCount,
+  currentRent,
+  className,
+}: {
+  rentRows: RentRow[];
+  ownedCount: number;
+  currentRent: number | null;
+  className?: string;
+}) => (
+  <div
+    className={`rounded-xl border border-neutral-200 bg-white px-3 py-2 ${
+      className ?? ""
+    }`}
+  >
+    <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+      Rent
+    </p>
+    <div className="mt-2 space-y-1 text-xs">
+      {rentRows.map((row) => (
+        <div
+          key={row.label}
+          className="flex items-center justify-between text-neutral-600"
+        >
+          <span>{row.label}</span>
+          <span className="font-semibold text-neutral-900">
+            {row.value !== null ? `$${row.value}` : "—"}
+          </span>
+        </div>
+      ))}
+    </div>
+    <p className="mt-2 text-[11px] text-neutral-500">
+      Currently owned: {ownedCount} railroads.
+    </p>
+    {currentRent !== null ? (
+      <p className="mt-1 text-[11px] font-semibold text-neutral-700">
+        Current rent: ${currentRent}
+      </p>
+    ) : null}
+  </div>
+);
+
+const UtilityRentTable = ({
+  ownedCount,
+  lastRoll,
+  currentRent,
+  className,
+}: {
+  ownedCount: number;
+  lastRoll: number | null;
+  currentRent: number | null;
+  className?: string;
+}) => (
+  <div
+    className={`rounded-xl border border-neutral-200 bg-white px-3 py-2 text-xs text-neutral-600 ${
+      className ?? ""
+    }`}
+  >
+    <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+      Rent
+    </p>
+    <div className="mt-2 space-y-1">
+      <p>
+        If one Utility is owned, rent is{" "}
+        <span className="font-semibold text-neutral-900">
+          {UTILITY_RENT_MULTIPLIERS.single}×
+        </span>{" "}
+        the dice roll.
+      </p>
+      <p>
+        If both Utilities are owned, rent is{" "}
+        <span className="font-semibold text-neutral-900">
+          {UTILITY_RENT_MULTIPLIERS.double}×
+        </span>{" "}
+        the dice roll.
+      </p>
+    </div>
+    <p className="mt-2 text-[11px] text-neutral-500">
+      Rent is based on the dice roll.
+    </p>
+    <p className="mt-1 text-[11px] text-neutral-500">
+      Currently owned: {ownedCount} utilities.
+    </p>
+    {lastRoll !== null && currentRent !== null ? (
+      <p className="mt-1 text-[11px] font-semibold text-neutral-700">
+        Current rent (last roll {lastRoll}): ${currentRent}
+      </p>
+    ) : null}
+  </div>
+);
+
 type FloatingTurnActionsProps = {
   isVisible: boolean;
   canRoll: boolean;
@@ -160,6 +325,34 @@ const formatSignedPercent = (value: number) =>
   `${value >= 0 ? "+" : ""}${(value * 100).toFixed(1)}%`;
 
 const formatMultiplier = (value: number) => `${value.toFixed(2)}×`;
+
+const getPropertyRentDetails = (tile: BoardTile | null) => {
+  const baseRent =
+    tile && typeof tile.baseRent === "number" ? tile.baseRent : null;
+  const rentByHouses =
+    tile?.rentByHouses && tile.rentByHouses.length > 0
+      ? tile.rentByHouses
+      : null;
+  const baseRentDisplay = rentByHouses?.[0] ?? baseRent ?? null;
+  const maxRentDisplay =
+    rentByHouses && rentByHouses.length > 0
+      ? rentByHouses[rentByHouses.length - 1] ?? null
+      : baseRent ?? null;
+  const maxRentLabel = rentByHouses
+    ? "Rent with hotel (max build)"
+    : "Rent with max build";
+  return {
+    houseCost: tile?.houseCost ?? null,
+    rentRows: [
+      { label: "Base rent", value: baseRentDisplay },
+      { label: "Rent with 1 house", value: rentByHouses?.[1] ?? null },
+      { label: "Rent with 2 houses", value: rentByHouses?.[2] ?? null },
+      { label: "Rent with 3 houses", value: rentByHouses?.[3] ?? null },
+      { label: "Rent with 4 houses", value: rentByHouses?.[4] ?? null },
+      { label: maxRentLabel, value: maxRentDisplay },
+    ],
+  };
+};
 
 const describeMacroEffect = (effect: MacroEventEffect) => {
   switch (effect.type) {
@@ -3269,31 +3462,10 @@ export default function PlayPage() {
       null
     );
   }, [boardPack?.tiles, pendingPurchase]);
-  const pendingBaseRent =
-    pendingTile && typeof pendingTile.baseRent === "number"
-      ? pendingTile.baseRent
-      : null;
-  const pendingRentByHouses =
-    pendingTile?.rentByHouses && pendingTile.rentByHouses.length > 0
-      ? pendingTile.rentByHouses
-      : null;
-  const pendingBaseRentDisplay =
-    pendingRentByHouses?.[0] ?? pendingBaseRent ?? null;
-  const pendingMaxRentDisplay =
-    pendingRentByHouses && pendingRentByHouses.length > 0
-      ? pendingRentByHouses[pendingRentByHouses.length - 1] ?? null
-      : pendingBaseRent ?? null;
-  const pendingMaxRentLabel = pendingRentByHouses
-    ? "Rent with hotel (max build)"
-    : "Rent with max build";
-  const pendingRentRows = [
-    { label: "Base rent", value: pendingBaseRentDisplay },
-    { label: "Rent with 1 house", value: pendingRentByHouses?.[1] ?? null },
-    { label: "Rent with 2 houses", value: pendingRentByHouses?.[2] ?? null },
-    { label: "Rent with 3 houses", value: pendingRentByHouses?.[3] ?? null },
-    { label: "Rent with 4 houses", value: pendingRentByHouses?.[4] ?? null },
-    { label: pendingMaxRentLabel, value: pendingMaxRentDisplay },
-  ];
+  const pendingPropertyRent = useMemo(
+    () => getPropertyRentDetails(pendingTile),
+    [pendingTile],
+  );
   const pendingOwnerId = useMemo(() => {
     if (!pendingTile) {
       return null;
@@ -5111,126 +5283,72 @@ export default function PlayPage() {
             </>
           ) : null}
           {showPendingDecisionCard && pendingPurchase ? (
-            <div className="overflow-hidden rounded-2xl border border-neutral-200 bg-white text-sm text-neutral-900 shadow-sm">
-              <div
-                className="h-4 w-full"
-                style={{ backgroundColor: pendingBandColor }}
-              />
-              <div className="px-4 pb-4 pt-3">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-neutral-500">
-                  Pending decision
-                </p>
-                {pendingTile?.type === "RAIL" ? (
-                  <>
-                    <div className="mt-2 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-3 text-center">
-                      <div className="mx-auto flex h-12 w-24 items-center justify-center rounded-md border border-dashed border-neutral-300 text-[10px] font-semibold text-neutral-500">
-                        RAIL_ICON_PLACEHOLDER
-                      </div>
-                      <p className="mt-2 text-lg font-black uppercase tracking-wide text-neutral-900">
-                        {pendingTileLabel}
-                      </p>
-                      <p className="text-xs font-medium text-neutral-500">
-                        Price ${pendingPurchase.price}
-                      </p>
+            <TitleDeedCard
+              bandColor={pendingBandColor}
+              eyebrow="Pending decision"
+              header={
+                pendingTile?.type === "RAIL" ? (
+                  <div className="mt-2 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-3 text-center">
+                    <div className="mx-auto flex h-12 w-24 items-center justify-center rounded-md border border-dashed border-neutral-300 text-[10px] font-semibold text-neutral-500">
+                      RAIL_ICON_PLACEHOLDER
                     </div>
-                    <div className="mt-3 rounded-xl border border-neutral-200 bg-white px-3 py-2">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
-                        Rent
-                      </p>
-                      <div className="mt-2 space-y-1 text-xs">
-                        {pendingRailRentRows.map((row) => (
-                          <div
-                            key={row.label}
-                            className="flex items-center justify-between text-neutral-600"
-                          >
-                            <span>{row.label}</span>
-                            <span className="font-semibold text-neutral-900">
-                              {row.value !== null ? `$${row.value}` : "—"}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                      <p className="mt-2 text-[11px] text-neutral-500">
-                        Currently owned: {pendingOwnerRailCount} railroads.
-                      </p>
-                    </div>
-                  </>
-                ) : pendingTile?.type === "UTILITY" ? (
-                  <>
-                    <div className="mt-2 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-3 text-center">
-                      <div className="mx-auto flex h-12 w-24 items-center justify-center rounded-md border border-dashed border-neutral-300 text-[10px] font-semibold text-neutral-500">
-                        UTIL_ICON_PLACEHOLDER
-                      </div>
-                      <p className="mt-2 text-lg font-black uppercase tracking-wide text-neutral-900">
-                        {pendingTileLabel}
-                      </p>
-                      <p className="text-xs font-medium text-neutral-500">
-                        Price ${pendingPurchase.price}
-                      </p>
-                    </div>
-                    <div className="mt-3 rounded-xl border border-neutral-200 bg-white px-3 py-2 text-xs text-neutral-600">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
-                        Rent
-                      </p>
-                      <div className="mt-2 space-y-1">
-                        <p>
-                          If one Utility is owned, rent is{" "}
-                          <span className="font-semibold text-neutral-900">
-                            {UTILITY_RENT_MULTIPLIERS.single}×
-                          </span>{" "}
-                          the dice roll.
-                        </p>
-                        <p>
-                          If both Utilities are owned, rent is{" "}
-                          <span className="font-semibold text-neutral-900">
-                            {UTILITY_RENT_MULTIPLIERS.double}×
-                          </span>{" "}
-                          the dice roll.
-                        </p>
-                      </div>
-                      <p className="mt-2 text-[11px] text-neutral-500">
-                        Rent is based on the dice roll.
-                      </p>
-                      <p className="mt-1 text-[11px] text-neutral-500">
-                        Currently owned: {pendingOwnerUtilityCount} utilities.
-                      </p>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <p className="mt-1 text-lg font-black uppercase tracking-wide text-neutral-900">
+                    <p className="mt-2 text-lg font-black uppercase tracking-wide text-neutral-900">
                       {pendingTileLabel}
                     </p>
                     <p className="text-xs font-medium text-neutral-500">
                       Price ${pendingPurchase.price}
                     </p>
-                    <div className="mt-3 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
-                        Rent
-                      </p>
-                      <div className="mt-2 space-y-1 text-xs">
-                        {pendingRentRows.map((row) => (
-                          <div
-                            key={row.label}
-                            className="flex items-center justify-between text-neutral-600"
-                          >
-                            <span>{row.label}</span>
-                            <span className="font-semibold text-neutral-900">
-                              {row.value !== null ? `$${row.value}` : "—"}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="mt-2 border-t border-neutral-200 pt-2 text-xs font-medium text-neutral-700">
-                        House cost:{" "}
-                        {pendingTile?.houseCost
-                          ? `$${pendingTile.houseCost} each`
-                          : "—"}
-                      </div>
+                  </div>
+                ) : pendingTile?.type === "UTILITY" ? (
+                  <div className="mt-2 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-3 text-center">
+                    <div className="mx-auto flex h-12 w-24 items-center justify-center rounded-md border border-dashed border-neutral-300 text-[10px] font-semibold text-neutral-500">
+                      UTIL_ICON_PLACEHOLDER
                     </div>
-                  </>
-                )}
-                <div className="mt-4 border-t border-neutral-200 pt-3">
+                    <p className="mt-2 text-lg font-black uppercase tracking-wide text-neutral-900">
+                      {pendingTileLabel}
+                    </p>
+                    <p className="text-xs font-medium text-neutral-500">
+                      Price ${pendingPurchase.price}
+                    </p>
+                  </div>
+                ) : (
+                  <p className="mt-1 text-lg font-black uppercase tracking-wide text-neutral-900">
+                    {pendingTileLabel}
+                  </p>
+                )
+              }
+              subheader={
+                pendingTile?.type === "PROPERTY" ? (
+                  <p className="text-xs font-medium text-neutral-500">
+                    Price ${pendingPurchase.price}
+                  </p>
+                ) : null
+              }
+              rentSection={
+                pendingTile?.type === "RAIL" ? (
+                  <RailRentTable
+                    className="mt-3"
+                    rentRows={pendingRailRentRows}
+                    ownedCount={pendingOwnerRailCount}
+                    currentRent={null}
+                  />
+                ) : pendingTile?.type === "UTILITY" ? (
+                  <UtilityRentTable
+                    className="mt-3"
+                    ownedCount={pendingOwnerUtilityCount}
+                    lastRoll={null}
+                    currentRent={null}
+                  />
+                ) : (
+                  <PropertyRentTable
+                    className="mt-3"
+                    rentRows={pendingPropertyRent.rentRows}
+                    houseCost={pendingPropertyRent.houseCost}
+                  />
+                )
+              }
+              footer={
+                <>
                   <div className="grid gap-2">
                     <button
                       className="rounded-2xl bg-neutral-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
@@ -5292,9 +5410,9 @@ export default function PlayPage() {
                       buy this property.
                     </p>
                   ) : null}
-                </div>
-              </div>
-            </div>
+                </>
+              }
+            />
           ) : null}
           {showPendingDecisionBanner ? (
             <div className="rounded-2xl border border-amber-100 bg-amber-50/60 p-4 text-sm text-amber-900">
@@ -6193,12 +6311,10 @@ export default function PlayPage() {
                       const isProperty = tile.type === "PROPERTY";
                       const isRail = tile.type === "RAIL";
                       const isUtility = tile.type === "UTILITY";
-                      const baseRent =
-                        typeof tile.baseRent === "number"
-                          ? tile.baseRent
-                          : null;
-                      const railBaseRent =
-                        RAIL_RENT_BY_COUNT[1] ?? baseRent ?? null;
+                      const propertyRent = isProperty
+                        ? getPropertyRentDetails(tile)
+                        : null;
+                      const railBaseRent = RAIL_RENT_BY_COUNT[1] ?? null;
                       const railCurrentRent =
                         RAIL_RENT_BY_COUNT[
                           Math.min(
@@ -6206,6 +6322,21 @@ export default function PlayPage() {
                             RAIL_RENT_BY_COUNT.length - 1,
                           )
                         ] ?? railBaseRent;
+                      const railRentRows = [
+                        { label: "Rent", value: RAIL_RENT_BY_COUNT[1] ?? null },
+                        {
+                          label: "If 2 Railroads are owned",
+                          value: RAIL_RENT_BY_COUNT[2] ?? null,
+                        },
+                        {
+                          label: "If 3 Railroads are owned",
+                          value: RAIL_RENT_BY_COUNT[3] ?? null,
+                        },
+                        {
+                          label: "If 4 Railroads are owned",
+                          value: RAIL_RENT_BY_COUNT[4] ?? null,
+                        },
+                      ];
                       const utilityMultiplier =
                         ownedUtilityCount >= 2
                           ? UTILITY_RENT_MULTIPLIERS.double
@@ -6218,109 +6349,82 @@ export default function PlayPage() {
                         lastRoll !== null ? lastRoll * utilityMultiplier : null;
                       const groupLabel = getTileGroupLabel(tile);
                       return (
-                        <PropertyCardShell
+                        <TitleDeedCard
                           key={tile.index}
                           bandColor={getTileBandColor(tile)}
-                          bodyClassName="text-sm"
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="space-y-1">
-                              <div>
-                                <p className="font-semibold text-neutral-900">
+                          header={
+                            isRail ? (
+                              <div className="mt-2 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-3 text-center">
+                                <div className="mx-auto flex h-12 w-24 items-center justify-center rounded-md border border-dashed border-neutral-300 text-[10px] font-semibold text-neutral-500">
+                                  RAIL_ICON_PLACEHOLDER
+                                </div>
+                                <p className="mt-2 text-lg font-black uppercase tracking-wide text-neutral-900">
                                   {tile.name}
                                 </p>
-                                <p className="text-xs text-neutral-500">
+                                <p className="text-xs font-medium text-neutral-500">
                                   {groupLabel}
                                 </p>
                               </div>
-                              <div className="flex flex-wrap items-center gap-3 text-xs text-neutral-500">
-                                <span className="font-semibold text-neutral-700">
-                                  Principal: ${principalPreview}
-                                </span>
-                                {isProperty ? (
-                                  <>
-                                    <span className="uppercase tracking-wide text-neutral-400">
-                                      Rent
-                                    </span>
-                                    <span className="font-semibold text-neutral-700">
-                                      {baseRent !== null ? `$${baseRent}` : "—"}
-                                    </span>
-                                    <span className="uppercase tracking-wide text-neutral-400">
-                                      Houses
-                                    </span>
-                                    <span className="font-semibold text-neutral-700">
-                                      {houses}
-                                    </span>
-                                  </>
-                                ) : null}
-                                {isRail ? (
-                                  <>
-                                    <span className="uppercase tracking-wide text-neutral-400">
-                                      Base rent
-                                    </span>
-                                    <span className="font-semibold text-neutral-700">
-                                      {railBaseRent !== null
-                                        ? `$${railBaseRent}`
-                                        : "—"}
-                                    </span>
-                                    <span className="uppercase tracking-wide text-neutral-400">
-                                      Owned RR
-                                    </span>
-                                    <span className="font-semibold text-neutral-700">
-                                      {ownedRailCount}
-                                    </span>
-                                    <span className="uppercase tracking-wide text-neutral-400">
-                                      Current rent
-                                    </span>
-                                    <span className="font-semibold text-neutral-700">
-                                      {railCurrentRent !== null
-                                        ? `$${railCurrentRent}`
-                                        : "—"}
-                                    </span>
-                                  </>
-                                ) : null}
-                                {isUtility ? (
-                                  <>
-                                    <span className="uppercase tracking-wide text-neutral-400">
-                                      Owned util
-                                    </span>
-                                    <span className="font-semibold text-neutral-700">
-                                      {ownedUtilityCount}
-                                    </span>
-                                    <span className="uppercase tracking-wide text-neutral-400">
-                                      Rent rule
-                                    </span>
-                                    <span className="font-semibold text-neutral-700">
-                                      {UTILITY_RENT_MULTIPLIERS.single}× /{" "}
-                                      {UTILITY_RENT_MULTIPLIERS.double}×
-                                    </span>
-                                    {lastRoll !== null ? (
-                                      <>
-                                        <span className="uppercase tracking-wide text-neutral-400">
-                                          Last roll
-                                        </span>
-                                        <span className="font-semibold text-neutral-700">
-                                          {lastRoll}
-                                        </span>
-                                        <span className="uppercase tracking-wide text-neutral-400">
-                                          Current rent
-                                        </span>
-                                        <span className="font-semibold text-neutral-700">
-                                          {utilityRentPreview !== null
-                                            ? `$${utilityRentPreview}`
-                                            : "—"}
-                                        </span>
-                                      </>
-                                    ) : null}
-                                  </>
-                                ) : null}
+                            ) : isUtility ? (
+                              <div className="mt-2 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-3 text-center">
+                                <div className="mx-auto flex h-12 w-24 items-center justify-center rounded-md border border-dashed border-neutral-300 text-[10px] font-semibold text-neutral-500">
+                                  UTIL_ICON_PLACEHOLDER
+                                </div>
+                                <p className="mt-2 text-lg font-black uppercase tracking-wide text-neutral-900">
+                                  {tile.name}
+                                </p>
+                                <p className="text-xs font-medium text-neutral-500">
+                                  {groupLabel}
+                                </p>
                               </div>
-                            </div>
-                            <div className="flex flex-col items-end gap-2">
+                            ) : (
+                              <p className="mt-1 text-lg font-black uppercase tracking-wide text-neutral-900">
+                                {tile.name}
+                              </p>
+                            )
+                          }
+                          subheader={
+                            isProperty ? (
+                              <div className="mt-1 space-y-1 text-xs font-medium text-neutral-500">
+                                <p>{groupLabel}</p>
+                                <p>Loan Value: ${principalPreview}</p>
+                                <p>Houses: {houses}</p>
+                              </div>
+                            ) : (
+                              <div className="mt-2 text-xs font-medium text-neutral-500">
+                                <p>Loan Value: ${principalPreview}</p>
+                              </div>
+                            )
+                          }
+                          rentSection={
+                            isProperty && propertyRent ? (
+                              <PropertyRentTable
+                                className="mt-3"
+                                rentRows={propertyRent.rentRows}
+                                houseCost={propertyRent.houseCost}
+                              />
+                            ) : isRail ? (
+                              <RailRentTable
+                                className="mt-3"
+                                rentRows={railRentRows}
+                                ownedCount={ownedRailCount}
+                                currentRent={railCurrentRent}
+                              />
+                            ) : isUtility ? (
+                              <UtilityRentTable
+                                className="mt-3"
+                                ownedCount={ownedUtilityCount}
+                                lastRoll={lastRoll}
+                                currentRent={utilityRentPreview}
+                              />
+                            ) : null
+                          }
+                          footer={
+                            <div className="grid gap-2">
                               {isProperty ? (
-                                <div className="flex items-center gap-2">
+                                <div className="flex flex-wrap gap-2">
                                   <button
-                                    className="rounded-full bg-neutral-900 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
+                                    className="rounded-2xl bg-neutral-900 px-4 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
                                     type="button"
                                     onClick={() =>
                                       void handleBankAction({
@@ -6338,7 +6442,7 @@ export default function PlayPage() {
                                       : "Build"}
                                   </button>
                                   <button
-                                    className="rounded-full border border-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
+                                    className="rounded-2xl border border-neutral-900 px-4 py-2 text-xs font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
                                     type="button"
                                     onClick={() =>
                                       void handleBankAction({
@@ -6358,7 +6462,7 @@ export default function PlayPage() {
                                 </div>
                               ) : null}
                               <button
-                                className="rounded-full bg-neutral-900 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
+                                className="rounded-2xl bg-neutral-900 px-4 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
                                 type="button"
                                 onClick={() =>
                                   void handleBankAction({
@@ -6378,8 +6482,8 @@ export default function PlayPage() {
                                   : "Collateralize"}
                               </button>
                             </div>
-                          </div>
-                        </PropertyCardShell>
+                          }
+                        />
                       );
                     },
                   )}
