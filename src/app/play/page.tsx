@@ -29,6 +29,8 @@ import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 const lastGameKey = "bank.lastGameId";
 const DEBUG = process.env.NEXT_PUBLIC_DEBUG === "true";
 const JAIL_FINE_AMOUNT = 50;
+const RAIL_RENT_BY_COUNT = [0, 25, 50, 100, 200];
+const UTILITY_RENT_MULTIPLIERS = { single: 4, double: 10 };
 const EVENT_FETCH_LIMIT = 100;
 const EVENT_LOG_LIMIT = 10;
 const TRANSACTION_DISPLAY_LIMIT = 30;
@@ -3165,6 +3167,56 @@ export default function PlayPage() {
     { label: "Rent with 4 houses", value: pendingRentByHouses?.[4] ?? null },
     { label: pendingMaxRentLabel, value: pendingMaxRentDisplay },
   ];
+  const pendingOwnerId = useMemo(() => {
+    if (!pendingTile) {
+      return null;
+    }
+    const existingOwner = ownershipByTile[pendingTile.index]?.owner_player_id;
+    if (existingOwner) {
+      return existingOwner;
+    }
+    return currentUserPlayer?.id ?? null;
+  }, [currentUserPlayer?.id, ownershipByTile, pendingTile]);
+  const pendingOwnerRailCount = useMemo(() => {
+    if (!pendingOwnerId || !boardPack?.tiles) {
+      return 0;
+    }
+    return boardPack.tiles.filter(
+      (tile) =>
+        tile.type === "RAIL" &&
+        ownershipByTile[tile.index]?.owner_player_id === pendingOwnerId,
+    ).length;
+  }, [boardPack?.tiles, ownershipByTile, pendingOwnerId]);
+  const pendingOwnerUtilityCount = useMemo(() => {
+    if (!pendingOwnerId || !boardPack?.tiles) {
+      return 0;
+    }
+    return boardPack.tiles.filter(
+      (tile) =>
+        tile.type === "UTILITY" &&
+        ownershipByTile[tile.index]?.owner_player_id === pendingOwnerId,
+    ).length;
+  }, [boardPack?.tiles, ownershipByTile, pendingOwnerId]);
+  const pendingRailRentRows = useMemo(() => {
+    if (pendingTile?.type !== "RAIL") {
+      return [];
+    }
+    return [
+      { label: "Rent", value: RAIL_RENT_BY_COUNT[1] ?? null },
+      {
+        label: "If 2 Railroads are owned",
+        value: RAIL_RENT_BY_COUNT[2] ?? null,
+      },
+      {
+        label: "If 3 Railroads are owned",
+        value: RAIL_RENT_BY_COUNT[3] ?? null,
+      },
+      {
+        label: "If 4 Railroads are owned",
+        value: RAIL_RENT_BY_COUNT[4] ?? null,
+      },
+    ];
+  }, [pendingTile?.type]);
   const pendingTileLabel =
     pendingTile?.name ??
     (pendingPurchase ? `Tile ${pendingPurchase.tile_index}` : null);
@@ -4884,36 +4936,116 @@ export default function PlayPage() {
                 <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-neutral-500">
                   Pending decision
                 </p>
-                <p className="mt-1 text-lg font-black uppercase tracking-wide text-neutral-900">
-                  {pendingTileLabel}
-                </p>
-                <p className="text-xs font-medium text-neutral-500">
-                  Price ${pendingPurchase.price}
-                </p>
-                <div className="mt-3 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
-                    Rent
-                  </p>
-                  <div className="mt-2 space-y-1 text-xs">
-                    {pendingRentRows.map((row) => (
-                      <div
-                        key={row.label}
-                        className="flex items-center justify-between text-neutral-600"
-                      >
-                        <span>{row.label}</span>
-                        <span className="font-semibold text-neutral-900">
-                          {row.value !== null ? `$${row.value}` : "—"}
-                        </span>
+                {pendingTile?.type === "RAIL" ? (
+                  <>
+                    <div className="mt-2 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-3 text-center">
+                      <div className="mx-auto flex h-12 w-24 items-center justify-center rounded-md border border-dashed border-neutral-300 text-[10px] font-semibold text-neutral-500">
+                        RAIL_ICON_PLACEHOLDER
                       </div>
-                    ))}
-                  </div>
-                  <div className="mt-2 border-t border-neutral-200 pt-2 text-xs font-medium text-neutral-700">
-                    House cost:{" "}
-                    {pendingTile?.houseCost
-                      ? `$${pendingTile.houseCost} each`
-                      : "—"}
-                  </div>
-                </div>
+                      <p className="mt-2 text-lg font-black uppercase tracking-wide text-neutral-900">
+                        {pendingTileLabel}
+                      </p>
+                      <p className="text-xs font-medium text-neutral-500">
+                        Price ${pendingPurchase.price}
+                      </p>
+                    </div>
+                    <div className="mt-3 rounded-xl border border-neutral-200 bg-white px-3 py-2">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+                        Rent
+                      </p>
+                      <div className="mt-2 space-y-1 text-xs">
+                        {pendingRailRentRows.map((row) => (
+                          <div
+                            key={row.label}
+                            className="flex items-center justify-between text-neutral-600"
+                          >
+                            <span>{row.label}</span>
+                            <span className="font-semibold text-neutral-900">
+                              {row.value !== null ? `$${row.value}` : "—"}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="mt-2 text-[11px] text-neutral-500">
+                        Currently owned: {pendingOwnerRailCount} railroads.
+                      </p>
+                    </div>
+                  </>
+                ) : pendingTile?.type === "UTILITY" ? (
+                  <>
+                    <div className="mt-2 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-3 text-center">
+                      <div className="mx-auto flex h-12 w-24 items-center justify-center rounded-md border border-dashed border-neutral-300 text-[10px] font-semibold text-neutral-500">
+                        UTIL_ICON_PLACEHOLDER
+                      </div>
+                      <p className="mt-2 text-lg font-black uppercase tracking-wide text-neutral-900">
+                        {pendingTileLabel}
+                      </p>
+                      <p className="text-xs font-medium text-neutral-500">
+                        Price ${pendingPurchase.price}
+                      </p>
+                    </div>
+                    <div className="mt-3 rounded-xl border border-neutral-200 bg-white px-3 py-2 text-xs text-neutral-600">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+                        Rent
+                      </p>
+                      <div className="mt-2 space-y-1">
+                        <p>
+                          If one Utility is owned, rent is{" "}
+                          <span className="font-semibold text-neutral-900">
+                            {UTILITY_RENT_MULTIPLIERS.single}×
+                          </span>{" "}
+                          the dice roll.
+                        </p>
+                        <p>
+                          If both Utilities are owned, rent is{" "}
+                          <span className="font-semibold text-neutral-900">
+                            {UTILITY_RENT_MULTIPLIERS.double}×
+                          </span>{" "}
+                          the dice roll.
+                        </p>
+                      </div>
+                      <p className="mt-2 text-[11px] text-neutral-500">
+                        Rent is based on the dice roll.
+                      </p>
+                      <p className="mt-1 text-[11px] text-neutral-500">
+                        Currently owned: {pendingOwnerUtilityCount} utilities.
+                      </p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="mt-1 text-lg font-black uppercase tracking-wide text-neutral-900">
+                      {pendingTileLabel}
+                    </p>
+                    <p className="text-xs font-medium text-neutral-500">
+                      Price ${pendingPurchase.price}
+                    </p>
+                    <div className="mt-3 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+                        Rent
+                      </p>
+                      <div className="mt-2 space-y-1 text-xs">
+                        {pendingRentRows.map((row) => (
+                          <div
+                            key={row.label}
+                            className="flex items-center justify-between text-neutral-600"
+                          >
+                            <span>{row.label}</span>
+                            <span className="font-semibold text-neutral-900">
+                              {row.value !== null ? `$${row.value}` : "—"}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="mt-2 border-t border-neutral-200 pt-2 text-xs font-medium text-neutral-700">
+                        House cost:{" "}
+                        {pendingTile?.houseCost
+                          ? `$${pendingTile.houseCost} each`
+                          : "—"}
+                      </div>
+                    </div>
+                  </>
+                )}
                 <div className="mt-4 border-t border-neutral-200 pt-3">
                   <div className="grid gap-2">
                     <button
