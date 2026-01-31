@@ -1008,6 +1008,7 @@ export default function PlayPage() {
   const activeGameIdRef = useRef<string | null>(null);
   const unmountingRef = useRef(false);
   const invalidTokenRef = useRef<string | null>(null);
+  const tradeConfirmSectionRef = useRef<HTMLElement | null>(null);
 
   const isConfigured = useMemo(() => supabaseClient.isConfigured(), []);
   const latestRollEvent = useMemo(
@@ -4504,6 +4505,13 @@ export default function PlayPage() {
     setIsIncomingTradeOpen(true);
   }, [incomingTradeProposal]);
 
+  const scrollToTradeConfirm = useCallback(() => {
+    tradeConfirmSectionRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    });
+  }, []);
+
   const openProposeTradeModal = useCallback(() => {
     if (!currentUserPlayer) {
       setNotice("Join a game lobby first.");
@@ -6437,11 +6445,25 @@ export default function PlayPage() {
         </div>
       </section>
 
-      <section className="rounded-2xl border bg-white p-5 shadow-sm space-y-3">
+      <section
+        ref={tradeConfirmSectionRef}
+        className="rounded-2xl border bg-white p-5 shadow-sm space-y-3"
+      >
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
-            Trade Confirm
-          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+              Trade Confirm
+            </p>
+            {incomingTradeProposal ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+                <span
+                  className="h-1.5 w-1.5 rounded-full bg-amber-500"
+                  aria-hidden
+                />
+                Offer
+              </span>
+            ) : null}
+          </div>
           <p className="text-sm text-neutral-600">
             Verify the terms before both sides accept.
           </p>
@@ -6460,7 +6482,7 @@ export default function PlayPage() {
               type="button"
               onClick={openIncomingTradeModal}
             >
-              Accept Trade
+              See offer
             </button>
           ) : (
             <div className="flex items-center rounded-2xl border border-dashed border-neutral-200 px-4 py-3 text-sm text-neutral-400">
@@ -6669,6 +6691,20 @@ export default function PlayPage() {
         onRollDice={() => void handleBankAction({ action: "ROLL_DICE" })}
         onEndTurn={() => void handleBankAction({ action: "END_TURN" })}
       />
+      {incomingTradeProposal ? (
+        <button
+          className="fixed bottom-16 right-6 z-10 flex items-center gap-2 rounded-full border border-neutral-200 bg-white px-4 py-2 text-xs font-semibold text-neutral-700 shadow-lg shadow-neutral-200/60 transition hover:border-neutral-300 hover:text-neutral-900"
+          type="button"
+          onClick={scrollToTradeConfirm}
+          aria-label="Trade offer. Scroll to trade confirmation"
+        >
+          <span
+            className="h-2 w-2 rounded-full bg-amber-500"
+            aria-hidden
+          />
+          Trade offer
+        </button>
+      ) : null}
       {!isEventLogSuppressed ? (
         <>
           <button
