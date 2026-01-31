@@ -84,18 +84,22 @@ const PropertyCardShell = ({
   </div>
 );
 
-const DiceIcon = ({ className }: { className?: string }) => (
-  <div
-    className={`flex h-6 w-6 items-center justify-center ${className ?? ""}`}
+const DiceIcon = () => (
+  <svg
+    width="22"
+    height="22"
+    viewBox="0 0 24 24"
+    fill="currentColor"
+    aria-hidden
   >
-    <Image
-      src="/dice-icon.svg"
-      alt="Dice"
-      width={24}
-      height={24}
-    />
-  </div>
+    <rect x="3" y="3" width="18" height="18" rx="4" />
+    <circle cx="8" cy="8" r="1.5" />
+    <circle cx="16" cy="16" r="1.5" />
+    <circle cx="8" cy="16" r="1.5" />
+    <circle cx="16" cy="8" r="1.5" />
+  </svg>
 );
+
 
 type FloatingTurnActionsProps = {
   isVisible: boolean;
