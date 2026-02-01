@@ -1875,7 +1875,10 @@ export default function PlayPage() {
       return `Macro event triggered: ${eventName}${rarityLabel}${durationLabel}`;
     }
 
-    if (event.event_type === "MACRO_EVENT_EXPIRED") {
+    if (
+      event.event_type === "MACRO_EVENT_EXPIRED" ||
+      event.event_type === "MACRO_EXPIRED"
+    ) {
       const eventName =
         typeof payload?.event_name === "string"
           ? payload.event_name

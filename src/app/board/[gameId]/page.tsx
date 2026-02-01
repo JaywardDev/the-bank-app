@@ -639,7 +639,10 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
         return `Macro event triggered: ${eventName}${rarityLabel}${durationLabel}`;
       }
 
-      if (event.event_type === "MACRO_EVENT_EXPIRED") {
+      if (
+        event.event_type === "MACRO_EVENT_EXPIRED" ||
+        event.event_type === "MACRO_EXPIRED"
+      ) {
         const payload = event.payload as { event_name?: unknown } | null;
         const eventName =
           typeof payload?.event_name === "string"
