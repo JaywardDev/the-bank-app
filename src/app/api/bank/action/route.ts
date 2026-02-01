@@ -6232,7 +6232,6 @@ export async function POST(request: Request) {
                 events,
                 macroMeta: {
                   ...macroMetaBase,
-                  effect_type: "sovereign_default",
                 },
                 effectType: "sovereign_default",
               });
