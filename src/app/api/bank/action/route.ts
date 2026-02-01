@@ -1131,6 +1131,9 @@ const getNextActivePlayer = (
   return null;
 };
 
+const getFirstActivePlayer = (players: PlayerRow[]): PlayerRow | null =>
+  players.find((player) => !player.is_eliminated) ?? null;
+
 const getActivePlayersAfterElimination = (
   players: PlayerRow[],
   eliminatedPlayerId: string,
@@ -7216,7 +7219,12 @@ export async function POST(request: Request) {
         },
       ];
 
-      const nextRound = (gameState.rounds_elapsed ?? 0) + 1;
+      const firstActivePlayer = getFirstActivePlayer(players);
+      const tableRoundAdvanced = Boolean(
+        firstActivePlayer && nextPlayer.id === firstActivePlayer.id,
+      );
+      const nextRound =
+        (gameState.rounds_elapsed ?? 0) + (tableRoundAdvanced ? 1 : 0);
       const macroEnabled = rules.macroEnabled;
       let nextLastMacroEventId = gameState.last_macro_event_id ?? null;
       const activeMacroEffectsV1 = normalizeActiveMacroEffectsV1(
@@ -7234,7 +7242,7 @@ export async function POST(request: Request) {
         rarity?: "common" | "uncommon" | "black_swan";
       } | null = null;
 
-      if (macroEnabled) {
+      if (macroEnabled && tableRoundAdvanced) {
         const { updated: tickedMacroEffects, expired: expiredMacroEffects } =
           tickMacroEffectsV1(activeMacroEffectsV1);
         nextActiveMacroEffectsV1 = tickedMacroEffects;
