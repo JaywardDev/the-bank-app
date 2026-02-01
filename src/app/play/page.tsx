@@ -273,7 +273,7 @@ const FloatingTurnActions = ({
   const endEmphasized = canEndTurn && !isEnding;
 
   return (
-    <div className="fixed bottom-24 right-6 z-20 flex flex-col items-center gap-3">
+    <div className="fixed bottom-20 right-6 z-20 flex flex-col items-center gap-3">
       <button
         className={`flex h-14 w-14 items-center justify-center rounded-full border shadow-lg transition ${
           rollEmphasized
@@ -7037,14 +7037,14 @@ export default function PlayPage() {
       {!isEventLogSuppressed ? (
         <>
           <button
-            className="fixed bottom-6 right-6 z-10 rounded-full bg-neutral-900 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white shadow-lg shadow-neutral-900/20 transition hover:bg-neutral-800"
+            className="fixed bottom-6 right-4 z-10 rounded-full bg-neutral-900 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white shadow-lg shadow-neutral-900/20 transition hover:bg-neutral-800"
             type="button"
             onClick={() => {
               setActivityTab("log");
               setIsActivityPanelOpen(true);
             }}
           >
-            Activity
+            ︽
           </button>
           {isActivityPanelOpen ? (
             <div
