@@ -7218,9 +7218,6 @@ export default function PlayPage() {
                 <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
                   Board
                 </p>
-                <p className="hidden text-xs text-neutral-400 [@media(orientation:portrait)]:block">
-                  Rotate your phone for full board view.
-                </p>
               </div>
               <button
                 className="rounded-full border border-neutral-200 px-2.5 py-1.5 text-xs font-semibold text-neutral-500 transition hover:border-neutral-300 hover:text-neutral-700"
