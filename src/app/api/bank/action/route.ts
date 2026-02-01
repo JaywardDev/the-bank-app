@@ -202,6 +202,7 @@ type GameStateRow = {
   pending_card_drawn_by_player_id: string | null;
   pending_card_drawn_at: string | null;
   pending_card_source_tile_index: number | null;
+  skip_next_roll_by_player: Record<string, boolean> | null;
 };
 
 type OwnershipRow = {
@@ -528,6 +529,206 @@ const getMacroInterestTrendAccumulatorV1 = (
 
 const getMacroLoanMortgageBlockedV1 = (activeEffects: ActiveMacroEffectV1[]) =>
   activeEffects.some((effect) => effect.effects.loan_mortgage_new_blocked === true);
+
+const hasMacroOneOffEffects = (effects: MacroEffectsV1 | null) => {
+  if (!effects) {
+    return false;
+  }
+  return (
+    typeof effects.cash_delta === "number" ||
+    Boolean(effects.regional_disaster) ||
+    Boolean(effects.bank_stress_test) ||
+    Boolean(effects.pandemic) ||
+    Boolean(effects.sovereign_default)
+  );
+};
+
+const getActivePlayers = (players: PlayerRow[]) =>
+  players.filter((player) => !player.is_eliminated);
+
+const getPropertyColorGroups = (boardTiles: TileInfo[]) => {
+  const groups = new Set<string>();
+  for (const tile of boardTiles) {
+    if (tile.type === "PROPERTY" && tile.colorGroup) {
+      groups.add(tile.colorGroup);
+    }
+  }
+  return Array.from(groups);
+};
+
+const selectRandomColorGroups = (
+  colorGroups: string[],
+  count: number,
+  seedKey: string,
+) => {
+  if (colorGroups.length === 0 || count <= 0) {
+    return [];
+  }
+  const rng = mulberry32(hashStringToUint32(seedKey));
+  const selection = [...colorGroups];
+  for (let index = selection.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(rng() * (index + 1));
+    [selection[index], selection[swapIndex]] = [
+      selection[swapIndex],
+      selection[index],
+    ];
+  }
+  return selection.slice(0, Math.min(count, selection.length));
+};
+
+const liquidateHousesForPlayer = async ({
+  gameId,
+  player,
+  boardTiles,
+  ownershipByTile,
+  balances,
+  startingCash,
+  targetCash,
+  allowedColorGroups,
+  macroHouseSellMultiplier,
+  events,
+  macroMeta,
+  effectType,
+}: {
+  gameId: string;
+  player: PlayerRow;
+  boardTiles: TileInfo[];
+  ownershipByTile: OwnershipByTile;
+  balances: Record<string, number>;
+  startingCash: number;
+  targetCash: number;
+  allowedColorGroups?: string[] | null;
+  macroHouseSellMultiplier: number;
+  events: Array<{ event_type: string; payload: Record<string, unknown> }>;
+  macroMeta: { macro_id: string | null; macro_name: string; effect_type: string };
+  effectType: string;
+}) => {
+  let updatedBalances = balances;
+  let housesSold = 0;
+  let cashRecovered = 0;
+
+  const candidateTiles = boardTiles
+    .filter((tile) => {
+      if (tile.type !== "PROPERTY" || !tile.colorGroup) {
+        return false;
+      }
+      if (allowedColorGroups && !allowedColorGroups.includes(tile.colorGroup)) {
+        return false;
+      }
+      return true;
+    })
+    .map((tile) => {
+      const ownership = ownershipByTile[tile.index];
+      if (ownership?.owner_player_id !== player.id) {
+        return null;
+      }
+      const houses = ownership.houses ?? 0;
+      if (houses <= 0) {
+        return null;
+      }
+      return { tile, houses };
+    })
+    .filter(
+      (entry): entry is { tile: TileInfo; houses: number } => entry !== null,
+    );
+
+  const currentBalance = updatedBalances[player.id] ?? startingCash;
+  let nextBalance = currentBalance;
+
+  const pickNextTile = () => {
+    let bestIndex = -1;
+    let bestHouses = -1;
+    for (let index = 0; index < candidateTiles.length; index += 1) {
+      const entry = candidateTiles[index];
+      if (entry.houses > bestHouses) {
+        bestHouses = entry.houses;
+        bestIndex = index;
+      } else if (entry.houses === bestHouses && bestIndex >= 0) {
+        const bestTile = candidateTiles[bestIndex].tile;
+        if (entry.tile.index < bestTile.index) {
+          bestIndex = index;
+        }
+      }
+    }
+    return bestIndex;
+  };
+
+  while (nextBalance < targetCash && candidateTiles.length > 0) {
+    const nextIndex = pickNextTile();
+    if (nextIndex < 0) {
+      break;
+    }
+    const entry = candidateTiles[nextIndex];
+    const tile = entry.tile;
+    const houseCost = tile.houseCost ?? 0;
+    const sellValue = Math.round(
+      houseCost * 0.5 * macroHouseSellMultiplier,
+    );
+    const housesAfter = entry.houses - 1;
+    await fetchFromSupabaseWithService(
+      `property_ownership?game_id=eq.${gameId}&tile_index=eq.${tile.index}&owner_player_id=eq.${player.id}`,
+      {
+        method: "PATCH",
+        headers: {
+          Prefer: "return=representation",
+        },
+        body: JSON.stringify({
+          houses: housesAfter,
+        }),
+      },
+    );
+
+    ownershipByTile[tile.index] = {
+      owner_player_id: player.id,
+      collateral_loan_id: ownershipByTile[tile.index]?.collateral_loan_id ?? null,
+      purchase_mortgage_id:
+        ownershipByTile[tile.index]?.purchase_mortgage_id ?? null,
+      houses: housesAfter,
+    };
+
+    entry.houses = housesAfter;
+    if (entry.houses <= 0) {
+      candidateTiles.splice(nextIndex, 1);
+    }
+
+    nextBalance += sellValue;
+    housesSold += 1;
+    cashRecovered += sellValue;
+    updatedBalances = {
+      ...updatedBalances,
+      [player.id]: nextBalance,
+    };
+
+    events.push(
+      {
+        event_type: "HOUSE_SOLD",
+        payload: {
+          player_id: player.id,
+          tile_index: tile.index,
+          tile_id: tile.tile_id,
+          house_cost: houseCost,
+          houses_before: housesAfter + 1,
+          houses_after: housesAfter,
+          reason: "FORCED_HOUSE_LIQUIDATION",
+          effect_type: effectType,
+          ...macroMeta,
+        },
+      },
+      {
+        event_type: "CASH_CREDIT",
+        payload: {
+          player_id: player.id,
+          amount: sellValue,
+          reason: "FORCED_HOUSE_LIQUIDATION",
+          effect_type: effectType,
+          ...macroMeta,
+        },
+      },
+    );
+  }
+
+  return { balances: updatedBalances, housesSold, cashRecovered };
+};
 
 const getMaintenancePerHouse = (effects: MacroEventEffect[]) =>
   effects.reduce((sum, detail) => {
@@ -2517,6 +2718,223 @@ const applyLoanPaymentsForPlayer = async ({
   return { balances: updatedBalances, balancesChanged, events, bankruptcyCandidate };
 };
 
+const advanceTurn = async ({
+  gameId,
+  gameState,
+  players,
+  currentPlayer,
+  currentVersion,
+  userId,
+  rules,
+  startingCash,
+  extraEvents = [],
+  extraGameStatePatch = {},
+}: {
+  gameId: string;
+  gameState: GameStateRow;
+  players: PlayerRow[];
+  currentPlayer: PlayerRow;
+  currentVersion: number;
+  userId: string;
+  rules: ReturnType<typeof getRules>;
+  startingCash: number;
+  extraEvents?: Array<{ event_type: string; payload: Record<string, unknown> }>;
+  extraGameStatePatch?: Record<string, unknown>;
+}) => {
+  const nextPlayer = getNextActivePlayer(players, gameState.current_player_id);
+
+  if (!nextPlayer) {
+    return NextResponse.json(
+      { error: "No active players remaining." },
+      { status: 409 },
+    );
+  }
+
+  const balances = gameState.balances ?? {};
+  let updatedBalances = balances;
+  let balancesChanged = false;
+  let bankruptcyCandidate:
+    | { reason: string; cashBefore: number; cashAfter: number }
+    | null = null;
+  const events: Array<{ event_type: string; payload: Record<string, unknown> }> = [
+    ...extraEvents,
+    {
+      event_type: "END_TURN",
+      payload: {
+        from_player_id: currentPlayer.id,
+        from_player_name: currentPlayer.display_name,
+        to_player_id: nextPlayer.id,
+        to_player_name: nextPlayer.display_name,
+      },
+    },
+  ];
+
+  const firstActivePlayer = getFirstActivePlayer(players);
+  const tableRoundAdvanced = Boolean(
+    firstActivePlayer && nextPlayer.id === firstActivePlayer.id,
+  );
+  const nextRound =
+    (gameState.rounds_elapsed ?? 0) + (tableRoundAdvanced ? 1 : 0);
+  const macroEnabled = rules.macroEnabled;
+  let nextLastMacroEventId = gameState.last_macro_event_id ?? null;
+  const activeMacroEffectsV1 = normalizeActiveMacroEffectsV1(
+    gameState.active_macro_effects_v1,
+  );
+  let nextActiveMacroEffectsV1 = activeMacroEffectsV1;
+  let triggeredMacroEvent: {
+    id: string;
+    name: string;
+    durationRounds: number;
+    headline: string;
+    flavor: string;
+    rulesText: string;
+    effects: MacroEffectsV1;
+    rarity?: "common" | "uncommon" | "black_swan";
+  } | null = null;
+
+  if (macroEnabled && tableRoundAdvanced) {
+    const { updated: tickedMacroEffects, expired: expiredMacroEffects } =
+      tickMacroEffectsV1(activeMacroEffectsV1);
+    nextActiveMacroEffectsV1 = tickedMacroEffects;
+
+    for (const expiredEffect of expiredMacroEffects) {
+      events.push({
+        event_type: "MACRO_EXPIRED",
+        payload: {
+          macro_id: expiredEffect.id,
+          macro_name: expiredEffect.name,
+          round_index: nextRound,
+        },
+      });
+    }
+
+    if (
+      nextRound % MACRO_EVENT_INTERVAL_ROUNDS === 0 &&
+      MACRO_DECK_V1.length > 0
+    ) {
+      const macroEvent = drawMacroCardV1(nextLastMacroEventId);
+      nextLastMacroEventId = macroEvent.id;
+      triggeredMacroEvent = macroEvent;
+      events.push({
+        event_type: "MACRO_EVENT_TRIGGERED",
+        payload: {
+          deck_id: "macro-v1",
+          deck_name: "Macro V1",
+          event_id: macroEvent.id,
+          event_name: macroEvent.name,
+          duration_rounds: macroEvent.durationRounds,
+          effects: macroEvent.effects,
+          rarity: macroEvent.rarity ?? null,
+          mode: "weighted",
+          round_index: nextRound,
+        },
+      });
+    }
+  }
+
+  const loanResult = await applyLoanPaymentsForPlayer({
+    gameId,
+    player: nextPlayer,
+    balances: updatedBalances,
+    startingCash,
+    macroInterestTrendAccumulator: getMacroInterestTrendAccumulatorV1(
+      macroEnabled ? nextActiveMacroEffectsV1 : [],
+    ),
+    macroMortgageFlatDelta: getMacroMortgageFlatDeltaV1(
+      macroEnabled ? nextActiveMacroEffectsV1 : [],
+    ),
+  });
+  updatedBalances = loanResult.balances;
+  balancesChanged = balancesChanged || loanResult.balancesChanged;
+  events.push(...loanResult.events);
+  if (!bankruptcyCandidate && loanResult.bankruptcyCandidate) {
+    bankruptcyCandidate = loanResult.bankruptcyCandidate;
+  }
+
+  if (bankruptcyCandidate) {
+    const bankruptcyResult = await resolveBankruptcyIfNeeded({
+      gameId,
+      gameState,
+      players,
+      player: nextPlayer,
+      updatedBalances,
+      cashBefore: bankruptcyCandidate.cashBefore,
+      cashAfter: bankruptcyCandidate.cashAfter,
+      reason: bankruptcyCandidate.reason,
+      events,
+      currentVersion,
+      userId,
+      playerPosition: nextPlayer.position ?? null,
+    });
+
+    if (bankruptcyResult.handled) {
+      if (bankruptcyResult.error) {
+        return NextResponse.json(
+          { error: bankruptcyResult.error },
+          { status: 409 },
+        );
+      }
+      return NextResponse.json({ gameState: bankruptcyResult.updatedState });
+    }
+  }
+
+  const nextTurnPhase = nextPlayer.is_in_jail
+    ? "AWAITING_JAIL_DECISION"
+    : "AWAITING_ROLL";
+  const nextPendingAction = triggeredMacroEvent
+    ? {
+        type: "MACRO_EVENT",
+        macro_id: triggeredMacroEvent.id,
+        macroCardId: triggeredMacroEvent.id,
+        name: triggeredMacroEvent.name,
+        rarity: triggeredMacroEvent.rarity ?? null,
+        durationRounds: triggeredMacroEvent.durationRounds,
+        headline: triggeredMacroEvent.headline,
+        flavor: triggeredMacroEvent.flavor,
+        rulesText: triggeredMacroEvent.rulesText,
+        effects: triggeredMacroEvent.effects,
+        return_turn_phase: nextTurnPhase,
+      }
+    : null;
+  const finalVersion = currentVersion + events.length;
+  const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+    `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+    {
+      method: "PATCH",
+      headers: {
+        Prefer: "return=representation",
+      },
+      body: JSON.stringify({
+        version: finalVersion,
+        current_player_id: nextPlayer.id,
+        last_roll: null,
+        doubles_count: 0,
+        rounds_elapsed: nextRound,
+        last_macro_event_id: nextLastMacroEventId,
+        active_macro_effects_v1: nextActiveMacroEffectsV1,
+        ...(balancesChanged ? { balances: updatedBalances } : {}),
+        pending_action: nextPendingAction,
+        turn_phase: triggeredMacroEvent
+          ? "AWAITING_CONFIRMATION"
+          : nextTurnPhase,
+        ...extraGameStatePatch,
+        updated_at: new Date().toISOString(),
+      }),
+    },
+  )) ?? [];
+
+  if (!updatedState) {
+    return NextResponse.json(
+      { error: "Supabase returned no data for END_TURN game_state update." },
+      { status: 500 },
+    );
+  }
+
+  await emitGameEvents(gameId, currentVersion + 1, events, userId);
+
+  return NextResponse.json({ gameState: updatedState });
+};
+
 const parseBearerToken = (authorization: string | null) => {
   if (!authorization) {
     return null;
@@ -2609,7 +3027,7 @@ export async function POST(request: Request) {
       }
 
       await fetchFromSupabaseWithService<GameStateRow[]>(
-        "game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment",
+        "game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment",
         {
           method: "POST",
           headers: {
@@ -2748,7 +3166,7 @@ export async function POST(request: Request) {
     )) ?? [];
 
     const [gameState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
-      `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
+      `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
       { method: "GET" },
     )) ?? [];
 
@@ -2866,7 +3284,7 @@ export async function POST(request: Request) {
       );
 
       const upsertResponse = await fetch(
-        `${supabaseUrl}/rest/v1/game_state?on_conflict=game_id&select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment`,
+        `${supabaseUrl}/rest/v1/game_state?on_conflict=game_id&select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment`,
         {
           method: "POST",
           headers: {
@@ -2896,6 +3314,7 @@ export async function POST(request: Request) {
             community_seed: communitySeed,
             chance_reshuffle_count: 0,
             community_reshuffle_count: 0,
+            skip_next_roll_by_player: {},
             updated_at: new Date().toISOString(),
           }),
         },
@@ -3236,7 +3655,7 @@ export async function POST(request: Request) {
         const finalVersion = currentVersion + events.length;
         const [updatedState] =
           (await fetchFromSupabaseWithService<GameStateRow[]>(
-            `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
+            `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
             {
               method: "PATCH",
               headers: {
@@ -3325,7 +3744,7 @@ export async function POST(request: Request) {
         const finalVersion = currentVersion + events.length;
         const [updatedState] =
           (await fetchFromSupabaseWithService<GameStateRow[]>(
-            `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
+            `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
             {
               method: "PATCH",
               headers: {
@@ -3419,7 +3838,7 @@ export async function POST(request: Request) {
         const finalVersion = currentVersion + events.length;
         const [updatedState] =
           (await fetchFromSupabaseWithService<GameStateRow[]>(
-            `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
+            `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
             {
               method: "PATCH",
               headers: {
@@ -3773,7 +4192,7 @@ export async function POST(request: Request) {
       const finalVersion = currentVersion + events.length;
       const [updatedState] =
         (await fetchFromSupabaseWithService<GameStateRow[]>(
-          `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
+          `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
           {
             method: "PATCH",
             headers: {
@@ -4476,6 +4895,37 @@ export async function POST(request: Request) {
           { error: "You have already rolled this turn." },
           { status: 409 },
         );
+      }
+
+      const skipNextRoll =
+        gameState.skip_next_roll_by_player?.[currentPlayer.id] === true;
+      if (skipNextRoll) {
+        const nextSkipNextRollByPlayer = {
+          ...(gameState.skip_next_roll_by_player ?? {}),
+          [currentPlayer.id]: false,
+        };
+        return await advanceTurn({
+          gameId,
+          gameState,
+          players,
+          currentPlayer,
+          currentVersion,
+          userId: user.id,
+          rules,
+          startingCash: game.starting_cash ?? 0,
+          extraEvents: [
+            {
+              event_type: "TURN_SKIPPED_PANDEMIC",
+              payload: {
+                player_id: currentPlayer.id,
+                player_name: currentPlayer.display_name,
+              },
+            },
+          ],
+          extraGameStatePatch: {
+            skip_next_roll_by_player: nextSkipNextRollByPlayer,
+          },
+        });
       }
 
       const { dice, total: rollTotal } = rollDice();
@@ -5320,13 +5770,26 @@ export async function POST(request: Request) {
         typeof pendingAction.rulesText === "string" ? pendingAction.rulesText : null;
       const macroEffects =
         pendingAction.effects && typeof pendingAction.effects === "object"
-          ? pendingAction.effects
+          ? (pendingAction.effects as MacroEffectsV1)
           : null;
       const macroEnabled = rules.macroEnabled;
       const activeMacroEffectsV1 = normalizeActiveMacroEffectsV1(
         gameState.active_macro_effects_v1,
       );
       let nextActiveMacroEffectsV1 = activeMacroEffectsV1;
+      const balances = gameState.balances ?? {};
+      let updatedBalances = balances;
+      let balancesChanged = false;
+      const skipNextRollByPlayer =
+        gameState.skip_next_roll_by_player &&
+        typeof gameState.skip_next_roll_by_player === "object"
+          ? (gameState.skip_next_roll_by_player as Record<string, boolean>)
+          : {};
+      let nextSkipNextRollByPlayer = { ...skipNextRollByPlayer };
+      const macroMetaBase = {
+        macro_id: macroCardId,
+        macro_name: macroName,
+      };
 
       const events: Array<{ event_type: string; payload: Record<string, unknown> }> =
         [
@@ -5347,6 +5810,466 @@ export async function POST(request: Request) {
             },
           },
         ];
+      if (
+        macroEnabled &&
+        macroEffects &&
+        (hasMacroOneOffEffects(macroEffects) || macroDurationRounds === 0)
+      ) {
+        const activePlayers = getActivePlayers(players);
+        const boardPack = getBoardPackById(game.board_pack_id);
+        const boardTiles = boardPack?.tiles ?? [];
+        const activeMacroEffectsForRules = getActiveMacroEffectsV1ForRules(
+          gameState.active_macro_effects_v1,
+          rules.macroEnabled,
+        );
+        const macroHouseSellMultiplier = getMacroHouseSellMultiplierV1(
+          activeMacroEffectsForRules,
+        );
+        const macroInterestTrendAccumulator = getMacroInterestTrendAccumulatorV1(
+          activeMacroEffectsForRules,
+        );
+        const macroMortgageFlatDelta = getMacroMortgageFlatDeltaV1(
+          activeMacroEffectsForRules,
+        );
+        const needsOwnership =
+          Boolean(macroEffects.regional_disaster) ||
+          Boolean(
+            macroEffects.sovereign_default?.forceHouseLiquidationIfInsufficient,
+          );
+        let ownershipByTile = needsOwnership
+          ? await loadOwnershipByTile(gameId)
+          : null;
+
+        if (typeof macroEffects.cash_delta === "number") {
+          const cashDelta = Math.round(macroEffects.cash_delta);
+          const perPlayerAmounts: Array<{
+            player_id: string;
+            amount: number;
+          }> = [];
+          for (const player of activePlayers) {
+            const currentBalance = updatedBalances[player.id] ?? game.starting_cash ?? 0;
+            const nextBalance = currentBalance + cashDelta;
+            updatedBalances = {
+              ...updatedBalances,
+              [player.id]: nextBalance,
+            };
+            if (cashDelta !== 0) {
+              balancesChanged = true;
+            }
+            perPlayerAmounts.push({ player_id: player.id, amount: cashDelta });
+            events.push({
+              event_type: cashDelta >= 0 ? "CASH_CREDIT" : "CASH_DEBIT",
+              payload: {
+                player_id: player.id,
+                amount: Math.abs(cashDelta),
+                reason: "MACRO_CASH_DELTA",
+                effect_type: "cash_delta",
+                ...macroMetaBase,
+              },
+            });
+          }
+          events.push({
+            event_type: "MACRO_CASH_DELTA_APPLIED",
+            payload: {
+              effect_type: "cash_delta",
+              per_player: perPlayerAmounts,
+              ...macroMetaBase,
+            },
+          });
+        }
+
+        if (macroEffects.regional_disaster && ownershipByTile) {
+          const colorSets = Math.max(
+            0,
+            macroEffects.regional_disaster.colorSets ?? 0,
+          );
+          const costPerHouse = Math.round(
+            macroEffects.regional_disaster.costPerHouse ?? 0,
+          );
+          const availableGroups = getPropertyColorGroups(boardTiles);
+          const selectedColorSets = selectRandomColorGroups(
+            availableGroups,
+            colorSets,
+            `${gameId}-${macroCardId ?? "macro"}-regional-disaster`,
+          );
+          const perPlayerSummary: Array<{
+            player_id: string;
+            houses_affected: number;
+            cost: number;
+            houses_sold: number;
+            cash_recovered: number;
+            remaining_deficit: number;
+          }> = [];
+          for (const player of activePlayers) {
+            const housesAffected = boardTiles.reduce((sum, tile) => {
+              if (
+                tile.type !== "PROPERTY" ||
+                !tile.colorGroup ||
+                !selectedColorSets.includes(tile.colorGroup)
+              ) {
+                return sum;
+              }
+              const ownership = ownershipByTile[tile.index];
+              if (ownership?.owner_player_id !== player.id) {
+                return sum;
+              }
+              return sum + (ownership.houses ?? 0);
+            }, 0);
+            const cost = housesAffected * costPerHouse;
+            let housesSold = 0;
+            let cashRecovered = 0;
+            if (cost > 0) {
+              const currentBalance =
+                updatedBalances[player.id] ?? game.starting_cash ?? 0;
+              if (currentBalance < cost) {
+                const liquidation = await liquidateHousesForPlayer({
+                  gameId,
+                  player,
+                  boardTiles,
+                  ownershipByTile,
+                  balances: updatedBalances,
+                  startingCash: game.starting_cash ?? 0,
+                  targetCash: cost,
+                  allowedColorGroups: selectedColorSets,
+                  macroHouseSellMultiplier,
+                  events,
+                  macroMeta: {
+                    ...macroMetaBase,
+                    effect_type: "regional_disaster",
+                  },
+                  effectType: "regional_disaster",
+                });
+                updatedBalances = liquidation.balances;
+                housesSold = liquidation.housesSold;
+                cashRecovered = liquidation.cashRecovered;
+                if (cashRecovered !== 0) {
+                  balancesChanged = true;
+                }
+              }
+              const postBalance =
+                updatedBalances[player.id] ?? game.starting_cash ?? 0;
+              const nextBalance = postBalance - cost;
+              updatedBalances = {
+                ...updatedBalances,
+                [player.id]: nextBalance,
+              };
+              if (cost !== 0) {
+                balancesChanged = true;
+              }
+              events.push({
+                event_type: "CASH_DEBIT",
+                payload: {
+                  player_id: player.id,
+                  amount: cost,
+                  reason: "MACRO_REGIONAL_DISASTER",
+                  effect_type: "regional_disaster",
+                  ...macroMetaBase,
+                },
+              });
+            }
+            const remainingDeficit = Math.min(
+              0,
+              (updatedBalances[player.id] ?? game.starting_cash ?? 0),
+            );
+            if (remainingDeficit < 0) {
+              events.push({
+                event_type: "WARNING",
+                payload: {
+                  player_id: player.id,
+                  reason: "MACRO_REGIONAL_DISASTER_INSUFFICIENT_FUNDS",
+                  remaining_deficit: remainingDeficit,
+                  effect_type: "regional_disaster",
+                  ...macroMetaBase,
+                },
+              });
+            }
+            perPlayerSummary.push({
+              player_id: player.id,
+              houses_affected: housesAffected,
+              cost,
+              houses_sold: housesSold,
+              cash_recovered: cashRecovered,
+              remaining_deficit: remainingDeficit,
+            });
+          }
+          events.push({
+            event_type: "MACRO_REGIONAL_DISASTER_APPLIED",
+            payload: {
+              selected_color_sets: selectedColorSets,
+              cost_per_house: costPerHouse,
+              per_player: perPlayerSummary,
+              effect_type: "regional_disaster",
+              ...macroMetaBase,
+            },
+          });
+        }
+
+        if (macroEffects.bank_stress_test?.payLargestLoanInterestImmediately) {
+          const minLoans = Math.max(
+            0,
+            macroEffects.bank_stress_test.minLoans ?? 0,
+          );
+          const perPlayerLoans: Array<{
+            player_id: string;
+            affected: Array<Record<string, unknown>>;
+          }> = [];
+          for (const player of activePlayers) {
+            const activeLoans =
+              (await fetchFromSupabaseWithService<PlayerLoanRow[]>(
+                `player_loans?select=id,collateral_tile_index,principal,remaining_principal,rate_per_turn,status&game_id=eq.${gameId}&player_id=eq.${player.id}&status=eq.active`,
+                { method: "GET" },
+              )) ?? [];
+            const activeMortgages =
+              (await fetchFromSupabaseWithService<PurchaseMortgageRow[]>(
+                `purchase_mortgages?select=id,tile_index,principal_remaining,rate_per_turn,status&game_id=eq.${gameId}&player_id=eq.${player.id}&status=eq.active`,
+                { method: "GET" },
+              )) ?? [];
+            const liabilityCount = activeLoans.length + activeMortgages.length;
+            if (liabilityCount < minLoans) {
+              continue;
+            }
+            const liabilities: Array<{
+              type: "collateral_loan" | "purchase_mortgage";
+              id: string;
+              principal_remaining: number;
+              interest_amount: number;
+              meta: Record<string, unknown>;
+            }> = [];
+            for (const loan of activeLoans) {
+              const principalRemaining =
+                typeof loan.remaining_principal === "number"
+                  ? loan.remaining_principal
+                  : loan.principal;
+              const interestAmount = Math.round(
+                principalRemaining * loan.rate_per_turn,
+              );
+              liabilities.push({
+                type: "collateral_loan",
+                id: loan.id,
+                principal_remaining: principalRemaining,
+                interest_amount: interestAmount,
+                meta: {
+                  loan_id: loan.id,
+                  tile_index: loan.collateral_tile_index,
+                  rate_per_turn: loan.rate_per_turn,
+                },
+              });
+            }
+            for (const mortgage of activeMortgages) {
+              const effectiveRatePerTurn =
+                mortgage.rate_per_turn +
+                macroInterestTrendAccumulator +
+                macroMortgageFlatDelta;
+              const interestAmount = Math.round(
+                mortgage.principal_remaining * effectiveRatePerTurn,
+              );
+              liabilities.push({
+                type: "purchase_mortgage",
+                id: mortgage.id,
+                principal_remaining: mortgage.principal_remaining,
+                interest_amount: interestAmount,
+                meta: {
+                  mortgage_id: mortgage.id,
+                  tile_index: mortgage.tile_index,
+                  base_rate_per_turn: mortgage.rate_per_turn,
+                  macro_interest_delta_per_turn: macroInterestTrendAccumulator,
+                  macro_mortgage_flat_delta: macroMortgageFlatDelta,
+                  effective_rate_per_turn: effectiveRatePerTurn,
+                },
+              });
+            }
+            if (liabilities.length === 0) {
+              continue;
+            }
+            const maxPrincipal = Math.max(
+              ...liabilities.map((entry) => entry.principal_remaining),
+            );
+            const affected = liabilities.filter(
+              (entry) => entry.principal_remaining === maxPrincipal,
+            );
+            const affectedSummaries: Array<Record<string, unknown>> = [];
+            for (const liability of affected) {
+              const currentBalance =
+                updatedBalances[player.id] ?? game.starting_cash ?? 0;
+              const nextBalance = currentBalance - liability.interest_amount;
+              updatedBalances = {
+                ...updatedBalances,
+                [player.id]: nextBalance,
+              };
+              if (liability.interest_amount !== 0) {
+                balancesChanged = true;
+              }
+              events.push({
+                event_type: "CASH_DEBIT",
+                payload: {
+                  player_id: player.id,
+                  amount: liability.interest_amount,
+                  reason: "MACRO_STRESS_TEST",
+                  effect_type: "bank_stress_test",
+                  loan_type: liability.type,
+                  principal_remaining: liability.principal_remaining,
+                  interest_amount: liability.interest_amount,
+                  ...liability.meta,
+                  ...macroMetaBase,
+                },
+              });
+              affectedSummaries.push({
+                loan_type: liability.type,
+                loan_id: liability.id,
+                principal_remaining: liability.principal_remaining,
+                interest_amount: liability.interest_amount,
+                ...liability.meta,
+              });
+            }
+            if (affectedSummaries.length > 0) {
+              perPlayerLoans.push({
+                player_id: player.id,
+                affected: affectedSummaries,
+              });
+            }
+          }
+          if (perPlayerLoans.length > 0) {
+            events.push({
+              event_type: "MACRO_STRESS_TEST_APPLIED",
+              payload: {
+                per_player: perPlayerLoans,
+                effect_type: "bank_stress_test",
+                ...macroMetaBase,
+              },
+            });
+          }
+        }
+
+        if (macroEffects.pandemic) {
+          const stimulusCash = Math.round(
+            macroEffects.pandemic.stimulusCash ?? 0,
+          );
+          if (stimulusCash !== 0) {
+            for (const player of activePlayers) {
+              const currentBalance =
+                updatedBalances[player.id] ?? game.starting_cash ?? 0;
+              const nextBalance = currentBalance + stimulusCash;
+              updatedBalances = {
+                ...updatedBalances,
+                [player.id]: nextBalance,
+              };
+              balancesChanged = true;
+              events.push({
+                event_type: "CASH_CREDIT",
+                payload: {
+                  player_id: player.id,
+                  amount: stimulusCash,
+                  reason: "MACRO_PANDEMIC_STIMULUS",
+                  effect_type: "pandemic",
+                  ...macroMetaBase,
+                },
+              });
+            }
+          }
+          if (macroEffects.pandemic.skipNextRoll) {
+            for (const player of activePlayers) {
+              nextSkipNextRollByPlayer[player.id] = true;
+            }
+          }
+        }
+
+        if (macroEffects.sovereign_default) {
+          const cashDelta = Math.round(macroEffects.sovereign_default.cashDelta ?? 0);
+          const forceLiquidation =
+            macroEffects.sovereign_default.forceHouseLiquidationIfInsufficient;
+          const perPlayerSummary: Array<{
+            player_id: string;
+            houses_sold: number;
+            cash_recovered: number;
+            remaining_deficit: number;
+          }> = [];
+          for (const player of activePlayers) {
+            const currentBalance =
+              updatedBalances[player.id] ?? game.starting_cash ?? 0;
+            const nextBalance = currentBalance + cashDelta;
+            updatedBalances = {
+              ...updatedBalances,
+              [player.id]: nextBalance,
+            };
+            if (cashDelta !== 0) {
+              balancesChanged = true;
+            }
+            if (cashDelta !== 0) {
+              events.push({
+                event_type: cashDelta >= 0 ? "CASH_CREDIT" : "CASH_DEBIT",
+                payload: {
+                  player_id: player.id,
+                  amount: Math.abs(cashDelta),
+                  reason: "MACRO_SOVEREIGN_DEFAULT",
+                  effect_type: "sovereign_default",
+                  ...macroMetaBase,
+                },
+              });
+            }
+            let housesSold = 0;
+            let cashRecovered = 0;
+            if (forceLiquidation && nextBalance < 0) {
+              if (!ownershipByTile) {
+                ownershipByTile = await loadOwnershipByTile(gameId);
+              }
+              const liquidation = await liquidateHousesForPlayer({
+                gameId,
+                player,
+                boardTiles,
+                ownershipByTile,
+                balances: updatedBalances,
+                startingCash: game.starting_cash ?? 0,
+                targetCash: 0,
+                allowedColorGroups: null,
+                macroHouseSellMultiplier,
+                events,
+                macroMeta: {
+                  ...macroMetaBase,
+                  effect_type: "sovereign_default",
+                },
+                effectType: "sovereign_default",
+              });
+              updatedBalances = liquidation.balances;
+              housesSold = liquidation.housesSold;
+              cashRecovered = liquidation.cashRecovered;
+              if (cashRecovered !== 0) {
+                balancesChanged = true;
+              }
+            }
+            const remainingDeficit = Math.min(
+              0,
+              updatedBalances[player.id] ?? game.starting_cash ?? 0,
+            );
+            if (remainingDeficit < 0) {
+              events.push({
+                event_type: "WARNING",
+                payload: {
+                  player_id: player.id,
+                  reason: "MACRO_SOVEREIGN_DEFAULT_INSUFFICIENT_FUNDS",
+                  remaining_deficit: remainingDeficit,
+                  effect_type: "sovereign_default",
+                  ...macroMetaBase,
+                },
+              });
+            }
+            perPlayerSummary.push({
+              player_id: player.id,
+              houses_sold: housesSold,
+              cash_recovered: cashRecovered,
+              remaining_deficit: remainingDeficit,
+            });
+          }
+          events.push({
+            event_type: "MACRO_SOVEREIGN_DEFAULT_APPLIED",
+            payload: {
+              cash_delta: cashDelta,
+              per_player: perPlayerSummary,
+              effect_type: "sovereign_default",
+              ...macroMetaBase,
+            },
+          });
+        }
+      }
       if (
         macroEnabled &&
         macroEffects &&
@@ -5391,6 +6314,8 @@ export async function POST(request: Request) {
             pending_action: null,
             turn_phase: returnTurnPhase,
             active_macro_effects_v1: nextActiveMacroEffectsV1,
+            ...(balancesChanged ? { balances: updatedBalances } : {}),
+            skip_next_roll_by_player: nextSkipNextRollByPlayer,
             updated_at: new Date().toISOString(),
           }),
         },
@@ -6398,6 +7323,37 @@ export async function POST(request: Request) {
         );
       }
 
+      const skipNextRoll =
+        gameState.skip_next_roll_by_player?.[currentPlayer.id] === true;
+      if (skipNextRoll) {
+        const nextSkipNextRollByPlayer = {
+          ...(gameState.skip_next_roll_by_player ?? {}),
+          [currentPlayer.id]: false,
+        };
+        return await advanceTurn({
+          gameId,
+          gameState,
+          players,
+          currentPlayer,
+          currentVersion,
+          userId: user.id,
+          rules,
+          startingCash: game.starting_cash ?? 0,
+          extraEvents: [
+            {
+              event_type: "TURN_SKIPPED_PANDEMIC",
+              payload: {
+                player_id: currentPlayer.id,
+                player_name: currentPlayer.display_name,
+              },
+            },
+          ],
+          extraGameStatePatch: {
+            skip_next_roll_by_player: nextSkipNextRollByPlayer,
+          },
+        });
+      }
+
       const { dice, total: rollTotal } = rollDice();
       const [dieOne, dieTwo] = dice;
       const isDouble = dieOne === dieTwo;
@@ -7185,203 +8141,16 @@ export async function POST(request: Request) {
           { status: 409 },
         );
       }
-
-      const nextPlayer = getNextActivePlayer(
-        players,
-        gameState.current_player_id,
-      );
-
-      if (!nextPlayer) {
-        return NextResponse.json(
-          { error: "No active players remaining." },
-          { status: 409 },
-        );
-      }
-
-      const balances = gameState.balances ?? {};
-      let updatedBalances = balances;
-      let balancesChanged = false;
-      let bankruptcyCandidate:
-        | { reason: string; cashBefore: number; cashAfter: number }
-        | null = null;
-      const events: Array<{
-        event_type: string;
-        payload: Record<string, unknown>;
-      }> = [
-        {
-          event_type: "END_TURN",
-          payload: {
-            from_player_id: currentPlayer.id,
-            from_player_name: currentPlayer.display_name,
-            to_player_id: nextPlayer.id,
-            to_player_name: nextPlayer.display_name,
-          },
-        },
-      ];
-
-      const firstActivePlayer = getFirstActivePlayer(players);
-      const tableRoundAdvanced = Boolean(
-        firstActivePlayer && nextPlayer.id === firstActivePlayer.id,
-      );
-      const nextRound =
-        (gameState.rounds_elapsed ?? 0) + (tableRoundAdvanced ? 1 : 0);
-      const macroEnabled = rules.macroEnabled;
-      let nextLastMacroEventId = gameState.last_macro_event_id ?? null;
-      const activeMacroEffectsV1 = normalizeActiveMacroEffectsV1(
-        gameState.active_macro_effects_v1,
-      );
-      let nextActiveMacroEffectsV1 = activeMacroEffectsV1;
-      let triggeredMacroEvent: {
-        id: string;
-        name: string;
-        durationRounds: number;
-        headline: string;
-        flavor: string;
-        rulesText: string;
-        effects: MacroEffectsV1;
-        rarity?: "common" | "uncommon" | "black_swan";
-      } | null = null;
-
-      if (macroEnabled && tableRoundAdvanced) {
-        const { updated: tickedMacroEffects, expired: expiredMacroEffects } =
-          tickMacroEffectsV1(activeMacroEffectsV1);
-        nextActiveMacroEffectsV1 = tickedMacroEffects;
-
-        for (const expiredEffect of expiredMacroEffects) {
-          events.push({
-            event_type: "MACRO_EXPIRED",
-            payload: {
-              macro_id: expiredEffect.id,
-              macro_name: expiredEffect.name,
-              round_index: nextRound,
-            },
-          });
-        }
-
-        if (
-          nextRound % MACRO_EVENT_INTERVAL_ROUNDS === 0 &&
-          MACRO_DECK_V1.length > 0
-        ) {
-          const macroEvent = drawMacroCardV1(nextLastMacroEventId);
-          nextLastMacroEventId = macroEvent.id;
-          triggeredMacroEvent = macroEvent;
-          events.push({
-            event_type: "MACRO_EVENT_TRIGGERED",
-            payload: {
-              deck_id: "macro-v1",
-              deck_name: "Macro V1",
-              event_id: macroEvent.id,
-              event_name: macroEvent.name,
-              duration_rounds: macroEvent.durationRounds,
-              effects: macroEvent.effects,
-              rarity: macroEvent.rarity ?? null,
-              mode: "weighted",
-              round_index: nextRound,
-            },
-          });
-        }
-      }
-
-      const loanResult = await applyLoanPaymentsForPlayer({
+      return await advanceTurn({
         gameId,
-        player: nextPlayer,
-        balances: updatedBalances,
+        gameState,
+        players,
+        currentPlayer,
+        currentVersion,
+        userId: user.id,
+        rules,
         startingCash: game.starting_cash ?? 0,
-        macroInterestTrendAccumulator: getMacroInterestTrendAccumulatorV1(
-          macroEnabled ? nextActiveMacroEffectsV1 : [],
-        ),
-        macroMortgageFlatDelta: getMacroMortgageFlatDeltaV1(
-          macroEnabled ? nextActiveMacroEffectsV1 : [],
-        ),
       });
-      updatedBalances = loanResult.balances;
-      balancesChanged = balancesChanged || loanResult.balancesChanged;
-      events.push(...loanResult.events);
-      if (!bankruptcyCandidate && loanResult.bankruptcyCandidate) {
-        bankruptcyCandidate = loanResult.bankruptcyCandidate;
-      }
-
-      if (bankruptcyCandidate) {
-        const bankruptcyResult = await resolveBankruptcyIfNeeded({
-          gameId,
-          gameState,
-          players,
-          player: nextPlayer,
-          updatedBalances,
-          cashBefore: bankruptcyCandidate.cashBefore,
-          cashAfter: bankruptcyCandidate.cashAfter,
-          reason: bankruptcyCandidate.reason,
-          events,
-          currentVersion,
-          userId: user.id,
-          playerPosition: nextPlayer.position ?? null,
-        });
-
-        if (bankruptcyResult.handled) {
-          if (bankruptcyResult.error) {
-            return NextResponse.json(
-              { error: bankruptcyResult.error },
-              { status: 409 },
-            );
-          }
-          return NextResponse.json({ gameState: bankruptcyResult.updatedState });
-        }
-      }
-
-      const nextTurnPhase = nextPlayer.is_in_jail
-        ? "AWAITING_JAIL_DECISION"
-        : "AWAITING_ROLL";
-      const nextPendingAction = triggeredMacroEvent
-        ? {
-            type: "MACRO_EVENT",
-            macro_id: triggeredMacroEvent.id,
-            macroCardId: triggeredMacroEvent.id,
-            name: triggeredMacroEvent.name,
-            rarity: triggeredMacroEvent.rarity ?? null,
-            durationRounds: triggeredMacroEvent.durationRounds,
-            headline: triggeredMacroEvent.headline,
-            flavor: triggeredMacroEvent.flavor,
-            rulesText: triggeredMacroEvent.rulesText,
-            effects: triggeredMacroEvent.effects,
-            return_turn_phase: nextTurnPhase,
-          }
-        : null;
-      const finalVersion = currentVersion + events.length;
-      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
-        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
-        {
-          method: "PATCH",
-          headers: {
-            Prefer: "return=representation",
-          },
-          body: JSON.stringify({
-            version: finalVersion,
-            current_player_id: nextPlayer.id,
-            last_roll: null,
-            doubles_count: 0,
-            rounds_elapsed: nextRound,
-            last_macro_event_id: nextLastMacroEventId,
-            active_macro_effects_v1: nextActiveMacroEffectsV1,
-            ...(balancesChanged ? { balances: updatedBalances } : {}),
-            pending_action: nextPendingAction,
-            turn_phase: triggeredMacroEvent
-              ? "AWAITING_CONFIRMATION"
-              : nextTurnPhase,
-            updated_at: new Date().toISOString(),
-          }),
-        },
-      )) ?? [];
-
-      if (!updatedState) {
-        return NextResponse.json(
-          { error: "Supabase returned no data for END_TURN game_state update." },
-          { status: 500 },
-        );
-      }
-
-      await emitGameEvents(gameId, currentVersion + 1, events, user.id);
-
-      return NextResponse.json({ gameState: updatedState });
     }
 
     return NextResponse.json(

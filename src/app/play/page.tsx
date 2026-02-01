@@ -402,6 +402,7 @@ type GameState = {
   auction_eligible_player_ids: string[] | null;
   auction_passed_player_ids: string[] | null;
   auction_min_increment: number | null;
+  skip_next_roll_by_player: Record<string, boolean> | null;
 };
 
 type GameEvent = {
@@ -852,6 +853,46 @@ const derivePlayerTransactions = ({
           });
           break;
         }
+        if (reason === "MACRO_CASH_DELTA") {
+          transactions.push({
+            ...recordBase,
+            id: event.id,
+            title: "Macro cash delta",
+            subtitle: null,
+            amount: -amount,
+          });
+          break;
+        }
+        if (reason === "MACRO_REGIONAL_DISASTER") {
+          transactions.push({
+            ...recordBase,
+            id: event.id,
+            title: "Regional disaster",
+            subtitle: null,
+            amount: -amount,
+          });
+          break;
+        }
+        if (reason === "MACRO_STRESS_TEST") {
+          transactions.push({
+            ...recordBase,
+            id: event.id,
+            title: "Bank stress test",
+            subtitle: null,
+            amount: -amount,
+          });
+          break;
+        }
+        if (reason === "MACRO_SOVEREIGN_DEFAULT") {
+          transactions.push({
+            ...recordBase,
+            id: event.id,
+            title: "Sovereign default",
+            subtitle: null,
+            amount: -amount,
+          });
+          break;
+        }
         if (reason === "MACRO_CASH_SHOCK") {
           const eventName =
             typeof payload.event_name === "string" ? payload.event_name : null;
@@ -904,6 +945,37 @@ const derivePlayerTransactions = ({
             subtitle: eventName,
             amount,
           });
+          break;
+        }
+        if (reason === "MACRO_CASH_DELTA") {
+          transactions.push({
+            ...recordBase,
+            id: event.id,
+            title: "Macro cash delta",
+            subtitle: null,
+            amount,
+          });
+          break;
+        }
+        if (reason === "MACRO_PANDEMIC_STIMULUS") {
+          transactions.push({
+            ...recordBase,
+            id: event.id,
+            title: "Pandemic stimulus",
+            subtitle: null,
+            amount,
+          });
+          break;
+        }
+        if (reason === "FORCED_HOUSE_LIQUIDATION") {
+          transactions.push({
+            ...recordBase,
+            id: event.id,
+            title: "Forced house liquidation",
+            subtitle: null,
+            amount,
+          });
+          break;
         }
         break;
       }
@@ -2682,7 +2754,7 @@ export default function PlayPage() {
   const loadGameState = useCallback(
     async (activeGameId: string, accessToken?: string) => {
       const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
-        `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${activeGameId}&limit=1`,
+        `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${activeGameId}&limit=1`,
         { method: "GET" },
         accessToken,
       );
@@ -3335,6 +3407,12 @@ export default function PlayPage() {
       currentUserPlayer &&
       gameState?.current_player_id === currentUserPlayer.id &&
       !currentUserPlayer.is_eliminated,
+  );
+  const skipNextRollByPlayer = gameState?.skip_next_roll_by_player ?? {};
+  const isPandemicSkipPending = Boolean(
+    isMyTurn &&
+      currentUserPlayer &&
+      skipNextRollByPlayer[currentUserPlayer.id],
   );
   const pendingPurchase = useMemo<PendingPurchaseAction | null>(() => {
     const pendingAction = gameState?.pending_action;
@@ -5049,6 +5127,12 @@ export default function PlayPage() {
       {notice ? (
         <div className="rounded-2xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
           {notice}
+        </div>
+      ) : null}
+
+      {isPandemicSkipPending ? (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-900">
+          Pandemic: your next roll is skipped.
         </div>
       ) : null}
 
