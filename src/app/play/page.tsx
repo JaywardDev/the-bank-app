@@ -267,6 +267,7 @@ type TitleDeedPreviewProps = {
   price?: number | null;
   ownedRailCount?: number;
   ownedUtilityCount?: number;
+  mode?: "actions" | "readonly";
   footer?: ReactNode;
 };
 
@@ -277,6 +278,7 @@ const TitleDeedPreview = ({
   price,
   ownedRailCount = 0,
   ownedUtilityCount = 0,
+  mode = "actions",
   footer,
 }: TitleDeedPreviewProps) => {
   if (!tile || !["PROPERTY", "RAIL", "UTILITY"].includes(tile.type)) {
@@ -292,11 +294,14 @@ const TitleDeedPreview = ({
   const propertyRent = getPropertyRentDetails(tile);
   const railRentRows = tile.type === "RAIL" ? buildRailRentRows() : [];
   const tileName = tile.name ?? "Property";
+  const showActions = mode === "actions";
+  const resolvedEyebrow = showActions ? eyebrow : undefined;
+  const resolvedFooter = showActions ? footer : undefined;
 
   return (
     <TitleDeedCard
       bandColor={bandColor}
-      eyebrow={eyebrow}
+      eyebrow={resolvedEyebrow}
       header={
         tile.type === "RAIL" ? (
           <div className="mt-2 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-3 text-center">
@@ -362,7 +367,7 @@ const TitleDeedPreview = ({
           />
         )
       }
-      footer={footer}
+      footer={resolvedFooter}
     />
   );
 };
@@ -1769,7 +1774,7 @@ export default function PlayPage() {
     if (!selectedExpandedTile || selectedTileIndex === null) {
       return null;
     }
-    const ownableTypes = new Set(["PROPERTY", "RAILROAD", "UTILITY"]);
+    const ownableTypes = new Set(["PROPERTY", "RAIL", "RAILROAD", "UTILITY"]);
     if (!ownableTypes.has(selectedExpandedTile.type)) {
       return "Not ownable";
     }
@@ -1782,6 +1787,43 @@ export default function PlayPage() {
     );
     return owner?.display_name ?? "Player";
   }, [ownershipByTile, players, selectedExpandedTile, selectedTileIndex]);
+  const selectedTileOwnerId = useMemo(() => {
+    if (!selectedExpandedTile || selectedTileIndex === null) {
+      return null;
+    }
+    const ownableTypes = new Set(["PROPERTY", "RAIL", "RAILROAD", "UTILITY"]);
+    if (!ownableTypes.has(selectedExpandedTile.type)) {
+      return null;
+    }
+    return ownershipByTile[selectedTileIndex]?.owner_player_id ?? null;
+  }, [ownershipByTile, selectedExpandedTile, selectedTileIndex]);
+  const selectedOwnerRailCount = useMemo(() => {
+    if (!selectedTileOwnerId) {
+      return 0;
+    }
+    const tiles = boardPack?.tiles ?? expandedBoardTiles;
+    return tiles.filter(
+      (tile) =>
+        tile.type === "RAIL" &&
+        ownershipByTile[tile.index]?.owner_player_id === selectedTileOwnerId,
+    ).length;
+  }, [boardPack?.tiles, expandedBoardTiles, ownershipByTile, selectedTileOwnerId]);
+  const selectedOwnerUtilityCount = useMemo(() => {
+    if (!selectedTileOwnerId) {
+      return 0;
+    }
+    const tiles = boardPack?.tiles ?? expandedBoardTiles;
+    return tiles.filter(
+      (tile) =>
+        tile.type === "UTILITY" &&
+        ownershipByTile[tile.index]?.owner_player_id === selectedTileOwnerId,
+    ).length;
+  }, [
+    boardPack?.tiles,
+    expandedBoardTiles,
+    ownershipByTile,
+    selectedTileOwnerId,
+  ]);
   const selectedTilePlayers = useMemo(() => {
     if (selectedTileIndex === null) {
       return [];
@@ -7280,7 +7322,7 @@ export default function PlayPage() {
                           "Tile"}
                       </p>
                     </div>
-                    <div className="mt-4 space-y-3 text-sm text-neutral-600">
+                    <div className="mt-4 max-h-[60vh] space-y-3 overflow-y-auto pr-1 text-sm text-neutral-600">
                       <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-neutral-50 px-3 py-2">
                         <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
                           Type
@@ -7297,6 +7339,19 @@ export default function PlayPage() {
                           {selectedTileOwnerLabel ?? "Unowned"}
                         </span>
                       </div>
+                      {selectedExpandedTile &&
+                      ["PROPERTY", "RAIL", "UTILITY"].includes(
+                        selectedExpandedTile.type,
+                      ) ? (
+                        <TitleDeedPreview
+                          tile={selectedExpandedTile}
+                          bandColor={getTileBandColor(selectedExpandedTile)}
+                          price={selectedExpandedTile.price ?? null}
+                          ownedRailCount={selectedOwnerRailCount}
+                          ownedUtilityCount={selectedOwnerUtilityCount}
+                          mode="readonly"
+                        />
+                      ) : null}
                       <div className="rounded-2xl bg-neutral-50 px-3 py-2">
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
