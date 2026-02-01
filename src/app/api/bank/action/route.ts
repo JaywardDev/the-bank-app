@@ -5840,9 +5840,10 @@ export async function POST(request: Request) {
           Boolean(
             macroEffects.sovereign_default?.forceHouseLiquidationIfInsufficient,
           );
+        let ownershipByTileLoaded = needsOwnership;
         let ownershipByTile = needsOwnership
-          ? await loadOwnershipByTile(gameId)
-          : null;
+          ? ((await loadOwnershipByTile(gameId)) ?? {})
+          : {};
 
         if (typeof macroEffects.cash_delta === "number") {
           const cashDelta = Math.round(macroEffects.cash_delta);
@@ -5882,7 +5883,7 @@ export async function POST(request: Request) {
           });
         }
 
-        if (macroEffects.regional_disaster && ownershipByTile) {
+        if (macroEffects.regional_disaster) {
           const colorSets = Math.max(
             0,
             macroEffects.regional_disaster.colorSets ?? 0,
@@ -6213,8 +6214,10 @@ export async function POST(request: Request) {
             let housesSold = 0;
             let cashRecovered = 0;
             if (forceLiquidation && nextBalance < 0) {
-              if (!ownershipByTile) {
-                ownershipByTile = await loadOwnershipByTile(gameId);
+              if (!ownershipByTileLoaded) {
+                ownershipByTile =
+                  (await loadOwnershipByTile(gameId)) ?? {};
+                ownershipByTileLoaded = true;
               }
               const liquidation = await liquidateHousesForPlayer({
                 gameId,
