@@ -2324,6 +2324,7 @@ const finalizeMoveResolution = async ({
     !isBankruptcyPending && isUnownedOwnableTile && !(shouldSendToJail && jailTile)
       ? {
           type: "BUY_PROPERTY",
+          player_id: currentPlayer.id,
           tile_index: activeLandingTile.index,
           price: activeLandingTile.price ?? 0,
         }
@@ -5460,12 +5461,23 @@ export async function POST(request: Request) {
         | {
             type?: unknown;
             tile_index?: unknown;
+            player_id?: unknown;
           }
         | null;
 
       if (!pendingAction || pendingAction.type !== "BUY_PROPERTY") {
         return NextResponse.json(
           { error: "No pending property decision." },
+          { status: 409 },
+        );
+      }
+
+      if (
+        typeof pendingAction.player_id === "string" &&
+        pendingAction.player_id !== currentPlayer.id
+      ) {
+        return NextResponse.json(
+          { error: "Pending decision belongs to another player." },
           { status: 409 },
         );
       }
@@ -6346,12 +6358,23 @@ export async function POST(request: Request) {
         | {
             type?: unknown;
             tile_index?: unknown;
+            player_id?: unknown;
           }
         | null;
 
       if (!pendingAction || pendingAction.type !== "BUY_PROPERTY") {
         return NextResponse.json(
           { error: "No pending property purchase." },
+          { status: 409 },
+        );
+      }
+
+      if (
+        typeof pendingAction.player_id === "string" &&
+        pendingAction.player_id !== currentPlayer.id
+      ) {
+        return NextResponse.json(
+          { error: "Pending decision belongs to another player." },
           { status: 409 },
         );
       }
@@ -6925,6 +6948,17 @@ export async function POST(request: Request) {
         );
       }
 
+      const pendingAction = gameState.pending_action as
+        | {
+            type?: unknown;
+            player_id?: unknown;
+          }
+        | null;
+      const shouldClearStalePendingPurchase =
+        pendingAction?.type === "BUY_PROPERTY" &&
+        typeof pendingAction.player_id === "string" &&
+        pendingAction.player_id !== currentPlayer.id;
+
       const tileResult = loadOwnedOwnableTile(tileIndex);
       if ("error" in tileResult) {
         return NextResponse.json(
@@ -7038,6 +7072,14 @@ export async function POST(request: Request) {
           body: JSON.stringify({
             version: finalVersion,
             balances: updatedBalances,
+            ...(shouldClearStalePendingPurchase
+              ? {
+                  pending_action: null,
+                  turn_phase: currentPlayer.is_in_jail
+                    ? "AWAITING_JAIL_DECISION"
+                    : "AWAITING_ROLL",
+                }
+              : {}),
             updated_at: new Date().toISOString(),
           }),
         },
@@ -7063,6 +7105,17 @@ export async function POST(request: Request) {
           { status: 400 },
         );
       }
+
+      const pendingAction = gameState.pending_action as
+        | {
+            type?: unknown;
+            player_id?: unknown;
+          }
+        | null;
+      const shouldClearStalePendingPurchase =
+        pendingAction?.type === "BUY_PROPERTY" &&
+        typeof pendingAction.player_id === "string" &&
+        pendingAction.player_id !== currentPlayer.id;
 
       const tileResult = loadOwnedOwnableTile(tileIndex);
       if ("error" in tileResult) {
@@ -7202,6 +7255,14 @@ export async function POST(request: Request) {
           },
           body: JSON.stringify({
             version: finalVersion,
+            ...(shouldClearStalePendingPurchase
+              ? {
+                  pending_action: null,
+                  turn_phase: currentPlayer.is_in_jail
+                    ? "AWAITING_JAIL_DECISION"
+                    : "AWAITING_ROLL",
+                }
+              : {}),
             updated_at: new Date().toISOString(),
           }),
         },

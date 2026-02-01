@@ -624,6 +624,7 @@ type TradeExecutionSummary = {
 
 type PendingPurchaseAction = {
   type: "BUY_PROPERTY";
+  player_id: string | null;
   tile_index: number;
   price: number;
 };
@@ -3616,11 +3617,22 @@ export default function PlayPage() {
 
     const candidate = pendingAction as {
       type?: unknown;
+      player_id?: unknown;
       tile_index?: unknown;
       price?: unknown;
     };
 
     if (candidate.type !== "BUY_PROPERTY") {
+      return null;
+    }
+
+    const pendingPlayerId =
+      typeof candidate.player_id === "string" ? candidate.player_id : null;
+    if (
+      pendingPlayerId &&
+      gameState?.current_player_id &&
+      pendingPlayerId !== gameState.current_player_id
+    ) {
       return null;
     }
 
@@ -3633,10 +3645,11 @@ export default function PlayPage() {
 
     return {
       type: "BUY_PROPERTY",
+      player_id: pendingPlayerId,
       tile_index: candidate.tile_index,
       price: candidate.price,
     };
-  }, [gameState?.pending_action]);
+  }, [gameState?.current_player_id, gameState?.pending_action]);
   const pendingMacroEvent = useMemo(() => {
     const pendingAction = gameState?.pending_action;
     if (!pendingAction || typeof pendingAction !== "object") {
