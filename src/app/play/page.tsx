@@ -1493,6 +1493,7 @@ export default function PlayPage() {
   const [propertyActionModal, setPropertyActionModal] = useState<{
     action: "SELL_TO_MARKET" | "DEFAULT_PROPERTY";
     tileIndex: number;
+    defaultKind?: "mortgage" | "loan";
   } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -4190,17 +4191,6 @@ export default function PlayPage() {
                 ? "Mortgaged properties cannot be sold"
                 : null;
         const canSellToMarket = sellToMarketDisabledReason === null;
-        const canDefaultPropertyBase =
-          isCollateralized || isPurchaseMortgaged;
-        const defaultDisabledReason = !canDefaultPropertyBase
-          ? "Not collateralized or mortgaged"
-          : !canAct
-            ? "Not your turn"
-            : houses > 0
-              ? "Sell houses first"
-              : null;
-        const canDefaultProperty =
-          canDefaultPropertyBase && defaultDisabledReason === null;
         return {
           tile,
           isCollateralized,
@@ -4213,8 +4203,6 @@ export default function PlayPage() {
           canSellHouse,
           canSellToMarket,
           sellToMarketDisabledReason,
-          canDefaultProperty,
-          defaultDisabledReason,
         };
       });
   }, [
@@ -6484,7 +6472,11 @@ export default function PlayPage() {
                 <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
                   {propertyActionModal.action === "SELL_TO_MARKET"
                     ? "Sell to Market"
-                    : "Default property"}
+                    : propertyActionModal.defaultKind === "mortgage"
+                      ? "Default mortgage"
+                      : propertyActionModal.defaultKind === "loan"
+                        ? "Default collateral loan"
+                        : "Default property"}
                 </p>
                 <p className="text-lg font-semibold text-neutral-900">
                   {propertyActionTile?.name ??
@@ -6493,7 +6485,11 @@ export default function PlayPage() {
                 <p className="mt-2 text-sm text-neutral-600">
                   {propertyActionModal.action === "SELL_TO_MARKET"
                     ? "This will return the property to the open market. This action is irreversible."
-                    : "This will default the loan and return the property to the market. This action is irreversible."}
+                    : propertyActionModal.defaultKind === "mortgage"
+                      ? "This will default the mortgage and return the property to the market. This action is irreversible."
+                      : propertyActionModal.defaultKind === "loan"
+                        ? "This will default the collateral loan and return the property to the market. This action is irreversible."
+                        : "This will default the loan and return the property to the market. This action is irreversible."}
                 </p>
                 <div className="mt-3 rounded-2xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-700">
                   <span className="font-semibold">Payout:</span> $
@@ -6870,8 +6866,6 @@ export default function PlayPage() {
                       canSellHouse,
                       canSellToMarket,
                       sellToMarketDisabledReason,
-                      canDefaultProperty,
-                      defaultDisabledReason,
                     }) => {
                       const principalPreview = Math.round(
                         (tile.price ?? 0) * rules.collateralLtv,
@@ -7029,65 +7023,34 @@ export default function PlayPage() {
                                   </button>
                                 </div>
                               ) : null}
-                              <div className="grid gap-2 sm:grid-cols-2">
-                                <div className="space-y-1">
-                                  <button
-                                    className="rounded-2xl border border-neutral-900 px-4 py-2 text-xs font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
-                                    type="button"
-                                    onClick={() =>
-                                      setPropertyActionModal({
-                                        action: "SELL_TO_MARKET",
-                                        tileIndex: tile.index,
-                                      })
-                                    }
-                                    disabled={
-                                      !canSellToMarket ||
-                                      actionLoading === "SELL_TO_MARKET"
-                                    }
-                                    title={
-                                      sellToMarketDisabledReason ??
-                                      "Sell this property to the market"
-                                    }
-                                  >
-                                    {actionLoading === "SELL_TO_MARKET"
-                                      ? "Selling…"
-                                      : "Sell to Market"}
-                                  </button>
-                                  {sellToMarketDisabledReason ? (
-                                    <p className="text-xs text-neutral-400">
-                                      {sellToMarketDisabledReason}
-                                    </p>
-                                  ) : null}
-                                </div>
-                                <div className="space-y-1">
-                                  <button
-                                    className="rounded-2xl border border-rose-500 px-4 py-2 text-xs font-semibold text-rose-600 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
-                                    type="button"
-                                    onClick={() =>
-                                      setPropertyActionModal({
-                                        action: "DEFAULT_PROPERTY",
-                                        tileIndex: tile.index,
-                                      })
-                                    }
-                                    disabled={
-                                      !canDefaultProperty ||
-                                      actionLoading === "DEFAULT_PROPERTY"
-                                    }
-                                    title={
-                                      defaultDisabledReason ??
-                                      "Default on this property"
-                                    }
-                                  >
-                                    {actionLoading === "DEFAULT_PROPERTY"
-                                      ? "Defaulting…"
-                                      : "Default"}
-                                  </button>
-                                  {defaultDisabledReason ? (
-                                    <p className="text-xs text-neutral-400">
-                                      {defaultDisabledReason}
-                                    </p>
-                                  ) : null}
-                                </div>
+                              <div className="space-y-1">
+                                <button
+                                  className="rounded-2xl border border-neutral-900 px-4 py-2 text-xs font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
+                                  type="button"
+                                  onClick={() =>
+                                    setPropertyActionModal({
+                                      action: "SELL_TO_MARKET",
+                                      tileIndex: tile.index,
+                                    })
+                                  }
+                                  disabled={
+                                    !canSellToMarket ||
+                                    actionLoading === "SELL_TO_MARKET"
+                                  }
+                                  title={
+                                    sellToMarketDisabledReason ??
+                                    "Sell this property to the market"
+                                  }
+                                >
+                                  {actionLoading === "SELL_TO_MARKET"
+                                    ? "Selling…"
+                                    : "Sell to Market"}
+                                </button>
+                                {sellToMarketDisabledReason ? (
+                                  <p className="text-xs text-neutral-400">
+                                    {sellToMarketDisabledReason}
+                                  </p>
+                                ) : null}
                               </div>
                               <button
                                 className="rounded-2xl bg-neutral-900 px-4 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
@@ -7141,6 +7104,16 @@ export default function PlayPage() {
                       canAct &&
                       payoffAmount > 0 &&
                       myPlayerBalance >= payoffAmount;
+                    const houses =
+                      ownershipByTile[loan.collateral_tile_index]?.houses ?? 0;
+                    const defaultDisabledReason =
+                      houses > 0
+                        ? "Sell houses first"
+                        : !canAct
+                          ? "Not your turn"
+                          : null;
+                    const canDefault =
+                      defaultDisabledReason === null && houses === 0;
                     return (
                       <PropertyCardShell
                         key={loan.id}
@@ -7166,22 +7139,54 @@ export default function PlayPage() {
                               Remaining balance: ${payoffAmount}
                             </p>
                           </div>
-                          <button
-                            className="rounded-full border border-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
-                            type="button"
-                            onClick={() => setPayoffLoan(loan)}
-                            disabled={
-                              !canPayoff ||
-                              actionLoading === "PAYOFF_COLLATERAL_LOAN"
-                            }
-                            title={
-                              canPayoff
-                                ? "Pay off this loan"
-                                : "Not enough cash to pay off"
-                            }
-                          >
-                            Pay off
-                          </button>
+                          <div className="flex flex-col items-end gap-2">
+                            <button
+                              className="rounded-full border border-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
+                              type="button"
+                              onClick={() => setPayoffLoan(loan)}
+                              disabled={
+                                !canPayoff ||
+                                actionLoading === "PAYOFF_COLLATERAL_LOAN"
+                              }
+                              title={
+                                canPayoff
+                                  ? "Pay off this loan"
+                                  : "Not enough cash to pay off"
+                              }
+                            >
+                              Pay off
+                            </button>
+                            <div className="space-y-1 text-right">
+                              <button
+                                className="rounded-full border border-rose-500 px-3 py-2 text-xs font-semibold text-rose-600 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
+                                type="button"
+                                onClick={() =>
+                                  setPropertyActionModal({
+                                    action: "DEFAULT_PROPERTY",
+                                    tileIndex: loan.collateral_tile_index,
+                                    defaultKind: "loan",
+                                  })
+                                }
+                                disabled={
+                                  !canDefault ||
+                                  actionLoading === "DEFAULT_PROPERTY"
+                                }
+                                title={
+                                  defaultDisabledReason ??
+                                  "Default on this collateral loan"
+                                }
+                              >
+                                {actionLoading === "DEFAULT_PROPERTY"
+                                  ? "Defaulting…"
+                                  : "Default"}
+                              </button>
+                              {defaultDisabledReason ? (
+                                <p className="text-xs text-neutral-400">
+                                  {defaultDisabledReason}
+                                </p>
+                              ) : null}
+                            </div>
+                          </div>
                         </div>
                       </PropertyCardShell>
                     );
@@ -7223,6 +7228,16 @@ export default function PlayPage() {
                       canAct &&
                       payoffAmount > 0 &&
                       myPlayerBalance >= payoffAmount;
+                    const houses =
+                      ownershipByTile[mortgage.tile_index]?.houses ?? 0;
+                    const defaultDisabledReason =
+                      houses > 0
+                        ? "Sell houses first"
+                        : !canAct
+                          ? "Not your turn"
+                          : null;
+                    const canDefault =
+                      defaultDisabledReason === null && houses === 0;
                     return (
                       <PropertyCardShell
                         key={mortgage.id}
@@ -7252,27 +7267,59 @@ export default function PlayPage() {
                               Payoff amount: ${payoffAmount}
                             </p>
                           </div>
-                          <button
-                            className="rounded-full border border-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
-                            type="button"
-                            onClick={() =>
-                              void handleBankAction({
-                                action: "PAYOFF_PURCHASE_MORTGAGE",
-                                mortgageId: mortgage.id,
-                              })
-                            }
-                            disabled={
-                              !canPayoff ||
-                              actionLoading === "PAYOFF_PURCHASE_MORTGAGE"
-                            }
-                            title={
-                              canPayoff
-                                ? "Pay off this mortgage"
-                                : "Not enough cash to pay off"
-                            }
-                          >
-                            Pay off
-                          </button>
+                          <div className="flex flex-col items-end gap-2">
+                            <button
+                              className="rounded-full border border-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
+                              type="button"
+                              onClick={() =>
+                                void handleBankAction({
+                                  action: "PAYOFF_PURCHASE_MORTGAGE",
+                                  mortgageId: mortgage.id,
+                                })
+                              }
+                              disabled={
+                                !canPayoff ||
+                                actionLoading === "PAYOFF_PURCHASE_MORTGAGE"
+                              }
+                              title={
+                                canPayoff
+                                  ? "Pay off this mortgage"
+                                  : "Not enough cash to pay off"
+                              }
+                            >
+                              Pay off
+                            </button>
+                            <div className="space-y-1 text-right">
+                              <button
+                                className="rounded-full border border-rose-500 px-3 py-2 text-xs font-semibold text-rose-600 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
+                                type="button"
+                                onClick={() =>
+                                  setPropertyActionModal({
+                                    action: "DEFAULT_PROPERTY",
+                                    tileIndex: mortgage.tile_index,
+                                    defaultKind: "mortgage",
+                                  })
+                                }
+                                disabled={
+                                  !canDefault ||
+                                  actionLoading === "DEFAULT_PROPERTY"
+                                }
+                                title={
+                                  defaultDisabledReason ??
+                                  "Default on this mortgage"
+                                }
+                              >
+                                {actionLoading === "DEFAULT_PROPERTY"
+                                  ? "Defaulting…"
+                                  : "Default"}
+                              </button>
+                              {defaultDisabledReason ? (
+                                <p className="text-xs text-neutral-400">
+                                  {defaultDisabledReason}
+                                </p>
+                              ) : null}
+                            </div>
+                          </div>
                         </div>
                       </PropertyCardShell>
                     );
