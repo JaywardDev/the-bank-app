@@ -23,6 +23,8 @@ type BoardMiniMapProps = {
   size?: "compact" | "default" | "large";
   ownershipByTile?: OwnershipByTile;
   showOwnership?: boolean;
+  selectedTileIndex?: number | null;
+  onTileClick?: (tileIndex: number) => void;
 };
 
 type OwnershipColor = {
@@ -69,6 +71,8 @@ export default function BoardMiniMap({
   size = "default",
   ownershipByTile,
   showOwnership = false,
+  selectedTileIndex,
+  onTileClick,
 }: BoardMiniMapProps) {
   const boardTiles = tiles && tiles.length > 0 ? tiles : fallbackTiles;
   const playersByTile = players.reduce<Record<number, PlayerMarker[]>>(
@@ -131,6 +135,7 @@ export default function BoardMiniMap({
     }
     return `${trimmed.slice(0, 12)}…`;
   };
+  const isInteractive = Boolean(onTileClick);
 
   return (
     <div className="space-y-3">
@@ -160,6 +165,14 @@ export default function BoardMiniMap({
                 boxShadow: `inset 0 0 0 2px ${ownershipColor.inset}`,
               }
             : undefined;
+          const isSelectedTile = selectedTileIndex === tile.index;
+          const interactiveClassName = isInteractive
+            ? `${
+                isDark
+                  ? "cursor-pointer hover:border-white/30 hover:bg-white/10"
+                  : "cursor-pointer hover:border-neutral-300 hover:bg-white"
+              } transition active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-400/60 focus-visible:outline-offset-2`
+            : "";
 
           const mutedGroupTintClass = getMutedGroupTintClass(tile);
 
@@ -173,7 +186,27 @@ export default function BoardMiniMap({
                   : "border-neutral-200 bg-neutral-50"
               } ${
                 isCurrentTile ? "ring-2 ring-emerald-400/70" : ""
-              } ${isLastMovedTile ? "ring-2 ring-amber-300/80 animate-[pulse_1.2s_ease-in-out_3]" : ""}`}
+              } ${
+                isLastMovedTile
+                  ? "ring-2 ring-amber-300/80 animate-[pulse_1.2s_ease-in-out_3]"
+                  : ""
+              } ${
+                isSelectedTile
+                  ? "outline outline-2 outline-indigo-300/70 outline-offset-2"
+                  : ""
+              } ${interactiveClassName}`}
+              role={isInteractive ? "button" : undefined}
+              tabIndex={isInteractive ? 0 : undefined}
+              onClick={() => onTileClick?.(tile.index)}
+              onKeyDown={(event) => {
+                if (!isInteractive) {
+                  return;
+                }
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  onTileClick?.(tile.index);
+                }
+              }}
             >
               <div className="relative">
                 {mutedGroupTintClass ? (

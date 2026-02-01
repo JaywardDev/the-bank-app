@@ -634,6 +634,122 @@ type PendingPurchaseAction = {
   price: number;
 };
 
+type TileDetailsPanelProps = {
+  selectedTileIndex: number;
+  selectedTile: BoardTile;
+  selectedTileTypeLabel: string | null;
+  selectedTileOwnerLabel: string | null;
+  selectedTilePlayers: Player[];
+  currentUserPlayer?: Player;
+  selectedOwnerRailCount: number;
+  selectedOwnerUtilityCount: number;
+  onClose: () => void;
+  sheetRef?: React.Ref<HTMLDivElement>;
+};
+
+const TileDetailsPanel = ({
+  selectedTileIndex,
+  selectedTile,
+  selectedTileTypeLabel,
+  selectedTileOwnerLabel,
+  selectedTilePlayers,
+  currentUserPlayer,
+  selectedOwnerRailCount,
+  selectedOwnerUtilityCount,
+  onClose,
+  sheetRef,
+}: TileDetailsPanelProps) => (
+  <div
+    ref={sheetRef}
+    className="w-full max-w-3xl rounded-3xl border border-neutral-200 bg-white p-4 shadow-2xl sm:p-6"
+    onClick={(event) => event.stopPropagation()}
+    role="dialog"
+    aria-label="Tile details"
+  >
+    <div className="flex items-center justify-between gap-3">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+          Tile details · {selectedTileIndex}
+        </p>
+      </div>
+      <button
+        className="rounded-full border border-neutral-200 px-2 py-1 text-xs font-semibold text-neutral-500 transition hover:border-neutral-300 hover:text-neutral-700"
+        type="button"
+        onClick={onClose}
+        aria-label="Close tile details"
+      >
+        ✕
+      </button>
+    </div>
+    <div className="mt-4">
+      <p className="text-lg font-semibold text-neutral-900 sm:text-xl">
+        {selectedTile.name?.trim() || selectedTileTypeLabel || "Tile"}
+      </p>
+    </div>
+    <div className="mt-4 max-h-[60vh] space-y-3 overflow-y-auto pr-1 text-sm text-neutral-600">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-neutral-50 px-3 py-2">
+        <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+          Type
+        </span>
+        <span className="font-medium text-neutral-800">
+          {selectedTileTypeLabel ?? "Other"}
+        </span>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-neutral-50 px-3 py-2">
+        <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+          Owner
+        </span>
+        <span className="font-medium text-neutral-800">
+          {selectedTileOwnerLabel ?? "Unowned"}
+        </span>
+      </div>
+      {["PROPERTY", "RAIL", "UTILITY"].includes(selectedTile.type) ? (
+        <TitleDeedPreview
+          tile={selectedTile}
+          bandColor={getTileBandColor(selectedTile)}
+          price={selectedTile.price ?? null}
+          ownedRailCount={selectedOwnerRailCount}
+          ownedUtilityCount={selectedOwnerUtilityCount}
+          mode="readonly"
+        />
+      ) : null}
+      <div className="rounded-2xl bg-neutral-50 px-3 py-2">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+            Players here
+          </span>
+          {currentUserPlayer &&
+          currentUserPlayer.position === selectedTileIndex ? (
+            <span className="text-xs font-semibold uppercase tracking-wide text-emerald-500">
+              You are here
+            </span>
+          ) : null}
+        </div>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {selectedTilePlayers.length > 0 ? (
+            selectedTilePlayers.map((player) => (
+              <div
+                key={player.id}
+                className="flex items-center gap-2 rounded-full border border-neutral-200 bg-white px-2.5 py-1 text-xs font-semibold text-neutral-700"
+              >
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-neutral-900 text-[9px] font-semibold uppercase text-white">
+                  {getPlayerInitials(player.display_name)}
+                </span>
+                <span>
+                  {player.display_name ||
+                    getPlayerInitials(player.display_name)}
+                </span>
+              </div>
+            ))
+          ) : (
+            <span className="text-xs text-neutral-400">None</span>
+          )}
+        </div>
+      </div>
+    </div>
+  </div>
+);
+
 const getPendingCardDescription = (
   kind: string | null,
   payload: Record<string, unknown> | null,
@@ -5486,6 +5602,10 @@ export default function PlayPage() {
               ownershipByTile={ownershipByTile}
               showOwnership
               size="compact"
+              selectedTileIndex={selectedTileIndex}
+              onTileClick={(tileIndex) => {
+                setSelectedTileIndex(tileIndex);
+              }}
             />
           </div>
         </div>
@@ -5508,6 +5628,25 @@ export default function PlayPage() {
           </p>
         ) : null}
       </section>
+
+      {!isBoardExpanded && selectedTileIndex !== null && selectedExpandedTile ? (
+        <div
+          className="fixed inset-0 z-40 flex items-end justify-center bg-black/40 px-4 pb-6 sm:items-center sm:pb-0"
+          onClick={() => setSelectedTileIndex(null)}
+        >
+          <TileDetailsPanel
+            selectedTileIndex={selectedTileIndex}
+            selectedTile={selectedExpandedTile}
+            selectedTileTypeLabel={selectedTileTypeLabel}
+            selectedTileOwnerLabel={selectedTileOwnerLabel}
+            selectedTilePlayers={selectedTilePlayers}
+            currentUserPlayer={currentUserPlayer}
+            selectedOwnerRailCount={selectedOwnerRailCount}
+            selectedOwnerUtilityCount={selectedOwnerUtilityCount}
+            onClose={() => setSelectedTileIndex(null)}
+          />
+        </div>
+      ) : null}
 
       <section className="space-y-4">
         <div className="relative">
@@ -7290,102 +7429,18 @@ export default function PlayPage() {
               </div>
               {selectedTileIndex !== null && selectedExpandedTile ? (
                 <div className="absolute inset-x-0 bottom-0 z-20 flex justify-center px-4 pb-4 sm:px-6 sm:pb-6">
-                  <div
-                    ref={expandedTileSheetRef}
-                    className="w-full max-w-3xl rounded-3xl border border-neutral-200 bg-white p-4 shadow-2xl sm:p-6"
-                    onClick={(event) => event.stopPropagation()}
-                    role="dialog"
-                    aria-label="Tile details"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
-                          Tile details · {selectedTileIndex}
-                        </p>
-                      </div>
-                      <button
-                        className="rounded-full border border-neutral-200 px-2 py-1 text-xs font-semibold text-neutral-500 transition hover:border-neutral-300 hover:text-neutral-700"
-                        type="button"
-                        onClick={() => setSelectedTileIndex(null)}
-                        aria-label="Close tile details"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                    <div className="mt-4">
-                      <p className="text-lg font-semibold text-neutral-900 sm:text-xl">
-                        {selectedExpandedTile.name?.trim() ||
-                          selectedTileTypeLabel ||
-                          "Tile"}
-                      </p>
-                    </div>
-                    <div className="mt-4 max-h-[60vh] space-y-3 overflow-y-auto pr-1 text-sm text-neutral-600">
-                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-neutral-50 px-3 py-2">
-                        <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
-                          Type
-                        </span>
-                        <span className="font-medium text-neutral-800">
-                          {selectedTileTypeLabel ?? "Other"}
-                        </span>
-                      </div>
-                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-neutral-50 px-3 py-2">
-                        <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
-                          Owner
-                        </span>
-                        <span className="font-medium text-neutral-800">
-                          {selectedTileOwnerLabel ?? "Unowned"}
-                        </span>
-                      </div>
-                      {selectedExpandedTile &&
-                      ["PROPERTY", "RAIL", "UTILITY"].includes(
-                        selectedExpandedTile.type,
-                      ) ? (
-                        <TitleDeedPreview
-                          tile={selectedExpandedTile}
-                          bandColor={getTileBandColor(selectedExpandedTile)}
-                          price={selectedExpandedTile.price ?? null}
-                          ownedRailCount={selectedOwnerRailCount}
-                          ownedUtilityCount={selectedOwnerUtilityCount}
-                          mode="readonly"
-                        />
-                      ) : null}
-                      <div className="rounded-2xl bg-neutral-50 px-3 py-2">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
-                            Players here
-                          </span>
-                          {currentUserPlayer &&
-                          currentUserPlayer.position === selectedTileIndex ? (
-                            <span className="text-xs font-semibold uppercase tracking-wide text-emerald-500">
-                              You are here
-                            </span>
-                          ) : null}
-                        </div>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {selectedTilePlayers.length > 0 ? (
-                            selectedTilePlayers.map((player) => (
-                              <div
-                                key={player.id}
-                                className="flex items-center gap-2 rounded-full border border-neutral-200 bg-white px-2.5 py-1 text-xs font-semibold text-neutral-700"
-                              >
-                                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-neutral-900 text-[9px] font-semibold uppercase text-white">
-                                  {getPlayerInitials(player.display_name)}
-                                </span>
-                                <span>
-                                  {player.display_name ||
-                                    getPlayerInitials(player.display_name)}
-                                </span>
-                              </div>
-                            ))
-                          ) : (
-                            <span className="text-xs text-neutral-400">
-                              None
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                  <TileDetailsPanel
+                    selectedTileIndex={selectedTileIndex}
+                    selectedTile={selectedExpandedTile}
+                    selectedTileTypeLabel={selectedTileTypeLabel}
+                    selectedTileOwnerLabel={selectedTileOwnerLabel}
+                    selectedTilePlayers={selectedTilePlayers}
+                    currentUserPlayer={currentUserPlayer}
+                    selectedOwnerRailCount={selectedOwnerRailCount}
+                    selectedOwnerUtilityCount={selectedOwnerUtilityCount}
+                    onClose={() => setSelectedTileIndex(null)}
+                    sheetRef={expandedTileSheetRef}
+                  />
                 </div>
               ) : null}
             </div>
