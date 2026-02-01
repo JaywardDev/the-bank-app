@@ -244,6 +244,129 @@ const UtilityRentTable = ({
   </div>
 );
 
+const buildRailRentRows = (): RentRow[] => [
+  { label: "Rent", value: RAIL_RENT_BY_COUNT[1] ?? null },
+  {
+    label: "If 2 Railroads are owned",
+    value: RAIL_RENT_BY_COUNT[2] ?? null,
+  },
+  {
+    label: "If 3 Railroads are owned",
+    value: RAIL_RENT_BY_COUNT[3] ?? null,
+  },
+  {
+    label: "If 4 Railroads are owned",
+    value: RAIL_RENT_BY_COUNT[4] ?? null,
+  },
+];
+
+type TitleDeedPreviewProps = {
+  tile: BoardTile | null;
+  bandColor: string;
+  eyebrow?: string;
+  price?: number | null;
+  ownedRailCount?: number;
+  ownedUtilityCount?: number;
+  footer?: ReactNode;
+};
+
+const TitleDeedPreview = ({
+  tile,
+  bandColor,
+  eyebrow,
+  price,
+  ownedRailCount = 0,
+  ownedUtilityCount = 0,
+  footer,
+}: TitleDeedPreviewProps) => {
+  if (!tile || !["PROPERTY", "RAIL", "UTILITY"].includes(tile.type)) {
+    return null;
+  }
+
+  const priceValue =
+    typeof price === "number"
+      ? price
+      : typeof tile.price === "number"
+        ? tile.price
+        : null;
+  const propertyRent = getPropertyRentDetails(tile);
+  const railRentRows = tile.type === "RAIL" ? buildRailRentRows() : [];
+  const tileName = tile.name ?? "Property";
+
+  return (
+    <TitleDeedCard
+      bandColor={bandColor}
+      eyebrow={eyebrow}
+      header={
+        tile.type === "RAIL" ? (
+          <div className="mt-2 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-3 text-center">
+            <div className="mx-auto flex h-12 w-24 items-center justify-center rounded-md border border-dashed border-neutral-300 text-[10px] font-semibold text-neutral-500">
+              RAIL_ICON_PLACEHOLDER
+            </div>
+            <p className="mt-2 text-lg font-black uppercase tracking-wide text-neutral-900">
+              {tileName}
+            </p>
+            {priceValue !== null ? (
+              <p className="text-xs font-medium text-neutral-500">
+                Price ${priceValue}
+              </p>
+            ) : null}
+          </div>
+        ) : tile.type === "UTILITY" ? (
+          <div className="mt-2 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-3 text-center">
+            <div className="mx-auto flex h-12 w-24 items-center justify-center rounded-md border border-dashed border-neutral-300 text-[10px] font-semibold text-neutral-500">
+              UTIL_ICON_PLACEHOLDER
+            </div>
+            <p className="mt-2 text-lg font-black uppercase tracking-wide text-neutral-900">
+              {tileName}
+            </p>
+            {priceValue !== null ? (
+              <p className="text-xs font-medium text-neutral-500">
+                Price ${priceValue}
+              </p>
+            ) : null}
+          </div>
+        ) : (
+          <p className="mt-1 text-lg font-black uppercase tracking-wide text-neutral-900">
+            {tileName}
+          </p>
+        )
+      }
+      subheader={
+        tile.type === "PROPERTY" && priceValue !== null ? (
+          <p className="text-xs font-medium text-neutral-500">
+            Price ${priceValue}
+          </p>
+        ) : null
+      }
+      rentSection={
+        tile.type === "RAIL" ? (
+          <RailRentTable
+            className="mt-3"
+            rentRows={railRentRows}
+            ownedCount={ownedRailCount}
+            currentRent={null}
+          />
+        ) : tile.type === "UTILITY" ? (
+          <UtilityRentTable
+            className="mt-3"
+            ownedCount={ownedUtilityCount}
+            lastRoll={null}
+            currentRent={null}
+          />
+        ) : (
+          <PropertyRentTable
+            className="mt-3"
+            rentRows={propertyRent.rentRows}
+            houseCost={propertyRent.houseCost}
+          />
+        )
+      }
+      footer={footer}
+    />
+  );
+};
+
 type FloatingTurnActionsProps = {
   isVisible: boolean;
   canRoll: boolean;
@@ -3560,10 +3683,6 @@ export default function PlayPage() {
       null
     );
   }, [boardPack?.tiles, pendingPurchase]);
-  const pendingPropertyRent = useMemo(
-    () => getPropertyRentDetails(pendingTile),
-    [pendingTile],
-  );
   const pendingOwnerId = useMemo(() => {
     if (!pendingTile) {
       return null;
@@ -3594,26 +3713,6 @@ export default function PlayPage() {
         ownershipByTile[tile.index]?.owner_player_id === pendingOwnerId,
     ).length;
   }, [boardPack?.tiles, ownershipByTile, pendingOwnerId]);
-  const pendingRailRentRows = useMemo(() => {
-    if (pendingTile?.type !== "RAIL") {
-      return [];
-    }
-    return [
-      { label: "Rent", value: RAIL_RENT_BY_COUNT[1] ?? null },
-      {
-        label: "If 2 Railroads are owned",
-        value: RAIL_RENT_BY_COUNT[2] ?? null,
-      },
-      {
-        label: "If 3 Railroads are owned",
-        value: RAIL_RENT_BY_COUNT[3] ?? null,
-      },
-      {
-        label: "If 4 Railroads are owned",
-        value: RAIL_RENT_BY_COUNT[4] ?? null,
-      },
-    ];
-  }, [pendingTile?.type]);
   const pendingTileLabel =
     pendingTile?.name ??
     (pendingPurchase ? `Tile ${pendingPurchase.tile_index}` : null);
@@ -4021,6 +4120,27 @@ export default function PlayPage() {
     auctionTileIndex !== null && auctionTileIndex !== undefined
       ? boardPack?.tiles?.find((tile) => tile.index === auctionTileIndex) ?? null
       : null;
+  const auctionBandColor = getTileBandColor(auctionTile);
+  const auctionOwnedRailCount = useMemo(() => {
+    if (!currentUserPlayer?.id || !boardPack?.tiles) {
+      return 0;
+    }
+    return boardPack.tiles.filter(
+      (tile) =>
+        tile.type === "RAIL" &&
+        ownershipByTile[tile.index]?.owner_player_id === currentUserPlayer.id,
+    ).length;
+  }, [boardPack?.tiles, currentUserPlayer?.id, ownershipByTile]);
+  const auctionOwnedUtilityCount = useMemo(() => {
+    if (!currentUserPlayer?.id || !boardPack?.tiles) {
+      return 0;
+    }
+    return boardPack.tiles.filter(
+      (tile) =>
+        tile.type === "UTILITY" &&
+        ownershipByTile[tile.index]?.owner_player_id === currentUserPlayer.id,
+    ).length;
+  }, [boardPack?.tiles, currentUserPlayer?.id, ownershipByTile]);
   const auctionCurrentBid = gameState?.auction_current_bid ?? 0;
   const auctionMinIncrement =
     gameState?.auction_min_increment ?? rules.auctionMinIncrement;
@@ -5387,70 +5507,13 @@ export default function PlayPage() {
             </>
           ) : null}
           {showPendingDecisionCard && pendingPurchase ? (
-            <TitleDeedCard
+            <TitleDeedPreview
+              tile={pendingTile}
               bandColor={pendingBandColor}
               eyebrow="Pending decision"
-              header={
-                pendingTile?.type === "RAIL" ? (
-                  <div className="mt-2 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-3 text-center">
-                    <div className="mx-auto flex h-12 w-24 items-center justify-center rounded-md border border-dashed border-neutral-300 text-[10px] font-semibold text-neutral-500">
-                      RAIL_ICON_PLACEHOLDER
-                    </div>
-                    <p className="mt-2 text-lg font-black uppercase tracking-wide text-neutral-900">
-                      {pendingTileLabel}
-                    </p>
-                    <p className="text-xs font-medium text-neutral-500">
-                      Price ${pendingPurchase.price}
-                    </p>
-                  </div>
-                ) : pendingTile?.type === "UTILITY" ? (
-                  <div className="mt-2 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-3 text-center">
-                    <div className="mx-auto flex h-12 w-24 items-center justify-center rounded-md border border-dashed border-neutral-300 text-[10px] font-semibold text-neutral-500">
-                      UTIL_ICON_PLACEHOLDER
-                    </div>
-                    <p className="mt-2 text-lg font-black uppercase tracking-wide text-neutral-900">
-                      {pendingTileLabel}
-                    </p>
-                    <p className="text-xs font-medium text-neutral-500">
-                      Price ${pendingPurchase.price}
-                    </p>
-                  </div>
-                ) : (
-                  <p className="mt-1 text-lg font-black uppercase tracking-wide text-neutral-900">
-                    {pendingTileLabel}
-                  </p>
-                )
-              }
-              subheader={
-                pendingTile?.type === "PROPERTY" ? (
-                  <p className="text-xs font-medium text-neutral-500">
-                    Price ${pendingPurchase.price}
-                  </p>
-                ) : null
-              }
-              rentSection={
-                pendingTile?.type === "RAIL" ? (
-                  <RailRentTable
-                    className="mt-3"
-                    rentRows={pendingRailRentRows}
-                    ownedCount={pendingOwnerRailCount}
-                    currentRent={null}
-                  />
-                ) : pendingTile?.type === "UTILITY" ? (
-                  <UtilityRentTable
-                    className="mt-3"
-                    ownedCount={pendingOwnerUtilityCount}
-                    lastRoll={null}
-                    currentRent={null}
-                  />
-                ) : (
-                  <PropertyRentTable
-                    className="mt-3"
-                    rentRows={pendingPropertyRent.rentRows}
-                    houseCost={pendingPropertyRent.houseCost}
-                  />
-                )
-              }
+              price={pendingPurchase.price}
+              ownedRailCount={pendingOwnerRailCount}
+              ownedUtilityCount={pendingOwnerUtilityCount}
               footer={
                 <>
                   <div className="grid gap-2">
@@ -6170,7 +6233,7 @@ export default function PlayPage() {
           <>
             <div className="fixed inset-0 z-20 bg-black/45 backdrop-blur-[2px]" />
             <div className="fixed inset-0 z-30 flex items-center justify-center p-4">
-              <div className="w-full max-w-md scale-[1.02] rounded-3xl border border-indigo-200 bg-white/95 p-5 shadow-2xl ring-1 ring-black/10 backdrop-blur">
+              <div className="flex w-full max-w-md scale-[1.02] flex-col rounded-3xl border border-indigo-200 bg-white/95 p-5 shadow-2xl ring-1 ring-black/10 backdrop-blur max-h-[calc(100vh-2rem)]">
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wide text-indigo-500">
@@ -6207,111 +6270,118 @@ export default function PlayPage() {
                     </p>
                   </div>
                 </div>
-                <div className="mt-4 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-3 text-sm text-indigo-900">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-indigo-500">
-                    Current bid
-                  </p>
-                  <p className="text-base font-semibold text-indigo-900">
-                    $
-                    {isAuctionActive
-                      ? auctionCurrentBid
-                      : auctionDisplaySnapshot?.currentBid ?? 0}
-                  </p>
-                  <p className="text-xs text-indigo-700">
-                    {isAuctionActive
-                      ? auctionWinnerName
-                        ? `Leading: ${auctionWinnerName}`
-                        : "No bids yet"
-                      : auctionDisplaySnapshot?.winnerName
-                        ? `Leading: ${auctionDisplaySnapshot.winnerName}`
-                        : "No bids yet"}
-                  </p>
-                </div>
-                {isAuctionActive ? (
-                  <>
-                    <p className="mt-3 text-sm text-neutral-600">
+                <div className="mt-4 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
+                  {isAuctionActive && auctionTile ? (
+                    <TitleDeedPreview
+                      tile={auctionTile}
+                      bandColor={auctionBandColor}
+                      price={auctionTile.price ?? null}
+                      ownedRailCount={auctionOwnedRailCount}
+                      ownedUtilityCount={auctionOwnedUtilityCount}
+                    />
+                  ) : null}
+                  <div className="rounded-2xl border border-indigo-100 bg-indigo-50/60 p-3 text-sm text-indigo-900">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-indigo-500">
+                      Current bid
+                    </p>
+                    <p className="text-base font-semibold text-indigo-900">
+                      $
+                      {isAuctionActive
+                        ? auctionCurrentBid
+                        : auctionDisplaySnapshot?.currentBid ?? 0}
+                    </p>
+                    <p className="text-xs text-indigo-700">
+                      {isAuctionActive
+                        ? auctionWinnerName
+                          ? `Leading: ${auctionWinnerName}`
+                          : "No bids yet"
+                        : auctionDisplaySnapshot?.winnerName
+                          ? `Leading: ${auctionDisplaySnapshot.winnerName}`
+                          : "No bids yet"}
+                    </p>
+                  </div>
+                  {isAuctionActive ? (
+                    <p className="text-sm text-neutral-600">
                       Waiting for{" "}
                       <span className="font-semibold text-neutral-900">
                         {auctionTurnPlayerName ?? "next bidder"}
                       </span>
                       …
                     </p>
-                  </>
-                ) : (
-                  <p className="mt-3 text-sm text-neutral-600">
-                    Resolving…
-                  </p>
-                )}
-                {isCurrentAuctionBidder && isAuctionActive ? (
-                  <div className="mt-4 space-y-3">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
-                      Your bid
-                    </p>
-                    <div className="flex items-center justify-between gap-3 rounded-2xl border border-neutral-200 bg-white px-3 py-2">
-                      <button
-                        className="rounded-full border border-neutral-200 px-3 py-1 text-sm font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:text-neutral-300"
-                        type="button"
-                        onClick={() =>
-                          setAuctionBidAmount((prev) => prev - 10)
-                        }
-                        disabled={!canDecreaseAuctionBid}
-                      >
-                        –
-                      </button>
-                      <div className="text-lg font-semibold text-neutral-900">
-                        ${auctionBidAmount}
-                      </div>
-                      <button
-                        className="rounded-full border border-neutral-200 px-3 py-1 text-sm font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:text-neutral-300"
-                        type="button"
-                        onClick={() =>
-                          setAuctionBidAmount((prev) => prev + 10)
-                        }
-                        disabled={!canIncreaseAuctionBid}
-                      >
-                        +
-                      </button>
-                    </div>
-                    <p className="text-xs text-neutral-500">
-                      Minimum bid: ${auctionBidMinimum} · Cash:{" "}
-                      {currentBidderCash}
-                    </p>
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      <div className="space-y-1">
+                  ) : (
+                    <p className="text-sm text-neutral-600">Resolving…</p>
+                  )}
+                  {isCurrentAuctionBidder && isAuctionActive ? (
+                    <div className="space-y-3">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                        Your bid
+                      </p>
+                      <div className="flex items-center justify-between gap-3 rounded-2xl border border-neutral-200 bg-white px-3 py-2">
                         <button
-                          className="rounded-2xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-indigo-200"
+                          className="rounded-full border border-neutral-200 px-3 py-1 text-sm font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:text-neutral-300"
                           type="button"
-                          onClick={handleAuctionBid}
-                          disabled={
-                            actionLoading === "AUCTION_BID" ||
-                            !canSubmitAuctionBid
+                          onClick={() =>
+                            setAuctionBidAmount((prev) => prev - 10)
                           }
+                          disabled={!canDecreaseAuctionBid}
                         >
-                          {actionLoading === "AUCTION_BID" ? "Bidding…" : "Bid"}
+                          –
                         </button>
-                        {auctionBidDisabledReason ? (
-                          <p className="text-xs text-neutral-400">
-                            {auctionBidDisabledReason}
-                          </p>
-                        ) : null}
+                        <div className="text-lg font-semibold text-neutral-900">
+                          ${auctionBidAmount}
+                        </div>
+                        <button
+                          className="rounded-full border border-neutral-200 px-3 py-1 text-sm font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:text-neutral-300"
+                          type="button"
+                          onClick={() =>
+                            setAuctionBidAmount((prev) => prev + 10)
+                          }
+                          disabled={!canIncreaseAuctionBid}
+                        >
+                          +
+                        </button>
                       </div>
-                      <button
-                        className="rounded-2xl border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:border-neutral-100 disabled:text-neutral-300"
-                        type="button"
-                        onClick={handleAuctionPass}
-                        disabled={actionLoading === "AUCTION_PASS"}
-                      >
-                        {actionLoading === "AUCTION_PASS" ? "Passing…" : "Pass"}
-                      </button>
+                      <p className="text-xs text-neutral-500">
+                        Minimum bid: ${auctionBidMinimum} · Cash:{" "}
+                        {currentBidderCash}
+                      </p>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <div className="space-y-1">
+                          <button
+                            className="rounded-2xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-indigo-200"
+                            type="button"
+                            onClick={handleAuctionBid}
+                            disabled={
+                              actionLoading === "AUCTION_BID" ||
+                              !canSubmitAuctionBid
+                            }
+                          >
+                            {actionLoading === "AUCTION_BID" ? "Bidding…" : "Bid"}
+                          </button>
+                          {auctionBidDisabledReason ? (
+                            <p className="text-xs text-neutral-400">
+                              {auctionBidDisabledReason}
+                            </p>
+                          ) : null}
+                        </div>
+                        <button
+                          className="rounded-2xl border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:border-neutral-100 disabled:text-neutral-300"
+                          type="button"
+                          onClick={handleAuctionPass}
+                          disabled={actionLoading === "AUCTION_PASS"}
+                        >
+                          {actionLoading === "AUCTION_PASS" ? "Passing…" : "Pass"}
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ) : (
-                  <p className="mt-4 text-xs text-neutral-500">
-                    {isAuctionActive
-                      ? "Watch the auction update live. Actions unlock when it is your turn to bid or pass."
-                      : "Updating auction results..."}
-                  </p>
-                )}
+                  ) : (
+                    <p className="text-xs text-neutral-500">
+                      {isAuctionActive
+                        ? "Watch the auction update live. Actions unlock when it is your turn to bid or pass."
+                        : "Updating auction results..."}
+                    </p>
+                  )}
+                </div>
               </div>
             </div>
           </>
