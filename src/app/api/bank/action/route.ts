@@ -600,7 +600,11 @@ const liquidateHousesForPlayer = async ({
   allowedColorGroups?: string[] | null;
   macroHouseSellMultiplier: number;
   events: Array<{ event_type: string; payload: Record<string, unknown> }>;
-  macroMeta: { macro_id: string | null; macro_name: string; effect_type: string };
+  macroMeta: {
+    macro_id: string | null;
+    macro_name: string;
+    macro_effect_type?: string;
+  };
   effectType: string;
 }) => {
   let updatedBalances = balances;
@@ -5935,7 +5939,7 @@ export async function POST(request: Request) {
                   events,
                   macroMeta: {
                     ...macroMetaBase,
-                    effect_type: "regional_disaster",
+                    macro_effect_type: "regional_disaster",
                   },
                   effectType: "regional_disaster",
                 });
