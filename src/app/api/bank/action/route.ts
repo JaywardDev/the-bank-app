@@ -80,7 +80,9 @@ type BankActionRequest =
         | "PAYOFF_COLLATERAL_LOAN"
         | "PAYOFF_PURCHASE_MORTGAGE"
         | "BUILD_HOUSE"
-        | "SELL_HOUSE",
+        | "SELL_HOUSE"
+        | "SELL_TO_MARKET"
+        | "DEFAULT_PROPERTY",
         "DECLINE_PROPERTY" | "BUY_PROPERTY"
       >;
       tileIndex?: number;
@@ -6900,6 +6902,321 @@ export async function POST(request: Request) {
       }
 
       return await handleHouseAction("SELL_HOUSE", tileIndex);
+    }
+
+    const loadOwnedOwnableTile = (tileIndex: number) => {
+      const boardPack = getBoardPackById(game.board_pack_id);
+      const tile = boardPack?.tiles?.find((entry) => entry.index === tileIndex);
+      if (!tile) {
+        return { error: "Property not found.", status: 404 };
+      }
+      if (!OWNABLE_TILE_TYPES.has(tile.type)) {
+        return { error: "Tile cannot be sold.", status: 409 };
+      }
+      return { tile };
+    };
+
+    if (body.action === "SELL_TO_MARKET") {
+      const tileIndex = body.tileIndex;
+      if (typeof tileIndex !== "number") {
+        return NextResponse.json(
+          { error: "Missing property tile." },
+          { status: 400 },
+        );
+      }
+
+      const tileResult = loadOwnedOwnableTile(tileIndex);
+      if ("error" in tileResult) {
+        return NextResponse.json(
+          { error: tileResult.error },
+          { status: tileResult.status },
+        );
+      }
+
+      const ownershipByTile = await loadOwnershipByTile(gameId);
+      const ownership = ownershipByTile[tileIndex];
+      if (!ownership || ownership.owner_player_id !== currentPlayer.id) {
+        return NextResponse.json(
+          { error: "You do not own this property." },
+          { status: 409 },
+        );
+      }
+
+      const houses = ownership.houses ?? 0;
+      if (houses > 0) {
+        return NextResponse.json(
+          { error: "Sell all houses before selling this property." },
+          { status: 409 },
+        );
+      }
+      if (ownership.collateral_loan_id) {
+        return NextResponse.json(
+          { error: "Collateralized properties cannot be sold." },
+          { status: 409 },
+        );
+      }
+      if (ownership.purchase_mortgage_id) {
+        return NextResponse.json(
+          { error: "Mortgaged properties cannot be sold." },
+          { status: 409 },
+        );
+      }
+
+      const price = tileResult.tile.price ?? 0;
+      if (!price) {
+        return NextResponse.json(
+          { error: "Property price is unavailable." },
+          { status: 409 },
+        );
+      }
+
+      const payout = Math.round(price * 0.7);
+      const balances = gameState.balances ?? {};
+      const currentBalance =
+        balances[currentPlayer.id] ?? game.starting_cash ?? 0;
+      const updatedBalances = {
+        ...balances,
+        [currentPlayer.id]: currentBalance + payout,
+      };
+
+      const ownershipResponse = await fetchFromSupabaseWithService(
+        `property_ownership?game_id=eq.${gameId}&tile_index=eq.${tileIndex}&owner_player_id=eq.${currentPlayer.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            owner_player_id: null,
+            collateral_loan_id: null,
+            purchase_mortgage_id: null,
+            houses: 0,
+          }),
+        },
+      );
+
+      if (!ownershipResponse) {
+        return NextResponse.json(
+          { error: "Unable to update ownership." },
+          { status: 500 },
+        );
+      }
+
+      const events: Array<{
+        event_type: string;
+        payload: Record<string, unknown>;
+      }> = [
+        {
+          event_type: "PROPERTY_SOLD_TO_MARKET",
+          payload: {
+            tile_index: tileIndex,
+            tile_id: tileResult.tile.tile_id,
+            player_id: currentPlayer.id,
+            price,
+            payout,
+          },
+        },
+        {
+          event_type: "CASH_CREDIT",
+          payload: {
+            player_id: currentPlayer.id,
+            amount: payout,
+            reason: "SELL_TO_MARKET",
+            tile_index: tileIndex,
+          },
+        },
+      ];
+
+      const finalVersion = currentVersion + events.length;
+      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            version: finalVersion,
+            balances: updatedBalances,
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      )) ?? [];
+
+      if (!updatedState) {
+        return NextResponse.json(
+          { error: "Version mismatch." },
+          { status: 409 },
+        );
+      }
+
+      await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+
+      return NextResponse.json({ gameState: updatedState });
+    }
+
+    if (body.action === "DEFAULT_PROPERTY") {
+      const tileIndex = body.tileIndex;
+      if (typeof tileIndex !== "number") {
+        return NextResponse.json(
+          { error: "Missing property tile." },
+          { status: 400 },
+        );
+      }
+
+      const tileResult = loadOwnedOwnableTile(tileIndex);
+      if ("error" in tileResult) {
+        return NextResponse.json(
+          { error: tileResult.error },
+          { status: tileResult.status },
+        );
+      }
+
+      const ownershipByTile = await loadOwnershipByTile(gameId);
+      const ownership = ownershipByTile[tileIndex];
+      if (!ownership || ownership.owner_player_id !== currentPlayer.id) {
+        return NextResponse.json(
+          { error: "You do not own this property." },
+          { status: 409 },
+        );
+      }
+
+      const houses = ownership.houses ?? 0;
+      if (houses > 0) {
+        return NextResponse.json(
+          { error: "Sell all houses before defaulting this property." },
+          { status: 409 },
+        );
+      }
+
+      if (!ownership.collateral_loan_id && !ownership.purchase_mortgage_id) {
+        return NextResponse.json(
+          { error: "Property is not collateralized or mortgaged." },
+          { status: 409 },
+        );
+      }
+
+      if (ownership.purchase_mortgage_id) {
+        const [mortgage] = (await fetchFromSupabaseWithService<
+          PurchaseMortgageRow[]
+        >(
+          `purchase_mortgages?select=id,status&game_id=eq.${gameId}&player_id=eq.${currentPlayer.id}&id=eq.${ownership.purchase_mortgage_id}&limit=1`,
+          { method: "GET" },
+        )) ?? [];
+        if (!mortgage) {
+          return NextResponse.json(
+            { error: "Mortgage not found." },
+            { status: 404 },
+          );
+        }
+        if (mortgage.status !== "active") {
+          return NextResponse.json(
+            { error: "Mortgage is not active." },
+            { status: 409 },
+          );
+        }
+        await fetchFromSupabaseWithService(
+          `purchase_mortgages?id=eq.${mortgage.id}`,
+          {
+            method: "PATCH",
+            body: JSON.stringify({
+              status: "defaulted",
+              updated_at: new Date().toISOString(),
+            }),
+          },
+        );
+      }
+
+      if (ownership.collateral_loan_id) {
+        const [loan] = (await fetchFromSupabaseWithService<PlayerLoanRow[]>(
+          `player_loans?select=id,status&game_id=eq.${gameId}&player_id=eq.${currentPlayer.id}&id=eq.${ownership.collateral_loan_id}&limit=1`,
+          { method: "GET" },
+        )) ?? [];
+        if (!loan) {
+          return NextResponse.json(
+            { error: "Collateral loan not found." },
+            { status: 404 },
+          );
+        }
+        if (loan.status !== "active") {
+          return NextResponse.json(
+            { error: "Collateral loan is not active." },
+            { status: 409 },
+          );
+        }
+        await fetchFromSupabaseWithService(`player_loans?id=eq.${loan.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            status: "defaulted",
+            updated_at: new Date().toISOString(),
+          }),
+        });
+      }
+
+      const ownershipResponse = await fetchFromSupabaseWithService(
+        `property_ownership?game_id=eq.${gameId}&tile_index=eq.${tileIndex}&owner_player_id=eq.${currentPlayer.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            owner_player_id: null,
+            collateral_loan_id: null,
+            purchase_mortgage_id: null,
+            houses: 0,
+          }),
+        },
+      );
+
+      if (!ownershipResponse) {
+        return NextResponse.json(
+          { error: "Unable to update ownership." },
+          { status: 500 },
+        );
+      }
+
+      const events: Array<{
+        event_type: string;
+        payload: Record<string, unknown>;
+      }> = [
+        {
+          event_type: "PROPERTY_DEFAULTED",
+          payload: {
+            tile_index: tileIndex,
+            tile_id: tileResult.tile.tile_id,
+            player_id: currentPlayer.id,
+            collateral_loan_id: ownership.collateral_loan_id,
+            purchase_mortgage_id: ownership.purchase_mortgage_id,
+          },
+        },
+      ];
+
+      const finalVersion = currentVersion + events.length;
+      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            version: finalVersion,
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      )) ?? [];
+
+      if (!updatedState) {
+        return NextResponse.json(
+          { error: "Version mismatch." },
+          { status: 409 },
+        );
+      }
+
+      await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+
+      return NextResponse.json({ gameState: updatedState });
     }
 
     if (body.action === "TAKE_COLLATERAL_LOAN") {

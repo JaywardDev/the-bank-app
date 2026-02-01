@@ -1058,6 +1058,18 @@ const derivePlayerTransactions = ({
           });
           break;
         }
+        if (reason === "SELL_TO_MARKET") {
+          const tileIndex = parseNumber(payload.tile_index);
+          const tileName = getTileName(tileIndex);
+          transactions.push({
+            ...recordBase,
+            id: event.id,
+            title: "Sold to market",
+            subtitle: tileName,
+            amount,
+          });
+          break;
+        }
         if (reason === "MACRO_CASH_BONUS") {
           const eventName =
             typeof payload.event_name === "string" ? payload.event_name : null;
@@ -1356,6 +1368,10 @@ export default function PlayPage() {
   const [tradeRequestCash, setTradeRequestCash] = useState<number>(0);
   const [tradeRequestTiles, setTradeRequestTiles] = useState<number[]>([]);
   const [payoffLoan, setPayoffLoan] = useState<PlayerLoan | null>(null);
+  const [propertyActionModal, setPropertyActionModal] = useState<{
+    action: "SELL_TO_MARKET" | "DEFAULT_PROPERTY";
+    tileIndex: number;
+  } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -2574,6 +2590,58 @@ export default function PlayPage() {
         return `Loan paid off early on ${tileLabel} for $${amount}`;
       }
       return `Loan paid off early on ${tileLabel}`;
+    }
+
+    if (event.event_type === "PROPERTY_SOLD_TO_MARKET") {
+      const tileIndexRaw = payload?.tile_index;
+      const tileIndex =
+        typeof tileIndexRaw === "number"
+          ? tileIndexRaw
+          : typeof tileIndexRaw === "string"
+            ? Number.parseInt(tileIndexRaw, 10)
+            : null;
+      const tileNameFromBoard =
+        tileIndex !== null
+          ? boardPack?.tiles?.find((entry) => entry.index === tileIndex)?.name
+          : null;
+      const tileLabel =
+        tileNameFromBoard ?? (tileIndex !== null ? `Tile ${tileIndex}` : "tile");
+      const playerId =
+        typeof payload?.player_id === "string" ? payload.player_id : null;
+      const playerName =
+        players.find((player) => player.id === playerId)?.display_name ??
+        "Player";
+      const payout =
+        typeof payload?.payout === "number"
+          ? payload.payout
+          : typeof payload?.payout === "string"
+            ? Number.parseInt(payload.payout, 10)
+            : null;
+      return payout !== null
+        ? `${playerName} sold ${tileLabel} to market for $${payout}`
+        : `${playerName} sold ${tileLabel} to market`;
+    }
+
+    if (event.event_type === "PROPERTY_DEFAULTED") {
+      const tileIndexRaw = payload?.tile_index;
+      const tileIndex =
+        typeof tileIndexRaw === "number"
+          ? tileIndexRaw
+          : typeof tileIndexRaw === "string"
+            ? Number.parseInt(tileIndexRaw, 10)
+            : null;
+      const tileNameFromBoard =
+        tileIndex !== null
+          ? boardPack?.tiles?.find((entry) => entry.index === tileIndex)?.name
+          : null;
+      const tileLabel =
+        tileNameFromBoard ?? (tileIndex !== null ? `Tile ${tileIndex}` : "tile");
+      const playerId =
+        typeof payload?.player_id === "string" ? payload.player_id : null;
+      const playerName =
+        players.find((player) => player.id === playerId)?.display_name ??
+        "Player";
+      return `${playerName} defaulted on ${tileLabel}`;
     }
 
     if (event.event_type === "PAY_TAX") {
@@ -3941,6 +4009,27 @@ export default function PlayPage() {
           !isCollateralized &&
           houseCost > 0 &&
           houses > 0;
+        const sellToMarketDisabledReason = !canAct
+          ? "Not your turn"
+          : houses > 0
+            ? "Sell houses first"
+            : isCollateralized
+              ? "Collateralized properties cannot be sold"
+              : isPurchaseMortgaged
+                ? "Mortgaged properties cannot be sold"
+                : null;
+        const canSellToMarket = sellToMarketDisabledReason === null;
+        const canDefaultPropertyBase =
+          isCollateralized || isPurchaseMortgaged;
+        const defaultDisabledReason = !canDefaultPropertyBase
+          ? "Not collateralized or mortgaged"
+          : !canAct
+            ? "Not your turn"
+            : houses > 0
+              ? "Sell houses first"
+              : null;
+        const canDefaultProperty =
+          canDefaultPropertyBase && defaultDisabledReason === null;
         return {
           tile,
           isCollateralized,
@@ -3951,6 +4040,10 @@ export default function PlayPage() {
           houseCost,
           canBuildHouse,
           canSellHouse,
+          canSellToMarket,
+          sellToMarketDisabledReason,
+          canDefaultProperty,
+          defaultDisabledReason,
         };
       });
   }, [
@@ -3980,6 +4073,23 @@ export default function PlayPage() {
         ownershipByTile[tile.index]?.owner_player_id === currentUserPlayer.id,
     ).length;
   }, [boardPack?.tiles, currentUserPlayer, ownershipByTile]);
+  const propertyActionTile = useMemo(() => {
+    if (!propertyActionModal || !boardPack?.tiles) {
+      return null;
+    }
+    return (
+      boardPack.tiles.find(
+        (entry) => entry.index === propertyActionModal.tileIndex,
+      ) ?? null
+    );
+  }, [boardPack?.tiles, propertyActionModal]);
+  const propertyActionPayout = useMemo(() => {
+    if (!propertyActionModal || propertyActionModal.action !== "SELL_TO_MARKET") {
+      return 0;
+    }
+    const price = propertyActionTile?.price ?? 0;
+    return Math.round(price * 0.7);
+  }, [propertyActionModal, propertyActionTile]);
   const availableTradeCounterparties = useMemo(() => {
     if (!currentUserPlayer) {
       return [];
@@ -4675,7 +4785,14 @@ export default function PlayPage() {
         | { action: "AUCTION_BID"; amount: number }
         | { action: "AUCTION_PASS" }
         | { action: "TAKE_COLLATERAL_LOAN"; tileIndex: number }
-        | { action: "BUILD_HOUSE" | "SELL_HOUSE"; tileIndex: number }
+        | {
+            action:
+              | "BUILD_HOUSE"
+              | "SELL_HOUSE"
+              | "SELL_TO_MARKET"
+              | "DEFAULT_PROPERTY";
+            tileIndex: number;
+          }
         | { action: "PAYOFF_COLLATERAL_LOAN"; loanId: string }
         | { action: "PAYOFF_PURCHASE_MORTGAGE"; mortgageId: string }
         | {
@@ -6165,6 +6282,71 @@ export default function PlayPage() {
             </div>
           </>
         ) : null}
+        {propertyActionModal ? (
+          <>
+            <div className="fixed inset-0 z-20 bg-black/45 backdrop-blur-[2px]" />
+            <div className="fixed inset-0 z-30 flex items-center justify-center p-4">
+              <div className="w-full max-w-md rounded-3xl border border-neutral-200 bg-white/95 p-5 shadow-2xl ring-1 ring-black/10 backdrop-blur">
+                <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                  {propertyActionModal.action === "SELL_TO_MARKET"
+                    ? "Sell to Market"
+                    : "Default property"}
+                </p>
+                <p className="text-lg font-semibold text-neutral-900">
+                  {propertyActionTile?.name ??
+                    `Tile ${propertyActionModal.tileIndex}`}
+                </p>
+                <p className="mt-2 text-sm text-neutral-600">
+                  {propertyActionModal.action === "SELL_TO_MARKET"
+                    ? "This will return the property to the open market. This action is irreversible."
+                    : "This will default the loan and return the property to the market. This action is irreversible."}
+                </p>
+                <div className="mt-3 rounded-2xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-700">
+                  <span className="font-semibold">Payout:</span> $
+                  {propertyActionModal.action === "SELL_TO_MARKET"
+                    ? propertyActionPayout
+                    : 0}
+                </div>
+                <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                  <button
+                    className="rounded-2xl border px-4 py-2 text-sm font-semibold text-neutral-700"
+                    type="button"
+                    onClick={() => setPropertyActionModal(null)}
+                    disabled={
+                      actionLoading === "SELL_TO_MARKET" ||
+                      actionLoading === "DEFAULT_PROPERTY"
+                    }
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="rounded-2xl bg-neutral-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
+                    type="button"
+                    onClick={() => {
+                      void handleBankAction({
+                        action: propertyActionModal.action,
+                        tileIndex: propertyActionModal.tileIndex,
+                      });
+                      setPropertyActionModal(null);
+                    }}
+                    disabled={
+                      actionLoading === "SELL_TO_MARKET" ||
+                      actionLoading === "DEFAULT_PROPERTY"
+                    }
+                  >
+                    {propertyActionModal.action === "SELL_TO_MARKET"
+                      ? actionLoading === "SELL_TO_MARKET"
+                        ? "Selling…"
+                        : "Confirm sale"
+                      : actionLoading === "DEFAULT_PROPERTY"
+                        ? "Defaulting…"
+                        : "Confirm default"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </>
+        ) : null}
         {payoffLoan ? (
           <>
             <div className="fixed inset-0 z-20 bg-black/45 backdrop-blur-[2px]" />
@@ -6492,6 +6674,10 @@ export default function PlayPage() {
                       isCollateralEligible,
                       canBuildHouse,
                       canSellHouse,
+                      canSellToMarket,
+                      sellToMarketDisabledReason,
+                      canDefaultProperty,
+                      defaultDisabledReason,
                     }) => {
                       const principalPreview = Math.round(
                         (tile.price ?? 0) * rules.collateralLtv,
@@ -6649,6 +6835,66 @@ export default function PlayPage() {
                                   </button>
                                 </div>
                               ) : null}
+                              <div className="grid gap-2 sm:grid-cols-2">
+                                <div className="space-y-1">
+                                  <button
+                                    className="rounded-2xl border border-neutral-900 px-4 py-2 text-xs font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
+                                    type="button"
+                                    onClick={() =>
+                                      setPropertyActionModal({
+                                        action: "SELL_TO_MARKET",
+                                        tileIndex: tile.index,
+                                      })
+                                    }
+                                    disabled={
+                                      !canSellToMarket ||
+                                      actionLoading === "SELL_TO_MARKET"
+                                    }
+                                    title={
+                                      sellToMarketDisabledReason ??
+                                      "Sell this property to the market"
+                                    }
+                                  >
+                                    {actionLoading === "SELL_TO_MARKET"
+                                      ? "Selling…"
+                                      : "Sell to Market"}
+                                  </button>
+                                  {sellToMarketDisabledReason ? (
+                                    <p className="text-xs text-neutral-400">
+                                      {sellToMarketDisabledReason}
+                                    </p>
+                                  ) : null}
+                                </div>
+                                <div className="space-y-1">
+                                  <button
+                                    className="rounded-2xl border border-rose-500 px-4 py-2 text-xs font-semibold text-rose-600 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
+                                    type="button"
+                                    onClick={() =>
+                                      setPropertyActionModal({
+                                        action: "DEFAULT_PROPERTY",
+                                        tileIndex: tile.index,
+                                      })
+                                    }
+                                    disabled={
+                                      !canDefaultProperty ||
+                                      actionLoading === "DEFAULT_PROPERTY"
+                                    }
+                                    title={
+                                      defaultDisabledReason ??
+                                      "Default on this property"
+                                    }
+                                  >
+                                    {actionLoading === "DEFAULT_PROPERTY"
+                                      ? "Defaulting…"
+                                      : "Default"}
+                                  </button>
+                                  {defaultDisabledReason ? (
+                                    <p className="text-xs text-neutral-400">
+                                      {defaultDisabledReason}
+                                    </p>
+                                  ) : null}
+                                </div>
+                              </div>
                               <button
                                 className="rounded-2xl bg-neutral-900 px-4 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
                                 type="button"
