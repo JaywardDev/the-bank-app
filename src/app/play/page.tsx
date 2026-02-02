@@ -2028,39 +2028,40 @@ export default function PlayPage() {
             } ${isSelectedTile ? "outline outline-2 outline-indigo-300/60 outline-offset-2" : ""} h-full w-full rounded-md border-neutral-200 p-0.2 sm:p-0.2`}
           >
             <div className="relative flex h-full flex-col justify-end gap-2">
-              {mutedGroupTintClass ? (
-                <div
-                  className={`pointer-events-none absolute left-0 top-0 h-1.5 w-full ${mutedGroupTintClass}`}
-                />
-              ) : null}
-              <span className="absolute left-1 top-1 text-[9px] font-medium text-neutral-300/70">
-                {tile.index}
-              </span>
               {tileIconSrc ? (
-                <span className="pointer-events-none absolute inset-0 flex items-center justify-center px-1">
-                  <span className="relative h-full w-full overflow-hidden">
+                <span className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center px-1">
+                  <span className="relative h-full w-full">
                     <Image
                       src={tileIconSrc}
                       alt={tileFaceLabel ?? tile.name}
                       fill
-                      className="object-cover object-center"
+                      className="object-contain object-center opacity-35 grayscale brightness-110 contrast-75"
                     />
                   </span>
                 </span>
-              ) : tileFaceLabel ? (
-                <span className="pointer-events-none absolute inset-0 flex items-center justify-center px-0.5 text-[10px] font-semibold uppercase tracking-normal text-neutral-500">
+              ) : null}
+              {mutedGroupTintClass ? (
+                <div
+                  className={`pointer-events-none absolute left-0 top-0 z-20 h-1.5 w-full ${mutedGroupTintClass}`}
+                />
+              ) : null}
+              <span className="absolute left-1 top-1 z-20 text-[9px] font-medium text-neutral-300/70">
+                {tile.index}
+              </span>
+              {tileFaceLabel && !tileIconSrc ? (
+                <span className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center px-0.5 text-[10px] font-semibold uppercase tracking-normal text-neutral-500">
                   <span className="w-full line-clamp-2 text-center">
                     {tileFaceLabel}
                   </span>
                 </span>
               ) : null}
               {tile.type === "PROPERTY" ? (
-                <div className="flex justify-end">
+                <div className="relative z-30 flex justify-end">
                   <HousesDots houses={houses} size="md" />
                 </div>
               ) : null}
               {tilePlayers.length > 0 ? (
-                <div className="flex flex-wrap justify-end gap-1">
+                <div className="relative z-50 flex flex-wrap justify-end gap-1">
                   {tilePlayers.map((player) => (
                     <div
                       key={player.id}
