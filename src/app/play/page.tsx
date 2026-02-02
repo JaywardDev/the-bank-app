@@ -92,13 +92,13 @@ const isRailroadTile = (tile: BoardTile) => {
 
 const getTaxTileIconSrc = (tile: BoardTile) => {
   const normalizedTileId = tile.tile_id.toLowerCase();
-  if (normalizedTileId === "luxury-tax") {
+  if (normalizedTileId === "super-tax") {
     const src = "/icons/luxury_tax.svg";
     console.log(
       "[getTaxTileIconSrc]",
       "branch:tile_id",
       "field:tile_id",
-      "match:luxury-tax",
+      "match:super-tax",
       `value:${normalizedTileId}`,
       "src:",
       src,
