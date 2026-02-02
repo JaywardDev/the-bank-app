@@ -93,17 +93,53 @@ const isRailroadTile = (tile: BoardTile) => {
 const getTaxTileIconSrc = (tile: BoardTile) => {
   const normalizedTileId = tile.tile_id.toLowerCase();
   if (normalizedTileId === "luxury-tax") {
-    return "/icons/luxury_tax.svg";
+    const src = "/icons/luxury_tax.svg";
+    console.log(
+      "[getTaxTileIconSrc]",
+      "branch:tile_id",
+      "field:tile_id",
+      "match:luxury-tax",
+      "src:",
+      src,
+    );
+    return src;
   }
   if (normalizedTileId === "income-tax") {
-    return "/icons/income_tax.svg";
+    const src = "/icons/income_tax.svg";
+    console.log(
+      "[getTaxTileIconSrc]",
+      "branch:tile_id",
+      "field:tile_id",
+      "match:income-tax",
+      "src:",
+      src,
+    );
+    return src;
   }
 
   const tileLabel = `${tile.tile_id} ${tile.name}`.toLowerCase();
   if (tileLabel.includes("luxury")) {
-    return "/icons/luxury_tax.svg";
+    const src = "/icons/luxury_tax.svg";
+    console.log(
+      "[getTaxTileIconSrc]",
+      "branch:label",
+      "field:tile_id+name",
+      "match:luxury",
+      "src:",
+      src,
+    );
+    return src;
   }
-  return "/icons/income_tax.svg";
+  const src = "/icons/income_tax.svg";
+  console.log(
+    "[getTaxTileIconSrc]",
+    "branch:fallback",
+    "field:tile_id+name",
+    "match:default",
+    "src:",
+    src,
+  );
+  return src;
 };
 
 const getTileIconSrc = (tile: BoardTile | null): string | null => {
@@ -2002,6 +2038,20 @@ export default function PlayPage() {
       const tileFaceLabel = getExpandedTileFaceLabel(tile.type);
       const tileIconSrc = getBoardTileIconSrc(tile);
       const mutedGroupTintClass = getMutedGroupTintClass(tile);
+      if (tile.type === "TAX") {
+        const taxTileDebug = {
+          type: tile.type,
+          name: tile.name,
+          label: "label" in tile ? tile.label : undefined,
+          tile_id: tile.tile_id,
+          id: "id" in tile ? tile.id : undefined,
+          key: "key" in tile ? tile.key : undefined,
+          slug: "slug" in tile ? tile.slug : undefined,
+          subtype: "subtype" in tile ? tile.subtype : undefined,
+          category: "category" in tile ? tile.category : undefined,
+        };
+        console.log("[TAX TILE]", tileIndex, taxTileDebug, "icon:", tileIconSrc);
+      }
 
       return (
         <div
