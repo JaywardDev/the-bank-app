@@ -117,6 +117,68 @@ const getTileIconSrc = (tile: BoardTile | null): string | null => {
   return null;
 };
 
+const getBoardTileIconSrc = (tile: BoardTile | null): string | null => {
+  if (!tile) {
+    return null;
+  }
+
+  if (tile.type === "RAIL" || tile.type === "RAILROAD") {
+    return "/icons/railroad.svg";
+  }
+
+  if (tile.type === "UTILITY") {
+    const tileLabel = `${tile.tile_id} ${tile.name}`.toLowerCase();
+    if (tileLabel.includes("electric")) {
+      return "/icons/electricity.svg";
+    }
+    return "/icons/water_facility.svg";
+  }
+
+  if (tile.type === "START") {
+    return "/icons/go.svg";
+  }
+
+  if (tile.type === "GO_TO_JAIL") {
+    return "/icons/go_to_jail.svg";
+  }
+
+  if (tile.type === "FREE_PARKING") {
+    return "/icons/free_parking.svg";
+  }
+
+  if (tile.type === "JAIL") {
+    return "/icons/jail.svg";
+  }
+
+  if (tile.type === "CHANCE") {
+    return "/icons/chance.svg";
+  }
+
+  if (tile.type === "COMMUNITY_CHEST") {
+    return "/icons/community_chest.svg";
+  }
+
+  if (tile.type === "TAX") {
+    const tileLabel = `${tile.tile_id} ${tile.name}`.toLowerCase();
+    if (tileLabel.includes("luxury")) {
+      return "/icons/luxury_tax.svg";
+    }
+    return "/icons/income_tax.svg";
+  }
+
+  if (tile.type === "EVENT") {
+    const tileLabel = `${tile.tile_id} ${tile.name}`.toLowerCase();
+    if (tileLabel.includes("chance")) {
+      return "/icons/chance.svg";
+    }
+    if (tileLabel.includes("community")) {
+      return "/icons/community_chest.svg";
+    }
+  }
+
+  return null;
+};
+
 type TileIconProps = {
   src: string | null;
   alt: string;
@@ -1895,6 +1957,7 @@ export default function PlayPage() {
 
       const isSelectedTile = tileIndex === selectedTileIndex;
       const tileFaceLabel = getExpandedTileFaceLabel(tile.type);
+      const tileIconSrc = getBoardTileIconSrc(tile);
       const mutedGroupTintClass = getMutedGroupTintClass(tile);
 
       return (
@@ -1930,7 +1993,18 @@ export default function PlayPage() {
               <span className="absolute left-1 top-1 text-[9px] font-medium text-neutral-300/70">
                 {tile.index}
               </span>
-              {tileFaceLabel ? (
+              {tileIconSrc ? (
+                <span className="pointer-events-none absolute inset-0 flex items-center justify-center px-1">
+                  <span className="relative h-full w-full overflow-hidden">
+                    <Image
+                      src={tileIconSrc}
+                      alt={tileFaceLabel ?? tile.name}
+                      fill
+                      className="object-cover object-center"
+                    />
+                  </span>
+                </span>
+              ) : tileFaceLabel ? (
                 <span className="pointer-events-none absolute inset-0 flex items-center justify-center px-0.5 text-[10px] font-semibold uppercase tracking-normal text-neutral-500">
                   <span className="w-full line-clamp-2 text-center">
                     {tileFaceLabel}
