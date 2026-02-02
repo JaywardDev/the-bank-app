@@ -63,12 +63,22 @@ const getPlayerInitials = (name: string | null) => {
 
 const TILE_ICON_FALLBACK_SRC = "/icons/dice.svg";
 
+const isRailroadTile = (tile: BoardTile) => {
+  const tileLabel = `${tile.tile_id} ${tile.name}`.toLowerCase();
+  return (
+    tileLabel.includes("railroad") ||
+    tileLabel.includes("station") ||
+    tileLabel.includes("short line") ||
+    tileLabel.includes("short-line")
+  );
+};
+
 const getTileIconSrc = (tile: BoardTile | null): string | null => {
   if (!tile) {
     return null;
   }
 
-  if (tile.type === "RAIL") {
+  if (isRailroadTile(tile)) {
     return "/icons/railroad.svg";
   }
 
@@ -122,7 +132,7 @@ const getBoardTileIconSrc = (tile: BoardTile | null): string | null => {
     return null;
   }
 
-  if (tile.type === "RAIL" || tile.type === "RAILROAD") {
+  if (isRailroadTile(tile)) {
     return "/icons/railroad.svg";
   }
 
