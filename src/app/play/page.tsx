@@ -61,6 +61,106 @@ const getPlayerInitials = (name: string | null) => {
   return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
 };
 
+const TILE_ICON_FALLBACK_SRC = "/icons/dice.svg";
+
+const getTileIconSrc = (tile: BoardTile | null): string | null => {
+  if (!tile) {
+    return null;
+  }
+
+  if (tile.type === "RAIL") {
+    return "/icons/railroad.svg";
+  }
+
+  if (tile.type === "UTILITY") {
+    const tileLabel = `${tile.tile_id} ${tile.name}`.toLowerCase();
+    if (tileLabel.includes("electric")) {
+      return "/icons/electricity.svg";
+    }
+    return "/icons/water_facility.svg";
+  }
+
+  if (tile.type === "START") {
+    return "/icons/go.svg";
+  }
+
+  if (tile.type === "GO_TO_JAIL") {
+    return "/icons/go_to_jail.svg";
+  }
+
+  if (tile.type === "FREE_PARKING") {
+    return "/icons/free_parking.svg";
+  }
+
+  if (tile.type === "JAIL") {
+    return "/icons/jail.svg";
+  }
+
+  if (tile.type === "CHANCE") {
+    return "/icons/chance.svg";
+  }
+
+  if (tile.type === "COMMUNITY_CHEST") {
+    return "/icons/community_chest.svg";
+  }
+
+  if (tile.type === "EVENT") {
+    const tileLabel = `${tile.tile_id} ${tile.name}`.toLowerCase();
+    if (tileLabel.includes("chance")) {
+      return "/icons/chance.svg";
+    }
+    if (tileLabel.includes("community")) {
+      return "/icons/community_chest.svg";
+    }
+  }
+
+  return null;
+};
+
+type TileIconProps = {
+  src: string | null;
+  alt: string;
+  width: number;
+  height: number;
+  className?: string;
+  ariaHidden?: boolean;
+};
+
+const TileIcon = ({
+  src,
+  alt,
+  width,
+  height,
+  className,
+  ariaHidden,
+}: TileIconProps) => {
+  const [currentSrc, setCurrentSrc] = useState(src ?? TILE_ICON_FALLBACK_SRC);
+
+  useEffect(() => {
+    setCurrentSrc(src ?? TILE_ICON_FALLBACK_SRC);
+  }, [src]);
+
+  if (!src) {
+    return null;
+  }
+
+  return (
+    <Image
+      src={currentSrc}
+      alt={alt}
+      width={width}
+      height={height}
+      className={className}
+      aria-hidden={ariaHidden}
+      onError={() => {
+        if (currentSrc !== TILE_ICON_FALLBACK_SRC) {
+          setCurrentSrc(TILE_ICON_FALLBACK_SRC);
+        }
+      }}
+    />
+  );
+};
+
 
 type PropertyCardShellProps = {
   bandColor: string;
@@ -297,6 +397,7 @@ const TitleDeedPreview = ({
   const showActions = mode === "actions";
   const resolvedEyebrow = showActions ? eyebrow : undefined;
   const resolvedFooter = showActions ? footer : undefined;
+  const tileIconSrc = getTileIconSrc(tile);
 
   return (
     <TitleDeedCard
@@ -306,7 +407,14 @@ const TitleDeedPreview = ({
         tile.type === "RAIL" ? (
           <div className="mt-2 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-3 text-center">
             <div className="mx-auto flex h-12 w-24 items-center justify-center rounded-md border border-dashed border-neutral-300 text-[10px] font-semibold text-neutral-500">
-              RAIL_ICON_PLACEHOLDER
+              <TileIcon
+                src={tileIconSrc}
+                alt=""
+                width={48}
+                height={48}
+                className="h-10 w-10 object-contain"
+                ariaHidden
+              />
             </div>
             <p className="mt-2 text-lg font-black uppercase tracking-wide text-neutral-900">
               {tileName}
@@ -320,7 +428,14 @@ const TitleDeedPreview = ({
         ) : tile.type === "UTILITY" ? (
           <div className="mt-2 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-3 text-center">
             <div className="mx-auto flex h-12 w-24 items-center justify-center rounded-md border border-dashed border-neutral-300 text-[10px] font-semibold text-neutral-500">
-              UTIL_ICON_PLACEHOLDER
+              <TileIcon
+                src={tileIconSrc}
+                alt=""
+                width={48}
+                height={48}
+                className="h-10 w-10 object-contain"
+                ariaHidden
+              />
             </div>
             <p className="mt-2 text-lg font-black uppercase tracking-wide text-neutral-900">
               {tileName}
@@ -658,97 +773,115 @@ const TileDetailsPanel = ({
   selectedOwnerUtilityCount,
   onClose,
   sheetRef,
-}: TileDetailsPanelProps) => (
-  <div
-    ref={sheetRef}
-    className="w-full max-w-3xl rounded-3xl border border-neutral-200 bg-white p-4 shadow-2xl sm:p-6"
-    onClick={(event) => event.stopPropagation()}
-    role="dialog"
-    aria-label="Tile details"
-  >
-    <div className="flex items-center justify-between gap-3">
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
-          Tile details · {selectedTileIndex}
+}: TileDetailsPanelProps) => {
+  const isOwnable = ["PROPERTY", "RAIL", "UTILITY"].includes(selectedTile.type);
+  const tileIconSrc = getTileIconSrc(selectedTile);
+
+  return (
+    <div
+      ref={sheetRef}
+      className="w-full max-w-3xl rounded-3xl border border-neutral-200 bg-white p-4 shadow-2xl sm:p-6"
+      onClick={(event) => event.stopPropagation()}
+      role="dialog"
+      aria-label="Tile details"
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+            Tile details · {selectedTileIndex}
+          </p>
+        </div>
+        <button
+          className="rounded-full border border-neutral-200 px-2 py-1 text-xs font-semibold text-neutral-500 transition hover:border-neutral-300 hover:text-neutral-700"
+          type="button"
+          onClick={onClose}
+          aria-label="Close tile details"
+        >
+          ✕
+        </button>
+      </div>
+      <div className="mt-4">
+        <p className="text-lg font-semibold text-neutral-900 sm:text-xl">
+          {selectedTile.name?.trim() || selectedTileTypeLabel || "Tile"}
         </p>
       </div>
-      <button
-        className="rounded-full border border-neutral-200 px-2 py-1 text-xs font-semibold text-neutral-500 transition hover:border-neutral-300 hover:text-neutral-700"
-        type="button"
-        onClick={onClose}
-        aria-label="Close tile details"
-      >
-        ✕
-      </button>
-    </div>
-    <div className="mt-4">
-      <p className="text-lg font-semibold text-neutral-900 sm:text-xl">
-        {selectedTile.name?.trim() || selectedTileTypeLabel || "Tile"}
-      </p>
-    </div>
-    <div className="mt-4 max-h-[60vh] space-y-3 overflow-y-auto pr-1 text-sm text-neutral-600">
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-neutral-50 px-3 py-2">
-        <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
-          Type
-        </span>
-        <span className="font-medium text-neutral-800">
-          {selectedTileTypeLabel ?? "Other"}
-        </span>
-      </div>
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-neutral-50 px-3 py-2">
-        <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
-          Owner
-        </span>
-        <span className="font-medium text-neutral-800">
-          {selectedTileOwnerLabel ?? "Unowned"}
-        </span>
-      </div>
-      {["PROPERTY", "RAIL", "UTILITY"].includes(selectedTile.type) ? (
-        <TitleDeedPreview
-          tile={selectedTile}
-          bandColor={getTileBandColor(selectedTile)}
-          price={selectedTile.price ?? null}
-          ownedRailCount={selectedOwnerRailCount}
-          ownedUtilityCount={selectedOwnerUtilityCount}
-          mode="readonly"
-        />
-      ) : null}
-      <div className="rounded-2xl bg-neutral-50 px-3 py-2">
-        <div className="flex items-center justify-between gap-2">
+      <div className="mt-4 max-h-[60vh] space-y-3 overflow-y-auto pr-1 text-sm text-neutral-600">
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-neutral-50 px-3 py-2">
           <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
-            Players here
+            Type
           </span>
-          {currentUserPlayer &&
-          currentUserPlayer.position === selectedTileIndex ? (
-            <span className="text-xs font-semibold uppercase tracking-wide text-emerald-500">
-              You are here
-            </span>
-          ) : null}
+          <span className="font-medium text-neutral-800">
+            {selectedTileTypeLabel ?? "Other"}
+          </span>
         </div>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {selectedTilePlayers.length > 0 ? (
-            selectedTilePlayers.map((player) => (
-              <div
-                key={player.id}
-                className="flex items-center gap-2 rounded-full border border-neutral-200 bg-white px-2.5 py-1 text-xs font-semibold text-neutral-700"
-              >
-                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-neutral-900 text-[9px] font-semibold uppercase text-white">
-                  {getPlayerInitials(player.display_name)}
-                </span>
-                <span>
-                  {player.display_name ||
-                    getPlayerInitials(player.display_name)}
-                </span>
-              </div>
-            ))
-          ) : (
-            <span className="text-xs text-neutral-400">None</span>
-          )}
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-neutral-50 px-3 py-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+            Owner
+          </span>
+          <span className="font-medium text-neutral-800">
+            {selectedTileOwnerLabel ?? "Unowned"}
+          </span>
+        </div>
+        {isOwnable ? (
+          <TitleDeedPreview
+            tile={selectedTile}
+            bandColor={getTileBandColor(selectedTile)}
+            price={selectedTile.price ?? null}
+            ownedRailCount={selectedOwnerRailCount}
+            ownedUtilityCount={selectedOwnerUtilityCount}
+            mode="readonly"
+          />
+        ) : tileIconSrc ? (
+          <div className="rounded-2xl bg-neutral-50 px-3 py-6">
+            <div className="mx-auto flex h-24 w-24 items-center justify-center rounded-2xl border border-dashed border-neutral-300 bg-white">
+              <TileIcon
+                src={tileIconSrc}
+                alt=""
+                width={72}
+                height={72}
+                className="h-16 w-16 object-contain"
+                ariaHidden
+              />
+            </div>
+          </div>
+        ) : null}
+        <div className="rounded-2xl bg-neutral-50 px-3 py-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+              Players here
+            </span>
+            {currentUserPlayer &&
+            currentUserPlayer.position === selectedTileIndex ? (
+              <span className="text-xs font-semibold uppercase tracking-wide text-emerald-500">
+                You are here
+              </span>
+            ) : null}
+          </div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {selectedTilePlayers.length > 0 ? (
+              selectedTilePlayers.map((player) => (
+                <div
+                  key={player.id}
+                  className="flex items-center gap-2 rounded-full border border-neutral-200 bg-white px-2.5 py-1 text-xs font-semibold text-neutral-700"
+                >
+                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-neutral-900 text-[9px] font-semibold uppercase text-white">
+                    {getPlayerInitials(player.display_name)}
+                  </span>
+                  <span>
+                    {player.display_name ||
+                      getPlayerInitials(player.display_name)}
+                  </span>
+                </div>
+              ))
+            ) : (
+              <span className="text-xs text-neutral-400">None</span>
+            )}
+          </div>
         </div>
       </div>
     </div>
-  </div>
-);
+  );
+};
 
 const getPendingCardDescription = (
   kind: string | null,
@@ -6910,6 +7043,7 @@ export default function PlayPage() {
                       const utilityRentPreview =
                         lastRoll !== null ? lastRoll * utilityMultiplier : null;
                       const groupLabel = getTileGroupLabel(tile);
+                      const tileIconSrc = getTileIconSrc(tile);
                       return (
                         <TitleDeedCard
                           key={tile.index}
@@ -6918,7 +7052,14 @@ export default function PlayPage() {
                             isRail ? (
                               <div className="mt-2 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-3 text-center">
                                 <div className="mx-auto flex h-12 w-24 items-center justify-center rounded-md border border-dashed border-neutral-300 text-[10px] font-semibold text-neutral-500">
-                                  RAIL_ICON_PLACEHOLDER
+                                  <TileIcon
+                                    src={tileIconSrc}
+                                    alt=""
+                                    width={48}
+                                    height={48}
+                                    className="h-10 w-10 object-contain"
+                                    ariaHidden
+                                  />
                                 </div>
                                 <p className="mt-2 text-lg font-black uppercase tracking-wide text-neutral-900">
                                   {tile.name}
@@ -6930,7 +7071,14 @@ export default function PlayPage() {
                             ) : isUtility ? (
                               <div className="mt-2 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-3 text-center">
                                 <div className="mx-auto flex h-12 w-24 items-center justify-center rounded-md border border-dashed border-neutral-300 text-[10px] font-semibold text-neutral-500">
-                                  UTIL_ICON_PLACEHOLDER
+                                  <TileIcon
+                                    src={tileIconSrc}
+                                    alt=""
+                                    width={48}
+                                    height={48}
+                                    className="h-10 w-10 object-contain"
+                                    ariaHidden
+                                  />
                                 </div>
                                 <p className="mt-2 text-lg font-black uppercase tracking-wide text-neutral-900">
                                   {tile.name}
