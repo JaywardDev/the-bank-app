@@ -90,6 +90,22 @@ const isRailroadTile = (tile: BoardTile) => {
   );
 };
 
+const getTaxTileIconSrc = (tile: BoardTile) => {
+  const normalizedTileId = tile.tile_id.toLowerCase();
+  if (normalizedTileId === "luxury-tax") {
+    return "/icons/luxury_tax.svg";
+  }
+  if (normalizedTileId === "income-tax") {
+    return "/icons/income_tax.svg";
+  }
+
+  const tileLabel = `${tile.tile_id} ${tile.name}`.toLowerCase();
+  if (tileLabel.includes("luxury")) {
+    return "/icons/luxury_tax.svg";
+  }
+  return "/icons/income_tax.svg";
+};
+
 const getTileIconSrc = (tile: BoardTile | null): string | null => {
   if (!tile) {
     return null;
@@ -132,11 +148,7 @@ const getTileIconSrc = (tile: BoardTile | null): string | null => {
   }
 
   if (tile.type === "TAX") {
-    const tileLabel = `${tile.tile_id} ${tile.name}`.toLowerCase();
-    if (tileLabel.includes("luxury")) {
-      return "/icons/luxury_tax.svg";
-    }
-    return "/icons/income_tax.svg";
+    return getTaxTileIconSrc(tile);
   }
 
   if (tile.type === "EVENT") {
@@ -194,11 +206,7 @@ const getBoardTileIconSrc = (tile: BoardTile | null): string | null => {
   }
 
   if (tile.type === "TAX") {
-    const tileLabel = `${tile.tile_id} ${tile.name}`.toLowerCase();
-    if (tileLabel.includes("luxury")) {
-      return "/icons/luxury_tax.svg";
-    }
-    return "/icons/income_tax.svg";
+    return getTaxTileIconSrc(tile);
   }
 
   if (tile.type === "EVENT") {
