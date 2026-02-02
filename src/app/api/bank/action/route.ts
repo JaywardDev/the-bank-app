@@ -2397,6 +2397,215 @@ const finalizeMoveResolution = async ({
     }
   }
 
+  if (shouldSendToJail && jailTile) {
+    const nextPlayer = getNextActivePlayer(players, gameState.current_player_id);
+
+    if (!nextPlayer) {
+      return NextResponse.json(
+        { error: "No active players remaining." },
+        { status: 409 },
+      );
+    }
+
+    events.push({
+      event_type: "END_TURN",
+      payload: {
+        from_player_id: currentPlayer.id,
+        from_player_name: currentPlayer.display_name,
+        to_player_id: nextPlayer.id,
+        to_player_name: nextPlayer.display_name,
+      },
+    });
+
+    const firstActivePlayer = getFirstActivePlayer(players);
+    const tableRoundAdvanced = Boolean(
+      firstActivePlayer && nextPlayer.id === firstActivePlayer.id,
+    );
+    const nextRound =
+      (gameState.rounds_elapsed ?? 0) + (tableRoundAdvanced ? 1 : 0);
+    const macroEnabled = rules.macroEnabled;
+    let nextLastMacroEventId = gameState.last_macro_event_id ?? null;
+    const activeMacroEffectsV1 = normalizeActiveMacroEffectsV1(
+      gameState.active_macro_effects_v1,
+    );
+    let nextActiveMacroEffectsV1 = activeMacroEffectsV1;
+    let triggeredMacroEvent: {
+      id: string;
+      name: string;
+      durationRounds: number;
+      headline: string;
+      flavor: string;
+      rulesText: string;
+      effects: MacroEffectsV1;
+      rarity?: "common" | "uncommon" | "black_swan";
+    } | null = null;
+
+    if (macroEnabled && tableRoundAdvanced) {
+      const { updated: tickedMacroEffects, expired: expiredMacroEffects } =
+        tickMacroEffectsV1(activeMacroEffectsV1);
+      nextActiveMacroEffectsV1 = tickedMacroEffects;
+
+      for (const expiredEffect of expiredMacroEffects) {
+        events.push({
+          event_type: "MACRO_EXPIRED",
+          payload: {
+            macro_id: expiredEffect.id,
+            macro_name: expiredEffect.name,
+            round_index: nextRound,
+          },
+        });
+      }
+
+      if (
+        nextRound % MACRO_EVENT_INTERVAL_ROUNDS === 0 &&
+        MACRO_DECK_V1.length > 0
+      ) {
+        const macroEvent = drawMacroCardV1(nextLastMacroEventId);
+        nextLastMacroEventId = macroEvent.id;
+        triggeredMacroEvent = macroEvent;
+        events.push({
+          event_type: "MACRO_EVENT_TRIGGERED",
+          payload: {
+            deck_id: "macro-v1",
+            deck_name: "Macro V1",
+            event_id: macroEvent.id,
+            event_name: macroEvent.name,
+            duration_rounds: macroEvent.durationRounds,
+            effects: macroEvent.effects,
+            rarity: macroEvent.rarity ?? null,
+            mode: "weighted",
+            round_index: nextRound,
+          },
+        });
+      }
+    }
+
+    const loanResult = await applyLoanPaymentsForPlayer({
+      gameId,
+      player: nextPlayer,
+      balances: updatedBalances,
+      startingCash,
+      macroInterestTrendAccumulator: getMacroInterestTrendAccumulatorV1(
+        macroEnabled ? nextActiveMacroEffectsV1 : [],
+      ),
+      macroMortgageFlatDelta: getMacroMortgageFlatDeltaV1(
+        macroEnabled ? nextActiveMacroEffectsV1 : [],
+      ),
+    });
+    updatedBalances = loanResult.balances;
+    balancesChanged = balancesChanged || loanResult.balancesChanged;
+    events.push(...loanResult.events);
+
+    if (loanResult.bankruptcyCandidate) {
+      const bankruptcyResult = await resolveBankruptcyIfNeeded({
+        gameId,
+        gameState,
+        players,
+        player: nextPlayer,
+        updatedBalances,
+        cashBefore: loanResult.bankruptcyCandidate.cashBefore,
+        cashAfter: loanResult.bankruptcyCandidate.cashAfter,
+        reason: loanResult.bankruptcyCandidate.reason,
+        events,
+        currentVersion,
+        userId,
+        playerPosition: nextPlayer.position ?? null,
+      });
+
+      if (bankruptcyResult.handled) {
+        if (bankruptcyResult.error) {
+          return NextResponse.json(
+            { error: bankruptcyResult.error },
+            { status: 409 },
+          );
+        }
+        return NextResponse.json({ gameState: bankruptcyResult.updatedState });
+      }
+    }
+
+    const nextTurnPhase = nextPlayer.is_in_jail
+      ? "AWAITING_JAIL_DECISION"
+      : "AWAITING_ROLL";
+    const nextPendingAction = triggeredMacroEvent
+      ? {
+          type: "MACRO_EVENT",
+          macro_id: triggeredMacroEvent.id,
+          macroCardId: triggeredMacroEvent.id,
+          name: triggeredMacroEvent.name,
+          rarity: triggeredMacroEvent.rarity ?? null,
+          durationRounds: triggeredMacroEvent.durationRounds,
+          headline: triggeredMacroEvent.headline,
+          flavor: triggeredMacroEvent.flavor,
+          rulesText: triggeredMacroEvent.rulesText,
+          effects: triggeredMacroEvent.effects,
+          return_turn_phase: nextTurnPhase,
+        }
+      : null;
+
+    const finalVersion = currentVersion + events.length;
+    const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+      `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+      {
+        method: "PATCH",
+        headers: {
+          Prefer: "return=representation",
+        },
+        body: JSON.stringify({
+          version: finalVersion,
+          current_player_id: nextPlayer.id,
+          last_roll: null,
+          doubles_count: 0,
+          rounds_elapsed: nextRound,
+          last_macro_event_id: nextLastMacroEventId,
+          active_macro_effects_v1: nextActiveMacroEffectsV1,
+          ...(balancesChanged ? { balances: updatedBalances } : {}),
+          pending_action: nextPendingAction,
+          turn_phase: triggeredMacroEvent
+            ? "AWAITING_CONFIRMATION"
+            : nextTurnPhase,
+          ...(extraGameStatePatch ?? {}),
+          updated_at: new Date().toISOString(),
+        }),
+      },
+    )) ?? [];
+
+    if (!updatedState) {
+      return NextResponse.json(
+        { error: "Version mismatch." },
+        { status: 409 },
+      );
+    }
+
+    const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
+      `players?id=eq.${currentPlayer.id}`,
+      {
+        method: "PATCH",
+        headers: {
+          Prefer: "return=representation",
+        },
+        body: JSON.stringify({
+          position: jailTile.index,
+          is_in_jail: true,
+          jail_turns_remaining: 3,
+          ...(getOutOfJailFreeCountChanged
+            ? { get_out_of_jail_free_count: nextGetOutOfJailFreeCount }
+            : {}),
+        }),
+      },
+    )) ?? [];
+
+    if (!updatedPlayer) {
+      return NextResponse.json(
+        { error: "Unable to update player position." },
+        { status: 500 },
+      );
+    }
+
+    await emitGameEvents(gameId, currentVersion + 1, events, userId);
+
+    return NextResponse.json({ gameState: updatedState });
+  }
+
   const finalVersion = currentVersion + events.length;
   const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
     `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
