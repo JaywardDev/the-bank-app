@@ -114,6 +114,14 @@ const getTileIconSrc = (tile: BoardTile | null): string | null => {
     return "/icons/community_chest.svg";
   }
 
+  if (tile.type === "TAX") {
+    const tileLabel = `${tile.tile_id} ${tile.name}`.toLowerCase();
+    if (tileLabel.includes("luxury")) {
+      return "/icons/luxury_tax.svg";
+    }
+    return "/icons/income_tax.svg";
+  }
+
   if (tile.type === "EVENT") {
     const tileLabel = `${tile.tile_id} ${tile.name}`.toLowerCase();
     if (tileLabel.includes("chance")) {
