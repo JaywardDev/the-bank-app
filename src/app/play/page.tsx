@@ -99,6 +99,7 @@ const getTaxTileIconSrc = (tile: BoardTile) => {
       "branch:tile_id",
       "field:tile_id",
       "match:luxury-tax",
+      `value:${normalizedTileId}`,
       "src:",
       src,
     );
@@ -111,6 +112,7 @@ const getTaxTileIconSrc = (tile: BoardTile) => {
       "branch:tile_id",
       "field:tile_id",
       "match:income-tax",
+      `value:${normalizedTileId}`,
       "src:",
       src,
     );
@@ -125,6 +127,7 @@ const getTaxTileIconSrc = (tile: BoardTile) => {
       "branch:label",
       "field:tile_id+name",
       "match:luxury",
+      `value:${tileLabel}`,
       "src:",
       src,
     );
@@ -136,6 +139,7 @@ const getTaxTileIconSrc = (tile: BoardTile) => {
     "branch:fallback",
     "field:tile_id+name",
     "match:default",
+    `value:${tileLabel}`,
     "src:",
     src,
   );
