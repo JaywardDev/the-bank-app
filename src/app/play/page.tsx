@@ -48,6 +48,23 @@ const expandedOwnershipPalette = [
   { border: "rgba(8, 145, 178, 0.9)", inset: "rgba(8, 145, 178, 0.24)" },
 ];
 
+const getCanonicalTileType = (tileType: string) => {
+  const normalized = tileType.toUpperCase();
+  return normalized === "RAIL" ? "RAILROAD" : normalized;
+};
+
+const isRailTileType = (tileType: string) =>
+  getCanonicalTileType(tileType) === "RAILROAD";
+
+const isOwnableTileType = (tileType: string) => {
+  const canonicalType = getCanonicalTileType(tileType);
+  return (
+    canonicalType === "PROPERTY" ||
+    canonicalType === "RAILROAD" ||
+    canonicalType === "UTILITY"
+  );
+};
+
 const getPlayerInitials = (name: string | null) => {
   if (!name) {
     return "P";
@@ -461,7 +478,7 @@ const TitleDeedPreview = ({
   mode = "actions",
   footer,
 }: TitleDeedPreviewProps) => {
-  if (!tile || !["PROPERTY", "RAIL", "UTILITY"].includes(tile.type)) {
+  if (!tile || !isOwnableTileType(tile.type)) {
     return null;
   }
 
@@ -472,7 +489,7 @@ const TitleDeedPreview = ({
         ? tile.price
         : null;
   const propertyRent = getPropertyRentDetails(tile);
-  const railRentRows = tile.type === "RAIL" ? buildRailRentRows() : [];
+  const railRentRows = isRailTileType(tile.type) ? buildRailRentRows() : [];
   const tileName = tile.name ?? "Property";
   const showActions = mode === "actions";
   const resolvedEyebrow = showActions ? eyebrow : undefined;
@@ -484,7 +501,7 @@ const TitleDeedPreview = ({
       bandColor={bandColor}
       eyebrow={resolvedEyebrow}
       header={
-        tile.type === "RAIL" ? (
+        isRailTileType(tile.type) ? (
           <div className="mt-2 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-3 text-center">
             <div className="mx-auto flex h-12 w-24 items-center justify-center rounded-md border border-dashed border-neutral-300 text-[10px] font-semibold text-neutral-500">
               <TileIcon
@@ -540,7 +557,7 @@ const TitleDeedPreview = ({
         ) : null
       }
       rentSection={
-        tile.type === "RAIL" ? (
+        isRailTileType(tile.type) ? (
           <RailRentTable
             className="mt-3"
             rentRows={railRentRows}
@@ -854,7 +871,7 @@ const TileDetailsPanel = ({
   onClose,
   sheetRef,
 }: TileDetailsPanelProps) => {
-  const isOwnable = ["PROPERTY", "RAIL", "UTILITY"].includes(selectedTile.type);
+  const isOwnable = isOwnableTileType(selectedTile.type);
   const tileIconSrc = getTileIconSrc(selectedTile);
 
   return (
@@ -1918,7 +1935,7 @@ export default function PlayPage() {
     [],
   );
   const getExpandedTileFaceLabel = useCallback((tileType: string) => {
-    const normalized = tileType.toUpperCase();
+    const normalized = getCanonicalTileType(tileType);
     if (normalized === "PROPERTY") {
       return null;
     }
@@ -2066,7 +2083,7 @@ export default function PlayPage() {
     ],
   );
   const getExpandedTileTypeLabel = useCallback((tileType: string) => {
-    const normalized = tileType.toUpperCase();
+    const normalized = getCanonicalTileType(tileType);
     switch (normalized) {
       case "PROPERTY":
         return "Property";
@@ -2116,8 +2133,7 @@ export default function PlayPage() {
     if (!selectedExpandedTile || selectedTileIndex === null) {
       return null;
     }
-    const ownableTypes = new Set(["PROPERTY", "RAIL", "RAILROAD", "UTILITY"]);
-    if (!ownableTypes.has(selectedExpandedTile.type)) {
+    if (!isOwnableTileType(selectedExpandedTile.type)) {
       return "Not ownable";
     }
     const ownership = ownershipByTile[selectedTileIndex];
@@ -2133,8 +2149,7 @@ export default function PlayPage() {
     if (!selectedExpandedTile || selectedTileIndex === null) {
       return null;
     }
-    const ownableTypes = new Set(["PROPERTY", "RAIL", "RAILROAD", "UTILITY"]);
-    if (!ownableTypes.has(selectedExpandedTile.type)) {
+    if (!isOwnableTileType(selectedExpandedTile.type)) {
       return null;
     }
     return ownershipByTile[selectedTileIndex]?.owner_player_id ?? null;
@@ -2146,7 +2161,7 @@ export default function PlayPage() {
     const tiles = boardPack?.tiles ?? expandedBoardTiles;
     return tiles.filter(
       (tile) =>
-        tile.type === "RAIL" &&
+        isRailTileType(tile.type) &&
         ownershipByTile[tile.index]?.owner_player_id === selectedTileOwnerId,
     ).length;
   }, [boardPack?.tiles, expandedBoardTiles, ownershipByTile, selectedTileOwnerId]);
