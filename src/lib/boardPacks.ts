@@ -2,8 +2,20 @@ export type BoardPack = {
   id: string;
   displayName: string;
   properties: string[];
+  economy: BoardPackEconomy;
   eventDecks?: EventDecks;
   tiles: BoardTile[];
+};
+
+export type BoardPackEconomy = {
+  currency: {
+    code: string;
+    symbol: string;
+  };
+  houseRentMultipliersByGroup: Record<string, number[]>;
+  hotelIncrementMultiplier: number;
+  startingBalance?: number;
+  passGoAmount?: number;
 };
 
 export type CardKind =
@@ -71,14 +83,17 @@ type PropertyGroupConfig = {
   houseCost: number;
 };
 
-const HOUSE_RENT_MULTIPLIERS = [1, 5, 15, 45, 80];
+const DEFAULT_HOUSE_RENT_MULTIPLIERS = [1, 5, 15, 45, 80];
 
-const buildRentByHouses = (baseRent: number) =>
-  HOUSE_RENT_MULTIPLIERS.map((multiplier) => baseRent * multiplier);
+const buildRentByHouses = (
+  baseRent: number,
+  multipliers: number[] = DEFAULT_HOUSE_RENT_MULTIPLIERS,
+) => multipliers.map((multiplier) => baseRent * multiplier);
 
 const applyPropertyGroupConfig = (
   tiles: BoardTile[],
   groups: PropertyGroupConfig[],
+  economy: BoardPackEconomy,
 ) =>
   tiles.map((tile) => {
     if (tile.type !== "PROPERTY") {
@@ -91,13 +106,57 @@ const applyPropertyGroupConfig = (
       return tile;
     }
     const baseRent = tile.baseRent ?? 0;
+    const rentMultipliers =
+      economy.houseRentMultipliersByGroup[group.id] ??
+      DEFAULT_HOUSE_RENT_MULTIPLIERS;
     return {
       ...tile,
       colorGroup: group.id,
       houseCost: group.houseCost,
-      rentByHouses: buildRentByHouses(baseRent),
+      rentByHouses: tile.rentByHouses ??
+        buildRentByHouses(baseRent, rentMultipliers),
     };
   });
+
+const CLASSIC_US_ECONOMY: BoardPackEconomy = {
+  currency: {
+    code: "USD",
+    symbol: "$",
+  },
+  houseRentMultipliersByGroup: {},
+  hotelIncrementMultiplier: 1.25,
+  startingBalance: 1500,
+  passGoAmount: 200,
+};
+
+const CLASSIC_UK_ECONOMY: BoardPackEconomy = {
+  currency: {
+    code: "GBP",
+    symbol: "£",
+  },
+  houseRentMultipliersByGroup: {},
+  hotelIncrementMultiplier: 1.25,
+  startingBalance: 1500,
+  passGoAmount: 200,
+};
+
+const PHILIPPINES_ECONOMY: BoardPackEconomy = {
+  currency: {
+    code: "PHP",
+    symbol: "₱",
+  },
+  houseRentMultipliersByGroup: {},
+  hotelIncrementMultiplier: 1.25,
+};
+
+const NEW_ZEALAND_ECONOMY: BoardPackEconomy = {
+  currency: {
+    code: "NZD",
+    symbol: "$",
+  },
+  houseRentMultipliersByGroup: {},
+  hotelIncrementMultiplier: 1.25,
+};
 
 export const chanceCards: CardDefinition[] = [
   {
@@ -670,6 +729,7 @@ export const boardPacks: BoardPack[] = [
     id: "classic-us",
     displayName: "Classic (US)",
     properties: [],
+    economy: CLASSIC_US_ECONOMY,
     eventDecks: {
       chance: classicUsChanceCards,
       community: classicUsCommunityCards,
@@ -946,12 +1006,13 @@ export const boardPacks: BoardPack[] = [
         price: 400,
         baseRent: 50,
       },
-    ], CLASSIC_US_PROPERTY_GROUPS),
+    ], CLASSIC_US_PROPERTY_GROUPS, CLASSIC_US_ECONOMY),
   },
   {
     id: "classic-uk",
     displayName: "Classic (UK)",
     properties: [],
+    economy: CLASSIC_UK_ECONOMY,
     eventDecks: {
       chance: classicUkChanceCards,
       community: classicUkCommunityCards,
@@ -1228,18 +1289,20 @@ export const boardPacks: BoardPack[] = [
         price: 400,
         baseRent: 50,
       },
-    ], CLASSIC_UK_PROPERTY_GROUPS),
+    ], CLASSIC_UK_PROPERTY_GROUPS, CLASSIC_UK_ECONOMY),
   },
   {
     id: "philippines",
     displayName: "Philippines",
     properties: [],
+    economy: PHILIPPINES_ECONOMY,
     tiles: [],
   },
   {
     id: "new-zealand",
     displayName: "New Zealand",
     properties: [],
+    economy: NEW_ZEALAND_ECONOMY,
     tiles: [],
   },
 ];
