@@ -2262,7 +2262,19 @@ const finalizeMoveResolution = async ({
   let shouldPayRent = rentAmount > 0 && Boolean(rentOwnerId);
   const isUnownedOwnableTile = isOwnableTile && !ownership;
   const isTaxTile = activeLandingTile.type === "TAX";
-  const taxAmount = isTaxTile ? activeLandingTile.taxAmount ?? 0 : 0;
+  const normalizedTaxTileId = isTaxTile
+    ? activeLandingTile.tile_id.toLowerCase()
+    : "";
+  const isIncomeTax = isTaxTile && normalizedTaxTileId === "income-tax";
+  const baseTaxAmount = isTaxTile ? activeLandingTile.taxAmount ?? 0 : 0;
+  const taxAmount = isIncomeTax
+    ? computeEffectiveGoSalary({
+        packEconomy: boardPackEconomy,
+        boardTiles,
+        ownershipByTile,
+        playerId: currentPlayer.id,
+      })
+    : baseTaxAmount;
   const shouldPayTax = isTaxTile && taxAmount > 0;
   const isFreeParking = activeLandingTile.type === "FREE_PARKING";
 
@@ -2344,16 +2356,23 @@ const finalizeMoveResolution = async ({
         cashAfter: nextBalance,
       };
     }
+    const taxPayload: Record<string, unknown> = {
+      tile_index: activeLandingTile.index,
+      tile_name: activeLandingTile.name,
+      amount: taxAmount,
+      payer_player_id: currentPlayer.id,
+      payer_display_name: currentPlayer.display_name,
+    };
+    if (isIncomeTax) {
+      Object.assign(taxPayload, {
+        tax_kind: "INCOME_TAX",
+        computed_from: "effectiveGoSalary",
+      });
+    }
     events.push(
       {
         event_type: "PAY_TAX",
-        payload: {
-          tile_index: activeLandingTile.index,
-          tile_name: activeLandingTile.name,
-          amount: taxAmount,
-          payer_player_id: currentPlayer.id,
-          payer_display_name: currentPlayer.display_name,
-        },
+        payload: taxPayload,
       },
       {
         event_type: "CASH_DEBIT",
