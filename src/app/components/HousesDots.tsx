@@ -4,25 +4,23 @@ type HousesDotsProps = {
 };
 
 export default function HousesDots({ houses, size }: HousesDotsProps) {
-  if (!Number.isFinite(houses) || houses <= 0) {
+  const normalizedDev = Number.isFinite(houses)
+    ? Math.max(0, Math.floor(houses))
+    : 0;
+  if (normalizedDev <= 0) {
     return null;
   }
 
-  const count = Math.min(4, Math.floor(houses));
   const dotSize = size === "sm" ? "h-1.5 w-1.5" : "h-2.5 w-2.5";
-  const gapSize = size === "sm" ? "gap-0.5" : "gap-1";
+  const hotelCount = Math.floor(normalizedDev / 5);
+  const dotColor =
+    hotelCount >= 1 ? "bg-red-500" : "bg-emerald-500";
+  const ariaLabel =
+    hotelCount >= 1 ? "Hotel development" : "House development";
 
   return (
-    <div
-      className={`flex items-center ${gapSize}`}
-      aria-label={`${count} house${count === 1 ? "" : "s"}`}
-    >
-      {Array.from({ length: count }).map((_, index) => (
-        <span
-          key={index}
-          className={`${dotSize} rounded-full bg-emerald-500`}
-        />
-      ))}
+    <div className="flex items-center" aria-label={ariaLabel}>
+      <span className={`${dotSize} rounded-full ${dotColor}`} />
     </div>
   );
 }
