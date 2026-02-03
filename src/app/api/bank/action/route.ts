@@ -5718,7 +5718,6 @@ export async function POST(request: Request) {
       }
 
       const boardPack = getBoardPackById(game.board_pack_id);
-      const boardPackEconomy = boardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY;
       const boardTiles = boardPack?.tiles ?? [];
       const landingTile = boardTiles.find(
         (tile) => tile.index === body.tileIndex,
@@ -8126,6 +8125,7 @@ export async function POST(request: Request) {
       }
 
       const boardPack = getBoardPackById(game.board_pack_id);
+      const boardPackEconomy = boardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY;
       const boardTiles = boardPack?.tiles ?? [];
       const boardSize = boardTiles.length > 0 ? boardTiles.length : 40;
       const currentPosition = Number.isFinite(currentPlayer.position)
