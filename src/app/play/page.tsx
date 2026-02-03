@@ -367,10 +367,14 @@ type RentRow = { label: string; value: number | null };
 const PropertyRentTable = ({
   rentRows,
   houseCost,
+  hotelIncrement,
+  currentRent,
   className,
 }: {
   rentRows: RentRow[];
   houseCost: number | null;
+  hotelIncrement: number | null;
+  currentRent?: number | null;
   className?: string;
 }) => (
   <div
@@ -393,7 +397,18 @@ const PropertyRentTable = ({
           </span>
         </div>
       ))}
+      <div className="flex items-center justify-between text-neutral-600">
+        <span>Hotel increment</span>
+        <span className="font-semibold text-neutral-900">
+          {hotelIncrement !== null ? `+$${hotelIncrement} per hotel` : "—"}
+        </span>
+      </div>
     </div>
+    {currentRent !== undefined ? (
+      <div className="mt-2 text-xs font-semibold text-neutral-700">
+        Current rent: {currentRent !== null ? `$${currentRent}` : "—"}
+      </div>
+    ) : null}
     <div className="mt-2 border-t border-neutral-200 pt-2 text-xs font-medium text-neutral-700">
       House cost: {houseCost ? `$${houseCost} each` : "—"}
     </div>
@@ -520,6 +535,8 @@ type TitleDeedPreviewProps = {
   ownedUtilityCount?: number;
   mode?: "actions" | "readonly";
   footer?: ReactNode;
+  showDevelopment?: boolean;
+  developmentCount?: number | null;
 };
 
 const TitleDeedPreview = ({
@@ -532,6 +549,8 @@ const TitleDeedPreview = ({
   ownedUtilityCount = 0,
   mode = "actions",
   footer,
+  showDevelopment = false,
+  developmentCount = null,
 }: TitleDeedPreviewProps) => {
   if (!tile || !isOwnableTileType(tile.type)) {
     return null;
@@ -553,6 +572,12 @@ const TitleDeedPreview = ({
   const resolvedFooter = showActions ? footer : undefined;
   const tileIconSrc = getTileIconSrc(tile);
   const utilityRentMultipliers = boardPackEconomy.utilityRentMultipliers;
+  const resolvedDevelopment =
+    typeof developmentCount === "number" ? developmentCount : null;
+  const currentRent =
+    tile.type === "PROPERTY" && resolvedDevelopment !== null
+      ? getPropertyRentWithDev(tile, resolvedDevelopment)
+      : null;
 
   return (
     <TitleDeedCard
@@ -631,11 +656,24 @@ const TitleDeedPreview = ({
             rentMultipliers={utilityRentMultipliers}
           />
         ) : (
-          <PropertyRentTable
-            className="mt-3"
-            rentRows={propertyRent.rentRows}
-            houseCost={propertyRent.houseCost}
-          />
+          <div className="mt-3 space-y-2">
+            {showDevelopment && resolvedDevelopment !== null ? (
+              <div className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-xs text-neutral-600">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium text-neutral-700">
+                    Development
+                  </span>
+                  <DevelopmentIcons dev={resolvedDevelopment} />
+                </div>
+              </div>
+            ) : null}
+            <PropertyRentTable
+              rentRows={propertyRent.rentRows}
+              houseCost={propertyRent.houseCost}
+              hotelIncrement={propertyRent.hotelIncrement}
+              currentRent={resolvedDevelopment !== null ? currentRent : undefined}
+            />
+          </div>
         )
       }
       footer={resolvedFooter}
@@ -720,6 +758,75 @@ const formatSignedPercent = (value: number) =>
 
 const formatMultiplier = (value: number) => `${value.toFixed(2)}×`;
 
+const getDevBreakdown = (dev: number) => {
+  const normalizedDev = Number.isFinite(dev) ? Math.max(0, Math.floor(dev)) : 0;
+  return {
+    hotelCount: Math.floor(normalizedDev / 5),
+    houseCount: normalizedDev % 5,
+  };
+};
+
+const getHotelIncrement = (rent4: number) => Math.ceil(rent4 * 1.25);
+
+const getPropertyRentWithDev = (tile: BoardTile, dev: number) => {
+  const rentByHouses = tile.rentByHouses;
+  if (!rentByHouses || rentByHouses.length === 0) {
+    return tile.baseRent ?? 0;
+  }
+  const normalizedDev = Number.isFinite(dev) ? Math.max(0, Math.floor(dev)) : 0;
+  if (normalizedDev <= rentByHouses.length - 1) {
+    return rentByHouses[normalizedDev] ?? tile.baseRent ?? 0;
+  }
+  const { hotelCount, houseCount } = getDevBreakdown(normalizedDev);
+  const rent4 =
+    rentByHouses[4] ??
+    rentByHouses[rentByHouses.length - 1] ??
+    tile.baseRent ??
+    0;
+  const hotelIncrement = getHotelIncrement(rent4);
+  const baseRent = rentByHouses[houseCount] ?? tile.baseRent ?? 0;
+  return baseRent + hotelCount * hotelIncrement;
+};
+
+const DevelopmentIcons = ({
+  dev,
+  maxIcons = 8,
+}: {
+  dev: number;
+  maxIcons?: number;
+}) => {
+  const { hotelCount, houseCount } = getDevBreakdown(dev);
+  const totalIcons = hotelCount + houseCount;
+  if (totalIcons === 0) {
+    return <span className="text-xs text-neutral-400">None</span>;
+  }
+  const visibleCount = Math.min(totalIcons, maxIcons);
+  const overflow = totalIcons - visibleCount;
+  return (
+    <div className="flex flex-wrap items-center justify-end gap-1">
+      {Array.from({ length: visibleCount }).map((_, index) => {
+        const iconType = index < hotelCount ? "hotel" : "house";
+        return (
+        <Image
+          key={`${iconType}-${index}`}
+          src={iconType === "hotel" ? "/icons/hotel.svg" : "/icons/house.svg"}
+          alt=""
+          width={14}
+          height={14}
+          className="h-3.5 w-3.5 object-contain"
+          aria-hidden
+        />
+        );
+      })}
+      {overflow > 0 ? (
+        <span className="text-[10px] font-semibold text-neutral-500">
+          +{overflow}
+        </span>
+      ) : null}
+    </div>
+  );
+};
+
 const getPropertyRentDetails = (tile: BoardTile | null) => {
   const baseRent =
     tile && typeof tile.baseRent === "number" ? tile.baseRent : null;
@@ -728,22 +835,18 @@ const getPropertyRentDetails = (tile: BoardTile | null) => {
       ? tile.rentByHouses
       : null;
   const baseRentDisplay = rentByHouses?.[0] ?? baseRent ?? null;
-  const maxRentDisplay =
-    rentByHouses && rentByHouses.length > 0
-      ? rentByHouses[rentByHouses.length - 1] ?? null
-      : baseRent ?? null;
-  const maxRentLabel = rentByHouses
-    ? "Rent with hotel (max build)"
-    : "Rent with max build";
+  const rent4 =
+    rentByHouses?.[4] ?? rentByHouses?.[rentByHouses.length - 1] ?? null;
+  const hotelIncrement = rent4 !== null ? getHotelIncrement(rent4) : null;
   return {
     houseCost: tile?.houseCost ?? null,
+    hotelIncrement,
     rentRows: [
       { label: "Base rent", value: baseRentDisplay },
       { label: "Rent with 1 house", value: rentByHouses?.[1] ?? null },
       { label: "Rent with 2 houses", value: rentByHouses?.[2] ?? null },
       { label: "Rent with 3 houses", value: rentByHouses?.[3] ?? null },
       { label: "Rent with 4 houses", value: rentByHouses?.[4] ?? null },
-      { label: maxRentLabel, value: maxRentDisplay },
     ],
   };
 };
@@ -914,6 +1017,7 @@ type TileDetailsPanelProps = {
   currentUserPlayer?: Player;
   selectedOwnerRailCount: number;
   selectedOwnerUtilityCount: number;
+  selectedTileDevelopment?: number | null;
   boardPackEconomy: BoardPackEconomy;
   onClose: () => void;
   sheetRef?: React.Ref<HTMLDivElement>;
@@ -928,12 +1032,15 @@ const TileDetailsPanel = ({
   currentUserPlayer,
   selectedOwnerRailCount,
   selectedOwnerUtilityCount,
+  selectedTileDevelopment,
   boardPackEconomy,
   onClose,
   sheetRef,
 }: TileDetailsPanelProps) => {
   const isOwnable = isOwnableTileType(selectedTile.type);
   const tileIconSrc = getTileIconSrc(selectedTile);
+  const resolvedDevelopment =
+    typeof selectedTileDevelopment === "number" ? selectedTileDevelopment : 0;
 
   return (
     <div
@@ -989,6 +1096,8 @@ const TileDetailsPanel = ({
             ownedRailCount={selectedOwnerRailCount}
             ownedUtilityCount={selectedOwnerUtilityCount}
             mode="readonly"
+            showDevelopment
+            developmentCount={resolvedDevelopment}
           />
         ) : tileIconSrc ? (
           <div className="rounded-2xl bg-neutral-50 px-3 py-6">
@@ -2259,6 +2368,12 @@ export default function PlayPage() {
     ownershipByTile,
     selectedTileOwnerId,
   ]);
+  const selectedTileDevelopment = useMemo(() => {
+    if (selectedTileIndex === null) {
+      return null;
+    }
+    return ownershipByTile[selectedTileIndex]?.houses ?? null;
+  }, [ownershipByTile, selectedTileIndex]);
   const selectedTilePlayers = useMemo(() => {
     if (selectedTileIndex === null) {
       return [];
@@ -4490,7 +4605,6 @@ export default function PlayPage() {
           hasFullSet &&
           !isCollateralized &&
           houseCost > 0 &&
-          houses < 4 &&
           myPlayerBalance >= houseCost;
         const canSellHouse =
           canAct &&
@@ -5266,6 +5380,7 @@ export default function PlayPage() {
             action:
               | "BUILD_HOUSE"
               | "SELL_HOUSE"
+              | "SELL_HOTEL"
               | "SELL_TO_MARKET"
               | "DEFAULT_PROPERTY";
             tileIndex: number;
@@ -5949,6 +6064,7 @@ export default function PlayPage() {
             currentUserPlayer={currentUserPlayer}
             selectedOwnerRailCount={selectedOwnerRailCount}
             selectedOwnerUtilityCount={selectedOwnerUtilityCount}
+            selectedTileDevelopment={selectedTileDevelopment}
             boardPackEconomy={boardPackEconomy}
             onClose={() => setSelectedTileIndex(null)}
           />
@@ -7197,6 +7313,9 @@ export default function PlayPage() {
                       const propertyRent = isProperty
                         ? getPropertyRentDetails(tile)
                         : null;
+                      const currentPropertyRent = isProperty
+                        ? getPropertyRentWithDev(tile, houses)
+                        : null;
                       const railRentByCount = boardPackEconomy.railRentByCount;
                       const railBaseRent = railRentByCount[1] ?? null;
                       const railCurrentRent =
@@ -7216,6 +7335,13 @@ export default function PlayPage() {
                         lastRoll !== null ? lastRoll * utilityMultiplier : null;
                       const groupLabel = getTileGroupLabel(tile);
                       const tileIconSrc = getTileIconSrc(tile);
+                      const showSellHouse = houses > 0;
+                      const showSellHotel = houses >= 5;
+                      const isHotelBoundary = houses >= 5 && houses % 5 === 0;
+                      const canSellHotel = canSellHouse && isHotelBoundary;
+                      const sellHotelDisabledReason = !isHotelBoundary
+                        ? "Sell houses first to reach a hotel boundary."
+                        : null;
                       return (
                         <TitleDeedCard
                           key={tile.index}
@@ -7270,7 +7396,10 @@ export default function PlayPage() {
                               <div className="mt-1 space-y-1 text-xs font-medium text-neutral-500">
                                 <p>{groupLabel}</p>
                                 <p>Loan Value: ${principalPreview}</p>
-                                <p>Houses: {houses}</p>
+                                <div className="flex items-center justify-between gap-2">
+                                  <span>Development</span>
+                                  <DevelopmentIcons dev={houses} />
+                                </div>
                               </div>
                             ) : (
                               <div className="mt-2 text-xs font-medium text-neutral-500">
@@ -7284,6 +7413,8 @@ export default function PlayPage() {
                                 className="mt-3"
                                 rentRows={propertyRent.rentRows}
                                 houseCost={propertyRent.houseCost}
+                                hotelIncrement={propertyRent.hotelIncrement}
+                                currentRent={currentPropertyRent}
                               />
                             ) : isRail ? (
                               <RailRentTable
@@ -7326,24 +7457,58 @@ export default function PlayPage() {
                                       ? "Building…"
                                       : "Build"}
                                   </button>
-                                  <button
-                                    className="rounded-2xl border border-neutral-900 px-4 py-2 text-xs font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
-                                    type="button"
-                                    onClick={() =>
-                                      void handleBankAction({
-                                        action: "SELL_HOUSE",
-                                        tileIndex: tile.index,
-                                      })
-                                    }
-                                    disabled={
-                                      !canSellHouse ||
-                                      actionLoading === "SELL_HOUSE"
-                                    }
-                                  >
-                                    {actionLoading === "SELL_HOUSE"
-                                      ? "Selling…"
-                                      : "Sell"}
-                                  </button>
+                                  {showSellHouse ? (
+                                    <button
+                                      className="rounded-2xl border border-neutral-900 px-4 py-2 text-xs font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
+                                      type="button"
+                                      onClick={() =>
+                                        void handleBankAction({
+                                          action: "SELL_HOUSE",
+                                          tileIndex: tile.index,
+                                        })
+                                      }
+                                      disabled={
+                                        !canSellHouse ||
+                                        actionLoading === "SELL_HOUSE"
+                                      }
+                                    >
+                                      {actionLoading === "SELL_HOUSE"
+                                        ? "Selling…"
+                                        : "Sell House"}
+                                    </button>
+                                  ) : null}
+                                  {showSellHotel ? (
+                                    <div className="space-y-1">
+                                      <button
+                                        className="rounded-2xl border border-neutral-900 px-4 py-2 text-xs font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
+                                        type="button"
+                                        onClick={() =>
+                                          void handleBankAction({
+                                            action: "SELL_HOTEL",
+                                            tileIndex: tile.index,
+                                          })
+                                        }
+                                        disabled={
+                                          !canSellHotel ||
+                                          actionLoading === "SELL_HOTEL"
+                                        }
+                                        title={
+                                          sellHotelDisabledReason ??
+                                          "Sell a hotel (5 development)"
+                                        }
+                                      >
+                                        {actionLoading === "SELL_HOTEL"
+                                          ? "Selling…"
+                                          : "Sell Hotel"}
+                                      </button>
+                                      {!canSellHotel &&
+                                      sellHotelDisabledReason ? (
+                                        <p className="text-xs text-neutral-400">
+                                          {sellHotelDisabledReason}
+                                        </p>
+                                      ) : null}
+                                    </div>
+                                  ) : null}
                                 </div>
                               ) : null}
                               <div className="space-y-1">
@@ -7808,6 +7973,7 @@ export default function PlayPage() {
                     currentUserPlayer={currentUserPlayer}
                     selectedOwnerRailCount={selectedOwnerRailCount}
                     selectedOwnerUtilityCount={selectedOwnerUtilityCount}
+                    selectedTileDevelopment={selectedTileDevelopment}
                     boardPackEconomy={boardPackEconomy}
                     onClose={() => setSelectedTileIndex(null)}
                     sheetRef={expandedTileSheetRef}
