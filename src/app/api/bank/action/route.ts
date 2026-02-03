@@ -6,7 +6,7 @@ import {
   defaultBoardPackId,
   getBoardPackById,
 } from "@/lib/boardPacks";
-import type { BoardPackEconomy, BoardTileType } from "@/lib/boardPacks";
+import type { BoardPackEconomy, BoardTile, BoardTileType } from "@/lib/boardPacks";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "@/lib/env";
 import {
   MACRO_EVENT_INTERVAL_ROUNDS,
@@ -20,6 +20,7 @@ import {
   type MacroRarity,
 } from "@/lib/macroDeckV1";
 import { DEFAULT_RULES, getRules } from "@/lib/rules";
+import { computeEffectiveGoSalary } from "@/lib/salary";
 
 const supabaseUrl = (process.env.SUPABASE_URL ?? SUPABASE_URL ?? "").trim();
 const supabaseAnonKey = (
@@ -297,7 +298,6 @@ type DiceEventPayload = {
   rolls_this_turn?: number;
 };
 
-const PASS_START_SALARY = 200;
 const JAIL_FINE_AMOUNT = 50;
 const OWNABLE_TILE_TYPES = new Set(["PROPERTY", "RAIL", "UTILITY"]);
 
@@ -1761,34 +1761,48 @@ const applyGoSalary = ({
   balances,
   startingCash,
   events,
-  alreadyCollected,
   reason,
+  packEconomy,
+  boardTiles,
+  ownershipByTile,
 }: {
   player: PlayerRow;
   balances: Record<string, number>;
   startingCash: number;
   events: Array<{ event_type: string; payload: Record<string, unknown> }>;
-  alreadyCollected: boolean;
   reason: "PASS_START" | "LAND_GO";
+  packEconomy: BoardPackEconomy;
+  boardTiles: BoardTile[];
+  ownershipByTile: Record<
+    number,
+    {
+      owner_player_id: string | null;
+      collateral_loan_id: string | null;
+      houses?: number | null;
+    }
+  >;
 }) => {
-  if (alreadyCollected) {
-    return { balances, balancesChanged: false, alreadyCollected };
-  }
   const currentBalance = balances[player.id] ?? startingCash;
+  const totalSalary = computeEffectiveGoSalary({
+    packEconomy,
+    boardTiles,
+    ownershipByTile,
+    playerId: player.id,
+  });
   const updatedBalances = {
     ...balances,
-    [player.id]: currentBalance + PASS_START_SALARY,
+    [player.id]: currentBalance + totalSalary,
   };
   events.push({
     event_type: "COLLECT_GO",
     payload: {
       player_id: player.id,
       player_name: player.display_name,
-      amount: PASS_START_SALARY,
+      amount: totalSalary,
       reason,
     },
   });
-  return { balances: updatedBalances, balancesChanged: true, alreadyCollected: true };
+  return { balances: updatedBalances, balancesChanged: totalSalary !== 0 };
 };
 
 const applyCardEffect = ({
@@ -1805,12 +1819,13 @@ const applyCardEffect = ({
   updatedBalances,
   balancesChanged,
   bankruptcyCandidate,
-  goSalaryAwarded,
   nextGetOutOfJailFreeCount,
   getOutOfJailFreeCountChanged,
   cardUtilityRollOverride,
   cardTriggeredGoToJail,
   startingCash,
+  ownershipByTile,
+  boardPackEconomy,
 }: {
   card: { id: string; title: string; kind: string; payload?: unknown };
   currentPlayer: PlayerRow;
@@ -1827,7 +1842,6 @@ const applyCardEffect = ({
   bankruptcyCandidate:
     | { reason: string; cashBefore: number; cashAfter: number }
     | null;
-  goSalaryAwarded: boolean;
   nextGetOutOfJailFreeCount: number;
   getOutOfJailFreeCountChanged: boolean;
   cardUtilityRollOverride:
@@ -1835,6 +1849,15 @@ const applyCardEffect = ({
     | null;
   cardTriggeredGoToJail: boolean;
   startingCash: number;
+  ownershipByTile: Record<
+    number,
+    {
+      owner_player_id: string | null;
+      collateral_loan_id: string | null;
+      houses?: number | null;
+    }
+  >;
+  boardPackEconomy: BoardPackEconomy;
 }) => {
   if (card.kind === "PAY" || card.kind === "RECEIVE") {
     const amount =
@@ -1988,12 +2011,13 @@ const applyCardEffect = ({
           balances: updatedBalances,
           startingCash,
           events,
-          alreadyCollected: goSalaryAwarded,
           reason,
+          packEconomy: boardPackEconomy,
+          boardTiles,
+          ownershipByTile,
         });
         updatedBalances = goResult.balances;
         balancesChanged = balancesChanged || goResult.balancesChanged;
-        goSalaryAwarded = goResult.alreadyCollected;
       }
 
       events.push({
@@ -2114,7 +2138,6 @@ const applyCardEffect = ({
     getOutOfJailFreeCountChanged,
     cardUtilityRollOverride,
     cardTriggeredGoToJail,
-    goSalaryAwarded,
   };
 };
 
@@ -5003,15 +5026,9 @@ export async function POST(request: Request) {
       let bankruptcyCandidate:
         | { reason: string; cashBefore: number; cashAfter: number }
         | null = null;
-      let goSalaryAwarded = false;
       const rollTotal =
         typeof gameState.last_roll === "number" ? gameState.last_roll : null;
-      if (rollTotal !== null) {
-        const previousPosition =
-          ((sourceTile.index - rollTotal) % boardSize + boardSize) % boardSize;
-        const passedStart = previousPosition + rollTotal >= boardSize;
-        goSalaryAwarded = passedStart || sourceTile.type === "START";
-      }
+      const ownershipByTile = await loadOwnershipByTile(gameId);
       let cardTriggeredGoToJail = false;
       let cardUtilityRollOverride:
         | { total: number; dice: [number, number] }
@@ -5038,12 +5055,13 @@ export async function POST(request: Request) {
         updatedBalances,
         balancesChanged,
         bankruptcyCandidate,
-        goSalaryAwarded,
         nextGetOutOfJailFreeCount,
         getOutOfJailFreeCountChanged,
         cardUtilityRollOverride,
         cardTriggeredGoToJail,
         startingCash: game.starting_cash ?? 0,
+        ownershipByTile,
+        boardPackEconomy,
       });
 
       ({
@@ -5059,7 +5077,6 @@ export async function POST(request: Request) {
         getOutOfJailFreeCountChanged,
         cardUtilityRollOverride,
         cardTriggeredGoToJail,
-        goSalaryAwarded,
       } = cardResult);
 
       return await finalizeMoveResolution({
@@ -5084,7 +5101,7 @@ export async function POST(request: Request) {
         events,
         currentVersion,
         userId: user.id,
-        ownershipByTile: await loadOwnershipByTile(gameId),
+        ownershipByTile,
         boardTiles,
         boardPackEconomy,
         rules,
@@ -5216,7 +5233,6 @@ export async function POST(request: Request) {
       let bankruptcyCandidate:
         | { reason: string; cashBefore: number; cashAfter: number }
         | null = null;
-      let goSalaryAwarded = false;
       let nextChanceIndex = gameState?.chance_index ?? 0;
       let nextCommunityIndex = gameState?.community_index ?? 0;
       let nextChanceOrder = gameState?.chance_order ?? null;
@@ -5454,12 +5470,13 @@ export async function POST(request: Request) {
           balances: updatedBalances,
           startingCash: game.starting_cash ?? 0,
           events,
-          alreadyCollected: goSalaryAwarded,
           reason,
+          packEconomy: boardPackEconomy,
+          boardTiles,
+          ownershipByTile,
         });
         updatedBalances = goResult.balances;
         balancesChanged = balancesChanged || goResult.balancesChanged;
-        goSalaryAwarded = goResult.alreadyCollected;
       }
 
       events.push({
@@ -8220,7 +8237,6 @@ export async function POST(request: Request) {
       let bankruptcyCandidate:
         | { reason: string; cashBefore: number; cashAfter: number }
         | null = null;
-      let goSalaryAwarded = false;
       if (forcedFine) {
         const currentBalance =
           updatedBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
@@ -8345,12 +8361,13 @@ export async function POST(request: Request) {
           balances: updatedBalances,
           startingCash: game.starting_cash ?? 0,
           events,
-          alreadyCollected: goSalaryAwarded,
           reason,
+          packEconomy: boardPackEconomy,
+          boardTiles,
+          ownershipByTile,
         });
         updatedBalances = goResult.balances;
         balancesChanged = balancesChanged || goResult.balancesChanged;
-        goSalaryAwarded = goResult.alreadyCollected;
       }
 
       events.push({
