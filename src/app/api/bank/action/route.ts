@@ -1605,6 +1605,36 @@ const ownsFullColorSet = (
   );
 };
 
+const getDevBreakdown = (dev: number) => {
+  const normalizedDev = Number.isFinite(dev) ? Math.max(0, Math.floor(dev)) : 0;
+  return {
+    hotelCount: Math.floor(normalizedDev / 5),
+    houseCount: normalizedDev % 5,
+  };
+};
+
+const getHotelIncrement = (rent4: number) => Math.ceil(rent4 * 1.25);
+
+const getPropertyRentWithDev = (tile: TileInfo, dev: number) => {
+  const rentByHouses = tile.rentByHouses;
+  if (!rentByHouses || rentByHouses.length === 0) {
+    return tile.baseRent ?? 0;
+  }
+  const normalizedDev = Number.isFinite(dev) ? Math.max(0, Math.floor(dev)) : 0;
+  if (normalizedDev <= rentByHouses.length - 1) {
+    return rentByHouses[normalizedDev] ?? tile.baseRent ?? 0;
+  }
+  const { hotelCount, houseCount } = getDevBreakdown(normalizedDev);
+  const rent4 =
+    rentByHouses[4] ??
+    rentByHouses[rentByHouses.length - 1] ??
+    tile.baseRent ??
+    0;
+  const hotelIncrement = getHotelIncrement(rent4);
+  const baseRent = rentByHouses[houseCount] ?? tile.baseRent ?? 0;
+  return baseRent + hotelCount * hotelIncrement;
+};
+
 const calculateRent = ({
   tile,
   ownerId,
@@ -1701,22 +1731,14 @@ const calculateRent = ({
   }
 
   if (tile.type === "PROPERTY") {
-    const houses = ownershipByTile[tile.index]?.houses ?? 0;
-    const rentByHouses = tile.rentByHouses;
-    const clampedHouses =
-      rentByHouses && rentByHouses.length > 0
-        ? Math.min(Math.max(houses, 0), rentByHouses.length - 1)
-        : Math.max(houses, 0);
-    const amount =
-      rentByHouses && rentByHouses.length > 0
-        ? rentByHouses[clampedHouses] ?? tile.baseRent ?? 0
-        : tile.baseRent ?? 0;
+    const dev = ownershipByTile[tile.index]?.houses ?? 0;
+    const amount = getPropertyRentWithDev(tile, dev);
     const finalAmount = Math.round(amount * rentMultiplier);
     return {
       amount: finalAmount,
       meta: {
         rent_type: "PROPERTY",
-        houses: clampedHouses,
+        houses: dev,
         base_rent: amount,
         ...(macroMeta ?? {}),
       },
