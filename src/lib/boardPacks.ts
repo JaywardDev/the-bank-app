@@ -14,6 +14,11 @@ export type BoardPackEconomy = {
   };
   houseRentMultipliersByGroup: Record<string, number[]>;
   hotelIncrementMultiplier: number;
+  railRentByCount: number[];
+  utilityRentMultipliers: {
+    single: number;
+    double: number;
+  };
   startingBalance?: number;
   passGoAmount?: number;
 };
@@ -84,6 +89,8 @@ type PropertyGroupConfig = {
 };
 
 const DEFAULT_HOUSE_RENT_MULTIPLIERS = [1, 5, 15, 45, 80];
+const DEFAULT_RAIL_RENT_BY_COUNT = [0, 25, 50, 100, 200];
+const DEFAULT_UTILITY_RENT_MULTIPLIERS = { single: 4, double: 10 };
 
 const buildRentByHouses = (
   baseRent: number,
@@ -125,6 +132,8 @@ const CLASSIC_US_ECONOMY: BoardPackEconomy = {
   },
   houseRentMultipliersByGroup: {},
   hotelIncrementMultiplier: 1.25,
+  railRentByCount: DEFAULT_RAIL_RENT_BY_COUNT,
+  utilityRentMultipliers: DEFAULT_UTILITY_RENT_MULTIPLIERS,
   startingBalance: 1500,
   passGoAmount: 200,
 };
@@ -136,6 +145,8 @@ const CLASSIC_UK_ECONOMY: BoardPackEconomy = {
   },
   houseRentMultipliersByGroup: {},
   hotelIncrementMultiplier: 1.25,
+  railRentByCount: DEFAULT_RAIL_RENT_BY_COUNT,
+  utilityRentMultipliers: DEFAULT_UTILITY_RENT_MULTIPLIERS,
   startingBalance: 1500,
   passGoAmount: 200,
 };
@@ -147,6 +158,8 @@ const PHILIPPINES_ECONOMY: BoardPackEconomy = {
   },
   houseRentMultipliersByGroup: {},
   hotelIncrementMultiplier: 1.25,
+  railRentByCount: DEFAULT_RAIL_RENT_BY_COUNT,
+  utilityRentMultipliers: DEFAULT_UTILITY_RENT_MULTIPLIERS,
 };
 
 const NEW_ZEALAND_ECONOMY: BoardPackEconomy = {
@@ -156,7 +169,11 @@ const NEW_ZEALAND_ECONOMY: BoardPackEconomy = {
   },
   houseRentMultipliersByGroup: {},
   hotelIncrementMultiplier: 1.25,
+  railRentByCount: DEFAULT_RAIL_RENT_BY_COUNT,
+  utilityRentMultipliers: DEFAULT_UTILITY_RENT_MULTIPLIERS,
 };
+
+export const DEFAULT_BOARD_PACK_ECONOMY = CLASSIC_US_ECONOMY;
 
 export const chanceCards: CardDefinition[] = [
   {

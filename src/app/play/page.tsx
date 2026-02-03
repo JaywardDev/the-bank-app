@@ -13,7 +13,12 @@ import type { RealtimeChannel } from "@supabase/supabase-js";
 import PageShell from "../components/PageShell";
 import BoardMiniMap from "../components/BoardMiniMap";
 import HousesDots from "../components/HousesDots";
-import { getBoardPackById, type BoardTile } from "@/lib/boardPacks";
+import {
+  DEFAULT_BOARD_PACK_ECONOMY,
+  getBoardPackById,
+  type BoardPackEconomy,
+  type BoardTile,
+} from "@/lib/boardPacks";
 import {
   getMutedGroupTintClass,
   getTileBandColor,
@@ -25,8 +30,6 @@ import Image from "next/image";
 const lastGameKey = "bank.lastGameId";
 const DEBUG = process.env.NEXT_PUBLIC_DEBUG === "true";
 const JAIL_FINE_AMOUNT = 50;
-const RAIL_RENT_BY_COUNT = [0, 25, 50, 100, 200];
-const UTILITY_RENT_MULTIPLIERS = { single: 4, double: 10 };
 const EVENT_FETCH_LIMIT = 100;
 const EVENT_LOG_LIMIT = 10;
 const TRANSACTION_DISPLAY_LIMIT = 30;
@@ -444,11 +447,13 @@ const UtilityRentTable = ({
   ownedCount,
   lastRoll,
   currentRent,
+  rentMultipliers,
   className,
 }: {
   ownedCount: number;
   lastRoll: number | null;
   currentRent: number | null;
+  rentMultipliers: BoardPackEconomy["utilityRentMultipliers"];
   className?: string;
 }) => (
   <div
@@ -463,14 +468,14 @@ const UtilityRentTable = ({
       <p>
         If one Utility is owned, rent is{" "}
         <span className="font-semibold text-neutral-900">
-          {UTILITY_RENT_MULTIPLIERS.single}×
+          {rentMultipliers.single}×
         </span>{" "}
         the dice roll.
       </p>
       <p>
         If both Utilities are owned, rent is{" "}
         <span className="font-semibold text-neutral-900">
-          {UTILITY_RENT_MULTIPLIERS.double}×
+          {rentMultipliers.double}×
         </span>{" "}
         the dice roll.
       </p>
@@ -489,25 +494,26 @@ const UtilityRentTable = ({
   </div>
 );
 
-const buildRailRentRows = (): RentRow[] => [
-  { label: "Rent", value: RAIL_RENT_BY_COUNT[1] ?? null },
+const buildRailRentRows = (railRentByCount: number[]): RentRow[] => [
+  { label: "Rent", value: railRentByCount[1] ?? null },
   {
     label: "If 2 Railroads are owned",
-    value: RAIL_RENT_BY_COUNT[2] ?? null,
+    value: railRentByCount[2] ?? null,
   },
   {
     label: "If 3 Railroads are owned",
-    value: RAIL_RENT_BY_COUNT[3] ?? null,
+    value: railRentByCount[3] ?? null,
   },
   {
     label: "If 4 Railroads are owned",
-    value: RAIL_RENT_BY_COUNT[4] ?? null,
+    value: railRentByCount[4] ?? null,
   },
 ];
 
 type TitleDeedPreviewProps = {
   tile: BoardTile | null;
   bandColor: string;
+  boardPackEconomy: BoardPackEconomy;
   eyebrow?: string;
   price?: number | null;
   ownedRailCount?: number;
@@ -519,6 +525,7 @@ type TitleDeedPreviewProps = {
 const TitleDeedPreview = ({
   tile,
   bandColor,
+  boardPackEconomy,
   eyebrow,
   price,
   ownedRailCount = 0,
@@ -537,12 +544,15 @@ const TitleDeedPreview = ({
         ? tile.price
         : null;
   const propertyRent = getPropertyRentDetails(tile);
-  const railRentRows = isRailTileType(tile.type) ? buildRailRentRows() : [];
+  const railRentRows = isRailTileType(tile.type)
+    ? buildRailRentRows(boardPackEconomy.railRentByCount)
+    : [];
   const tileName = tile.name ?? "Property";
   const showActions = mode === "actions";
   const resolvedEyebrow = showActions ? eyebrow : undefined;
   const resolvedFooter = showActions ? footer : undefined;
   const tileIconSrc = getTileIconSrc(tile);
+  const utilityRentMultipliers = boardPackEconomy.utilityRentMultipliers;
 
   return (
     <TitleDeedCard
@@ -618,6 +628,7 @@ const TitleDeedPreview = ({
             ownedCount={ownedUtilityCount}
             lastRoll={null}
             currentRent={null}
+            rentMultipliers={utilityRentMultipliers}
           />
         ) : (
           <PropertyRentTable
@@ -903,6 +914,7 @@ type TileDetailsPanelProps = {
   currentUserPlayer?: Player;
   selectedOwnerRailCount: number;
   selectedOwnerUtilityCount: number;
+  boardPackEconomy: BoardPackEconomy;
   onClose: () => void;
   sheetRef?: React.Ref<HTMLDivElement>;
 };
@@ -916,6 +928,7 @@ const TileDetailsPanel = ({
   currentUserPlayer,
   selectedOwnerRailCount,
   selectedOwnerUtilityCount,
+  boardPackEconomy,
   onClose,
   sheetRef,
 }: TileDetailsPanelProps) => {
@@ -971,6 +984,7 @@ const TileDetailsPanel = ({
           <TitleDeedPreview
             tile={selectedTile}
             bandColor={getTileBandColor(selectedTile)}
+            boardPackEconomy={boardPackEconomy}
             price={selectedTile.price ?? null}
             ownedRailCount={selectedOwnerRailCount}
             ownedUtilityCount={selectedOwnerUtilityCount}
@@ -1942,6 +1956,7 @@ export default function PlayPage() {
     }
   }, [isGoToJailAcknowledging, pendingGoToJail]);
   const boardPack = getBoardPackById(gameMeta?.board_pack_id);
+  const boardPackEconomy = boardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY;
   const currentPlayerId = gameState?.current_player_id ?? null;
   const expandedBoardTiles =
     boardPack?.tiles && boardPack.tiles.length > 0
@@ -5934,6 +5949,7 @@ export default function PlayPage() {
             currentUserPlayer={currentUserPlayer}
             selectedOwnerRailCount={selectedOwnerRailCount}
             selectedOwnerUtilityCount={selectedOwnerUtilityCount}
+            boardPackEconomy={boardPackEconomy}
             onClose={() => setSelectedTileIndex(null)}
           />
         </div>
@@ -6112,6 +6128,7 @@ export default function PlayPage() {
             <TitleDeedPreview
               tile={pendingTile}
               bandColor={pendingBandColor}
+              boardPackEconomy={boardPackEconomy}
               eyebrow="Pending decision"
               price={pendingPurchase.price}
               ownedRailCount={pendingOwnerRailCount}
@@ -6950,6 +6967,7 @@ export default function PlayPage() {
                     <TitleDeedPreview
                       tile={auctionTile}
                       bandColor={auctionBandColor}
+                      boardPackEconomy={boardPackEconomy}
                       price={auctionTile.price ?? null}
                       ownedRailCount={auctionOwnedRailCount}
                       ownedUtilityCount={auctionOwnedUtilityCount}
@@ -7179,33 +7197,17 @@ export default function PlayPage() {
                       const propertyRent = isProperty
                         ? getPropertyRentDetails(tile)
                         : null;
-                      const railBaseRent = RAIL_RENT_BY_COUNT[1] ?? null;
+                      const railRentByCount = boardPackEconomy.railRentByCount;
+                      const railBaseRent = railRentByCount[1] ?? null;
                       const railCurrentRent =
-                        RAIL_RENT_BY_COUNT[
-                          Math.min(
-                            ownedRailCount,
-                            RAIL_RENT_BY_COUNT.length - 1,
-                          )
+                        railRentByCount[
+                          Math.min(ownedRailCount, railRentByCount.length - 1)
                         ] ?? railBaseRent;
-                      const railRentRows = [
-                        { label: "Rent", value: RAIL_RENT_BY_COUNT[1] ?? null },
-                        {
-                          label: "If 2 Railroads are owned",
-                          value: RAIL_RENT_BY_COUNT[2] ?? null,
-                        },
-                        {
-                          label: "If 3 Railroads are owned",
-                          value: RAIL_RENT_BY_COUNT[3] ?? null,
-                        },
-                        {
-                          label: "If 4 Railroads are owned",
-                          value: RAIL_RENT_BY_COUNT[4] ?? null,
-                        },
-                      ];
+                      const railRentRows = buildRailRentRows(railRentByCount);
                       const utilityMultiplier =
                         ownedUtilityCount >= 2
-                          ? UTILITY_RENT_MULTIPLIERS.double
-                          : UTILITY_RENT_MULTIPLIERS.single;
+                          ? boardPackEconomy.utilityRentMultipliers.double
+                          : boardPackEconomy.utilityRentMultipliers.single;
                       const lastRoll =
                         typeof gameState?.last_roll === "number"
                           ? gameState.last_roll
@@ -7296,6 +7298,9 @@ export default function PlayPage() {
                                 ownedCount={ownedUtilityCount}
                                 lastRoll={lastRoll}
                                 currentRent={utilityRentPreview}
+                                rentMultipliers={
+                                  boardPackEconomy.utilityRentMultipliers
+                                }
                               />
                             ) : null
                           }
@@ -7803,6 +7808,7 @@ export default function PlayPage() {
                     currentUserPlayer={currentUserPlayer}
                     selectedOwnerRailCount={selectedOwnerRailCount}
                     selectedOwnerUtilityCount={selectedOwnerUtilityCount}
+                    boardPackEconomy={boardPackEconomy}
                     onClose={() => setSelectedTileIndex(null)}
                     sheetRef={expandedTileSheetRef}
                   />

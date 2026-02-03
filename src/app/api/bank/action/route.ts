@@ -2,10 +2,11 @@ import { NextResponse } from "next/server";
 import {
   chanceCards,
   communityCards,
+  DEFAULT_BOARD_PACK_ECONOMY,
   defaultBoardPackId,
   getBoardPackById,
 } from "@/lib/boardPacks";
-import type { BoardTileType } from "@/lib/boardPacks";
+import type { BoardPackEconomy, BoardTileType } from "@/lib/boardPacks";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "@/lib/env";
 import {
   MACRO_EVENT_INTERVAL_ROUNDS,
@@ -299,7 +300,6 @@ type DiceEventPayload = {
 const PASS_START_SALARY = 200;
 const JAIL_FINE_AMOUNT = 50;
 const OWNABLE_TILE_TYPES = new Set(["PROPERTY", "RAIL", "UTILITY"]);
-const RAIL_RENT_BY_COUNT = [0, 25, 50, 100, 200];
 
 const isConfigured = () =>
   Boolean(supabaseUrl && supabaseAnonKey && supabaseServiceRoleKey);
@@ -1613,6 +1613,7 @@ const calculateRent = ({
   ownershipByTile,
   diceTotal,
   activeMacroEffects,
+  boardPackEconomy,
 }: {
   tile: TileInfo;
   ownerId: string | null;
@@ -1621,6 +1622,7 @@ const calculateRent = ({
   ownershipByTile: OwnershipByTile;
   diceTotal?: number | null;
   activeMacroEffects: ActiveMacroEffectV1[];
+  boardPackEconomy: BoardPackEconomy;
 }) => {
   if (!ownerId || ownerId === currentPlayerId) {
     return { amount: 0, meta: null };
@@ -1647,7 +1649,7 @@ const calculateRent = ({
       ownerId,
       "RAIL",
     );
-    const baseAmount = RAIL_RENT_BY_COUNT[railCount] ?? 0;
+    const baseAmount = boardPackEconomy.railRentByCount[railCount] ?? 0;
     const amount = Math.round(baseAmount * rentMultiplier * railMultiplier);
     return {
       amount,
@@ -1667,7 +1669,10 @@ const calculateRent = ({
       ownerId,
       "UTILITY",
     );
-    const multiplier = utilityCount >= 2 ? 10 : 4;
+    const multiplier =
+      utilityCount >= 2
+        ? boardPackEconomy.utilityRentMultipliers.double
+        : boardPackEconomy.utilityRentMultipliers.single;
     const total = diceTotal ?? 0;
     const baseAmount = multiplier * total;
     const totalHousesOwned = Object.values(ownershipByTile).reduce(
@@ -2115,6 +2120,7 @@ const finalizeMoveResolution = async ({
   userId,
   ownershipByTile,
   boardTiles,
+  boardPackEconomy,
   rules,
   startingCash,
   activeMacroEffects,
@@ -2161,6 +2167,7 @@ const finalizeMoveResolution = async ({
   userId: string;
   ownershipByTile: OwnershipByTile;
   boardTiles: TileInfo[];
+  boardPackEconomy: BoardPackEconomy;
   rules: ReturnType<typeof getRules>;
   startingCash: number;
   activeMacroEffects: ActiveMacroEffectV1[];
@@ -2200,6 +2207,7 @@ const finalizeMoveResolution = async ({
           ownershipByTile,
           diceTotal: rentDiceTotal,
           activeMacroEffects,
+          boardPackEconomy,
         });
       })();
   if (activeLandingTile.type === "UTILITY" && cardUtilityRollOverride) {
@@ -4937,6 +4945,7 @@ export async function POST(request: Request) {
         payload: cardPayload,
       };
       const boardPack = getBoardPackById(game.board_pack_id);
+      const boardPackEconomy = boardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY;
       const boardTiles = boardPack?.tiles ?? [];
       const boardSize = boardTiles.length > 0 ? boardTiles.length : 40;
       const sourceIndex =
@@ -5055,6 +5064,7 @@ export async function POST(request: Request) {
         userId: user.id,
         ownershipByTile: await loadOwnershipByTile(gameId),
         boardTiles,
+        boardPackEconomy,
         rules,
         startingCash: game.starting_cash ?? 0,
         activeMacroEffects: getActiveMacroEffectsV1ForRules(
@@ -5149,6 +5159,7 @@ export async function POST(request: Request) {
       const isDouble = dieOne === dieTwo;
       const nextDoublesCount = isDouble ? doublesCount + 1 : 0;
       const boardPack = getBoardPackById(game.board_pack_id);
+      const boardPackEconomy = boardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY;
       const boardTiles = boardPack?.tiles ?? [];
       const boardSize = boardTiles.length > 0 ? boardTiles.length : 40;
       const currentPosition = Number.isFinite(currentPlayer.position)
@@ -5642,6 +5653,7 @@ export async function POST(request: Request) {
         userId: user.id,
         ownershipByTile,
         boardTiles,
+        boardPackEconomy,
         rules,
         startingCash: game.starting_cash ?? 0,
         activeMacroEffects: getActiveMacroEffectsV1ForRules(
@@ -5706,6 +5718,7 @@ export async function POST(request: Request) {
       }
 
       const boardPack = getBoardPackById(game.board_pack_id);
+      const boardPackEconomy = boardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY;
       const boardTiles = boardPack?.tiles ?? [];
       const landingTile = boardTiles.find(
         (tile) => tile.index === body.tileIndex,
@@ -8494,6 +8507,7 @@ export async function POST(request: Request) {
         userId: user.id,
         ownershipByTile,
         boardTiles,
+        boardPackEconomy,
         rules,
         startingCash: game.starting_cash ?? 0,
         activeMacroEffects: getActiveMacroEffectsV1ForRules(
