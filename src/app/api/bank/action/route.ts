@@ -39,7 +39,6 @@ const bankHeaders = {
 };
 
 const PURCHASE_MORTGAGE_RATE_PER_TURN = 0.015;
-const MAX_HOUSES_PER_PROPERTY = 4;
 
 type BaseActionRequest = {
   gameId?: string;
@@ -82,6 +81,7 @@ type BankActionRequest =
         | "PAYOFF_PURCHASE_MORTGAGE"
         | "BUILD_HOUSE"
         | "SELL_HOUSE"
+        | "SELL_HOTEL"
         | "SELL_TO_MARKET"
         | "DEFAULT_PROPERTY",
         "DECLINE_PROPERTY" | "BUY_PROPERTY"
@@ -6849,7 +6849,7 @@ export async function POST(request: Request) {
     }
 
     const handleHouseAction = async (
-      action: "BUILD_HOUSE" | "SELL_HOUSE",
+      action: "BUILD_HOUSE" | "SELL_HOUSE" | "SELL_HOTEL",
       tileIndex: number,
     ) => {
       const activeMacroEffects = getActiveMacroEffectsV1ForRules(
@@ -6913,13 +6913,6 @@ export async function POST(request: Request) {
         (entry) =>
           entry.type === "PROPERTY" && entry.colorGroup === tile.colorGroup,
       );
-      const groupHouseCounts = groupTiles.map(
-        (entry) => ownershipByTile[entry.index]?.houses ?? 0,
-      );
-      const minGroupHouses =
-        groupHouseCounts.length > 0 ? Math.min(...groupHouseCounts) : 0;
-      const maxGroupHouses =
-        groupHouseCounts.length > 0 ? Math.max(...groupHouseCounts) : 0;
 
       const houses = ownership.houses ?? 0;
       const houseCost = tile.houseCost ?? 0;
@@ -6928,22 +6921,20 @@ export async function POST(request: Request) {
           ? Math.round(houseCost * macroDevelopmentMultiplier)
           : houseCost;
 
+      const isEvenBuildAfterChange = (nextHouses: number) => {
+        const nextGroupHouses = groupTiles.map((entry) =>
+          entry.index === tileIndex
+            ? nextHouses
+            : ownershipByTile[entry.index]?.houses ?? 0,
+        );
+        const nextMin =
+          nextGroupHouses.length > 0 ? Math.min(...nextGroupHouses) : 0;
+        const nextMax =
+          nextGroupHouses.length > 0 ? Math.max(...nextGroupHouses) : 0;
+        return nextMax - nextMin <= 1;
+      };
+
       if (action === "BUILD_HOUSE") {
-        if (houses !== minGroupHouses) {
-          return NextResponse.json(
-            {
-              error:
-                "Houses must be built evenly across the color group.",
-            },
-            { status: 409 },
-          );
-        }
-        if (houses >= MAX_HOUSES_PER_PROPERTY) {
-          return NextResponse.json(
-            { error: "Maximum houses already built." },
-            { status: 409 },
-          );
-        }
         if (!houseCost) {
           return NextResponse.json(
             { error: "House cost not configured for this property." },
@@ -6961,6 +6952,15 @@ export async function POST(request: Request) {
         }
 
         const nextHouses = houses + 1;
+        if (!isEvenBuildAfterChange(nextHouses)) {
+          return NextResponse.json(
+            {
+              error:
+                "Houses must be built evenly across the color group.",
+            },
+            { status: 409 },
+          );
+        }
         const updatedBalances = {
           ...balances,
           [currentPlayer.id]: currentBalance - adjustedHouseCost,
@@ -7040,20 +7040,6 @@ export async function POST(request: Request) {
         return NextResponse.json({ gameState: updatedState });
       }
 
-      if (houses <= 0) {
-        return NextResponse.json(
-          { error: "No houses to sell." },
-          { status: 409 },
-        );
-      }
-
-      if (houses !== maxGroupHouses) {
-        return NextResponse.json(
-          { error: "Houses must be sold evenly across the color group." },
-          { status: 409 },
-        );
-      }
-
       if (!houseCost) {
         return NextResponse.json(
           { error: "House cost not configured for this property." },
@@ -7061,12 +7047,51 @@ export async function POST(request: Request) {
         );
       }
 
-      const sellValue = Math.round(
-        houseCost * 0.5 * macroHouseSellMultiplier,
-      );
       const balances = gameState.balances ?? {};
       const currentBalance = balances[currentPlayer.id] ?? game.starting_cash ?? 0;
-      const nextHouses = houses - 1;
+      const sellValue =
+        action === "SELL_HOTEL"
+          ? Math.round(0.8 * 5 * houseCost)
+          : Math.round(houseCost * 0.5 * macroHouseSellMultiplier);
+      const houseReduction = action === "SELL_HOTEL" ? 5 : 1;
+      const nextHouses = houses - houseReduction;
+
+      if (houses <= 0) {
+        return NextResponse.json(
+          { error: "No houses to sell." },
+          { status: 409 },
+        );
+      }
+
+      if (action === "SELL_HOTEL") {
+        if (houses < 5) {
+          return NextResponse.json(
+            { error: "No hotel available to sell." },
+            { status: 409 },
+          );
+        }
+        if (houses % 5 !== 0) {
+          return NextResponse.json(
+            { error: "Hotels can only be sold at development boundaries." },
+            { status: 409 },
+          );
+        }
+      }
+
+      if (nextHouses < 0) {
+        return NextResponse.json(
+          { error: "No houses to sell." },
+          { status: 409 },
+        );
+      }
+
+      if (!isEvenBuildAfterChange(nextHouses)) {
+        return NextResponse.json(
+          { error: "Houses must be sold evenly across the color group." },
+          { status: 409 },
+        );
+      }
+
       const updatedBalances = {
         ...balances,
         [currentPlayer.id]: currentBalance + sellValue,
@@ -7097,7 +7122,7 @@ export async function POST(request: Request) {
         payload: Record<string, unknown>;
       }> = [
         {
-          event_type: "HOUSE_SOLD",
+          event_type: action === "SELL_HOTEL" ? "HOTEL_SOLD" : "HOUSE_SOLD",
           payload: {
             player_id: currentPlayer.id,
             tile_index: tileIndex,
@@ -7112,7 +7137,7 @@ export async function POST(request: Request) {
           payload: {
             player_id: currentPlayer.id,
             amount: sellValue,
-            reason: "SELL_HOUSE",
+            reason: action === "SELL_HOTEL" ? "SELL_HOTEL" : "SELL_HOUSE",
             tile_index: tileIndex,
           },
         },
@@ -7168,6 +7193,18 @@ export async function POST(request: Request) {
       }
 
       return await handleHouseAction("SELL_HOUSE", tileIndex);
+    }
+
+    if (body.action === "SELL_HOTEL") {
+      const tileIndex = body.tileIndex;
+      if (typeof tileIndex !== "number") {
+        return NextResponse.json(
+          { error: "Missing property tile." },
+          { status: 400 },
+        );
+      }
+
+      return await handleHouseAction("SELL_HOTEL", tileIndex);
     }
 
     const loadOwnedOwnableTile = (tileIndex: number) => {
