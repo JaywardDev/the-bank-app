@@ -6073,13 +6073,13 @@ export default function PlayPage() {
         subtitle="Mobile-first tools for wallet, assets, actions, and trades."
       >
         <div className="fixed inset-0 z-40 overflow-hidden text-white">
-          <div className="absolute inset-0">
+          <div className="relative h-full w-full">
             <Image
               src="/icons/loading_screen.svg"
               alt="Game boot background"
               fill
               sizes="100vw"
-              className="object-cover object-center"
+              className="object-fill object-center"
               style={{
                 filter: "saturate(0.75) contrast(0.95) brightness(0.92)",
                 opacity: 0.98,
