@@ -465,8 +465,16 @@ export default function LobbyPage() {
   );
 
   return (
-    <main className="min-h-dvh bg-neutral-50 p-6 flex items-start justify-center">
-      <div className="w-full max-w-md space-y-6">
+    <main className="relative min-h-dvh bg-neutral-50 p-6 flex items-start justify-center">
+      <div
+        className="pointer-events-none absolute inset-0 z-0 bg-[url('/icons/lobby_page.svg')] bg-cover bg-center bg-fixed"
+        aria-hidden="true"
+      />
+      <div
+        className="pointer-events-none absolute inset-0 z-10 bg-neutral-950/40"
+        aria-hidden="true"
+      />
+      <div className="relative z-20 w-full max-w-md space-y-6">
         <header className="space-y-2">
           <h1 className="text-2xl font-semibold text-neutral-900">Game lobby</h1>
           <p className="text-sm text-neutral-600">
