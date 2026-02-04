@@ -6079,7 +6079,7 @@ export default function PlayPage() {
               alt="Game boot background"
               fill
               sizes="100vw"
-              className="object-fill object-center"
+              className="object-cover object-center"
               style={{
                 filter: "saturate(0.75) contrast(0.95) brightness(0.92)",
                 opacity: 0.98,
