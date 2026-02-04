@@ -4174,6 +4174,25 @@ export default function PlayPage() {
     setMinLoadingElapsed(false);
   }, [gameId]);
 
+  const isInProgress = gameMeta?.status === "in_progress";
+  const hasGameMetaError = Boolean(gameMetaError);
+  const isGameReady =
+    isConfigured &&
+    !loading &&
+    !needsAuth &&
+    !sessionInvalid &&
+    Boolean(session?.access_token) &&
+    Boolean(gameId) &&
+    Boolean(gameMeta) &&
+    Boolean(boardPack?.tiles?.length) &&
+    Boolean(gameState) &&
+    players.length > 0 &&
+    initialSnapshotReady;
+  const canShowLoadingScreen =
+    isConfigured && Boolean(gameId) && !needsAuth && !gameMetaError;
+  const shouldShowLoadingScreen =
+    canShowLoadingScreen && (!isGameReady || !minLoadingElapsed);
+
   useEffect(() => {
     if (!canShowLoadingScreen) {
       setLoadingStartAt(null);
@@ -4227,24 +4246,6 @@ export default function PlayPage() {
     }
   }, [session?.access_token, sessionInvalid]);
 
-  const isInProgress = gameMeta?.status === "in_progress";
-  const hasGameMetaError = Boolean(gameMetaError);
-  const isGameReady =
-    isConfigured &&
-    !loading &&
-    !needsAuth &&
-    !sessionInvalid &&
-    Boolean(session?.access_token) &&
-    Boolean(gameId) &&
-    Boolean(gameMeta) &&
-    Boolean(boardPack?.tiles?.length) &&
-    Boolean(gameState) &&
-    players.length > 0 &&
-    initialSnapshotReady;
-  const canShowLoadingScreen =
-    isConfigured && Boolean(gameId) && !needsAuth && !gameMetaError;
-  const shouldShowLoadingScreen =
-    canShowLoadingScreen && (!isGameReady || !minLoadingElapsed);
   const currentPlayer = players.find(
     (player) => player.id === gameState?.current_player_id,
   );
