@@ -403,13 +403,13 @@ export default function Home() {
   const showPlayResumeGate = Boolean(activeGame?.status === "in_progress");
 
   return (
-    <main className="relative min-h-dvh bg-neutral-50 p-6 flex items-start justify-center">
+    <main className="relative min-h-dvh bg-[#F6F1E8] p-6 flex items-start justify-center">
       <div
         className="pointer-events-none absolute inset-0 z-0 bg-[url('/icons/home_page.svg')] bg-cover bg-center bg-fixed"
         aria-hidden="true"
       />
       <div
-        className="pointer-events-none absolute inset-0 z-10 bg-neutral-950/40"
+        className="pointer-events-none absolute inset-0 z-10 bg-neutral-950/15"
         aria-hidden="true"
       />
       <div className="relative z-20 w-full max-w-md space-y-6">
@@ -431,7 +431,7 @@ export default function Home() {
           </div>
         ) : null}
 
-        <section className="space-y-3 rounded-2xl border bg-white p-4 shadow-sm">
+        <section className="space-y-3 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-4 shadow-[0_10px_24px_rgba(34,21,10,0.12)]">
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-base font-semibold">Player session</h2>
@@ -463,14 +463,14 @@ export default function Home() {
                 Email for magic link
               </label>
               <input
-                className="w-full rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm"
+                className="w-full rounded-xl border border-amber-200/70 bg-[#F4EFE7] px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-500 focus-visible:border-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
                 type="email"
                 placeholder="you@example.com"
                 value={authEmail}
                 onChange={(event) => setAuthEmail(event.target.value)}
               />
               <button
-                className="w-full rounded-xl bg-neutral-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-400"
+                className="w-full rounded-xl bg-gradient-to-b from-neutral-900 to-neutral-800 px-4 py-2 text-sm font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_8px_18px_rgba(29,20,12,0.35)] transition active:translate-y-0.5 active:shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_4px_10px_rgba(29,20,12,0.3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[#FBFAF7] disabled:cursor-not-allowed disabled:opacity-60"
                 type="button"
                 onClick={handleSendMagicLink}
                 disabled={loadingAction === "auth" || hasConfigErrors}
@@ -481,14 +481,14 @@ export default function Home() {
           )}
         </section>
 
-        <section className="space-y-3 rounded-2xl border bg-white p-4 shadow-sm">
+        <section className="space-y-3 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-4 shadow-[0_10px_24px_rgba(34,21,10,0.12)]">
           <h2 className="text-base font-semibold">Player details</h2>
           <div className="space-y-2">
             <label className="text-xs font-medium uppercase text-neutral-500">
               Display name
             </label>
             <input
-              className="w-full rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm"
+              className="w-full rounded-xl border border-amber-200/70 bg-[#F4EFE7] px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-500 focus-visible:border-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
               type="text"
               placeholder="Banker Alex"
               value={playerName}
@@ -497,7 +497,7 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="space-y-3 rounded-2xl border bg-white p-4 shadow-sm">
+        <section className="space-y-3 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-4 shadow-[0_10px_24px_rgba(34,21,10,0.12)]">
           <h2 className="text-base font-semibold">Create a game</h2>
           <p className="text-sm text-neutral-500">
             Host a new table and share the join code with players.
@@ -507,7 +507,7 @@ export default function Home() {
               Board pack
             </label>
             <select
-              className="w-full rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm"
+              className="w-full rounded-xl border border-amber-200/70 bg-[#F4EFE7] px-3 py-2 text-sm text-neutral-900 focus-visible:border-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
               value={boardPackId}
               onChange={(event) => setBoardPackId(event.target.value)}
             >
@@ -519,7 +519,7 @@ export default function Home() {
             </select>
           </div>
           <button
-            className="w-full rounded-xl bg-neutral-900 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-400"
+            className="w-full rounded-xl bg-gradient-to-b from-neutral-900 to-neutral-800 px-4 py-3 text-sm font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_10px_22px_rgba(29,20,12,0.35)] transition active:translate-y-0.5 active:shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_5px_12px_rgba(29,20,12,0.3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[#FBFAF7] disabled:cursor-not-allowed disabled:opacity-60"
             type="button"
             onClick={handleCreateGame}
             disabled={!session || loadingAction === "create"}
@@ -528,20 +528,20 @@ export default function Home() {
           </button>
         </section>
 
-        <section className="space-y-3 rounded-2xl border bg-white p-4 shadow-sm">
+        <section className="space-y-3 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-4 shadow-[0_10px_24px_rgba(34,21,10,0.12)]">
           <h2 className="text-base font-semibold">Join a game</h2>
           <p className="text-sm text-neutral-500">
             Enter the code from the host to join their lobby.
           </p>
           <input
-            className="w-full rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm uppercase tracking-[0.3em]"
+            className="w-full rounded-xl border border-amber-200/70 bg-[#F4EFE7] px-3 py-2 text-sm uppercase tracking-[0.3em] text-neutral-900 placeholder:text-neutral-500 focus-visible:border-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
             type="text"
             placeholder="ABC123"
             value={joinCode}
             onChange={(event) => setJoinCode(event.target.value)}
           />
           <button
-            className="w-full rounded-xl border border-neutral-900 px-4 py-3 text-sm font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-300 disabled:text-neutral-300"
+            className="w-full rounded-xl border border-amber-300/70 bg-[#F7F2EA]/80 px-4 py-3 text-sm font-semibold text-neutral-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] transition hover:bg-[#F1E9DD] active:translate-y-0.5 active:shadow-[inset_0_1px_0_rgba(255,255,255,0.4)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70 disabled:cursor-not-allowed disabled:border-amber-200/60 disabled:text-neutral-400 disabled:opacity-70"
             type="button"
             onClick={handleJoinGame}
             disabled={!session || loadingAction === "join"}
@@ -551,7 +551,7 @@ export default function Home() {
         </section>
 
         {showLobbyResumeGate ? (
-          <section className="space-y-3 rounded-2xl border bg-white p-4 shadow-sm">
+          <section className="space-y-3 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-4 shadow-[0_10px_24px_rgba(34,21,10,0.12)]">
             <div className="space-y-1">
               <h2 className="text-base font-semibold">Lobby ready</h2>
               <p className="text-sm text-neutral-500">
@@ -559,7 +559,7 @@ export default function Home() {
               </p>
             </div>
             <button
-              className="w-full rounded-xl bg-neutral-900 px-4 py-3 text-sm font-semibold text-white"
+              className="w-full rounded-xl bg-gradient-to-b from-neutral-900 to-neutral-800 px-4 py-3 text-sm font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_10px_22px_rgba(29,20,12,0.35)] transition active:translate-y-0.5 active:shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_5px_12px_rgba(29,20,12,0.3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[#FBFAF7]"
               type="button"
               onClick={() => router.push(`/lobby/${activeGame?.id ?? ""}`)}
             >
@@ -569,7 +569,7 @@ export default function Home() {
         ) : null}
 
         {showPlayResumeGate ? (
-          <section className="space-y-3 rounded-2xl border bg-white p-4 shadow-sm">
+          <section className="space-y-3 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-4 shadow-[0_10px_24px_rgba(34,21,10,0.12)]">
             <div className="space-y-1">
               <h2 className="text-base font-semibold">Game in progress</h2>
               <p className="text-sm text-neutral-500">
@@ -578,7 +578,7 @@ export default function Home() {
             </div>
             {isMember ? (
               <button
-                className="w-full rounded-xl bg-neutral-900 px-4 py-3 text-sm font-semibold text-white"
+                className="w-full rounded-xl bg-gradient-to-b from-neutral-900 to-neutral-800 px-4 py-3 text-sm font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_10px_22px_rgba(29,20,12,0.35)] transition active:translate-y-0.5 active:shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_5px_12px_rgba(29,20,12,0.3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[#FBFAF7]"
                 type="button"
                 onClick={() => router.push("/play")}
               >
