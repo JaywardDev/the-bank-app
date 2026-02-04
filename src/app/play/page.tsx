@@ -1921,6 +1921,8 @@ export default function PlayPage() {
     eventVersion: number;
   } | null>(null);
   const [isGoToJailAcknowledging, setIsGoToJailAcknowledging] = useState(false);
+  const [loadingStartAt, setLoadingStartAt] = useState<number | null>(null);
+  const [minLoadingElapsed, setMinLoadingElapsed] = useState(false);
   const expandedBoardContainerRef = useRef<HTMLDivElement | null>(null);
   const expandedBoardRef = useRef<HTMLDivElement | null>(null);
   const expandedTileSheetRef = useRef<HTMLDivElement | null>(null);
@@ -1944,6 +1946,7 @@ export default function PlayPage() {
   const tradeConfirmSectionRef = useRef<HTMLElement | null>(null);
   const lastGoToJailAckVersionRef = useRef<number | null>(null);
   const goToJailOkButtonRef = useRef<HTMLButtonElement | null>(null);
+  const minLoadingMs = 600;
 
   const isConfigured = useMemo(() => supabaseClient.isConfigured(), []);
   const latestRollEvent = useMemo(
@@ -4167,6 +4170,49 @@ export default function PlayPage() {
   }, []);
 
   useEffect(() => {
+    setLoadingStartAt(null);
+    setMinLoadingElapsed(false);
+  }, [gameId]);
+
+  useEffect(() => {
+    if (!canShowLoadingScreen) {
+      setLoadingStartAt(null);
+      setMinLoadingElapsed(false);
+      return;
+    }
+
+    if (isGameReady) {
+      if (loadingStartAt === null) {
+        setMinLoadingElapsed(true);
+      }
+      return;
+    }
+
+    if (loadingStartAt === null) {
+      setLoadingStartAt(Date.now());
+      setMinLoadingElapsed(false);
+    }
+  }, [canShowLoadingScreen, isGameReady, loadingStartAt]);
+
+  useEffect(() => {
+    if (loadingStartAt === null || minLoadingElapsed) {
+      return;
+    }
+
+    const elapsed = Date.now() - loadingStartAt;
+    if (elapsed >= minLoadingMs) {
+      setMinLoadingElapsed(true);
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      setMinLoadingElapsed(true);
+    }, minLoadingMs - elapsed);
+
+    return () => clearTimeout(timeout);
+  }, [loadingStartAt, minLoadingElapsed, minLoadingMs]);
+
+  useEffect(() => {
     if (!sessionInvalid) {
       return;
     }
@@ -4183,6 +4229,22 @@ export default function PlayPage() {
 
   const isInProgress = gameMeta?.status === "in_progress";
   const hasGameMetaError = Boolean(gameMetaError);
+  const isGameReady =
+    isConfigured &&
+    !loading &&
+    !needsAuth &&
+    !sessionInvalid &&
+    Boolean(session?.access_token) &&
+    Boolean(gameId) &&
+    Boolean(gameMeta) &&
+    Boolean(boardPack?.tiles?.length) &&
+    Boolean(gameState) &&
+    players.length > 0 &&
+    initialSnapshotReady;
+  const canShowLoadingScreen =
+    isConfigured && Boolean(gameId) && !needsAuth && !gameMetaError;
+  const shouldShowLoadingScreen =
+    canShowLoadingScreen && (!isGameReady || !minLoadingElapsed);
   const currentPlayer = players.find(
     (player) => player.id === gameState?.current_player_id,
   );
@@ -5917,6 +5979,107 @@ export default function PlayPage() {
     session,
   ]);
 
+  if (!isConfigured) {
+    return (
+      <PageShell
+        title="Player Console"
+        subtitle="Mobile-first tools for wallet, assets, actions, and trades."
+      >
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to see
+          live game updates.
+        </div>
+      </PageShell>
+    );
+  }
+
+  if (needsAuth) {
+    return (
+      <PageShell
+        title="Player Console"
+        subtitle="Mobile-first tools for wallet, assets, actions, and trades."
+      >
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          <p className="font-medium">Please sign in again to load this game.</p>
+          <button
+            className="mt-3 rounded-full bg-amber-900 px-4 py-2 text-xs font-semibold text-white"
+            type="button"
+            onClick={handleSignInAgain}
+          >
+            Please sign in again
+          </button>
+        </div>
+      </PageShell>
+    );
+  }
+
+  if (!gameId) {
+    return (
+      <PageShell
+        title="Player Console"
+        subtitle="Mobile-first tools for wallet, assets, actions, and trades."
+      >
+        <div className="rounded-2xl border border-neutral-200 bg-white p-5 text-sm text-neutral-600">
+          <p className="font-semibold text-neutral-900">No active game.</p>
+          <p className="mt-2 text-sm text-neutral-500">
+            Head back to the lobby to join or start a new session.
+          </p>
+          <button
+            className="mt-4 rounded-full bg-neutral-900 px-4 py-2 text-xs font-semibold text-white"
+            type="button"
+            onClick={() => router.push("/")}
+          >
+            Back to home
+          </button>
+        </div>
+      </PageShell>
+    );
+  }
+
+  if (gameMetaError) {
+    return (
+      <PageShell
+        title="Player Console"
+        subtitle="Mobile-first tools for wallet, assets, actions, and trades."
+      >
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-900">
+          {gameMetaError}
+        </div>
+      </PageShell>
+    );
+  }
+
+  if (shouldShowLoadingScreen) {
+    return (
+      <PageShell
+        title="Player Console"
+        subtitle="Mobile-first tools for wallet, assets, actions, and trades."
+      >
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-neutral-50">
+          <div className="flex flex-col items-center gap-4 text-center">
+            <Image
+              src="/icons/loading_screen.svg"
+              alt="Preparing the board"
+              width={240}
+              height={240}
+              style={{
+                filter:
+                  "saturate(0.75) contrast(0.95) brightness(0.98)",
+                opacity: 0.95,
+              }}
+            />
+            <div className="flex flex-col items-center gap-2">
+              <p className="text-sm font-medium text-neutral-600">
+                Preparing the board…
+              </p>
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-neutral-300 border-t-neutral-600" />
+            </div>
+          </div>
+        </div>
+      </PageShell>
+    );
+  }
+
   return (
     <PageShell
       title="Player Console"
@@ -5943,19 +6106,6 @@ export default function PlayPage() {
         </div>
       }
     >
-      {!isConfigured ? (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-          Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to see
-          live game updates.
-        </div>
-      ) : null}
-
-      {loading ? (
-        <div className="rounded-2xl border bg-white p-5 text-sm text-neutral-500">
-          Loading player console…
-        </div>
-      ) : null}
-
       {notice ? (
         <div className="rounded-2xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
           {notice}
@@ -5965,25 +6115,6 @@ export default function PlayPage() {
       {isPandemicSkipPending ? (
         <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-900">
           Pandemic: your next roll is skipped.
-        </div>
-      ) : null}
-
-      {needsAuth ? (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-          <p className="font-medium">Please sign in again to load this game.</p>
-          <button
-            className="mt-3 rounded-full bg-amber-900 px-4 py-2 text-xs font-semibold text-white"
-            type="button"
-            onClick={handleSignInAgain}
-          >
-            Please sign in again
-          </button>
-        </div>
-      ) : null}
-
-      {gameMetaError ? (
-        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-900">
-          {gameMetaError}
         </div>
       ) : null}
 
