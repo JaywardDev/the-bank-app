@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getConfigErrors, SITE_URL } from "@/lib/env";
+import { getConfigErrors } from "@/lib/env";
 import { boardPacks, defaultBoardPackId } from "@/lib/boardPacks";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 
@@ -413,11 +413,23 @@ export default function Home() {
         aria-hidden="true"
       />
       <div className="relative z-20 w-full max-w-md space-y-6">
-        <header className="space-y-2">
-          <h1 className="text-2xl font-semibold text-neutral-900">The Bank</h1>
-          <p className="text-sm text-neutral-600">
-            A strategy board game about money, decision-making, and managing finances.
-          </p>
+        <header className="flex items-start justify-between gap-4">
+          <div className="space-y-2">
+            <h1 className="text-2xl font-semibold text-neutral-900">The Bank</h1>
+            <p className="text-sm text-neutral-600">
+              A high-stakes table game of deals, risks, and fortune.
+            </p>
+          </div>
+          {session ? (
+            <button
+              className="text-xs font-medium text-neutral-500 hover:text-neutral-900"
+              type="button"
+              onClick={handleSignOut}
+              disabled={loadingAction === "signout"}
+            >
+              Sign out
+            </button>
+          ) : null}
         </header>
 
         {hasConfigErrors ? (
@@ -431,58 +443,44 @@ export default function Home() {
           </div>
         ) : null}
 
-        <section className="space-y-3 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-4 shadow-[0_10px_24px_rgba(34,21,10,0.12)]">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-base font-semibold">Player session</h2>
+        {!session ? (
+          <section className="space-y-3 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-4 shadow-[0_10px_24px_rgba(34,21,10,0.12)]">
+            <div className="space-y-1">
+              <h2 className="text-base font-semibold">Sign in</h2>
               <p className="text-sm text-neutral-500">
-                Sign in to create or join a table.
+                Use a magic link to continue.
               </p>
             </div>
-            {session ? (
-              <button
-                className="text-xs font-medium text-neutral-500 hover:text-neutral-900"
-                type="button"
-                onClick={handleSignOut}
-                disabled={loadingAction === "signout"}
-              >
-                Sign out
-              </button>
-            ) : null}
-          </div>
 
-          {authLoading ? (
-            <p className="text-sm text-neutral-500">Checking session…</p>
-          ) : session ? (
-            <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-3 text-sm text-emerald-900">
-              Signed in as <strong>{session.user.email ?? "player"}</strong>.
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <label className="text-xs font-medium uppercase text-neutral-500">
-                Email for magic link
-              </label>
-              <input
-                className="w-full rounded-xl border border-amber-200/70 bg-[#F4EFE7] px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-500 focus-visible:border-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
-                type="email"
-                placeholder="you@example.com"
-                value={authEmail}
-                onChange={(event) => setAuthEmail(event.target.value)}
-              />
-              <button
-                className="w-full rounded-xl bg-gradient-to-b from-neutral-900 to-neutral-800 px-4 py-2 text-sm font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_8px_18px_rgba(29,20,12,0.35)] transition active:translate-y-0.5 active:shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_4px_10px_rgba(29,20,12,0.3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[#FBFAF7] disabled:cursor-not-allowed disabled:opacity-60"
-                type="button"
-                onClick={handleSendMagicLink}
-                disabled={loadingAction === "auth" || hasConfigErrors}
-              >
-                {loadingAction === "auth" ? "Sending…" : "Send magic link"}
-              </button>
-            </div>
-          )}
-        </section>
+            {authLoading ? (
+              <p className="text-sm text-neutral-500">Checking session…</p>
+            ) : (
+              <div className="space-y-2">
+                <label className="text-xs font-medium uppercase text-neutral-500">
+                  Email
+                </label>
+                <input
+                  className="w-full rounded-xl border border-amber-200/70 bg-[#F4EFE7] px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-500 focus-visible:border-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
+                  type="email"
+                  placeholder="you@example.com"
+                  value={authEmail}
+                  onChange={(event) => setAuthEmail(event.target.value)}
+                />
+                <button
+                  className="w-full rounded-xl bg-gradient-to-b from-neutral-900 to-neutral-800 px-4 py-2 text-sm font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_8px_18px_rgba(29,20,12,0.35)] transition active:translate-y-0.5 active:shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_4px_10px_rgba(29,20,12,0.3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[#FBFAF7] disabled:cursor-not-allowed disabled:opacity-60"
+                  type="button"
+                  onClick={handleSendMagicLink}
+                  disabled={loadingAction === "auth" || hasConfigErrors}
+                >
+                  {loadingAction === "auth" ? "Sending…" : "Send magic link"}
+                </button>
+              </div>
+            )}
+          </section>
+        ) : null}
 
         <section className="space-y-3 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-4 shadow-[0_10px_24px_rgba(34,21,10,0.12)]">
-          <h2 className="text-base font-semibold">Player details</h2>
+          <h2 className="text-base font-semibold">Player</h2>
           <div className="space-y-2">
             <label className="text-xs font-medium uppercase text-neutral-500">
               Display name
@@ -498,9 +496,9 @@ export default function Home() {
         </section>
 
         <section className="space-y-3 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-4 shadow-[0_10px_24px_rgba(34,21,10,0.12)]">
-          <h2 className="text-base font-semibold">Create a game</h2>
+          <h2 className="text-base font-semibold">Host a table</h2>
           <p className="text-sm text-neutral-500">
-            Host a new table and share the join code with players.
+            Start a table and share the code with players.
           </p>
           <div className="space-y-2">
             <label className="text-xs font-medium uppercase text-neutral-500">
@@ -524,12 +522,12 @@ export default function Home() {
             onClick={handleCreateGame}
             disabled={!session || loadingAction === "create"}
           >
-            {loadingAction === "create" ? "Creating…" : "Create game"}
+            {loadingAction === "create" ? "Creating…" : "Host table"}
           </button>
         </section>
 
         <section className="space-y-3 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-4 shadow-[0_10px_24px_rgba(34,21,10,0.12)]">
-          <h2 className="text-base font-semibold">Join a game</h2>
+          <h2 className="text-base font-semibold">Join a table</h2>
           <p className="text-sm text-neutral-500">
             Enter the code from the host to join their lobby.
           </p>
@@ -546,7 +544,7 @@ export default function Home() {
             onClick={handleJoinGame}
             disabled={!session || loadingAction === "join"}
           >
-            {loadingAction === "join" ? "Joining…" : "Join game"}
+            {loadingAction === "join" ? "Joining…" : "Join table"}
           </button>
         </section>
 
@@ -594,17 +592,6 @@ export default function Home() {
           </div>
         ) : null}
 
-        <footer className="space-y-1 text-xs text-neutral-500">
-          <div>
-            Phase 3: Supabase auth + create/join scaffold • Bank-authoritative
-            logic coming next
-          </div>
-          {!hasConfigErrors ? (
-            <div className="text-[10px] text-neutral-400">
-              Config OK • SITE_URL: {SITE_URL}
-            </div>
-          ) : null}
-        </footer>
       </div>
     </main>
   );
