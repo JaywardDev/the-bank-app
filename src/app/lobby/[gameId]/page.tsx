@@ -42,6 +42,7 @@ export default function LobbyPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [copyNotice, setCopyNotice] = useState<string | null>(null);
   const latestSessionRef = useRef<SupabaseSession | null>(null);
   const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshInFlightRef = useRef(false);
@@ -464,8 +465,29 @@ export default function LobbyPage() {
     session && activeGame?.created_by && session.user.id === activeGame.created_by,
   );
 
+  const handleCopyCode = useCallback(async () => {
+    if (!activeGame?.join_code) {
+      return;
+    }
+
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(activeGame.join_code);
+        setCopyNotice("Copied!");
+      } else {
+        setCopyNotice("Select and copy the code.");
+      }
+    } catch (error) {
+      setCopyNotice("Unable to copy. Please select the code.");
+    }
+
+    window.setTimeout(() => {
+      setCopyNotice(null);
+    }, 2000);
+  }, [activeGame?.join_code]);
+
   return (
-    <main className="relative min-h-dvh bg-neutral-50 p-6 flex items-start justify-center">
+    <main className="lobby-skin relative flex min-h-dvh items-start justify-center bg-neutral-50 p-6">
       <div
         className="pointer-events-none absolute inset-0 z-0 bg-[url('/icons/lobby_page.svg')] bg-cover bg-center bg-fixed"
         aria-hidden="true"
@@ -475,11 +497,13 @@ export default function LobbyPage() {
         aria-hidden="true"
       />
       <div className="relative z-20 w-full max-w-md space-y-6">
-        <header className="space-y-2">
-          <h1 className="text-2xl font-semibold text-neutral-900">Game lobby</h1>
-          <p className="text-sm text-neutral-600">
-            Share the join code and wait for the host to start.
-          </p>
+        <header className="rounded-3xl border border-amber-200/80 bg-[#f8f2e7]/95 px-5 py-4 shadow-[0_12px_30px_rgba(37,25,10,0.18)] backdrop-blur">
+          <div className="space-y-1">
+            <h1 className="text-2xl font-semibold text-neutral-900">Game lobby</h1>
+            <p className="text-sm text-neutral-700">
+              Share the join code and wait for the host to start.
+            </p>
+          </div>
         </header>
 
         {hasConfigErrors ? (
@@ -494,41 +518,31 @@ export default function LobbyPage() {
         ) : null}
 
         {authLoading ? (
-          <div className="rounded-2xl border bg-white p-5 text-sm text-neutral-500">
+          <div className="rounded-2xl border border-amber-200/70 bg-[#f8f2e7] p-5 text-sm text-neutral-600 shadow-[0_10px_24px_rgba(37,25,10,0.14)]">
             Loading lobby…
           </div>
         ) : null}
 
         {activeGame ? (
-          <section className="space-y-3 rounded-2xl border bg-white p-4 shadow-sm">
-            <div className="flex items-center justify-between">
+          <section className="space-y-4 rounded-3xl border border-amber-200/70 bg-[#f8f2e7] p-5 shadow-[0_14px_34px_rgba(37,25,10,0.18)]">
+            <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 className="text-base font-semibold">Waiting room</h2>
-                <p className="text-sm text-neutral-500">
+                <p className="text-sm text-neutral-600">
                   Invite players before kicking off the game.
                 </p>
               </div>
               <button
-                className="text-xs font-medium text-neutral-500 hover:text-neutral-900"
+                className="rounded-md text-xs font-semibold text-neutral-500 transition hover:text-neutral-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-700"
                 type="button"
                 onClick={handleLeaveLobby}
               >
                 Leave
               </button>
             </div>
-            {isHost ? (
-              <button
-                className="w-full rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-900 hover:border-rose-300 disabled:cursor-not-allowed disabled:border-rose-100 disabled:text-rose-300"
-                type="button"
-                onClick={handleEndSession}
-                disabled={loadingAction === "end"}
-              >
-                {loadingAction === "end" ? "Ending…" : "End session"}
-              </button>
-            ) : null}
             {isHost && activeGame.status === "lobby" ? (
               <button
-                className="w-full rounded-xl bg-neutral-900 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-400"
+                className="w-full rounded-xl bg-neutral-900 px-4 py-3 text-sm font-semibold text-white shadow-[0_6px_16px_rgba(15,23,42,0.25)] transition hover:bg-neutral-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900 disabled:cursor-not-allowed disabled:bg-neutral-400"
                 type="button"
                 onClick={handleStartGame}
                 disabled={loadingAction === "start"}
@@ -536,21 +550,43 @@ export default function LobbyPage() {
                 {loadingAction === "start" ? "Starting…" : "Start game"}
               </button>
             ) : null}
+            {isHost ? (
+              <button
+                className="w-full rounded-xl border border-rose-200/80 bg-rose-50/80 px-4 py-3 text-sm font-semibold text-rose-800 transition hover:border-rose-300 hover:bg-rose-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-400 disabled:cursor-not-allowed disabled:border-rose-100 disabled:text-rose-300"
+                type="button"
+                onClick={handleEndSession}
+                disabled={loadingAction === "end"}
+              >
+                {loadingAction === "end" ? "Ending…" : "End session"}
+              </button>
+            ) : null}
             <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-sm">
-              <div className="text-xs uppercase text-neutral-500">Join code</div>
-              <div className="text-lg font-semibold tracking-[0.3em] text-neutral-900">
-                {activeGame.join_code}
+              <div className="flex items-center justify-between gap-3 text-xs uppercase text-neutral-500">
+                <span>Join code</span>
+                <button
+                  className="rounded-md border border-neutral-200 bg-white px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-neutral-700 transition hover:border-neutral-300 hover:bg-neutral-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-700"
+                  type="button"
+                  onClick={handleCopyCode}
+                >
+                  Copy
+                </button>
               </div>
+              <div className="mt-2 text-lg font-semibold uppercase tracking-[0.4em] text-neutral-900">
+                <span className="select-all font-mono">{activeGame.join_code}</span>
+              </div>
+              {copyNotice ? (
+                <div className="mt-1 text-xs text-neutral-500">{copyNotice}</div>
+              ) : null}
             </div>
             <div className="space-y-2">
               <div className="text-xs uppercase text-neutral-500">
-                Players ({players.length})
+                Seated players ({players.length})
               </div>
               <ul className="space-y-2">
                 {players.map((player) => (
                   <li
                     key={player.id}
-                    className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm"
+                    className="flex items-center justify-between rounded-xl border border-neutral-200/80 bg-white/80 px-3 py-2 text-sm text-neutral-700 shadow-[0_6px_12px_rgba(37,25,10,0.08)]"
                   >
                     {player.display_name ?? "Player"}
                   </li>
