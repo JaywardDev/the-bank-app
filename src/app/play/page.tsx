@@ -1921,8 +1921,10 @@ export default function PlayPage() {
     eventVersion: number;
   } | null>(null);
   const [isGoToJailAcknowledging, setIsGoToJailAcknowledging] = useState(false);
-  const [loadingStartAt, setLoadingStartAt] = useState<number | null>(null);
-  const [minLoadingElapsed, setMinLoadingElapsed] = useState(false);
+  const [introStartedAt, setIntroStartedAt] = useState<number | null>(null);
+  const [introElapsedMs, setIntroElapsedMs] = useState(0);
+  const [introMinElapsed, setIntroMinElapsed] = useState(false);
+  const [introDismissed, setIntroDismissed] = useState(false);
   const expandedBoardContainerRef = useRef<HTMLDivElement | null>(null);
   const expandedBoardRef = useRef<HTMLDivElement | null>(null);
   const expandedTileSheetRef = useRef<HTMLDivElement | null>(null);
@@ -1946,7 +1948,7 @@ export default function PlayPage() {
   const tradeConfirmSectionRef = useRef<HTMLElement | null>(null);
   const lastGoToJailAckVersionRef = useRef<number | null>(null);
   const goToJailOkButtonRef = useRef<HTMLButtonElement | null>(null);
-  const minLoadingMs = 600;
+  const minIntroMs = 5000;
 
   const isConfigured = useMemo(() => supabaseClient.isConfigured(), []);
   const latestRollEvent = useMemo(
@@ -4170,8 +4172,10 @@ export default function PlayPage() {
   }, []);
 
   useEffect(() => {
-    setLoadingStartAt(null);
-    setMinLoadingElapsed(false);
+    setIntroStartedAt(null);
+    setIntroElapsedMs(0);
+    setIntroMinElapsed(false);
+    setIntroDismissed(false);
   }, [gameId]);
 
   const isInProgress = gameMeta?.status === "in_progress";
@@ -4188,48 +4192,60 @@ export default function PlayPage() {
     Boolean(gameState) &&
     players.length > 0 &&
     initialSnapshotReady;
-  const canShowLoadingScreen =
+  const canShowIntro =
     isConfigured && Boolean(gameId) && !needsAuth && !gameMetaError;
-  const shouldShowLoadingScreen =
-    canShowLoadingScreen && (!isGameReady || !minLoadingElapsed);
+  const shouldShowIntro = canShowIntro && !introDismissed;
+  const introProgress = Math.min((introElapsedMs / minIntroMs) * 100, 100);
 
   useEffect(() => {
-    if (!canShowLoadingScreen) {
-      setLoadingStartAt(null);
-      setMinLoadingElapsed(false);
+    if (!canShowIntro) {
+      setIntroStartedAt(null);
+      setIntroElapsedMs(0);
+      setIntroMinElapsed(false);
+      setIntroDismissed(false);
       return;
     }
 
-    if (isGameReady) {
-      if (loadingStartAt === null) {
-        setMinLoadingElapsed(true);
+    if (introStartedAt === null) {
+      setIntroStartedAt(Date.now());
+      setIntroElapsedMs(0);
+      setIntroMinElapsed(false);
+    }
+  }, [canShowIntro, introStartedAt]);
+
+  useEffect(() => {
+    if (!canShowIntro || introStartedAt === null || introDismissed) {
+      return;
+    }
+
+    let animationFrameId = 0;
+    const updateElapsed = () => {
+      const elapsed = Date.now() - introStartedAt;
+      setIntroElapsedMs(elapsed);
+      if (elapsed >= minIntroMs) {
+        setIntroMinElapsed(true);
+      } else {
+        animationFrameId = window.requestAnimationFrame(updateElapsed);
       }
-      return;
-    }
+    };
 
-    if (loadingStartAt === null) {
-      setLoadingStartAt(Date.now());
-      setMinLoadingElapsed(false);
-    }
-  }, [canShowLoadingScreen, isGameReady, loadingStartAt]);
+    animationFrameId = window.requestAnimationFrame(updateElapsed);
+
+    return () => {
+      window.cancelAnimationFrame(animationFrameId);
+    };
+  }, [canShowIntro, introDismissed, introStartedAt, minIntroMs]);
 
   useEffect(() => {
-    if (loadingStartAt === null || minLoadingElapsed) {
+    if (introStartedAt === null || introMinElapsed) {
       return;
     }
 
-    const elapsed = Date.now() - loadingStartAt;
-    if (elapsed >= minLoadingMs) {
-      setMinLoadingElapsed(true);
+    if (introElapsedMs >= minIntroMs) {
+      setIntroMinElapsed(true);
       return;
     }
-
-    const timeout = setTimeout(() => {
-      setMinLoadingElapsed(true);
-    }, minLoadingMs - elapsed);
-
-    return () => clearTimeout(timeout);
-  }, [loadingStartAt, minLoadingElapsed, minLoadingMs]);
+  }, [introElapsedMs, introMinElapsed, introStartedAt, minIntroMs]);
 
   useEffect(() => {
     if (!sessionInvalid) {
@@ -6050,30 +6066,69 @@ export default function PlayPage() {
     );
   }
 
-  if (shouldShowLoadingScreen) {
+  if (shouldShowIntro) {
     return (
       <PageShell
         title="Player Console"
         subtitle="Mobile-first tools for wallet, assets, actions, and trades."
       >
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-neutral-50">
-          <div className="flex flex-col items-center gap-4 text-center">
+        <div className="fixed inset-0 z-40 overflow-hidden text-white">
+          <div className="absolute inset-0">
             <Image
               src="/icons/loading_screen.svg"
-              alt="Preparing the board"
-              width={240}
-              height={240}
+              alt="Game boot background"
+              fill
+              sizes="100vw"
+              className="object-cover object-center"
               style={{
-                filter:
-                  "saturate(0.75) contrast(0.95) brightness(0.98)",
-                opacity: 0.95,
+                filter: "saturate(0.75) contrast(0.95) brightness(0.92)",
+                opacity: 0.98,
               }}
             />
-            <div className="flex flex-col items-center gap-2">
-              <p className="text-sm font-medium text-neutral-600">
-                Preparing the board…
+            <div className="absolute inset-0 bg-neutral-900/35" />
+          </div>
+          <div className="relative flex h-full flex-col items-center justify-between px-6 py-12 text-center">
+            <div className="flex flex-col items-center gap-3">
+              <p className="text-xs uppercase tracking-[0.35em] text-white/70">
+                Game Boot
               </p>
-              <div className="h-5 w-5 animate-spin rounded-full border-2 border-neutral-300 border-t-neutral-600" />
+              <p className="text-2xl font-semibold text-white sm:text-3xl">
+                Warming up the board
+              </p>
+              <p className="text-sm text-white/70">
+                Syncing players, assets, and turn state.
+              </p>
+            </div>
+
+            <div className="flex w-full max-w-md flex-col items-center gap-4">
+              <div className="h-2 w-full overflow-hidden rounded-full bg-white/20">
+                <div
+                  className="h-full rounded-full bg-emerald-300 transition-[width] duration-100 ease-linear"
+                  style={{ width: `${introProgress}%` }}
+                />
+              </div>
+              {introMinElapsed ? (
+                <div className="flex flex-col items-center gap-2">
+                  {!isGameReady ? (
+                    <p className="text-xs text-white/75">Still syncing…</p>
+                  ) : null}
+                  <button
+                    className="rounded-full bg-white/90 px-6 py-2 text-sm font-semibold text-neutral-900 transition disabled:cursor-not-allowed disabled:bg-white/50 disabled:text-neutral-500"
+                    type="button"
+                    disabled={!isGameReady}
+                    onClick={() => {
+                      if (!isGameReady) {
+                        return;
+                      }
+                      setIntroDismissed(true);
+                    }}
+                  >
+                    Start
+                  </button>
+                </div>
+              ) : (
+                <p className="text-xs text-white/70">Loading intro…</p>
+              )}
             </div>
           </div>
         </div>
