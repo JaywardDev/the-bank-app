@@ -24,3 +24,19 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+@keyframes player-ready-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    box-shadow: 0 10px 20px rgba(15, 23, 42, 0.12);
+  }
+  50% {
+    transform: scale(1.03);
+    box-shadow: 0 14px 28px rgba(15, 23, 42, 0.16);
+  }
+}
+
+.player-ready-pulse {
+  animation: player-ready-pulse 3.2s ease-in-out infinite;
+}

@@ -708,6 +708,7 @@ const FloatingTurnActions = ({
   const isEnding = actionLoading === "END_TURN";
   const rollEmphasized = canRoll && !isRolling;
   const endEmphasized = canEndTurn && !isEnding;
+  const shouldPulse = isVisible && actionLoading === null;
 
   return (
     <div className="fixed bottom-20 right-6 z-20 flex flex-col items-center gap-3">
@@ -716,7 +717,7 @@ const FloatingTurnActions = ({
           rollEmphasized
             ? "border-neutral-900 bg-neutral-900 text-white shadow-neutral-900/30"
             : "border-neutral-200 bg-neutral-100 text-neutral-400 shadow-neutral-200/40"
-        }`}
+        } ${shouldPulse ? "player-ready-pulse" : ""}`}
         type="button"
         onClick={onRollDice}
         disabled={!canRoll || isRolling}
@@ -741,7 +742,7 @@ const FloatingTurnActions = ({
           endEmphasized
             ? "border-emerald-600 bg-emerald-600 text-white shadow-emerald-600/30"
             : "border-neutral-200 bg-neutral-100 text-neutral-400 shadow-neutral-200/40"
-        }`}
+        } ${shouldPulse ? "player-ready-pulse" : ""}`}
         type="button"
         onClick={onEndTurn}
         disabled={!canEndTurn || isEnding}
@@ -5998,10 +5999,7 @@ export default function PlayPage() {
 
   if (!isConfigured) {
     return (
-      <PageShell
-        title="Player Console"
-        subtitle="Mobile-first tools for wallet, assets, actions, and trades."
-      >
+      <PageShell title="Player Console">
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
           Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to see
           live game updates.
@@ -6012,10 +6010,7 @@ export default function PlayPage() {
 
   if (needsAuth) {
     return (
-      <PageShell
-        title="Player Console"
-        subtitle="Mobile-first tools for wallet, assets, actions, and trades."
-      >
+      <PageShell title="Player Console">
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
           <p className="font-medium">Please sign in again to load this game.</p>
           <button
@@ -6032,10 +6027,7 @@ export default function PlayPage() {
 
   if (!gameId) {
     return (
-      <PageShell
-        title="Player Console"
-        subtitle="Mobile-first tools for wallet, assets, actions, and trades."
-      >
+      <PageShell title="Player Console">
         <div className="rounded-2xl border border-neutral-200 bg-white p-5 text-sm text-neutral-600">
           <p className="font-semibold text-neutral-900">No active game.</p>
           <p className="mt-2 text-sm text-neutral-500">
@@ -6055,10 +6047,7 @@ export default function PlayPage() {
 
   if (gameMetaError) {
     return (
-      <PageShell
-        title="Player Console"
-        subtitle="Mobile-first tools for wallet, assets, actions, and trades."
-      >
+      <PageShell title="Player Console">
         <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-900">
           {gameMetaError}
         </div>
@@ -6068,10 +6057,7 @@ export default function PlayPage() {
 
   if (shouldShowIntro) {
     return (
-      <PageShell
-        title="Player Console"
-        subtitle="Mobile-first tools for wallet, assets, actions, and trades."
-      >
+      <PageShell title="Player Console">
         <div className="fixed inset-0 z-40 overflow-hidden text-white">
           <div className="absolute inset-0">
             <Image
@@ -6132,12 +6118,11 @@ export default function PlayPage() {
   return (
     <PageShell
       title="Player Console"
-      subtitle="Mobile-first tools for wallet, assets, actions, and trades."
       headerActions={
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 text-[11px] font-medium">
           {isHost ? (
             <button
-              className="text-xs font-medium text-rose-600 hover:text-rose-700"
+              className="text-rose-500/80 transition hover:text-rose-600"
               type="button"
               onClick={handleEndSession}
               disabled={actionLoading === "END_GAME"}
@@ -6146,7 +6131,7 @@ export default function PlayPage() {
             </button>
           ) : null}
           <button
-            className="text-xs font-medium text-neutral-500 hover:text-neutral-900"
+            className="text-neutral-400 transition hover:text-neutral-700"
             type="button"
             onClick={handleLeaveTable}
           >
@@ -6167,14 +6152,11 @@ export default function PlayPage() {
         </div>
       ) : null}
 
-      <section className="rounded-2xl border bg-white p-4 shadow-sm space-y-4">
+      <section className="rounded-2xl bg-white/90 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.08)] ring-1 ring-black/5 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
-              View mode
-            </p>
-            <p className="text-sm text-neutral-600">
-              Wallet controls with a live mini-board projection.
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-400">
+              MINI-BOARD
             </p>
             <p className="text-xs text-neutral-400">
               Board pack: {boardPack?.displayName ?? "Unknown"}
@@ -6254,9 +6236,11 @@ export default function PlayPage() {
       <section className="space-y-4">
         <div className="relative">
           <div
-            className={`rounded-2xl border bg-white p-5 shadow-sm space-y-4 ${
-              isAuctionActive ? "pointer-events-none opacity-50" : ""
-            }`}
+            className={`rounded-2xl bg-white/95 p-5 space-y-4 ring-1 transition ${
+              isMyTurn
+                ? "ring-emerald-200/80 shadow-[0_16px_36px_rgba(16,185,129,0.18)]"
+                : "ring-black/5 shadow-[0_10px_24px_rgba(15,23,42,0.08)]"
+            } ${isAuctionActive ? "pointer-events-none opacity-50" : ""}`}
           >
           <div className="flex items-start justify-between">
             <div>
@@ -7377,7 +7361,7 @@ export default function PlayPage() {
         ) : null}
         </div>
 
-        <div className="rounded-2xl border bg-white p-5 shadow-sm space-y-4">
+        <div className="rounded-2xl bg-white/95 p-5 shadow-[0_12px_30px_rgba(15,23,42,0.08)] ring-1 ring-black/5 space-y-4">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
@@ -7406,7 +7390,7 @@ export default function PlayPage() {
         </div>
       </section>
 
-      <section className="rounded-2xl border bg-white p-5 shadow-sm space-y-4">
+      <section className="rounded-2xl bg-white/95 p-5 shadow-[0_12px_30px_rgba(15,23,42,0.08)] ring-1 ring-black/5 space-y-4">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
             Loan with Collateral
@@ -8001,7 +7985,7 @@ export default function PlayPage() {
 
       <section
         ref={tradeConfirmSectionRef}
-        className="rounded-2xl border bg-white p-5 shadow-sm space-y-3"
+        className="rounded-2xl bg-white/95 p-5 shadow-[0_12px_30px_rgba(15,23,42,0.08)] ring-1 ring-black/5 space-y-3"
       >
         <div>
           <div className="flex flex-wrap items-center gap-2">
