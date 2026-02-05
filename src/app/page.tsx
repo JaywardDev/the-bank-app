@@ -420,13 +420,6 @@ export default function Home() {
               A high-stakes table game of deals, risks, and fortune.
             </p>
           </div>
-          <button
-            className="rounded-xl border border-amber-300/70 bg-[#F7F2EA]/80 px-3 py-2 text-xs font-semibold text-neutral-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] transition hover:bg-[#F1E9DD] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
-            type="button"
-            onClick={() => router.push("/watch")}
-          >
-            Watch Game
-          </button>
           {session ? (
             <button
               className="text-xs font-medium text-neutral-500 hover:text-neutral-900"
@@ -451,42 +444,57 @@ export default function Home() {
         ) : null}
 
         {!session ? (
-          <section className="space-y-3 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-4 shadow-[0_10px_24px_rgba(34,21,10,0.12)]">
-            <div className="space-y-1">
-              <h2 className="text-base font-semibold">Sign in</h2>
-              <p className="text-sm text-neutral-500">
-                Confirm your seat at the table.
-              </p>
-            </div>
-
-            {authLoading ? (
-              <p className="text-sm text-neutral-500">Checking session…</p>
-            ) : (
-              <div className="space-y-2">
-                <label className="text-xs font-medium uppercase text-neutral-500">
-                  Email
-                </label>
-                <input
-                  className="w-full rounded-xl border border-amber-200/70 bg-[#F4EFE7] px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-500 focus-visible:border-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
-                  type="email"
-                  placeholder="you@example.com"
-                  value={authEmail}
-                  onChange={(event) => setAuthEmail(event.target.value)}
-                />
-                <p className="text-xs text-neutral-500">
-                  We&apos;ll send a confirmation link to your email.
+          <div className="space-y-4">
+            <section className="space-y-3 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-4 shadow-[0_10px_24px_rgba(34,21,10,0.12)]">
+              <div className="space-y-1">
+                <h2 className="text-base font-semibold">Sign in</h2>
+                <p className="text-sm text-neutral-500">
+                  Confirm your seat at the table.
                 </p>
-                <button
-                  className="w-full rounded-xl bg-gradient-to-b from-neutral-900 to-neutral-800 px-4 py-2 text-sm font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_8px_18px_rgba(29,20,12,0.35)] transition active:translate-y-0.5 active:shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_4px_10px_rgba(29,20,12,0.3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[#FBFAF7] disabled:cursor-not-allowed disabled:opacity-60"
-                  type="button"
-                  onClick={handleSendMagicLink}
-                  disabled={loadingAction === "auth" || hasConfigErrors}
-                >
-                  {loadingAction === "auth" ? "Sending…" : "Confirm email"}
-                </button>
               </div>
-            )}
-          </section>
+
+              {authLoading ? (
+                <p className="text-sm text-neutral-500">Checking session…</p>
+              ) : (
+                <div className="space-y-2">
+                  <label className="text-xs font-medium uppercase text-neutral-500">
+                    Email
+                  </label>
+                  <input
+                    className="w-full rounded-xl border border-amber-200/70 bg-[#F4EFE7] px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-500 focus-visible:border-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
+                    type="email"
+                    placeholder="you@example.com"
+                    value={authEmail}
+                    onChange={(event) => setAuthEmail(event.target.value)}
+                  />
+                  <p className="text-xs text-neutral-500">
+                    We&apos;ll send a confirmation link to your email.
+                  </p>
+                  <button
+                    className="w-full rounded-xl bg-gradient-to-b from-neutral-900 to-neutral-800 px-4 py-2 text-sm font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_8px_18px_rgba(29,20,12,0.35)] transition active:translate-y-0.5 active:shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_4px_10px_rgba(29,20,12,0.3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[#FBFAF7] disabled:cursor-not-allowed disabled:opacity-60"
+                    type="button"
+                    onClick={handleSendMagicLink}
+                    disabled={loadingAction === "auth" || hasConfigErrors}
+                  >
+                    {loadingAction === "auth" ? "Sending…" : "Confirm email"}
+                  </button>
+                </div>
+              )}
+            </section>
+
+            <section className="space-y-2 rounded-2xl border border-amber-200/80 bg-[#F7F2EA]/90 p-4 shadow-[0_8px_18px_rgba(34,21,10,0.1)]">
+              <button
+                className="w-full rounded-xl border border-amber-300/70 bg-[#F7F2EA] px-4 py-2 text-sm font-semibold text-neutral-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] transition hover:bg-[#F1E9DD] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
+                type="button"
+                onClick={() => router.push("/watch")}
+              >
+                Watch Game
+              </button>
+              <p className="text-xs text-neutral-600">
+                Display the projection board on another device using a join code.
+              </p>
+            </section>
+          </div>
         ) : null}
 
         {session ? (
