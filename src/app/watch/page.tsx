@@ -58,7 +58,15 @@ export default function WatchPage() {
   };
 
   return (
-    <main className="relative min-h-dvh bg-[#F6F1E8] p-6 flex items-start justify-center">
+    <main className="relative flex min-h-dvh items-start justify-center bg-[#F6F1E8] p-6">
+      <div
+        className="pointer-events-none absolute inset-0 z-0 bg-[url('/icons/home_page.svg')] bg-cover bg-center bg-fixed"
+        aria-hidden="true"
+      />
+      <div
+        className="pointer-events-none absolute inset-0 z-10 bg-neutral-950/30"
+        aria-hidden="true"
+      />
       <div className="relative z-20 w-full max-w-md space-y-6">
         <header className="space-y-2">
           <h1 className="text-2xl font-semibold text-neutral-900">Watch Game</h1>
@@ -67,7 +75,7 @@ export default function WatchPage() {
           </p>
         </header>
 
-        <section className="space-y-3 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-4 shadow-[0_10px_24px_rgba(34,21,10,0.12)]">
+        <section className="space-y-3 rounded-2xl border border-amber-100/80 bg-[#FBFAF7]/95 p-4 shadow-[0_12px_28px_rgba(20,12,6,0.22)]">
           <form className="space-y-3" onSubmit={handleSubmit}>
             <input
               className="w-full rounded-xl border border-amber-200/70 bg-[#F4EFE7] px-3 py-2 text-sm uppercase tracking-[0.3em] text-neutral-900 placeholder:text-neutral-500 focus-visible:border-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
@@ -92,7 +100,7 @@ export default function WatchPage() {
           </div>
         ) : null}
 
-        <Link className="inline-flex text-sm text-neutral-700 underline" href="/">
+        <Link className="inline-flex text-sm text-neutral-900 underline" href="/">
           Back to home
         </Link>
       </div>
