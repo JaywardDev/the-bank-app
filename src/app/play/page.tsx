@@ -6079,56 +6079,49 @@ export default function PlayPage() {
               alt="Game boot background"
               fill
               sizes="100vw"
-              className="object-cover object-center"
+              className="object-cover object-center transition-[filter,opacity] duration-700 ease-out"
               style={{
-                filter: "saturate(0.75) contrast(0.95) brightness(0.92)",
-                opacity: 0.98,
+                filter: introMinElapsed
+                  ? "saturate(1.02) contrast(1) brightness(1)"
+                  : "saturate(0.7) contrast(0.92) brightness(0.88)",
+                opacity: introMinElapsed ? 1 : 0.95,
               }}
             />
-            <div className="absolute inset-0 bg-neutral-900/35" />
+            <div
+              className="absolute inset-0 bg-neutral-900/35 transition-opacity duration-700 ease-out"
+              style={{ opacity: introMinElapsed ? 0.15 : 0.45 }}
+            />
           </div>
-          <div className="relative flex h-full flex-col items-center justify-between px-6 py-12 text-center">
-            <div className="flex flex-col items-center gap-3">
-              <p className="text-xs uppercase tracking-[0.35em] text-white/70">
-                Game Boot
-              </p>
-              <p className="text-2xl font-semibold text-white sm:text-3xl">
-                Warming up the board
-              </p>
-              <p className="text-sm text-white/70">
-                Syncing players, assets, and turn state.
-              </p>
-            </div>
-
+          <div className="relative flex h-full flex-col items-center justify-end gap-6 px-6 py-12 text-center">
             <div className="flex w-full max-w-md flex-col items-center gap-4">
-              <div className="h-2 w-full overflow-hidden rounded-full bg-white/20">
+              <div
+                className={`h-2 w-full overflow-hidden rounded-full bg-white/20 transition-opacity duration-500 ${
+                  introMinElapsed ? "opacity-60" : "opacity-100"
+                }`}
+              >
                 <div
                   className="h-full rounded-full bg-emerald-300 transition-[width] duration-100 ease-linear"
                   style={{ width: `${introProgress}%` }}
                 />
               </div>
+              <p className="text-xs text-white/75">
+                {introMinElapsed ? "Ready when you are." : "Loading intro…"}
+              </p>
               {introMinElapsed ? (
-                <div className="flex flex-col items-center gap-2">
-                  {!isGameReady ? (
-                    <p className="text-xs text-white/75">Still syncing…</p>
-                  ) : null}
-                  <button
-                    className="rounded-full bg-white/90 px-6 py-2 text-sm font-semibold text-neutral-900 transition disabled:cursor-not-allowed disabled:bg-white/50 disabled:text-neutral-500"
-                    type="button"
-                    disabled={!isGameReady}
-                    onClick={() => {
-                      if (!isGameReady) {
-                        return;
-                      }
-                      setIntroDismissed(true);
-                    }}
-                  >
-                    Start
-                  </button>
-                </div>
-              ) : (
-                <p className="text-xs text-white/70">Loading intro…</p>
-              )}
+                <button
+                  className="rounded-full bg-white/90 px-6 py-2 text-sm font-semibold text-neutral-900 transition hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/90 focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-900 disabled:cursor-not-allowed disabled:bg-white/50 disabled:text-neutral-500"
+                  type="button"
+                  disabled={!isGameReady}
+                  onClick={() => {
+                    if (!isGameReady) {
+                      return;
+                    }
+                    setIntroDismissed(true);
+                  }}
+                >
+                  Start
+                </button>
+              ) : null}
             </div>
           </div>
         </div>
