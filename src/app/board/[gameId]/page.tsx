@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useParams } from "next/navigation";
 import BoardLayoutShell from "@/app/components/BoardLayoutShell";
 import BoardDashboard from "@/app/components/BoardDashboard";
 import BoardSquare from "@/app/components/BoardSquare";
@@ -178,6 +179,8 @@ type BoardDisplayPageProps = {
 };
 
 export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
+  const routeParams = useParams<{ gameId: string }>();
+  const gameId = routeParams?.gameId ?? params.gameId;
   const [session, setSession] = useState<SupabaseSession | null>(null);
   const [gameMeta, setGameMeta] = useState<GameMeta | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
@@ -194,37 +197,37 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
   const loadPlayers = useCallback(
     async (accessToken?: string) => {
       const playerRows = await supabaseClient.fetchFromSupabase<Player[]>(
-        `players?select=id,user_id,display_name,created_at,position,is_eliminated,eliminated_at&game_id=eq.${params.gameId}&order=created_at.asc`,
+        `players?select=id,user_id,display_name,created_at,position,is_eliminated,eliminated_at&game_id=eq.${gameId}&order=created_at.asc`,
         { method: "GET" },
         accessToken,
       );
       setPlayers(playerRows);
     },
-    [params.gameId],
+    [gameId],
   );
 
   const loadGameState = useCallback(
     async (accessToken?: string) => {
       const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
-        `game_state?select=game_id,version,current_player_id,last_roll,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index&game_id=eq.${params.gameId}&limit=1`,
+        `game_state?select=game_id,version,current_player_id,last_roll,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index&game_id=eq.${gameId}&limit=1`,
         { method: "GET" },
         accessToken,
       );
       setGameState(stateRow ?? null);
     },
-    [params.gameId],
+    [gameId],
   );
 
   const loadEvents = useCallback(
     async (accessToken?: string) => {
       const eventRows = await supabaseClient.fetchFromSupabase<GameEvent[]>(
-        `game_events?select=id,event_type,payload,created_at,version&game_id=eq.${params.gameId}&order=version.desc&limit=12`,
+        `game_events?select=id,event_type,payload,created_at,version&game_id=eq.${gameId}&order=version.desc&limit=12`,
         { method: "GET" },
         accessToken,
       );
       setEvents(eventRows);
     },
-    [params.gameId],
+    [gameId],
   );
 
   const loadOwnership = useCallback(
@@ -232,7 +235,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
       const ownershipRows = await supabaseClient.fetchFromSupabase<
         OwnershipRow[]
       >(
-        `property_ownership?select=tile_index,owner_player_id,collateral_loan_id,purchase_mortgage_id,houses&game_id=eq.${params.gameId}`,
+        `property_ownership?select=tile_index,owner_player_id,collateral_loan_id,purchase_mortgage_id,houses&game_id=eq.${gameId}`,
         { method: "GET" },
         accessToken,
       );
@@ -249,7 +252,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
       }, {});
       setOwnershipByTile(mapped);
     },
-    [params.gameId],
+    [gameId],
   );
 
   const loadBoardData = useCallback(async () => {
@@ -270,7 +273,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ gameId: params.gameId }),
+        body: JSON.stringify({ gameId }),
       });
 
       if (!snapshotResponse.ok) {
@@ -311,7 +314,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
     } finally {
       setLoading(false);
     }
-  }, [isConfigured, params.gameId]);
+  }, [gameId, isConfigured]);
 
   useEffect(() => {
     void loadBoardData();
@@ -329,11 +332,11 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
       return;
     }
 
-    const channelName = `board-display:${params.gameId}`;
+    const channelName = `board-display:${gameId}`;
     if (DEBUG) {
       console.info("[Board][Realtime] create channel", {
         channel: channelName,
-        gameId: params.gameId,
+        gameId,
         hasAccessToken: Boolean(session?.access_token),
       });
     }
@@ -345,14 +348,14 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
           event: "*",
           schema: "public",
           table: "players",
-          filter: `game_id=eq.${params.gameId}`,
+          filter: `game_id=eq.${gameId}`,
         },
         async (payload) => {
           if (DEBUG) {
             console.info("[Board][Realtime] payload", {
               table: "players",
               eventType: payload.eventType,
-              gameId: params.gameId,
+              gameId,
             });
           }
           try {
@@ -371,14 +374,14 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
           event: "*",
           schema: "public",
           table: "game_state",
-          filter: `game_id=eq.${params.gameId}`,
+          filter: `game_id=eq.${gameId}`,
         },
         async (payload) => {
           if (DEBUG) {
             console.info("[Board][Realtime] payload", {
               table: "game_state",
               eventType: payload.eventType,
-              gameId: params.gameId,
+              gameId,
             });
           }
           try {
@@ -397,14 +400,14 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
           event: "*",
           schema: "public",
           table: "game_events",
-          filter: `game_id=eq.${params.gameId}`,
+          filter: `game_id=eq.${gameId}`,
         },
         async (payload) => {
           if (DEBUG) {
             console.info("[Board][Realtime] payload", {
               table: "game_events",
               eventType: payload.eventType,
-              gameId: params.gameId,
+              gameId,
             });
           }
           try {
@@ -423,14 +426,14 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
           event: "*",
           schema: "public",
           table: "property_ownership",
-          filter: `game_id=eq.${params.gameId}`,
+          filter: `game_id=eq.${gameId}`,
         },
         async (payload) => {
           if (DEBUG) {
             console.info("[Board][Realtime] payload", {
               table: "property_ownership",
               eventType: payload.eventType,
-              gameId: params.gameId,
+              gameId,
             });
           }
           try {
@@ -450,7 +453,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
         if (DEBUG) {
           console.info("[Board][Realtime] status", {
             status,
-            gameId: params.gameId,
+            gameId,
           });
         }
 
@@ -479,7 +482,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
     loadGameState,
     loadOwnership,
     loadPlayers,
-    params.gameId,
+    gameId,
     session?.access_token,
   ]);
 

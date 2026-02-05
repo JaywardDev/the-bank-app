@@ -104,7 +104,7 @@ export async function POST(request: Request) {
 
   if (!gameId) {
     return NextResponse.json(
-      { error: "Missing game id." },
+      { error: "Missing gameId in snapshot request" },
       { status: 400 },
     );
   }
