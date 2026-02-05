@@ -14,6 +14,8 @@ import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 const DEBUG = process.env.NEXT_PUBLIC_DEBUG === "true";
 const SNAPSHOT_POLL_INTERVAL_MS = 1500;
 const REALTIME_STALE_TIMEOUT_MS = 10_000;
+const REFRESH_DEBOUNCE_MS = 350;
+const MAX_BOARD_HIGHLIGHTS = 18;
 
 type Player = {
   id: string;
@@ -63,6 +65,13 @@ type GameEvent = {
   payload: Record<string, unknown> | null;
   created_at: string;
   version: number;
+};
+
+type BoardHighlight = {
+  id: string;
+  version: number;
+  title: string;
+  subtext: string | null;
 };
 
 const getTurnsRemainingFromPayload = (payload: unknown): number | null => {
@@ -148,6 +157,90 @@ const getPendingCardDescription = (
   return "Card effect pending.";
 };
 
+
+const meaningfulEventTypes = new Set([
+  "MOVE_PLAYER",
+  "MOVE_RESOLVED",
+  "PLAYER_MOVED",
+  "BUY_PROPERTY",
+  "PROPERTY_PURCHASED",
+  "AUCTION_STARTED",
+  "AUCTION_BID",
+  "AUCTION_WON",
+  "AUCTION_PASS",
+  "RENT_PAID",
+  "GO_TO_JAIL",
+  "JAIL_DECISION",
+  "JAIL_RELEASED",
+  "JAIL_PAY_FINE",
+  "JAIL_DOUBLES_SUCCESS",
+  "JAIL_DOUBLES_FAIL",
+  "CARD_REVEALED",
+  "CARD_RESOLVED",
+  "DRAW_CARD",
+  "CARD_MOVE_TO",
+  "CARD_MOVE_REL",
+  "CARD_GO_TO_JAIL",
+  "CARD_PAY",
+  "CARD_RECEIVE",
+  "TURN_STARTED",
+  "END_TURN",
+  "PASS_GO",
+  "PAY_TAX",
+  "LAND_ON_TILE",
+  "MACRO_EVENT",
+  "MACRO_EVENT_TRIGGERED",
+  "MACRO_EVENT_EXPIRED",
+  "MACRO_EXPIRED",
+]);
+
+const isMeaningfulBoardEvent = (eventType: string, description: string) => {
+  if (!description || description === "Update received") {
+    return false;
+  }
+
+  return meaningfulEventTypes.has(eventType);
+};
+
+const mergeBoardEvents = (incoming: GameEvent[], existing: GameEvent[]) => {
+  const merged = [...incoming, ...existing];
+  const seen = new Set<string>();
+  return merged
+    .sort((a, b) => b.version - a.version)
+    .filter((event) => {
+      if (seen.has(event.id)) {
+        return false;
+      }
+      seen.add(event.id);
+      return true;
+    })
+    .slice(0, 30);
+};
+
+const dedupeBoardHighlights = (highlights: BoardHighlight[]) => {
+  const deduped: BoardHighlight[] = [];
+
+  for (const highlight of highlights) {
+    const previous = deduped[deduped.length - 1];
+    if (!previous) {
+      deduped.push(highlight);
+      continue;
+    }
+
+    const sameText =
+      previous.title === highlight.title && previous.subtext === highlight.subtext;
+    const closeVersions = Math.abs(previous.version - highlight.version) <= 1;
+
+    if (sameText && closeVersions) {
+      continue;
+    }
+
+    deduped.push(highlight);
+  }
+
+  return deduped;
+};
+
 type OwnershipRow = {
   tile_index: number;
   owner_player_id: string | null;
@@ -192,8 +285,12 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [liveUpdatesNotice, setLiveUpdatesNotice] = useState<string | null>(null);
+  const [isOffline, setIsOffline] = useState<boolean>(() =>
+    typeof navigator === "undefined" ? false : !navigator.onLine,
+  );
   const unmountingRef = useRef(false);
-  const pollingRequestInFlightRef = useRef(false);
+  const refreshRequestInFlightRef = useRef(false);
+  const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const realtimeFailedRef = useRef(false);
   const lastRealtimeUpdateAtRef = useRef<number | null>(null);
 
@@ -226,11 +323,11 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
   const loadEvents = useCallback(
     async (accessToken?: string) => {
       const eventRows = await supabaseClient.fetchFromSupabase<GameEvent[]>(
-        `game_events?select=id,event_type,payload,created_at,version&game_id=eq.${gameId}&order=version.desc&limit=12`,
+        `game_events?select=id,event_type,payload,created_at,version&game_id=eq.${gameId}&order=version.desc&limit=30`,
         { method: "GET" },
         accessToken,
       );
-      setEvents(eventRows);
+      setEvents((existingEvents) => mergeBoardEvents(eventRows, existingEvents));
     },
     [gameId],
   );
@@ -296,7 +393,9 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
       setGameMeta(snapshot.gameMeta ?? null);
       setPlayers(snapshot.players ?? []);
       setGameState(snapshot.gameState ?? null);
-      setEvents(snapshot.events ?? []);
+      setEvents((existingEvents) =>
+        mergeBoardEvents(snapshot.events ?? [], existingEvents),
+      );
 
       const mapped = (snapshot.ownershipRows ?? []).reduce<OwnershipByTile>(
         (acc, row) => {
@@ -325,6 +424,32 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
       }
     }
   }, [gameId, isConfigured]);
+
+  const requestRefresh = useCallback((reason: string) => {
+    if (!isConfigured) {
+      return;
+    }
+
+    if (refreshTimeoutRef.current) {
+      clearTimeout(refreshTimeoutRef.current);
+    }
+
+    refreshTimeoutRef.current = setTimeout(async () => {
+      if (refreshRequestInFlightRef.current) {
+        return;
+      }
+
+      refreshRequestInFlightRef.current = true;
+      try {
+        if (DEBUG) {
+          console.info("[Board][Refresh] requested", { reason, gameId });
+        }
+        await loadBoardData({ silent: true });
+      } finally {
+        refreshRequestInFlightRef.current = false;
+      }
+    }, REFRESH_DEBOUNCE_MS);
+  }, [gameId, isConfigured, loadBoardData]);
 
   useEffect(() => {
     void loadBoardData();
@@ -375,7 +500,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
             if (DEBUG) {
               console.error("[Board][Realtime] players handler error", error);
             }
-            setLiveUpdatesNotice("Live updates unavailable. Showing the latest snapshot.");
+            setLiveUpdatesNotice("Live updates unavailable — syncing via snapshot.");
           }
         },
       )
@@ -402,7 +527,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
             if (DEBUG) {
               console.error("[Board][Realtime] game_state handler error", error);
             }
-            setLiveUpdatesNotice("Live updates unavailable. Showing the latest snapshot.");
+            setLiveUpdatesNotice("Live updates unavailable — syncing via snapshot.");
           }
         },
       )
@@ -429,7 +554,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
             if (DEBUG) {
               console.error("[Board][Realtime] game_events handler error", error);
             }
-            setLiveUpdatesNotice("Live updates unavailable. Showing the latest snapshot.");
+            setLiveUpdatesNotice("Live updates unavailable — syncing via snapshot.");
           }
         },
       )
@@ -459,7 +584,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
                 error,
               );
             }
-            setLiveUpdatesNotice("Live updates unavailable. Showing the latest snapshot.");
+            setLiveUpdatesNotice("Live updates unavailable — syncing via snapshot.");
           }
         },
       )
@@ -479,7 +604,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
 
         if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
           realtimeFailedRef.current = true;
-          setLiveUpdatesNotice("Live updates unavailable. Showing the latest snapshot.");
+          setLiveUpdatesNotice("Live updates unavailable — syncing via snapshot.");
         }
       });
 
@@ -526,27 +651,59 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
       return false;
     };
 
-    const pollSnapshot = async () => {
-      if (pollingRequestInFlightRef.current || !shouldPoll()) {
+    const pollSnapshot = () => {
+      if (!shouldPoll()) {
         return;
       }
-
-      pollingRequestInFlightRef.current = true;
-      try {
-        await loadBoardData({ silent: true });
-      } finally {
-        pollingRequestInFlightRef.current = false;
-      }
+      requestRefresh("poll");
     };
 
     const intervalId = window.setInterval(() => {
-      void pollSnapshot();
+      pollSnapshot();
     }, SNAPSHOT_POLL_INTERVAL_MS);
 
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [isConfigured, loadBoardData, session]);
+  }, [isConfigured, requestRefresh, session]);
+
+
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        requestRefresh("visibility");
+      }
+    };
+
+    const handleFocus = () => {
+      requestRefresh("focus");
+    };
+
+    const handleOnline = () => {
+      setIsOffline(false);
+      requestRefresh("online");
+    };
+
+    const handleOffline = () => {
+      setIsOffline(true);
+    };
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
+      }
+    };
+  }, [requestRefresh]);
 
   useEffect(() => {
     return () => {
@@ -1479,12 +1636,31 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
     currentPlayerJailTurnsRaw && currentPlayerJailTurnsRaw > 0
       ? `In jail (${currentPlayerJailTurnsRaw} turns remaining)`
       : null;
-  const eventHighlights = events.slice(0, 5).map((event) => ({
-    id: event.id,
-    version: event.version,
-    eventType: event.event_type.replaceAll("_", " "),
-    label: formatEventDescription(event),
-  }));
+  const eventHighlights = useMemo(() => {
+    const highlights = [...events]
+      .sort((a, b) => b.version - a.version)
+      .map((event) => {
+        const description = formatEventDescription(event);
+        if (!isMeaningfulBoardEvent(event.event_type, description)) {
+          return null;
+        }
+
+        const [titlePart, ...rest] = description.split(" · ");
+        return {
+          id: event.id,
+          version: event.version,
+          title: titlePart,
+          subtext: rest.length > 0 ? rest.join(" · ") : null,
+        } satisfies BoardHighlight;
+      })
+      .filter((highlight): highlight is BoardHighlight => highlight !== null);
+
+    return dedupeBoardHighlights(highlights).slice(0, MAX_BOARD_HIGHLIGHTS);
+  }, [events, formatEventDescription]);
+
+  const boardNotice = isOffline
+    ? "Offline — showing last known state"
+    : liveUpdatesNotice;
 
   return (
     <BoardLayoutShell
@@ -1510,7 +1686,8 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
           }
           auctionSummary={auctionSummary}
           eventHighlights={eventHighlights}
-          liveUpdatesNotice={liveUpdatesNotice}
+          liveUpdatesNotice={boardNotice}
+          onManualRefresh={() => requestRefresh("manual")}
         />
       }
       board={

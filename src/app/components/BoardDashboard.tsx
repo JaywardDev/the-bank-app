@@ -2,9 +2,9 @@ import Link from "next/link";
 
 type EventHighlight = {
   id: string;
-  label: string;
+  title: string;
+  subtext: string | null;
   version: number;
-  eventType: string;
 };
 
 type BoardDashboardProps = {
@@ -30,6 +30,7 @@ type BoardDashboardProps = {
   } | null;
   eventHighlights: EventHighlight[];
   liveUpdatesNotice: string | null;
+  onManualRefresh: () => void;
 };
 
 export default function BoardDashboard({
@@ -45,6 +46,7 @@ export default function BoardDashboard({
   auctionSummary,
   eventHighlights,
   liveUpdatesNotice,
+  onManualRefresh,
 }: BoardDashboardProps) {
   return (
     <div className="space-y-4">
@@ -111,15 +113,25 @@ export default function BoardDashboard({
       </section>
 
       <section className="rounded-2xl border border-white/10 bg-black/30 p-4">
-        <p className="text-xs uppercase tracking-[0.18em] text-white/60">Event highlights</p>
-        <ul className="mt-3 space-y-2">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-xs uppercase tracking-[0.18em] text-white/60">Event highlights</p>
+          <button
+            type="button"
+            onClick={onManualRefresh}
+            className="rounded-full border border-white/20 px-3 py-1 text-xs text-white/70 transition hover:border-white/40 hover:text-white"
+          >
+            Refresh
+          </button>
+        </div>
+        <ul className="mt-3 max-h-96 space-y-2 overflow-y-auto pr-1">
           {eventHighlights.length === 0 ? (
             <li className="rounded-xl border border-dashed border-white/20 px-3 py-2 text-sm text-white/60">No events yet.</li>
           ) : (
             eventHighlights.map((event) => (
               <li key={event.id} className="rounded-xl border border-white/10 bg-black/40 px-3 py-2">
-                <p className="text-xs uppercase tracking-wide text-white/50">{event.eventType} · v{event.version}</p>
-                <p className="mt-1 text-sm text-white/80">{event.label}</p>
+                <p className="text-xs uppercase tracking-wide text-white/50">v{event.version}</p>
+                <p className="mt-1 text-sm text-white/80">{event.title}</p>
+                {event.subtext ? <p className="mt-1 text-xs text-white/55">{event.subtext}</p> : null}
               </li>
             ))
           )}
