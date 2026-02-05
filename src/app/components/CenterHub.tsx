@@ -16,25 +16,38 @@ type DeckVisualProps = {
   isHighlighted: boolean;
 };
 
-function DeckVisual({ label, src, isHighlighted }: DeckVisualProps) {
+function DeckVisual({ label, deck, src, isHighlighted }: DeckVisualProps) {
+  const accent =
+    deck === "CHANCE"
+      ? {
+          frame: "border-amber-400/65",
+          frameGlow: "ring-1 ring-amber-300/50",
+          iconTint: "brightness-100 saturate-100",
+        }
+      : {
+          frame: "border-sky-400/65",
+          frameGlow: "ring-1 ring-sky-300/50",
+          iconTint: "brightness-100 saturate-100",
+        };
+
   return (
     <div className="relative w-[270px] text-center">
       <div className="mx-auto w-[170px]">
-        <div className={`relative flex aspect-[4/3] items-center justify-center rounded-2xl border bg-gradient-to-br from-white/20 via-white/10 to-white/[0.02] p-4 shadow-[0_14px_24px_rgba(0,0,0,0.45)] transition-all duration-300 ${
+        <div className={`relative flex aspect-[4/3] items-center justify-center rounded-2xl border bg-gradient-to-br from-[#fffef8] via-[#f9f5ea] to-[#f3ece0] p-4 shadow-[0_10px_18px_rgba(0,0,0,0.28)] transition-all duration-300 ${accent.frameGlow} ${
           isHighlighted
             ? "border-emerald-200/70 ring-2 ring-emerald-300/45"
-            : "border-white/25"
+            : "border-neutral-300/90"
         }`}>
-          <div className="absolute inset-0 translate-x-[6px] translate-y-[6px] rounded-2xl border border-white/12 bg-neutral-900/25" />
-          <div className="absolute inset-0 translate-x-[12px] translate-y-[12px] rounded-2xl border border-white/10 bg-neutral-900/20" />
-          <div className="absolute inset-[2px] rounded-[14px] border border-white/20" />
+          <div className="absolute inset-0 translate-x-[6px] translate-y-[6px] rounded-2xl border border-neutral-300/60 bg-neutral-200/50" />
+          <div className="absolute inset-0 translate-x-[12px] translate-y-[12px] rounded-2xl border border-neutral-400/55 bg-neutral-300/45" />
+          <div className={`absolute inset-[2px] rounded-[14px] border ${accent.frame}`} />
           <div className="relative -rotate-[1.5deg]">
             <Image
               src={src}
               alt={`${label} deck`}
               width={90}
               height={90}
-              className="opacity-95 drop-shadow"
+              className={`opacity-95 drop-shadow-[0_2px_4px_rgba(0,0,0,0.2)] ${accent.iconTint}`}
             />
           </div>
         </div>
