@@ -22,6 +22,12 @@ type BoardDashboardProps = {
     description: string | null;
     actorName: string | null;
   } | null;
+  auctionSummary: {
+    tileName: string;
+    currentBid: number | null;
+    highestBidderName: string | null;
+    statusLine: string;
+  } | null;
   eventHighlights: EventHighlight[];
   liveUpdatesNotice: string | null;
 };
@@ -36,6 +42,7 @@ export default function BoardDashboard({
   jailStatusLabel,
   phaseLabel,
   pendingCard,
+  auctionSummary,
   eventHighlights,
   liveUpdatesNotice,
 }: BoardDashboardProps) {
@@ -72,6 +79,20 @@ export default function BoardDashboard({
         <p className="text-xs uppercase tracking-[0.18em] text-white/60">Phase / status</p>
         <p className="mt-2 text-xl font-semibold">{phaseLabel}</p>
       </section>
+
+      {auctionSummary ? (
+        <section className="rounded-2xl border border-amber-200/30 bg-amber-500/10 p-4">
+          <p className="text-xs uppercase tracking-[0.18em] text-amber-100">Auction in progress</p>
+          <p className="mt-2 text-lg font-semibold text-white">{auctionSummary.tileName}</p>
+          <p className="mt-2 text-sm text-amber-50/90">
+            Highest bid: {auctionSummary.currentBid !== null ? `$${auctionSummary.currentBid}` : "—"}
+            {auctionSummary.highestBidderName
+              ? ` · ${auctionSummary.highestBidderName}`
+              : ""}
+          </p>
+          <p className="mt-1 text-sm text-amber-100/90">{auctionSummary.statusLine}</p>
+        </section>
+      ) : null}
 
       <section className="rounded-2xl border border-emerald-200/20 bg-emerald-500/10 p-4">
         <p className="text-xs uppercase tracking-[0.18em] text-emerald-200">Macro/Card spotlight</p>

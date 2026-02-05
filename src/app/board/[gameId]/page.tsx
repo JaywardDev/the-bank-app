@@ -576,6 +576,52 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
     : null;
   const boardPack = getBoardPackById(gameMeta?.board_pack_id);
   const isAuctionActive = Boolean(gameState?.auction_active);
+  const auctionSummary = useMemo(() => {
+    if (!isAuctionActive) {
+      return null;
+    }
+
+    const tileIndex = gameState?.auction_tile_index;
+    const tileName =
+      tileIndex !== null && tileIndex !== undefined
+        ? boardPack?.tiles?.find((tile) => tile.index === tileIndex)?.name ??
+          `Tile ${tileIndex}`
+        : "Property";
+
+    const highestBidderId = gameState?.auction_current_winner_player_id ?? null;
+    const highestBidderName =
+      players.find((player) => player.id === highestBidderId)?.display_name ??
+      (highestBidderId ? "Player" : null);
+    const currentBid =
+      typeof gameState?.auction_current_bid === "number"
+        ? gameState.auction_current_bid
+        : null;
+    const activeBidderId = gameState?.auction_turn_player_id ?? null;
+    const activeBidderName =
+      players.find((player) => player.id === activeBidderId)?.display_name ??
+      (activeBidderId ? "Player" : null);
+
+    const statusLine = highestBidderName
+      ? `Highest bidder: ${highestBidderName}`
+      : activeBidderName
+        ? `Waiting for bids · Next: ${activeBidderName}`
+        : "Waiting for bids";
+
+    return {
+      tileName,
+      currentBid,
+      highestBidderName,
+      statusLine,
+    };
+  }, [
+    boardPack?.tiles,
+    gameState?.auction_current_bid,
+    gameState?.auction_current_winner_player_id,
+    gameState?.auction_tile_index,
+    gameState?.auction_turn_player_id,
+    isAuctionActive,
+    players,
+  ]);
   const pendingCard = useMemo(() => {
     if (!gameState?.pending_card_active) {
       return null;
@@ -1462,6 +1508,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
                 }
               : null
           }
+          auctionSummary={auctionSummary}
           eventHighlights={eventHighlights}
           liveUpdatesNotice={liveUpdatesNotice}
         />
