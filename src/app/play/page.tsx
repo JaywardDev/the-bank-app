@@ -708,15 +708,15 @@ const FloatingTurnActions = ({
   const isEnding = actionLoading === "END_TURN";
   const rollEmphasized = canRoll && !isRolling;
   const endEmphasized = canEndTurn && !isEnding;
-  const shouldPulse = isVisible && actionLoading === null;
+  const shouldPulse = rollEmphasized && isVisible && actionLoading === null;
 
   return (
     <div className="fixed bottom-20 right-6 z-20 flex flex-col items-center gap-3">
       <button
         className={`flex h-14 w-14 items-center justify-center rounded-full border shadow-lg transition ${
           rollEmphasized
-            ? "border-neutral-900 bg-neutral-900 text-white shadow-neutral-900/30"
-            : "border-neutral-200 bg-neutral-100 text-neutral-400 shadow-neutral-200/40"
+            ? "border-emerald-600 bg-emerald-600 text-white shadow-emerald-600/30"
+            : "border-emerald-200 bg-emerald-100 text-emerald-300 shadow-emerald-200/40 opacity-70"
         } ${shouldPulse ? "player-ready-pulse" : ""}`}
         type="button"
         onClick={onRollDice}
@@ -740,9 +740,9 @@ const FloatingTurnActions = ({
       <button
         className={`flex h-12 w-12 items-center justify-center rounded-full border text-xs font-semibold shadow-lg transition ${
           endEmphasized
-            ? "border-emerald-600 bg-emerald-600 text-white shadow-emerald-600/30"
-            : "border-neutral-200 bg-neutral-100 text-neutral-400 shadow-neutral-200/40"
-        } ${shouldPulse ? "player-ready-pulse" : ""}`}
+            ? "border-rose-600 bg-rose-600 text-white shadow-rose-600/30"
+            : "border-rose-200 bg-rose-100 text-rose-300 shadow-rose-200/40 opacity-70"
+        }`}
         type="button"
         onClick={onEndTurn}
         disabled={!canEndTurn || isEnding}
