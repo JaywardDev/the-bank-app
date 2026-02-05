@@ -1720,24 +1720,20 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
               <CenterHub
                 boardPackName={boardPack?.displayName ?? "Board"}
                 lastRoll={gameState?.last_roll ?? null}
+                revealedCard={
+                  pendingCard && pendingCard.deck
+                    ? {
+                        deck: pendingCard.deck,
+                        title: pendingCard.title,
+                        description: pendingCardDescription,
+                        statusLine: `Waiting for ${pendingCardActorName ?? "the current player"} to confirm…`,
+                      }
+                    : null
+                }
               />
             </div>
           </BoardSquare>
 
-          {pendingCard ? (
-            <>
-              <div className="fixed inset-0 z-20 bg-black/50 backdrop-blur-[1px]" />
-              <div className="fixed inset-0 z-30 flex items-center justify-center p-6">
-                <div className="w-full max-w-md rounded-3xl border border-emerald-200/40 bg-white/95 p-6 text-neutral-900 shadow-2xl backdrop-blur">
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-500">Card revealed</p>
-                  <p className="mt-1 text-lg font-semibold">{pendingDeckLabel}</p>
-                  <p className="mt-3 text-base font-semibold">{pendingCard.title}</p>
-                  {pendingCardDescription ? <p className="mt-2 text-sm text-neutral-600">{pendingCardDescription}</p> : null}
-                  <p className="mt-4 text-sm text-neutral-500">Waiting for {pendingCardActorName ?? "the current player"} to confirm…</p>
-                </div>
-              </div>
-            </>
-          ) : null}
         </>
       }
     />
