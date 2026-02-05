@@ -12,6 +12,8 @@ import { getRules } from "@/lib/rules";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 
 const DEBUG = process.env.NEXT_PUBLIC_DEBUG === "true";
+const SNAPSHOT_POLL_INTERVAL_MS = 1500;
+const REALTIME_STALE_TIMEOUT_MS = 10_000;
 
 type Player = {
   id: string;
@@ -191,6 +193,9 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [liveUpdatesNotice, setLiveUpdatesNotice] = useState<string | null>(null);
   const unmountingRef = useRef(false);
+  const pollingRequestInFlightRef = useRef(false);
+  const realtimeFailedRef = useRef(false);
+  const lastRealtimeUpdateAtRef = useRef<number | null>(null);
 
   const isConfigured = useMemo(() => supabaseClient.isConfigured(), []);
 
@@ -255,14 +260,17 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
     [gameId],
   );
 
-  const loadBoardData = useCallback(async () => {
+  const loadBoardData = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent ?? false;
     if (!isConfigured) {
       setLoading(false);
       return;
     }
 
-    setLoading(true);
-    setErrorMessage(null);
+    if (!silent) {
+      setLoading(true);
+      setErrorMessage(null);
+    }
 
     try {
       const currentSession = await supabaseClient.getSession();
@@ -312,7 +320,9 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
         setErrorMessage("Unable to load board data.");
       }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, [gameId, isConfigured]);
 
@@ -360,6 +370,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
           }
           try {
             await loadPlayers(session?.access_token);
+            lastRealtimeUpdateAtRef.current = Date.now();
           } catch (error) {
             if (DEBUG) {
               console.error("[Board][Realtime] players handler error", error);
@@ -386,6 +397,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
           }
           try {
             await loadGameState(session?.access_token);
+            lastRealtimeUpdateAtRef.current = Date.now();
           } catch (error) {
             if (DEBUG) {
               console.error("[Board][Realtime] game_state handler error", error);
@@ -412,6 +424,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
           }
           try {
             await loadEvents(session?.access_token);
+            lastRealtimeUpdateAtRef.current = Date.now();
           } catch (error) {
             if (DEBUG) {
               console.error("[Board][Realtime] game_events handler error", error);
@@ -438,6 +451,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
           }
           try {
             await loadOwnership(session?.access_token);
+            lastRealtimeUpdateAtRef.current = Date.now();
           } catch (error) {
             if (DEBUG) {
               console.error(
@@ -458,11 +472,13 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
         }
 
         if (status === "SUBSCRIBED") {
+          realtimeFailedRef.current = false;
           setLiveUpdatesNotice(null);
           return;
         }
 
         if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+          realtimeFailedRef.current = true;
           setLiveUpdatesNotice("Live updates unavailable. Showing the latest snapshot.");
         }
       });
@@ -485,6 +501,52 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
     gameId,
     session?.access_token,
   ]);
+
+  useEffect(() => {
+    if (!isConfigured) {
+      return;
+    }
+
+    const shouldPoll = () => {
+      if (!session) {
+        return true;
+      }
+
+      if (realtimeFailedRef.current) {
+        return true;
+      }
+
+      if (
+        lastRealtimeUpdateAtRef.current !== null &&
+        Date.now() - lastRealtimeUpdateAtRef.current > REALTIME_STALE_TIMEOUT_MS
+      ) {
+        return true;
+      }
+
+      return false;
+    };
+
+    const pollSnapshot = async () => {
+      if (pollingRequestInFlightRef.current || !shouldPoll()) {
+        return;
+      }
+
+      pollingRequestInFlightRef.current = true;
+      try {
+        await loadBoardData({ silent: true });
+      } finally {
+        pollingRequestInFlightRef.current = false;
+      }
+    };
+
+    const intervalId = window.setInterval(() => {
+      void pollSnapshot();
+    }, SNAPSHOT_POLL_INTERVAL_MS);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [isConfigured, loadBoardData, session]);
 
   useEffect(() => {
     return () => {
