@@ -1,9 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import PageShell from "@/app/components/PageShell";
-import BoardMiniMap from "@/app/components/BoardMiniMap";
-import HousesDots from "@/app/components/HousesDots";
+import BoardLayoutShell from "@/app/components/BoardLayoutShell";
+import BoardDashboard from "@/app/components/BoardDashboard";
+import BoardSquare from "@/app/components/BoardSquare";
+import BoardTrack from "@/app/components/BoardTrack";
+import CenterHub from "@/app/components/CenterHub";
 import { getBoardPackById } from "@/lib/boardPacks";
 import { getRules } from "@/lib/rules";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
@@ -509,16 +511,6 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
     : null;
   const boardPack = getBoardPackById(gameMeta?.board_pack_id);
   const isAuctionActive = Boolean(gameState?.auction_active);
-  const auctionTileIndex = gameState?.auction_tile_index ?? null;
-  const auctionTileName =
-    auctionTileIndex !== null
-      ? boardPack?.tiles?.find((tile) => tile.index === auctionTileIndex)?.name ??
-        `Tile ${auctionTileIndex}`
-      : null;
-  const auctionCurrentBid = gameState?.auction_current_bid ?? 0;
-  const auctionTurnPlayerName =
-    players.find((player) => player.id === gameState?.auction_turn_player_id)
-      ?.display_name ?? "Player";
   const pendingCard = useMemo(() => {
     if (!gameState?.pending_card_active) {
       return null;
@@ -569,10 +561,6 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
       null
     );
   }, [boardPack?.tiles, currentPlayer]);
-  const currentTileHouses =
-    currentPlayerTile?.index !== undefined
-      ? ownershipByTile[currentPlayerTile.index]?.houses ?? 0
-      : 0;
   const getOwnershipLabel = useCallback(
     (tileIndex: number | null) => {
       if (tileIndex === null || Number.isNaN(tileIndex)) {
@@ -1346,200 +1334,123 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
     [boardPack?.tiles, getOwnershipLabel, players],
   );
 
+  const playerColorPalette = [
+    "#60a5fa",
+    "#f87171",
+    "#34d399",
+    "#c084fc",
+    "#fbbf24",
+    "#22d3ee",
+  ];
+  const playerColorsById = players.reduce<Record<string, string>>((acc, player, index) => {
+    acc[player.id] = playerColorPalette[index % playerColorPalette.length];
+    return acc;
+  }, {});
+  const currentPlayerColor = currentPlayer?.id
+    ? playerColorsById[currentPlayer.id] ?? "#e5e7eb"
+    : "#e5e7eb";
+  const phaseLabel = gameState?.pending_card_active
+    ? "Card resolution pending"
+    : isAuctionActive
+      ? "Auction in progress"
+      : gameMeta?.status === "lobby"
+        ? "Lobby / waiting for players"
+        : currentPlayer
+          ? `Turn: ${currentPlayer.display_name ?? "Player"}`
+          : "Awaiting turn";
+  const currentPlayerJailTurnsRaw =
+    currentPlayer &&
+    typeof (currentPlayer as Player & { jail_turns_remaining?: unknown }).jail_turns_remaining ===
+      "number"
+      ? (currentPlayer as Player & { jail_turns_remaining?: number }).jail_turns_remaining
+      : null;
+  const jailStatusLabel =
+    currentPlayerJailTurnsRaw && currentPlayerJailTurnsRaw > 0
+      ? `In jail (${currentPlayerJailTurnsRaw} turns remaining)`
+      : null;
+  const eventHighlights = events.slice(0, 5).map((event) => ({
+    id: event.id,
+    version: event.version,
+    eventType: event.event_type.replaceAll("_", " "),
+    label: formatEventDescription(event),
+  }));
+
   return (
-    <PageShell
-      title="Board Display"
-      subtitle="Read-only, large-screen projection of the live table."
-      variant="board"
-    >
-      {!isConfigured ? (
-        <div className="rounded-3xl border border-amber-200/30 bg-amber-500/10 p-6 text-amber-100">
-          Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to
-          enable live board updates.
-        </div>
-      ) : null}
-
-      {loading ? (
-        <div className="rounded-3xl border border-white/10 bg-white/5 p-6 text-lg text-white/70">
-          Loading board…
-        </div>
-      ) : null}
-
-      {errorMessage ? (
-        <div className="rounded-3xl border border-rose-300/40 bg-rose-500/10 p-6 text-rose-100">
-          {errorMessage}
-        </div>
-      ) : null}
-
-      {liveUpdatesNotice ? (
-        <div className="rounded-3xl border border-amber-200/40 bg-amber-500/10 p-4 text-amber-100">
-          {liveUpdatesNotice}
-        </div>
-      ) : null}
-
-      {pendingCard ? (
+    <BoardLayoutShell
+      dashboard={
+        <BoardDashboard
+          boardPackName={boardPack?.displayName ?? "Unknown board pack"}
+          gameStatus={gameMeta?.status ?? "unknown"}
+          currentPlayerName={currentPlayer?.display_name ?? "Waiting for start"}
+          currentPlayerColor={currentPlayerColor}
+          lastRoll={gameState?.last_roll ?? null}
+          currentTileName={currentPlayerTile?.name ?? "—"}
+          jailStatusLabel={jailStatusLabel}
+          phaseLabel={phaseLabel}
+          pendingCard={
+            pendingCard
+              ? {
+                  deckLabel: pendingDeckLabel,
+                  title: pendingCard.title,
+                  description: pendingCardDescription,
+                  actorName: pendingCardActorName,
+                }
+              : null
+          }
+          eventHighlights={eventHighlights}
+          liveUpdatesNotice={liveUpdatesNotice}
+        />
+      }
+      board={
         <>
-          <div className="fixed inset-0 z-20 bg-black/50 backdrop-blur-[1px]" />
-          <div className="fixed inset-0 z-30 flex items-center justify-center p-6">
-            <div className="w-full max-w-md rounded-3xl border border-emerald-200/40 bg-white/95 p-6 text-neutral-900 shadow-2xl backdrop-blur">
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-500">
-                Card revealed
-              </p>
-              <p className="mt-1 text-lg font-semibold">{pendingDeckLabel}</p>
-              <p className="mt-3 text-base font-semibold">
-                {pendingCard.title}
-              </p>
-              {pendingCardDescription ? (
-                <p className="mt-2 text-sm text-neutral-600">
-                  {pendingCardDescription}
-                </p>
-              ) : null}
-              <p className="mt-4 text-sm text-neutral-500">
-                Waiting for {pendingCardActorName ?? "the current player"} to
-                confirm…
-              </p>
+          {!isConfigured ? (
+            <div className="mb-3 rounded-2xl border border-amber-200/30 bg-amber-500/10 p-4 text-amber-100">
+              Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to enable live board updates.
             </div>
-          </div>
-        </>
-      ) : null}
+          ) : null}
 
-      {isAuctionActive ? (
-        <div className="rounded-3xl border border-indigo-200/30 bg-indigo-500/10 p-5 text-indigo-100">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-200/70">
-            Auction in progress
-          </p>
-          <p className="mt-1 text-lg font-semibold text-white">
-            {auctionTileName ?? "Unowned tile"} — Current bid ${auctionCurrentBid}
-          </p>
-          <p className="text-sm text-indigo-100/80">
-            Waiting for {auctionTurnPlayerName}…
-          </p>
-        </div>
-      ) : null}
+          {loading ? (
+            <div className="mb-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-white/70">Loading board…</div>
+          ) : null}
 
-      <section className="grid gap-6 lg:grid-cols-[minmax(0,2.4fr)_minmax(0,1fr)]">
-        <div className="rounded-3xl border border-white/10 bg-white/5 p-6 md:p-8 space-y-5 flex flex-col min-h-[360px] lg:min-h-[70vh]">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/60">
-                Board map
-              </p>
-              <p className="text-xs text-white/50">
-                Board pack: {boardPack?.displayName ?? "Unknown"}
-              </p>
+          {errorMessage ? (
+            <div className="mb-3 rounded-2xl border border-rose-300/40 bg-rose-500/10 p-4 text-rose-100">{errorMessage}</div>
+          ) : null}
+
+          <BoardSquare>
+            <div className="relative h-full w-full">
+              <BoardTrack
+                tiles={boardPack?.tiles}
+                players={players}
+                ownershipByTile={ownershipByTile}
+                playerColorsById={playerColorsById}
+                currentPlayerId={currentPlayer?.id}
+                lastMovedPlayerId={lastMovedPlayerId}
+                lastMovedTileIndex={lastMovedTileIndex}
+              />
+              <CenterHub
+                boardPackName={boardPack?.displayName ?? "Board"}
+                lastRoll={gameState?.last_roll ?? null}
+              />
             </div>
-            <span className="text-xs text-white/50">Projection only</span>
-          </div>
-          <div className="rounded-3xl border border-white/10 bg-black/30 p-4 md:p-6 flex-1">
-            <BoardMiniMap
-              tiles={boardPack?.tiles}
-              players={players}
-              currentPlayerId={currentPlayer?.id}
-              lastMovedPlayerId={lastMovedPlayerId}
-              lastMovedTileIndex={lastMovedTileIndex}
-              ownershipByTile={ownershipByTile}
-              variant="dark"
-              size="large"
-            />
-          </div>
-          <p className="text-xs text-white/50">
-            Live player positions are highlighted for the active turn and the
-            most recent move.
-          </p>
-        </div>
+          </BoardSquare>
 
-        <div className="space-y-6">
-          <div className="rounded-3xl border border-white/10 bg-white/5 p-6 space-y-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/60">
-                Current turn
-              </p>
-              <p className="text-3xl font-semibold">
-                {currentPlayer?.display_name ?? "Waiting for start"}
-              </p>
-              <p className="text-sm text-white/70">
-                Last roll: {gameState?.last_roll ?? "—"}
-              </p>
-              {currentPlayerTile ? (
-                <div className="mt-3">
-                  <p className="text-xs uppercase tracking-wide text-white/50">
-                    Current tile
-                  </p>
-                  <p className="text-sm font-semibold text-white/80">
-                    {currentPlayerTile.name}
-                  </p>
-                  <HousesDots houses={currentTileHouses} size="md" />
+          {pendingCard ? (
+            <>
+              <div className="fixed inset-0 z-20 bg-black/50 backdrop-blur-[1px]" />
+              <div className="fixed inset-0 z-30 flex items-center justify-center p-6">
+                <div className="w-full max-w-md rounded-3xl border border-emerald-200/40 bg-white/95 p-6 text-neutral-900 shadow-2xl backdrop-blur">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-500">Card revealed</p>
+                  <p className="mt-1 text-lg font-semibold">{pendingDeckLabel}</p>
+                  <p className="mt-3 text-base font-semibold">{pendingCard.title}</p>
+                  {pendingCardDescription ? <p className="mt-2 text-sm text-neutral-600">{pendingCardDescription}</p> : null}
+                  <p className="mt-4 text-sm text-neutral-500">Waiting for {pendingCardActorName ?? "the current player"} to confirm…</p>
                 </div>
-              ) : null}
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-black/30 p-4 space-y-3">
-              <p className="text-xs uppercase tracking-wide text-white/50">
-                Active phase
-              </p>
-              <p className="text-lg font-semibold">
-                Rolling + trade confirmation
-              </p>
-              <p className="text-sm text-white/60">Next: TBD</p>
-            </div>
-          </div>
-          <div className="rounded-3xl border border-white/10 bg-white/5 p-6 space-y-3">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/60">
-              Turn order
-            </p>
-            <ol className="space-y-3 text-lg">
-              {players.length === 0 ? (
-                <li className="rounded-2xl border border-dashed border-white/20 bg-black/30 px-4 py-6 text-center text-sm text-white/60">
-                  No players yet.
-                </li>
-              ) : (
-                players.map((player, index) => (
-                  <li
-                    key={player.id}
-                    className={`flex items-center justify-between rounded-2xl border border-white/10 px-4 py-3 ${
-                      player.id === currentPlayer?.id
-                        ? "bg-white/10"
-                        : "bg-black/20"
-                    }`}
-                  >
-                    <span>{player.display_name ?? "Player"}</span>
-                    <span className="text-sm text-white/60">#{index + 1}</span>
-                  </li>
-                ))
-              )}
-            </ol>
-          </div>
-          <div className="rounded-3xl border border-white/10 bg-white/5 p-6 md:p-7 space-y-4">
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/60">
-                Event log
-              </p>
-              <span className="text-xs text-white/50">Read-only feed</span>
-            </div>
-            <ul className="space-y-3 text-base max-h-[40vh] overflow-y-auto pr-1">
-              {events.length === 0 ? (
-                <li className="rounded-2xl border border-dashed border-white/20 bg-black/30 px-4 py-5 text-center text-xs text-white/50">
-                  Events will appear once the game starts.
-                </li>
-              ) : (
-                events.map((event) => (
-                  <li
-                    key={event.id}
-                    className="rounded-2xl border border-white/10 bg-black/30 px-4 py-3"
-                  >
-                    <div className="flex items-center justify-between text-xs uppercase tracking-wide text-white/50">
-                      <span>{event.event_type.replaceAll("_", " ")}</span>
-                      <span>v{event.version}</span>
-                    </div>
-                    <p className="mt-2 text-sm text-white/80">
-                      {formatEventDescription(event)}
-                    </p>
-                  </li>
-                ))
-              )}
-            </ul>
-          </div>
-        </div>
-      </section>
-    </PageShell>
+              </div>
+            </>
+          ) : null}
+        </>
+      }
+    />
   );
 }
