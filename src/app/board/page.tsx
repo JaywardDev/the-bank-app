@@ -3,8 +3,8 @@ import PageShell from "../components/PageShell";
 export default function BoardPage() {
   return (
     <PageShell
-      title="Board Display"
-      subtitle="Read-only big-screen view for the table and event log."
+      title="Board Mock Preview"
+      subtitle="Static mock only. For a live game board, use /watch with a join code."
       variant="board"
     >
       <section className="grid gap-6 lg:grid-cols-[2fr_1fr]">
@@ -13,7 +13,7 @@ export default function BoardPage() {
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/60">
               Board View
             </p>
-            <span className="text-xs text-white/50">Mock layout</span>
+            <span className="text-xs text-amber-200">Static mock route</span>
           </div>
           <div className="flex h-[320px] items-center justify-center rounded-3xl border border-dashed border-white/20 bg-black/30 text-center text-sm text-white/60 md:h-[380px]">
             Board map placeholder (properties, tokens, and auctions)

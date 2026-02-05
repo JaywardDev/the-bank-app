@@ -420,6 +420,13 @@ export default function Home() {
               A high-stakes table game of deals, risks, and fortune.
             </p>
           </div>
+          <button
+            className="rounded-xl border border-amber-300/70 bg-[#F7F2EA]/80 px-3 py-2 text-xs font-semibold text-neutral-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] transition hover:bg-[#F1E9DD] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
+            type="button"
+            onClick={() => router.push("/watch")}
+          >
+            Watch Game
+          </button>
           {session ? (
             <button
               className="text-xs font-medium text-neutral-500 hover:text-neutral-900"

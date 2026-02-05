@@ -23,6 +23,7 @@ type Player = {
 type GameMeta = {
   id: string;
   board_pack_id: string | null;
+  status?: string | null;
 };
 
 type GameState = {
@@ -160,6 +161,14 @@ type OwnershipByTile = Record<
   }
 >;
 
+type SnapshotResponse = {
+  gameMeta: GameMeta;
+  players: Player[];
+  gameState: GameState | null;
+  events: GameEvent[];
+  ownershipRows: OwnershipRow[];
+};
+
 type BoardDisplayPageProps = {
   params: {
     gameId: string;
@@ -175,6 +184,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
   const [ownershipByTile, setOwnershipByTile] = useState<OwnershipByTile>({});
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [liveUpdatesNotice, setLiveUpdatesNotice] = useState<string | null>(null);
   const unmountingRef = useRef(false);
 
   const isConfigured = useMemo(() => supabaseClient.isConfigured(), []);
@@ -187,18 +197,6 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
         accessToken,
       );
       setPlayers(playerRows);
-    },
-    [params.gameId],
-  );
-
-  const loadGameMeta = useCallback(
-    async (accessToken?: string) => {
-      const [game] = await supabaseClient.fetchFromSupabase<GameMeta[]>(
-        `games?select=id,board_pack_id&id=eq.${params.gameId}&limit=1`,
-        { method: "GET" },
-        accessToken,
-      );
-      setGameMeta(game ?? null);
     },
     [params.gameId],
   );
@@ -265,13 +263,43 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
       const currentSession = await supabaseClient.getSession();
       setSession(currentSession);
 
-      await Promise.all([
-        loadGameMeta(currentSession?.access_token),
-        loadPlayers(currentSession?.access_token),
-        loadGameState(currentSession?.access_token),
-        loadEvents(currentSession?.access_token),
-        loadOwnership(currentSession?.access_token),
-      ]);
+      const snapshotResponse = await fetch("/api/board/snapshot", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ gameId: params.gameId }),
+      });
+
+      if (!snapshotResponse.ok) {
+        if (snapshotResponse.status === 404) {
+          throw new Error("This game is unavailable or no longer watchable.");
+        }
+        throw new Error("Unable to load the board right now.");
+      }
+
+      const snapshot = (await snapshotResponse.json()) as SnapshotResponse;
+
+      setGameMeta(snapshot.gameMeta ?? null);
+      setPlayers(snapshot.players ?? []);
+      setGameState(snapshot.gameState ?? null);
+      setEvents(snapshot.events ?? []);
+
+      const mapped = (snapshot.ownershipRows ?? []).reduce<OwnershipByTile>(
+        (acc, row) => {
+          if (row.owner_player_id) {
+            acc[row.tile_index] = {
+              owner_player_id: row.owner_player_id,
+              collateral_loan_id: row.collateral_loan_id ?? null,
+              purchase_mortgage_id: row.purchase_mortgage_id ?? null,
+              houses: row.houses ?? 0,
+            };
+          }
+          return acc;
+        },
+        {},
+      );
+      setOwnershipByTile(mapped);
     } catch (error) {
       if (error instanceof Error) {
         setErrorMessage(error.message);
@@ -281,14 +309,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
     } finally {
       setLoading(false);
     }
-  }, [
-    isConfigured,
-    loadEvents,
-    loadGameMeta,
-    loadGameState,
-    loadOwnership,
-    loadPlayers,
-  ]);
+  }, [isConfigured, params.gameId]);
 
   useEffect(() => {
     void loadBoardData();
@@ -298,6 +319,8 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
     if (!isConfigured) {
       return;
     }
+
+    setLiveUpdatesNotice(null);
 
     const realtimeClient = supabaseClient.getRealtimeClient();
     if (!realtimeClient) {
@@ -336,6 +359,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
             if (DEBUG) {
               console.error("[Board][Realtime] players handler error", error);
             }
+            setLiveUpdatesNotice("Live updates unavailable. Showing the latest snapshot.");
           }
         },
       )
@@ -361,6 +385,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
             if (DEBUG) {
               console.error("[Board][Realtime] game_state handler error", error);
             }
+            setLiveUpdatesNotice("Live updates unavailable. Showing the latest snapshot.");
           }
         },
       )
@@ -386,6 +411,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
             if (DEBUG) {
               console.error("[Board][Realtime] game_events handler error", error);
             }
+            setLiveUpdatesNotice("Live updates unavailable. Showing the latest snapshot.");
           }
         },
       )
@@ -414,6 +440,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
                 error,
               );
             }
+            setLiveUpdatesNotice("Live updates unavailable. Showing the latest snapshot.");
           }
         },
       )
@@ -423,6 +450,15 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
             status,
             gameId: params.gameId,
           });
+        }
+
+        if (status === "SUBSCRIBED") {
+          setLiveUpdatesNotice(null);
+          return;
+        }
+
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+          setLiveUpdatesNotice("Live updates unavailable. Showing the latest snapshot.");
         }
       });
 
@@ -1332,6 +1368,12 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
       {errorMessage ? (
         <div className="rounded-3xl border border-rose-300/40 bg-rose-500/10 p-6 text-rose-100">
           {errorMessage}
+        </div>
+      ) : null}
+
+      {liveUpdatesNotice ? (
+        <div className="rounded-3xl border border-amber-200/40 bg-amber-500/10 p-4 text-amber-100">
+          {liveUpdatesNotice}
         </div>
       ) : null}
 
