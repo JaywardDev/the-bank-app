@@ -4,7 +4,7 @@ import HousesDots from "@/app/components/HousesDots";
 import TokenStack from "@/app/components/TokenStack";
 import type { BoardTile } from "@/lib/boardPacks";
 import { getTileBandColor } from "@/lib/boardTileStyles";
-import { getBoardTileIconSrc } from "@/lib/tileIcons";
+import { getBoardTileIconSrc, isIconOnlySpecialTile } from "@/lib/tileIcons";
 
 type BoardPlayer = {
   id: string;
@@ -84,6 +84,7 @@ export default function BoardTrack({
           const tilePlayers = playersByTile[tile.index] ?? [];
           const isCorner = tile.index % 10 === 0;
           const tileIconSrc = getBoardTileIconSrc(tile);
+          const isIconOnlyTile = isIconOnlySpecialTile(tile) && !ownership;
 
           return (
             <article
@@ -99,7 +100,7 @@ export default function BoardTrack({
                   : undefined,
               }}
             >
-              <div className="pointer-events-none absolute inset-x-1.5 top-2 z-30 h-[calc(100%-0.75rem)]">
+              <div className="pointer-events-none absolute inset-x-1.5 top-2 z-20 h-[calc(100%-0.75rem)]">
                 <div
                   className="relative h-full w-full"
                   style={{
@@ -119,29 +120,34 @@ export default function BoardTrack({
                 </div>
               </div>
 
+              {tileIconSrc ? (
+                <div className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center">
+                  <Image
+                    src={tileIconSrc}
+                    alt=""
+                    width={96}
+                    height={96}
+                    aria-hidden
+                    className="h-[70%] w-[70%] scale-[0.75] object-contain opacity-25 blur-[0.2px]"
+                  />
+                </div>
+              ) : null}
+
               <div
-                className="h-1.5 w-full"
+                className="relative z-10 h-1.5 w-full"
                 style={{ backgroundColor: getTileBandColor(tile) }}
               />
-              <div className="p-1">
+              <div className="relative z-10 p-1">
                 <div className="flex items-start justify-between gap-1">
                   <p className="text-[10px] font-bold leading-none">
                     {tile.index}
                   </p>
-                  {tileIconSrc ? (
-                    <Image
-                      src={tileIconSrc}
-                      alt=""
-                      width={12}
-                      height={12}
-                      aria-hidden
-                      className="h-3 w-3 shrink-0 object-contain opacity-85"
-                    />
-                  ) : null}
                 </div>
-                <p className="mt-0.5 line-clamp-2 min-h-[1.7rem] pr-0.5 text-[9px] font-semibold leading-tight">
-                  {tile.name}
-                </p>
+                {!isIconOnlyTile ? (
+                  <p className="mt-0.5 line-clamp-2 min-h-[1.7rem] pr-0.5 text-[9px] font-semibold leading-tight">
+                    {tile.name}
+                  </p>
+                ) : null}
 
                 {ownership?.houses ? (
                   <div className="mt-1 flex justify-end">

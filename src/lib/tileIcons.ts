@@ -84,3 +84,35 @@ export const getBoardTileIconSrc = (tile: BoardTile | null): string | null => {
 
   return null;
 };
+
+const ICON_ONLY_SPECIAL_TILE_TYPES: BoardTile["type"][] = [
+  "START",
+  "TAX",
+  "CHANCE",
+  "COMMUNITY_CHEST",
+  "JAIL",
+  "FREE_PARKING",
+  "GO_TO_JAIL",
+];
+
+export const isIconOnlySpecialTile = (tile: BoardTile | null): boolean => {
+  if (!tile) {
+    return false;
+  }
+
+  const hasDedicatedIcon = Boolean(getBoardTileIconSrc(tile));
+  if (!hasDedicatedIcon) {
+    return false;
+  }
+
+  if (ICON_ONLY_SPECIAL_TILE_TYPES.includes(tile.type)) {
+    return true;
+  }
+
+  if (tile.type !== "EVENT") {
+    return false;
+  }
+
+  const tileLabel = `${tile.tile_id} ${tile.name}`.toLowerCase();
+  return tileLabel.includes("chance") || tileLabel.includes("community");
+};
