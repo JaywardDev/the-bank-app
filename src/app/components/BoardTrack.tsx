@@ -98,6 +98,20 @@ export default function BoardTrack({
                   : undefined,
               }}
             >
+              <div className="pointer-events-none absolute left-0.5 top-2.5 z-20 max-h-[calc(100%-0.75rem)]">
+                <TokenStack
+                  compact
+                  stacked
+                  players={tilePlayers.map((player) => ({
+                    id: player.id,
+                    display_name: player.display_name,
+                    color: playerColorsById[player.id] ?? "#93c5fd",
+                    isCurrent: player.id === currentPlayerId,
+                    isLastMoved: player.id === lastMovedPlayerId,
+                  }))}
+                />
+              </div>
+
               <div
                 className="h-1.5 w-full"
                 style={{ backgroundColor: getTileBandColor(tile) }}
@@ -127,19 +141,6 @@ export default function BoardTrack({
                     <HousesDots houses={ownership.houses} size="sm" />
                   </div>
                 ) : null}
-
-                <div className="mt-1">
-                  <TokenStack
-                    compact
-                    players={tilePlayers.map((player) => ({
-                      id: player.id,
-                      display_name: player.display_name,
-                      color: playerColorsById[player.id] ?? "#93c5fd",
-                      isCurrent: player.id === currentPlayerId,
-                      isLastMoved: player.id === lastMovedPlayerId,
-                    }))}
-                  />
-                </div>
               </div>
             </article>
           );
