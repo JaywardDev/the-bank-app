@@ -66,6 +66,7 @@ export const CLASSIC_UK_ECONOMY: BoardPackEconomy = {
   utilityRentMultipliers: { single: 4, double: 10 },
   startingBalance: 1500,
   passGoAmount: 200,
+  jailFineAmount: 50,
 };
 
 export const classicUkChanceCards: CardDefinition[] = [

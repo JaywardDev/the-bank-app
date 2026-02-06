@@ -53,6 +53,9 @@ const CLASSIC_PH_ECONOMY: BoardPackEconomy = {
     code: "PHP",
     symbol: "₱",
   },
+  startingBalance: 12000000,
+  passGoAmount: 1600000,
+  jailFineAmount: 400000,
 };
 
 const CLASSIC_PH_PROPERTY_GROUPS: PropertyGroupConfig[] = [
@@ -290,7 +293,7 @@ export const classicPhBoardPack: BoardPack = {
     { index: 1, tile_id: "cavite", type: "PROPERTY", name: "Cavite", price: 480000, baseRent: 16000 },
     { index: 2, tile_id: "community-chest-1", type: "EVENT", name: "Community Chest" },
     { index: 3, tile_id: "bulacan", type: "PROPERTY", name: "Bulacan", price: 480000, baseRent: 32000 },
-    { index: 4, tile_id: "income-tax", type: "TAX", name: "Income Tax", taxAmount: 200 },
+    { index: 4, tile_id: "income-tax", type: "TAX", name: "Income Tax", taxAmount: 3200000 },
     { index: 5, tile_id: "slex", type: "RAIL", name: "SLEX", price: 1600000, baseRent: 200000 },
     { index: 6, tile_id: "paranaque", type: "PROPERTY", name: "Parañaque", price: 800000, baseRent: 48000 },
     { index: 7, tile_id: "chance-1", type: "EVENT", name: "Chance" },
@@ -324,7 +327,7 @@ export const classicPhBoardPack: BoardPack = {
     { index: 35, tile_id: "mrt", type: "RAIL", name: "MRT", price: 1600000, baseRent: 200000 },
     { index: 36, tile_id: "chance-3", type: "EVENT", name: "Chance" },
     { index: 37, tile_id: "forbes-park", type: "PROPERTY", name: "Forbes Park", price: 2800000, baseRent: 280000 },
-    { index: 38, tile_id: "super-tax", type: "TAX", name: "Super Tax", taxAmount: 100 },
+    { index: 38, tile_id: "super-tax", type: "TAX", name: "Super Tax", taxAmount: 1600000 },
     { index: 39, tile_id: "bonifacio-high-street", type: "PROPERTY", name: "Bonifacio High Street", price: 3200000, baseRent: 400000 },
   ], CLASSIC_PH_PROPERTY_GROUPS, CLASSIC_PH_ECONOMY),
 };

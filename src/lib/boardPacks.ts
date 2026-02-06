@@ -26,6 +26,7 @@ export type BoardPackEconomy = {
   };
   startingBalance?: number;
   passGoAmount?: number;
+  jailFineAmount?: number;
 };
 
 export type CardKind =
@@ -150,6 +151,7 @@ const CLASSIC_US_ECONOMY: BoardPackEconomy = {
   utilityRentMultipliers: DEFAULT_UTILITY_RENT_MULTIPLIERS,
   startingBalance: 1500,
   passGoAmount: 200,
+  jailFineAmount: 50,
 };
 
 const NEW_ZEALAND_ECONOMY: BoardPackEconomy = {

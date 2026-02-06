@@ -298,7 +298,6 @@ type DiceEventPayload = {
   rolls_this_turn?: number;
 };
 
-const JAIL_FINE_AMOUNT = 50;
 const OWNABLE_TILE_TYPES = new Set(["PROPERTY", "RAIL", "UTILITY"]);
 
 const isConfigured = () =>
@@ -3270,6 +3269,11 @@ export async function POST(request: Request) {
 
       const boardPack = getBoardPackById(body.boardPackId);
 
+      const resolvedBoardPackId = boardPack?.id ?? defaultBoardPackId;
+      const resolvedBoardPack = getBoardPackById(resolvedBoardPackId);
+      const resolvedEconomy =
+        resolvedBoardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY;
+
       const [game] = (await fetchFromSupabaseWithService<GameRow[]>(
         "games?select=id,join_code,created_by",
         {
@@ -3280,7 +3284,8 @@ export async function POST(request: Request) {
           body: JSON.stringify({
             join_code: createJoinCode(),
             created_by: user.id,
-            board_pack_id: boardPack?.id ?? defaultBoardPackId,
+            board_pack_id: resolvedBoardPackId,
+            starting_cash: resolvedEconomy.startingBalance,
           }),
         },
       )) ?? [];
@@ -3448,6 +3453,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Game not found." }, { status: 404 });
     }
 
+    const boardPack = getBoardPackById(game.board_pack_id);
+    const boardPackEconomy = boardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY;
+    const startingCash =
+      game.starting_cash ??
+      boardPackEconomy.startingBalance ??
+      DEFAULT_BOARD_PACK_ECONOMY.startingBalance ??
+      0;
+    const jailFineAmount = boardPackEconomy.jailFineAmount ?? 50;
+
     const players = (await fetchFromSupabaseWithService<PlayerRow[]>(
       `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,is_eliminated,eliminated_at&game_id=eq.${gameId}&order=created_at.asc`,
       { method: "GET" },
@@ -3532,12 +3546,33 @@ export async function POST(request: Request) {
         );
       }
 
-      const startingCash = game.starting_cash ?? 1500;
+      const boardPack = getBoardPackById(game.board_pack_id);
+      const boardPackEconomy = boardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY;
+      const startingCash =
+      game.starting_cash ??
+      boardPackEconomy.startingBalance ??
+      DEFAULT_BOARD_PACK_ECONOMY.startingBalance ??
+      0;
+
+      if (game.starting_cash === null) {
+        await fetchFromSupabaseWithService<GameRow[]>(
+          `games?select=id&id=eq.${gameId}`,
+          {
+            method: "PATCH",
+            headers: {
+              Prefer: "return=representation",
+            },
+            body: JSON.stringify({
+              starting_cash: startingCash,
+            }),
+          },
+        );
+      }
+
       const balances = players.reduce<Record<string, number>>((acc, player) => {
         acc[player.id] = startingCash;
         return acc;
       }, {});
-      const boardPack = getBoardPackById(game.board_pack_id);
       const chanceDeck =
         boardPack?.eventDecks?.chance?.length
           ? boardPack.eventDecks.chance
@@ -4716,7 +4751,7 @@ export async function POST(request: Request) {
         let updatedBalances = gameState.balances ?? {};
         if (winnerId && !skipped) {
           const currentBalance =
-            updatedBalances[winnerId] ?? game.starting_cash ?? 0;
+            updatedBalances[winnerId] ?? startingCash;
           updatedBalances = {
             ...updatedBalances,
             [winnerId]: currentBalance - amount,
@@ -4857,7 +4892,7 @@ export async function POST(request: Request) {
 
         const balances = gameState.balances ?? {};
         const currentBalance =
-          balances[currentUserPlayer.id] ?? game.starting_cash ?? 0;
+          balances[currentUserPlayer.id] ?? startingCash;
         if (amount > currentBalance) {
           return NextResponse.json(
             { error: "Insufficient cash for that bid." },
@@ -5008,8 +5043,6 @@ export async function POST(request: Request) {
         kind: cardKind,
         payload: cardPayload,
       };
-      const boardPack = getBoardPackById(game.board_pack_id);
-      const boardPackEconomy = boardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY;
       const boardTiles = boardPack?.tiles ?? [];
       const boardSize = boardTiles.length > 0 ? boardTiles.length : 40;
       const sourceIndex =
@@ -5078,7 +5111,7 @@ export async function POST(request: Request) {
         getOutOfJailFreeCountChanged,
         cardUtilityRollOverride,
         cardTriggeredGoToJail,
-        startingCash: game.starting_cash ?? 0,
+        startingCash: startingCash,
         ownershipByTile,
         boardPackEconomy,
       });
@@ -5124,7 +5157,7 @@ export async function POST(request: Request) {
         boardTiles,
         boardPackEconomy,
         rules,
-        startingCash: game.starting_cash ?? 0,
+        startingCash: startingCash,
         activeMacroEffects: getActiveMacroEffectsV1ForRules(
           gameState?.active_macro_effects_v1,
           rules.macroEnabled,
@@ -5196,7 +5229,7 @@ export async function POST(request: Request) {
           currentVersion,
           userId: user.id,
           rules,
-          startingCash: game.starting_cash ?? 0,
+          startingCash: startingCash,
           extraEvents: [
             {
               event_type: "TURN_SKIPPED_PANDEMIC",
@@ -5216,8 +5249,6 @@ export async function POST(request: Request) {
       const [dieOne, dieTwo] = dice;
       const isDouble = dieOne === dieTwo;
       const nextDoublesCount = isDouble ? doublesCount + 1 : 0;
-      const boardPack = getBoardPackById(game.board_pack_id);
-      const boardPackEconomy = boardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY;
       const boardTiles = boardPack?.tiles ?? [];
       const boardSize = boardTiles.length > 0 ? boardTiles.length : 40;
       const currentPosition = Number.isFinite(currentPlayer.position)
@@ -5338,7 +5369,7 @@ export async function POST(request: Request) {
           gameId,
           player: nextPlayer,
           balances: updatedBalances,
-          startingCash: game.starting_cash ?? 0,
+          startingCash: startingCash,
           macroInterestTrendAccumulator: getMacroInterestTrendAccumulatorV1(
             getActiveMacroEffectsV1ForRules(
               gameState?.active_macro_effects_v1,
@@ -5487,7 +5518,7 @@ export async function POST(request: Request) {
         const goResult = applyGoSalary({
           player: currentPlayer,
           balances: updatedBalances,
-          startingCash: game.starting_cash ?? 0,
+          startingCash: startingCash,
           events,
           reason,
           packEconomy: boardPackEconomy,
@@ -5713,7 +5744,7 @@ export async function POST(request: Request) {
         boardTiles,
         boardPackEconomy,
         rules,
-        startingCash: game.starting_cash ?? 0,
+        startingCash: startingCash,
         activeMacroEffects: getActiveMacroEffectsV1ForRules(
           gameState?.active_macro_effects_v1,
           rules.macroEnabled,
@@ -6145,7 +6176,7 @@ export async function POST(request: Request) {
             amount: number;
           }> = [];
           for (const player of activePlayers) {
-            const currentBalance = updatedBalances[player.id] ?? game.starting_cash ?? 0;
+            const currentBalance = updatedBalances[player.id] ?? startingCash;
             const nextBalance = currentBalance + cashDelta;
             updatedBalances = {
               ...updatedBalances,
@@ -6218,7 +6249,7 @@ export async function POST(request: Request) {
             let cashRecovered = 0;
             if (cost > 0) {
               const currentBalance =
-                updatedBalances[player.id] ?? game.starting_cash ?? 0;
+                updatedBalances[player.id] ?? startingCash;
               if (currentBalance < cost) {
                 const liquidation = await liquidateHousesForPlayer({
                   gameId,
@@ -6226,7 +6257,7 @@ export async function POST(request: Request) {
                   boardTiles,
                   ownershipByTile,
                   balances: updatedBalances,
-                  startingCash: game.starting_cash ?? 0,
+                  startingCash: startingCash,
                   targetCash: cost,
                   allowedColorGroups: selectedColorSets,
                   macroHouseSellMultiplier,
@@ -6245,7 +6276,7 @@ export async function POST(request: Request) {
                 }
               }
               const postBalance =
-                updatedBalances[player.id] ?? game.starting_cash ?? 0;
+                updatedBalances[player.id] ?? startingCash;
               const nextBalance = postBalance - cost;
               updatedBalances = {
                 ...updatedBalances,
@@ -6267,7 +6298,7 @@ export async function POST(request: Request) {
             }
             const remainingDeficit = Math.min(
               0,
-              (updatedBalances[player.id] ?? game.starting_cash ?? 0),
+              (updatedBalances[player.id] ?? startingCash),
             );
             if (remainingDeficit < 0) {
               events.push({
@@ -6388,7 +6419,7 @@ export async function POST(request: Request) {
             const affectedSummaries: Array<Record<string, unknown>> = [];
             for (const liability of affected) {
               const currentBalance =
-                updatedBalances[player.id] ?? game.starting_cash ?? 0;
+                updatedBalances[player.id] ?? startingCash;
               const nextBalance = currentBalance - liability.interest_amount;
               updatedBalances = {
                 ...updatedBalances,
@@ -6445,7 +6476,7 @@ export async function POST(request: Request) {
           if (stimulusCash !== 0) {
             for (const player of activePlayers) {
               const currentBalance =
-                updatedBalances[player.id] ?? game.starting_cash ?? 0;
+                updatedBalances[player.id] ?? startingCash;
               const nextBalance = currentBalance + stimulusCash;
               updatedBalances = {
                 ...updatedBalances,
@@ -6483,7 +6514,7 @@ export async function POST(request: Request) {
           }> = [];
           for (const player of activePlayers) {
             const currentBalance =
-              updatedBalances[player.id] ?? game.starting_cash ?? 0;
+              updatedBalances[player.id] ?? startingCash;
             const nextBalance = currentBalance + cashDelta;
             updatedBalances = {
               ...updatedBalances,
@@ -6518,7 +6549,7 @@ export async function POST(request: Request) {
                 boardTiles,
                 ownershipByTile,
                 balances: updatedBalances,
-                startingCash: game.starting_cash ?? 0,
+                startingCash: startingCash,
                 targetCash: 0,
                 allowedColorGroups: null,
                 macroHouseSellMultiplier,
@@ -6537,7 +6568,7 @@ export async function POST(request: Request) {
             }
             const remainingDeficit = Math.min(
               0,
-              updatedBalances[player.id] ?? game.starting_cash ?? 0,
+              updatedBalances[player.id] ?? startingCash,
             );
             if (remainingDeficit < 0) {
               events.push({
@@ -6702,7 +6733,7 @@ export async function POST(request: Request) {
       const price = landingTile.price ?? 0;
       const balances = gameState.balances ?? {};
       const currentBalance =
-        balances[currentPlayer.id] ?? game.starting_cash ?? 0;
+        balances[currentPlayer.id] ?? startingCash;
       const usingMortgage = body.financing === "MORTGAGE";
       if (usingMortgage) {
         const activeMacroEffects = getActiveMacroEffectsV1ForRules(
@@ -6979,7 +7010,7 @@ export async function POST(request: Request) {
         }
         const balances = gameState.balances ?? {};
         const currentBalance =
-          balances[currentPlayer.id] ?? game.starting_cash ?? 0;
+          balances[currentPlayer.id] ?? startingCash;
         if (currentBalance < adjustedHouseCost) {
           return NextResponse.json(
             { error: "Not enough cash to build a house." },
@@ -7084,7 +7115,7 @@ export async function POST(request: Request) {
       }
 
       const balances = gameState.balances ?? {};
-      const currentBalance = balances[currentPlayer.id] ?? game.starting_cash ?? 0;
+      const currentBalance = balances[currentPlayer.id] ?? startingCash;
       const sellValue =
         action === "SELL_HOTEL"
           ? Math.round(0.8 * 5 * houseCost)
@@ -7323,7 +7354,7 @@ export async function POST(request: Request) {
       const payout = Math.round(price * 0.7);
       const balances = gameState.balances ?? {};
       const currentBalance =
-        balances[currentPlayer.id] ?? game.starting_cash ?? 0;
+        balances[currentPlayer.id] ?? startingCash;
       const updatedBalances = {
         ...balances,
         [currentPlayer.id]: currentBalance + payout,
@@ -7918,7 +7949,7 @@ export async function POST(request: Request) {
 
       const balances = gameState.balances ?? {};
       const currentBalance =
-        balances[currentPlayer.id] ?? game.starting_cash ?? 0;
+        balances[currentPlayer.id] ?? startingCash;
 
       if (currentBalance < payoffAmount) {
         return NextResponse.json(
@@ -8038,7 +8069,7 @@ export async function POST(request: Request) {
           currentVersion,
           userId: user.id,
           rules,
-          startingCash: game.starting_cash ?? 0,
+          startingCash: startingCash,
           extraEvents: [
             {
               event_type: "TURN_SKIPPED_PANDEMIC",
@@ -8119,7 +8150,7 @@ export async function POST(request: Request) {
           gameId,
           player: nextPlayer,
           balances: updatedBalances,
-          startingCash: game.starting_cash ?? 0,
+          startingCash: startingCash,
           macroInterestTrendAccumulator: getMacroInterestTrendAccumulatorV1(
             getActiveMacroEffectsV1ForRules(
               gameState?.active_macro_effects_v1,
@@ -8219,8 +8250,6 @@ export async function POST(request: Request) {
         return NextResponse.json({ gameState: updatedState });
       }
 
-      const boardPack = getBoardPackById(game.board_pack_id);
-      const boardPackEconomy = boardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY;
       const boardTiles = boardPack?.tiles ?? [];
       const boardSize = boardTiles.length > 0 ? boardTiles.length : 40;
       const currentPosition = Number.isFinite(currentPlayer.position)
@@ -8258,8 +8287,8 @@ export async function POST(request: Request) {
         | null = null;
       if (forcedFine) {
         const currentBalance =
-          updatedBalances[currentPlayer.id] ?? game.starting_cash ?? 0;
-        const nextBalance = currentBalance - JAIL_FINE_AMOUNT;
+          updatedBalances[currentPlayer.id] ?? startingCash;
+        const nextBalance = currentBalance - jailFineAmount;
         updatedBalances = {
           ...updatedBalances,
           [currentPlayer.id]: nextBalance,
@@ -8344,7 +8373,7 @@ export async function POST(request: Request) {
             payload: {
               player_id: currentPlayer.id,
               player_name: currentPlayer.display_name,
-              amount: JAIL_FINE_AMOUNT,
+              amount: jailFineAmount,
               forced: true,
             },
           },
@@ -8352,7 +8381,7 @@ export async function POST(request: Request) {
             event_type: "CASH_DEBIT",
             payload: {
               player_id: currentPlayer.id,
-              amount: JAIL_FINE_AMOUNT,
+              amount: jailFineAmount,
               reason: "JAIL_PAY_FINE",
             },
           },
@@ -8378,7 +8407,7 @@ export async function POST(request: Request) {
         const goResult = applyGoSalary({
           player: currentPlayer,
           balances: updatedBalances,
-          startingCash: game.starting_cash ?? 0,
+          startingCash: startingCash,
           events,
           reason,
           packEconomy: boardPackEconomy,
@@ -8604,7 +8633,7 @@ export async function POST(request: Request) {
         boardTiles,
         boardPackEconomy,
         rules,
-        startingCash: game.starting_cash ?? 0,
+        startingCash: startingCash,
         activeMacroEffects: getActiveMacroEffectsV1ForRules(
           gameState?.active_macro_effects_v1,
           rules.macroEnabled,
@@ -8643,8 +8672,8 @@ export async function POST(request: Request) {
 
       const balances = gameState.balances ?? {};
       const currentBalance =
-        balances[currentPlayer.id] ?? game.starting_cash ?? 0;
-      const nextBalance = currentBalance - JAIL_FINE_AMOUNT;
+        balances[currentPlayer.id] ?? startingCash;
+      const nextBalance = currentBalance - jailFineAmount;
       const updatedBalances = {
         ...balances,
         [currentPlayer.id]: nextBalance,
@@ -8658,14 +8687,14 @@ export async function POST(request: Request) {
           payload: {
             player_id: currentPlayer.id,
             player_name: currentPlayer.display_name,
-            amount: JAIL_FINE_AMOUNT,
+            amount: jailFineAmount,
           },
         },
         {
           event_type: "CASH_DEBIT",
           payload: {
             player_id: currentPlayer.id,
-            amount: JAIL_FINE_AMOUNT,
+            amount: jailFineAmount,
             reason: "JAIL_PAY_FINE",
           },
         },
@@ -8851,7 +8880,7 @@ export async function POST(request: Request) {
         currentVersion,
         userId: user.id,
         rules,
-        startingCash: game.starting_cash ?? 0,
+        startingCash: startingCash,
       });
     }
 

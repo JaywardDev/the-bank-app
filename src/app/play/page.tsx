@@ -31,7 +31,6 @@ import { getBoardTileIconSrc } from "@/lib/tileIcons";
 
 const lastGameKey = "bank.lastGameId";
 const DEBUG = process.env.NEXT_PUBLIC_DEBUG === "true";
-const JAIL_FINE_AMOUNT = 50;
 const EVENT_FETCH_LIMIT = 100;
 const EVENT_LOG_LIMIT = 10;
 const TRANSACTION_DISPLAY_LIMIT = 30;
@@ -6198,7 +6197,7 @@ export default function PlayPage() {
                     >
                       {actionLoading === "JAIL_PAY_FINE"
                         ? "Paying…"
-                        : `Pay ${formatMoney(JAIL_FINE_AMOUNT, currencySymbol)} fine`}
+                        : `Pay ${formatMoney(boardPackEconomy.jailFineAmount ?? 50, currencySymbol)} fine`}
                     </button>
                     {jailPayDisabledReason ? (
                       <p className="text-xs text-neutral-400">

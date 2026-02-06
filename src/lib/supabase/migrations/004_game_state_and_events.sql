@@ -1,5 +1,7 @@
 alter table public.games
-add column if not exists starting_cash integer not null default 1500;
+add column if not exists starting_cash integer;
+
+comment on column games.starting_cash is 'Set explicitly from the selected board pack economy at game creation/start.';
 
 create table if not exists public.game_state (
   game_id uuid primary key references public.games(id) on delete cascade,
