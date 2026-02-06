@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import Image from "next/image";
 import HousesDots from "@/app/components/HousesDots";
 import TokenStack from "@/app/components/TokenStack";
@@ -98,18 +99,24 @@ export default function BoardTrack({
                   : undefined,
               }}
             >
-              <div className="pointer-events-none absolute left-0.5 top-2.5 z-20 max-h-[calc(100%-0.75rem)]">
-                <TokenStack
-                  compact
-                  stacked
-                  players={tilePlayers.map((player) => ({
-                    id: player.id,
-                    display_name: player.display_name,
-                    color: playerColorsById[player.id] ?? "#93c5fd",
-                    isCurrent: player.id === currentPlayerId,
-                    isLastMoved: player.id === lastMovedPlayerId,
-                  }))}
-                />
+              <div className="pointer-events-none absolute inset-x-1.5 top-2 z-30 h-[calc(100%-0.75rem)]">
+                <div
+                  className="relative h-full w-full"
+                  style={{
+                    "--token-size": "clamp(12px, 40%, 26px)",
+                    "--token-step": "24%",
+                  } as CSSProperties}
+                >
+                  <TokenStack
+                    players={tilePlayers.map((player) => ({
+                      id: player.id,
+                      display_name: player.display_name,
+                      color: playerColorsById[player.id] ?? "#93c5fd",
+                      isCurrent: player.id === currentPlayerId,
+                      isLastMoved: player.id === lastMovedPlayerId,
+                    }))}
+                  />
+                </div>
               </div>
 
               <div

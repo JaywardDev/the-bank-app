@@ -10,8 +10,6 @@ type TokenPlayer = {
 
 type TokenStackProps = {
   players: TokenPlayer[];
-  compact?: boolean;
-  stacked?: boolean;
 };
 
 const getInitials = (name: string | null) => {
@@ -23,25 +21,18 @@ const getInitials = (name: string | null) => {
   return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
 };
 
-export default function TokenStack({
-  players,
-  compact = false,
-  stacked = false,
-}: TokenStackProps) {
+export default function TokenStack({ players }: TokenStackProps) {
   if (players.length === 0) {
     return null;
   }
 
-  const dotSizeClass = compact ? "h-7 w-7 text-[11px]" : "h-8 w-8 text-xs";
-  const containerClass = stacked
-    ? "flex flex-col items-start gap-0.5"
-    : "flex flex-wrap items-center gap-1";
-
   return (
-    <div className={containerClass}>
-      {players.map((player) => {
-        const style: CSSProperties = {
+    <div className="relative h-full w-full">
+      {players.map((player, index) => {
+        const style: CSSProperties & Record<string, string> = {
           backgroundColor: player.color,
+          "--token-shift-x": `calc(var(--token-step, 24%) * ${index})`,
+          "--token-shift-y": `calc(var(--token-step, 24%) * ${index})`,
         };
 
         return (
@@ -49,7 +40,7 @@ export default function TokenStack({
             key={player.id}
             style={style}
             title={player.display_name ?? "Player"}
-            className={`inline-flex ${dotSizeClass} items-center justify-center rounded-full border border-black/30 font-bold text-black shadow-[0_3px_6px_rgba(0,0,0,0.35)] ${
+            className={`absolute left-0 top-0 z-30 inline-flex h-[var(--token-size,clamp(12px,40%,26px))] w-[var(--token-size,clamp(12px,40%,26px))] translate-x-[min(var(--token-shift-x),calc(100%-var(--token-size,clamp(12px,40%,26px))))] translate-y-[min(var(--token-shift-y),calc(100%-var(--token-size,clamp(12px,40%,26px))))] items-center justify-center overflow-hidden rounded-full border border-black/30 font-bold text-[clamp(8px,14%,11px)] leading-none text-black shadow-[0_3px_6px_rgba(0,0,0,0.35)] ${
               player.isCurrent ? "ring-2 ring-emerald-300" : ""
             } ${player.isLastMoved ? "ring-2 ring-amber-300" : ""}`}
             aria-label={player.display_name ?? "Player token"}
