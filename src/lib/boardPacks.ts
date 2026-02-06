@@ -27,6 +27,7 @@ export type BoardPackEconomy = {
   startingBalance?: number;
   passGoAmount?: number;
   jailFineAmount?: number;
+  auctionMinIncrement?: number;
 };
 
 export type CardKind =

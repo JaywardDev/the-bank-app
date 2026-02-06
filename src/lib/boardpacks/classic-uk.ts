@@ -67,6 +67,7 @@ export const CLASSIC_UK_ECONOMY: BoardPackEconomy = {
   startingBalance: 1500,
   passGoAmount: 200,
   jailFineAmount: 50,
+  auctionMinIncrement: 10,
 };
 
 export const classicUkChanceCards: CardDefinition[] = [

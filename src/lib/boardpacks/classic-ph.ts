@@ -56,6 +56,7 @@ const CLASSIC_PH_ECONOMY: BoardPackEconomy = {
   startingBalance: 12000000,
   passGoAmount: 1600000,
   jailFineAmount: 400000,
+  auctionMinIncrement: 50000,
 };
 
 const CLASSIC_PH_PROPERTY_GROUPS: PropertyGroupConfig[] = [

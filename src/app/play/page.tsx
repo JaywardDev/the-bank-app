@@ -1728,7 +1728,7 @@ export default function PlayPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [auctionBidAmount, setAuctionBidAmount] = useState<number>(10);
+  const [auctionBidAmount, setAuctionBidAmount] = useState<number>(0);
   const [auctionNow, setAuctionNow] = useState<Date>(() => new Date());
   const [needsAuth, setNeedsAuth] = useState(false);
   const [isActivityPanelOpen, setIsActivityPanelOpen] = useState(false);
@@ -4772,9 +4772,9 @@ export default function PlayPage() {
   }, [boardPack?.tiles, currentUserPlayer?.id, ownershipByTile]);
   const auctionCurrentBid = gameState?.auction_current_bid ?? 0;
   const auctionMinIncrement =
-    gameState?.auction_min_increment ?? rules.auctionMinIncrement;
+    gameState?.auction_min_increment ?? boardPackEconomy.auctionMinIncrement ?? 10;
   const auctionBidMinimum =
-    auctionCurrentBid > 0 ? auctionCurrentBid + auctionMinIncrement : 10;
+    auctionCurrentBid > 0 ? auctionCurrentBid + auctionMinIncrement : auctionMinIncrement;
   const auctionTurnEndsAt = gameState?.auction_turn_ends_at ?? null;
   const auctionWinnerId = gameState?.auction_current_winner_player_id ?? null;
   const auctionWinnerName =
@@ -5036,9 +5036,9 @@ export default function PlayPage() {
         ).padStart(2, "0")}`
       : "—";
   const canIncreaseAuctionBid =
-    isCurrentAuctionBidder && auctionBidAmount + 10 <= currentBidderCash;
+    isCurrentAuctionBidder && auctionBidAmount + auctionMinIncrement <= currentBidderCash;
   const canDecreaseAuctionBid =
-    isCurrentAuctionBidder && auctionBidAmount - 10 >= auctionBidMinimum;
+    isCurrentAuctionBidder && auctionBidAmount - auctionMinIncrement >= auctionBidMinimum;
   const canSubmitAuctionBid =
     isCurrentAuctionBidder &&
     auctionBidAmount >= auctionBidMinimum &&
@@ -7170,7 +7170,7 @@ export default function PlayPage() {
                           className="rounded-full border border-neutral-200 px-3 py-1 text-sm font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:text-neutral-300"
                           type="button"
                           onClick={() =>
-                            setAuctionBidAmount((prev) => prev - 10)
+                            setAuctionBidAmount((prev) => prev - auctionMinIncrement)
                           }
                           disabled={!canDecreaseAuctionBid}
                         >
@@ -7183,7 +7183,7 @@ export default function PlayPage() {
                           className="rounded-full border border-neutral-200 px-3 py-1 text-sm font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:text-neutral-300"
                           type="button"
                           onClick={() =>
-                            setAuctionBidAmount((prev) => prev + 10)
+                            setAuctionBidAmount((prev) => prev + auctionMinIncrement)
                           }
                           disabled={!canIncreaseAuctionBid}
                         >

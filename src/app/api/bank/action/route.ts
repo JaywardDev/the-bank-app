@@ -4641,7 +4641,7 @@ export async function POST(request: Request) {
       const minIncrement =
         typeof gameState.auction_min_increment === "number"
           ? gameState.auction_min_increment
-          : rules.auctionMinIncrement;
+          : (boardPackEconomy.auctionMinIncrement ?? 10);
       const now = new Date();
       const auctionEvents: Array<{
         event_type: string;
@@ -4742,7 +4742,7 @@ export async function POST(request: Request) {
           auction_turn_ends_at: null,
           auction_eligible_player_ids: [],
           auction_passed_player_ids: [],
-          auction_min_increment: rules.auctionMinIncrement,
+          auction_min_increment: boardPackEconomy.auctionMinIncrement ?? 10,
           turn_phase: "AWAITING_ROLL",
           pending_action: null,
           updated_at: new Date().toISOString(),
@@ -4882,7 +4882,7 @@ export async function POST(request: Request) {
           );
         }
 
-        const minBid = currentBid === 0 ? 10 : currentBid + minIncrement;
+        const minBid = currentBid === 0 ? minIncrement : currentBid + minIncrement;
         if (amount < minBid) {
           return NextResponse.json(
             { error: `Bid must be at least $${minBid}.` },
@@ -5937,7 +5937,7 @@ export async function POST(request: Request) {
           event_type: "AUCTION_STARTED",
           payload: {
             tile_index: body.tileIndex,
-            min_increment: rules.auctionMinIncrement,
+            min_increment: boardPackEconomy.auctionMinIncrement ?? 10,
           },
         });
 
@@ -5965,7 +5965,7 @@ export async function POST(request: Request) {
                 ).toISOString(),
                 auction_eligible_player_ids: eligibleIds,
                 auction_passed_player_ids: [],
-                auction_min_increment: rules.auctionMinIncrement,
+                auction_min_increment: boardPackEconomy.auctionMinIncrement ?? 10,
                 updated_at: new Date().toISOString(),
               }),
             },
