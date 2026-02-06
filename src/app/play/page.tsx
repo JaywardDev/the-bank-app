@@ -194,12 +194,14 @@ const PropertyRentTable = ({
   houseCost,
   hotelIncrement,
   currentRent,
+  currencySymbol = "$",
   className,
 }: {
   rentRows: RentRow[];
   houseCost: number | null;
   hotelIncrement: number | null;
   currentRent?: number | null;
+  currencySymbol?: string;
   className?: string;
 }) => (
   <div
@@ -218,24 +220,24 @@ const PropertyRentTable = ({
         >
           <span>{row.label}</span>
           <span className="font-semibold text-neutral-900">
-            {row.value !== null ? `$${row.value}` : "—"}
+            {row.value !== null ? formatMoney(row.value, currencySymbol) : "—"}
           </span>
         </div>
       ))}
       <div className="flex items-center justify-between text-neutral-600">
         <span>Hotel increment</span>
         <span className="font-semibold text-neutral-900">
-          {hotelIncrement !== null ? `+$${hotelIncrement} per hotel` : "—"}
+          {hotelIncrement !== null ? `${formatSignedMoney(hotelIncrement, currencySymbol)} per hotel` : "—"}
         </span>
       </div>
     </div>
     {currentRent !== undefined ? (
       <div className="mt-2 text-xs font-semibold text-neutral-700">
-        Current rent: {currentRent !== null ? `$${currentRent}` : "—"}
+        Current rent: {currentRent !== null ? formatMoney(currentRent, currencySymbol) : "—"}
       </div>
     ) : null}
     <div className="mt-2 border-t border-neutral-200 pt-2 text-xs font-medium text-neutral-700">
-      House cost: {houseCost ? `$${houseCost} each` : "—"}
+      House cost: {houseCost ? `${formatMoney(houseCost, currencySymbol)} each` : "—"}
     </div>
   </div>
 );
@@ -244,11 +246,13 @@ const RailRentTable = ({
   rentRows,
   ownedCount,
   currentRent,
+  currencySymbol = "$",
   className,
 }: {
   rentRows: RentRow[];
   ownedCount: number;
   currentRent: number | null;
+  currencySymbol?: string;
   className?: string;
 }) => (
   <div
@@ -267,7 +271,7 @@ const RailRentTable = ({
         >
           <span>{row.label}</span>
           <span className="font-semibold text-neutral-900">
-            {row.value !== null ? `$${row.value}` : "—"}
+            {row.value !== null ? formatMoney(row.value, currencySymbol) : "—"}
           </span>
         </div>
       ))}
@@ -277,7 +281,7 @@ const RailRentTable = ({
     </p>
     {currentRent !== null ? (
       <p className="mt-1 text-[11px] font-semibold text-neutral-700">
-        Current rent: ${currentRent}
+        Current rent: {formatMoney(currentRent, currencySymbol)}
       </p>
     ) : null}
   </div>
@@ -288,12 +292,14 @@ const UtilityRentTable = ({
   lastRoll,
   currentRent,
   rentMultipliers,
+  currencySymbol = "$",
   className,
 }: {
   ownedCount: number;
   lastRoll: number | null;
   currentRent: number | null;
   rentMultipliers: BoardPackEconomy["utilityRentMultipliers"];
+  currencySymbol?: string;
   className?: string;
 }) => (
   <div
@@ -328,7 +334,7 @@ const UtilityRentTable = ({
     </p>
     {lastRoll !== null && currentRent !== null ? (
       <p className="mt-1 text-[11px] font-semibold text-neutral-700">
-        Current rent (last roll {lastRoll}): ${currentRent}
+        Current rent (last roll {lastRoll}): {formatMoney(currentRent, currencySymbol)}
       </p>
     ) : null}
   </div>
@@ -362,6 +368,7 @@ type TitleDeedPreviewProps = {
   footer?: ReactNode;
   showDevelopment?: boolean;
   developmentCount?: number | null;
+  currencySymbol?: string;
 };
 
 const TitleDeedPreview = ({
@@ -376,6 +383,7 @@ const TitleDeedPreview = ({
   footer,
   showDevelopment = false,
   developmentCount = null,
+  currencySymbol = "$",
 }: TitleDeedPreviewProps) => {
   if (!tile || !isOwnableTileType(tile.type)) {
     return null;
@@ -426,7 +434,7 @@ const TitleDeedPreview = ({
             </p>
             {priceValue !== null ? (
               <p className="text-xs font-medium text-neutral-500">
-                Price ${priceValue}
+                Price {formatMoney(priceValue, currencySymbol)}
               </p>
             ) : null}
           </div>
@@ -447,7 +455,7 @@ const TitleDeedPreview = ({
             </p>
             {priceValue !== null ? (
               <p className="text-xs font-medium text-neutral-500">
-                Price ${priceValue}
+                Price {formatMoney(priceValue, currencySymbol)}
               </p>
             ) : null}
           </div>
@@ -460,7 +468,7 @@ const TitleDeedPreview = ({
       subheader={
         tile.type === "PROPERTY" && priceValue !== null ? (
           <p className="text-xs font-medium text-neutral-500">
-            Price ${priceValue}
+            Price {formatMoney(priceValue, currencySymbol)}
           </p>
         ) : null
       }
@@ -471,6 +479,7 @@ const TitleDeedPreview = ({
             rentRows={railRentRows}
             ownedCount={ownedRailCount}
             currentRent={null}
+            currencySymbol={currencySymbol}
           />
         ) : tile.type === "UTILITY" ? (
           <UtilityRentTable
@@ -479,6 +488,7 @@ const TitleDeedPreview = ({
             lastRoll={null}
             currentRent={null}
             rentMultipliers={utilityRentMultipliers}
+            currencySymbol={currencySymbol}
           />
         ) : (
           <div className="mt-3 space-y-2">
@@ -497,6 +507,7 @@ const TitleDeedPreview = ({
               houseCost={propertyRent.houseCost}
               hotelIncrement={propertyRent.hotelIncrement}
               currentRent={resolvedDevelopment !== null ? currentRent : undefined}
+              currencySymbol={currencySymbol}
             />
           </div>
         )
@@ -583,6 +594,12 @@ const formatSignedPercent = (value: number) =>
   `${value >= 0 ? "+" : ""}${(value * 100).toFixed(1)}%`;
 
 const formatMultiplier = (value: number) => `${value.toFixed(2)}×`;
+
+const formatMoney = (amount: number, currencySymbol = "$") =>
+  `${currencySymbol}${amount.toLocaleString()}`;
+
+const formatSignedMoney = (amount: number, currencySymbol = "$") =>
+  `${amount < 0 ? "-" : "+"}${formatMoney(Math.abs(amount), currencySymbol)}`;
 
 const getDevBreakdown = (dev: number) => {
   const normalizedDev = Number.isFinite(dev) ? Math.max(0, Math.floor(dev)) : 0;
@@ -828,6 +845,7 @@ type TileDetailsPanelProps = {
   selectedOwnerUtilityCount: number;
   selectedTileDevelopment?: number | null;
   boardPackEconomy: BoardPackEconomy;
+  currencySymbol?: string;
   onClose: () => void;
   sheetRef?: React.Ref<HTMLDivElement>;
 };
@@ -843,6 +861,7 @@ const TileDetailsPanel = ({
   selectedOwnerUtilityCount,
   selectedTileDevelopment,
   boardPackEconomy,
+  currencySymbol = "$",
   onClose,
   sheetRef,
 }: TileDetailsPanelProps) => {
@@ -907,6 +926,7 @@ const TileDetailsPanel = ({
             mode="readonly"
             showDevelopment
             developmentCount={resolvedDevelopment}
+            currencySymbol={currencySymbol}
           />
         ) : tileIconSrc ? (
           <div className="rounded-2xl bg-neutral-50 px-3 py-6">
@@ -964,6 +984,7 @@ const getPendingCardDescription = (
   kind: string | null,
   payload: Record<string, unknown> | null,
   boardPack: ReturnType<typeof getBoardPackById> | null,
+  currencySymbol = "$",
 ) => {
   if (!kind) {
     return "Card effect pending.";
@@ -978,8 +999,8 @@ const getPendingCardDescription = (
           : null;
     if (amount !== null) {
       return kind === "PAY"
-        ? `Pay $${amount}.`
-        : `Receive $${amount}.`;
+        ? `Pay ${formatMoney(amount, currencySymbol)}.`
+        : `Receive ${formatMoney(amount, currencySymbol)}.`;
     }
     return kind === "PAY" ? "Pay the bank." : "Receive money from the bank.";
   }
@@ -1894,6 +1915,7 @@ export default function PlayPage() {
   }, [isGoToJailAcknowledging, pendingGoToJail]);
   const boardPack = getBoardPackById(gameMeta?.board_pack_id);
   const boardPackEconomy = boardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY;
+  const currencySymbol = boardPackEconomy?.currency?.symbol ?? "$";
   const currentPlayerId = gameState?.current_player_id ?? null;
   const expandedBoardTiles =
     boardPack?.tiles && boardPack.tiles.length > 0
@@ -2458,7 +2480,7 @@ export default function PlayPage() {
           ? payload.event_name
           : "Macro maintenance";
       return perHouse !== null
-        ? `${eventName} maintenance charged ($${perHouse} per house)`
+        ? `${eventName} maintenance charged (${formatMoney(perHouse, currencySymbol)} per house)`
         : `${eventName} maintenance charged`;
     }
 
@@ -2483,7 +2505,7 @@ export default function PlayPage() {
       const tileLabel =
         tileNameFromBoard ?? (tileIndex !== null ? `Tile ${tileIndex}` : "tile");
       return amount !== null
-        ? `Macro interest surcharge: $${amount} (${tileLabel})`
+        ? `Macro interest surcharge: ${formatMoney(amount, currencySymbol)} (${tileLabel})`
         : `Macro interest surcharge (${tileLabel})`;
     }
 
@@ -2502,7 +2524,7 @@ export default function PlayPage() {
         typeof payload?.reason === "string" ? payload.reason : "PASS_START";
       const reasonLabel = reason === "LAND_GO" ? "for landing on GO" : "for passing GO";
       return amount !== null
-        ? `${playerName} collected $${amount} ${reasonLabel}`
+        ? `${playerName} collected ${formatMoney(amount, currencySymbol)} ${reasonLabel}`
         : `${playerName} collected GO salary`;
     }
 
@@ -2560,7 +2582,7 @@ export default function PlayPage() {
           ? payload.player_name
           : "Player";
       return amount !== null
-        ? `${playerName} paid $${amount} (${cardTitle})`
+        ? `${playerName} paid ${formatMoney(amount, currencySymbol)} (${cardTitle})`
         : `${playerName} paid (${cardTitle})`;
     }
 
@@ -2578,7 +2600,7 @@ export default function PlayPage() {
           ? payload.player_name
           : "Player";
       return amount !== null
-        ? `${playerName} received $${amount} (${cardTitle})`
+        ? `${playerName} received ${formatMoney(amount, currencySymbol)} (${cardTitle})`
         : `${playerName} received (${cardTitle})`;
     }
 
@@ -2680,7 +2702,7 @@ export default function PlayPage() {
             : null;
 
       return price !== null
-        ? `Offer: Buy ${tileLabel} for $${price}`
+        ? `Offer: Buy ${tileLabel} for ${formatMoney(price, currencySymbol)}`
         : `Offer: Buy ${tileLabel}`;
     }
 
@@ -2722,7 +2744,7 @@ export default function PlayPage() {
             ? Number.parseInt(payload.min_increment, 10)
             : null;
       return minIncrement !== null
-        ? `Auction started for ${tileLabel} (min +$${minIncrement})`
+        ? `Auction started for ${tileLabel} (min ${formatSignedMoney(minIncrement, currencySymbol)})`
         : `Auction started for ${tileLabel}`;
     }
 
@@ -2752,7 +2774,7 @@ export default function PlayPage() {
       const tileLabel =
         tileNameFromBoard ?? (tileIndex !== null ? `Tile ${tileIndex}` : "tile");
       return amount !== null
-        ? `${playerName} bid $${amount} on ${tileLabel}`
+        ? `${playerName} bid ${formatMoney(amount, currencySymbol)} on ${tileLabel}`
         : `${playerName} bid on ${tileLabel}`;
     }
 
@@ -2807,7 +2829,7 @@ export default function PlayPage() {
       const tileLabel =
         tileNameFromBoard ?? (tileIndex !== null ? `Tile ${tileIndex}` : "tile");
       return amount !== null
-        ? `${winnerName} won ${tileLabel} for $${amount}`
+        ? `${winnerName} won ${tileLabel} for ${formatMoney(amount, currencySymbol)}`
         : `${winnerName} won ${tileLabel}`;
     }
 
@@ -2878,7 +2900,7 @@ export default function PlayPage() {
           : "";
 
       return rentAmount !== null
-        ? `Paid $${rentAmount} rent to ${ownerName} (${tileLabel})${detailLabel}${macroLabel}`
+        ? `Paid ${formatMoney(rentAmount, currencySymbol)} rent to ${ownerName} (${tileLabel})${detailLabel}${macroLabel}`
         : `Paid rent to ${ownerName} (${tileLabel})${macroLabel}`;
     }
 
@@ -2932,10 +2954,10 @@ export default function PlayPage() {
             ? Number.parseInt(payload.term_turns, 10)
             : null;
       const principalLabel =
-        principal !== null ? ` for $${principal}` : "";
+        principal !== null ? ` for ${formatMoney(principal, currencySymbol)}` : "";
       const paymentLabel =
         payment !== null && termTurns !== null
-          ? ` · $${payment}/turn × ${termTurns}`
+          ? ` · ${formatMoney(payment, currencySymbol)}/turn × ${termTurns}`
           : "";
       return `Collateral loan on ${tileLabel}${principalLabel}${paymentLabel}`;
     }
@@ -2962,10 +2984,10 @@ export default function PlayPage() {
             : null;
       const turnsRemaining = getTurnsRemainingFromPayload(payload);
       if (payment !== null && turnsRemaining !== null) {
-        return `Loan payment $${payment} on ${tileLabel} · ${turnsRemaining} turns left`;
+        return `Loan payment ${formatMoney(payment, currencySymbol)} on ${tileLabel} · ${turnsRemaining} turns left`;
       }
       if (payment !== null) {
-        return `Loan payment $${payment} on ${tileLabel}`;
+        return `Loan payment ${formatMoney(payment, currencySymbol)} on ${tileLabel}`;
       }
       return `Loan payment on ${tileLabel}`;
     }
@@ -3008,7 +3030,7 @@ export default function PlayPage() {
             ? Number.parseInt(payload.amount, 10)
             : null;
       if (amount !== null) {
-        return `Loan paid off early on ${tileLabel} for $${amount}`;
+        return `Loan paid off early on ${tileLabel} for ${formatMoney(amount, currencySymbol)}`;
       }
       return `Loan paid off early on ${tileLabel}`;
     }
@@ -3039,7 +3061,7 @@ export default function PlayPage() {
             ? Number.parseInt(payload.payout, 10)
             : null;
       return payout !== null
-        ? `${playerName} sold ${tileLabel} to market for $${payout}`
+        ? `${playerName} sold ${tileLabel} to market for ${formatMoney(payout, currencySymbol)}`
         : `${playerName} sold ${tileLabel} to market`;
     }
 
@@ -3091,7 +3113,7 @@ export default function PlayPage() {
           : "Player";
 
       return taxAmount !== null
-        ? `${payerName} paid $${taxAmount} tax (${tileLabel})`
+        ? `${payerName} paid ${formatMoney(taxAmount, currencySymbol)} tax (${tileLabel})`
         : `${payerName} paid tax (${tileLabel})`;
     }
 
@@ -3123,7 +3145,7 @@ export default function PlayPage() {
           ? payload.player_name
           : "Player";
       return fineAmount !== null
-        ? `${playerName} paid $${fineAmount} to get out of jail`
+        ? `${playerName} paid ${formatMoney(fineAmount, currencySymbol)} to get out of jail`
         : `${playerName} paid a jail fine`;
     }
 
@@ -3200,7 +3222,7 @@ export default function PlayPage() {
     }
 
     return "Update received";
-  }, [boardPack?.tiles, getOwnershipLabel, getTileNameByIndex, players]);
+  }, [boardPack?.tiles, currencySymbol, getOwnershipLabel, getTileNameByIndex, players]);
 
   const clearResumeStorage = useCallback(() => {
     if (typeof window === "undefined") {
@@ -4218,9 +4240,14 @@ export default function PlayPage() {
   const pendingCardDescription = useMemo(
     () =>
       pendingCard
-        ? getPendingCardDescription(pendingCard.kind, pendingCard.payload, boardPack)
+        ? getPendingCardDescription(
+            pendingCard.kind,
+            pendingCard.payload,
+            boardPack,
+            currencySymbol,
+          )
         : null,
-    [boardPack, pendingCard],
+    [boardPack, currencySymbol, pendingCard],
   );
   const pendingCardActorName = useMemo(() => {
     if (!pendingCard?.drawnBy) {
@@ -4825,7 +4852,7 @@ export default function PlayPage() {
     [transactions],
   );
   const formatSignedCurrency = (amount: number) =>
-    `${amount < 0 ? "-" : "+"}$${Math.abs(amount)}`;
+    formatSignedMoney(amount, currencySymbol);
   const incomingTradeSnapshotTiles = useMemo(
     () =>
       incomingTradeProposal
@@ -5022,7 +5049,7 @@ export default function PlayPage() {
       ? "Submitting bid…"
       : !canSubmitAuctionBid
         ? auctionBidAmount < auctionBidMinimum
-          ? `Minimum bid is $${auctionBidMinimum}`
+          ? `Minimum bid is ${formatMoney(auctionBidMinimum, currencySymbol)}`
           : auctionBidAmount > currentBidderCash
             ? "Not enough cash"
             : null
@@ -6171,7 +6198,7 @@ export default function PlayPage() {
                     >
                       {actionLoading === "JAIL_PAY_FINE"
                         ? "Paying…"
-                        : `Pay $${JAIL_FINE_AMOUNT} fine`}
+                        : `Pay ${formatMoney(JAIL_FINE_AMOUNT, currencySymbol)} fine`}
                     </button>
                     {jailPayDisabledReason ? (
                       <p className="text-xs text-neutral-400">
@@ -6256,6 +6283,7 @@ export default function PlayPage() {
               price={pendingPurchase.price}
               ownedRailCount={pendingOwnerRailCount}
               ownedUtilityCount={pendingOwnerUtilityCount}
+              currencySymbol={currencySymbol}
               footer={
                 <>
                   <div className="grid gap-2">
@@ -6289,7 +6317,7 @@ export default function PlayPage() {
                     >
                       {actionLoading === "BUY_PROPERTY"
                         ? "Buying…"
-                        : `Buy with Mortgage ($${pendingMortgageDownPayment} down)`}
+                        : `Buy with Mortgage (${formatMoney(pendingMortgageDownPayment, currencySymbol)} down)`}
                     </button>
                     <button
                       className="rounded-2xl border border-neutral-300 px-4 py-2 text-sm font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-400"
@@ -6315,7 +6343,7 @@ export default function PlayPage() {
                   ) : null}
                   {!canAffordPendingPurchase ? (
                     <p className="mt-2 text-[11px] text-neutral-500">
-                      You need ${pendingPurchase.price - myPlayerBalance} more to
+                      You need {formatMoney(pendingPurchase.price - myPlayerBalance, currencySymbol)} more to
                       buy this property.
                     </p>
                   ) : null}
@@ -6698,7 +6726,7 @@ export default function PlayPage() {
                     </p>
                     <ul className="mt-2 space-y-1 text-sm text-neutral-700">
                       {incomingTradeRequestCash > 0 ? (
-                        <li>Cash: ${incomingTradeRequestCash}</li>
+                        <li>Cash: {formatMoney(incomingTradeRequestCash, currencySymbol)}</li>
                       ) : null}
                       {incomingTradeRequestTiles.length > 0 ? (
                         incomingTradeRequestTiles.map((tileIndex) => {
@@ -6726,7 +6754,7 @@ export default function PlayPage() {
                     </p>
                     <ul className="mt-2 space-y-1 text-sm text-neutral-700">
                       {incomingTradeOfferCash > 0 ? (
-                        <li>Cash: ${incomingTradeOfferCash}</li>
+                        <li>Cash: {formatMoney(incomingTradeOfferCash, currencySymbol)}</li>
                       ) : null}
                       {incomingTradeOfferTiles.length > 0 ? (
                         incomingTradeOfferTiles.map((tileIndex) => {
@@ -6762,12 +6790,12 @@ export default function PlayPage() {
                           const details = [];
                           if (entry.collateralPayment !== null) {
                             details.push(
-                              `Collateral: $${entry.collateralPayment}/turn`,
+                              `Collateral: ${formatMoney(entry.collateralPayment, currencySymbol)}/turn`,
                             );
                           }
                           if (entry.mortgageInterest !== null) {
                             details.push(
-                              `Mortgage interest: $${entry.mortgageInterest}/turn`,
+                              `Mortgage interest: ${formatMoney(entry.mortgageInterest, currencySymbol)}/turn`,
                             );
                           }
                           if (details.length === 0) {
@@ -6841,7 +6869,7 @@ export default function PlayPage() {
                     </p>
                     <ul className="mt-2 space-y-1 text-sm text-neutral-700">
                       {tradeExecutionPerspective.giveCash > 0 ? (
-                        <li>Cash: ${tradeExecutionPerspective.giveCash}</li>
+                        <li>Cash: {formatMoney(tradeExecutionPerspective.giveCash, currencySymbol)}</li>
                       ) : null}
                       {tradeExecutionPerspective.giveTiles.length > 0 ? (
                         tradeExecutionPerspective.giveTiles.map((tileIndex) => {
@@ -6870,7 +6898,7 @@ export default function PlayPage() {
                     </p>
                     <ul className="mt-2 space-y-1 text-sm text-neutral-700">
                       {tradeExecutionPerspective.receiveCash > 0 ? (
-                        <li>Cash: ${tradeExecutionPerspective.receiveCash}</li>
+                        <li>Cash: {formatMoney(tradeExecutionPerspective.receiveCash, currencySymbol)}</li>
                       ) : null}
                       {tradeExecutionPerspective.receiveTiles.length > 0 ? (
                         tradeExecutionPerspective.receiveTiles.map((tileIndex) => {
@@ -6935,10 +6963,13 @@ export default function PlayPage() {
                         : "This will default the loan and return the property to the market. This action is irreversible."}
                 </p>
                 <div className="mt-3 rounded-2xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-700">
-                  <span className="font-semibold">Payout:</span> $
-                  {propertyActionModal.action === "SELL_TO_MARKET"
-                    ? propertyActionPayout
-                    : 0}
+                  <span className="font-semibold">Payout:</span>{" "}
+                  {formatMoney(
+                    propertyActionModal.action === "SELL_TO_MARKET"
+                      ? propertyActionPayout
+                      : 0,
+                    currencySymbol,
+                  )}
                 </div>
                 <div className="mt-4 grid gap-2 sm:grid-cols-2">
                   <button
@@ -6994,7 +7025,7 @@ export default function PlayPage() {
                   )?.name ?? `Tile ${payoffLoan.collateral_tile_index}`}
                 </p>
                 <p className="mt-2 text-sm text-neutral-600">
-                  Pay ${payoffLoan.remaining_principal} to release the collateral
+                  Pay {formatMoney(payoffLoan.remaining_principal, currencySymbol)} to release the collateral
                   and re-enable rent immediately.
                 </p>
                 <div className="mt-4 grid gap-2 sm:grid-cols-2">
@@ -7031,7 +7062,7 @@ export default function PlayPage() {
                         ? "Paying…"
                         : isLoanPayoffResolving
                           ? "Resolving…"
-                          : `Pay $${payoffLoan.remaining_principal}`}
+                          : `Pay ${formatMoney(payoffLoan.remaining_principal, currencySymbol)}`}
                     </button>
                     {payoffLoanDisabledReason ? (
                       <p className="text-xs text-neutral-400">
@@ -7094,6 +7125,7 @@ export default function PlayPage() {
                       price={auctionTile.price ?? null}
                       ownedRailCount={auctionOwnedRailCount}
                       ownedUtilityCount={auctionOwnedUtilityCount}
+                      currencySymbol={currencySymbol}
                     />
                   ) : null}
                   <div className="rounded-2xl border border-indigo-100 bg-indigo-50/60 p-3 text-sm text-indigo-900">
@@ -7101,10 +7133,12 @@ export default function PlayPage() {
                       Current bid
                     </p>
                     <p className="text-base font-semibold text-indigo-900">
-                      $
-                      {isAuctionActive
-                        ? auctionCurrentBid
-                        : auctionDisplaySnapshot?.currentBid ?? 0}
+                      {formatMoney(
+                        isAuctionActive
+                          ? auctionCurrentBid
+                          : auctionDisplaySnapshot?.currentBid ?? 0,
+                        currencySymbol,
+                      )}
                     </p>
                     <p className="text-xs text-indigo-700">
                       {isAuctionActive
@@ -7144,7 +7178,7 @@ export default function PlayPage() {
                           –
                         </button>
                         <div className="text-lg font-semibold text-neutral-900">
-                          ${auctionBidAmount}
+                          {formatMoney(auctionBidAmount, currencySymbol)}
                         </div>
                         <button
                           className="rounded-full border border-neutral-200 px-3 py-1 text-sm font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:text-neutral-300"
@@ -7158,8 +7192,8 @@ export default function PlayPage() {
                         </button>
                       </div>
                       <p className="text-xs text-neutral-500">
-                        Minimum bid: ${auctionBidMinimum} · Cash:{" "}
-                        {currentBidderCash}
+                        Minimum bid: {formatMoney(auctionBidMinimum, currencySymbol)} · Cash:{" "}
+                        {formatMoney(currentBidderCash, currencySymbol)}
                       </p>
                       <div className="grid gap-2 sm:grid-cols-2">
                         <div className="space-y-1">
@@ -7211,7 +7245,7 @@ export default function PlayPage() {
                 Balance
               </p>
               <p className="text-3xl font-semibold text-neutral-900">
-                ${myPlayerBalance}
+                {formatMoney(myPlayerBalance, currencySymbol)}
               </p>
               <p className="text-sm text-neutral-500">Available to spend</p>
               {getOutOfJailFreeCount > 0 ? (
@@ -7226,7 +7260,7 @@ export default function PlayPage() {
                 Net worth
               </p>
               <p className="text-lg font-semibold text-neutral-700">
-                ${netWorth}
+                {formatMoney(netWorth, currencySymbol)}
               </p>
             </div>
           </div>
@@ -7402,7 +7436,7 @@ export default function PlayPage() {
                             isProperty ? (
                               <div className="mt-1 space-y-1 text-xs font-medium text-neutral-500">
                                 <p>{groupLabel}</p>
-                                <p>Loan Value: ${principalPreview}</p>
+                                <p>Loan Value: {formatMoney(principalPreview, currencySymbol)}</p>
                                 <div className="flex items-center justify-between gap-2">
                                   <span>Development</span>
                                   <DevelopmentIcons dev={houses} />
@@ -7410,7 +7444,7 @@ export default function PlayPage() {
                               </div>
                             ) : (
                               <div className="mt-2 text-xs font-medium text-neutral-500">
-                                <p>Loan Value: ${principalPreview}</p>
+                                <p>Loan Value: {formatMoney(principalPreview, currencySymbol)}</p>
                               </div>
                             )
                           }
@@ -7422,6 +7456,7 @@ export default function PlayPage() {
                                 houseCost={propertyRent.houseCost}
                                 hotelIncrement={propertyRent.hotelIncrement}
                                 currentRent={currentPropertyRent}
+                                currencySymbol={currencySymbol}
                               />
                             ) : isRail ? (
                               <RailRentTable
@@ -7429,6 +7464,7 @@ export default function PlayPage() {
                                 rentRows={railRentRows}
                                 ownedCount={ownedRailCount}
                                 currentRent={railCurrentRent}
+                                currencySymbol={currencySymbol}
                               />
                             ) : isUtility ? (
                               <UtilityRentTable
@@ -7439,6 +7475,7 @@ export default function PlayPage() {
                                 rentMultipliers={
                                   boardPackEconomy.utilityRentMultipliers
                                 }
+                                currencySymbol={currencySymbol}
                               />
                             ) : null
                           }
@@ -7627,11 +7664,11 @@ export default function PlayPage() {
                               Rent paused while collateralized.
                             </p>
                             <p className="text-xs text-neutral-500">
-                              Payment: ${loan.payment_per_turn} · Turns
+                              Payment: {formatMoney(loan.payment_per_turn, currencySymbol)} · Turns
                               remaining: {loan.turns_remaining}
                             </p>
                             <p className="text-xs text-neutral-500">
-                              Remaining balance: ${payoffAmount}
+                              Remaining balance: {formatMoney(payoffAmount, currencySymbol)}
                             </p>
                           </div>
                           <div className="flex flex-col items-end gap-2">
@@ -7748,18 +7785,16 @@ export default function PlayPage() {
                               {groupLabel}
                             </p>
                             <p className="text-xs text-neutral-500">
-                              Principal remaining: $
-                              {mortgage.principal_remaining}
+                              Principal remaining: {formatMoney(mortgage.principal_remaining, currencySymbol)}
                             </p>
                             <p className="text-xs text-neutral-500">
-                              Accrued interest: $
-                              {mortgage.accrued_interest_unpaid}
+                              Accrued interest: {formatMoney(mortgage.accrued_interest_unpaid, currencySymbol)}
                             </p>
                             <p className="text-xs text-neutral-500">
-                              Interest per turn: ${interestPerTurn}
+                              Interest per turn: {formatMoney(interestPerTurn, currencySymbol)}
                             </p>
                             <p className="text-xs text-neutral-500">
-                              Payoff amount: ${payoffAmount}
+                              Payoff amount: {formatMoney(payoffAmount, currencySymbol)}
                             </p>
                           </div>
                           <div className="flex flex-col items-end gap-2">
