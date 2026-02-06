@@ -5974,93 +5974,86 @@ export default function PlayPage() {
         </div>
       ) : null}
 
-      <section className="rounded-2xl bg-white/90 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.08)] ring-1 ring-black/5 space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-400">
-              MINI-BOARD
-            </p>
-            <p className="text-xs text-neutral-400">
-              Board pack: {boardPack?.displayName ?? "Unknown"}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              className="rounded-full border border-neutral-200 px-3 py-1.5 text-xs font-semibold text-neutral-600 transition hover:border-neutral-300 hover:text-neutral-800"
-              type="button"
-              onClick={() => setMiniBoardCollapsed((current) => !current)}
-            >
-              {miniBoardCollapsed ? "Show mini-board" : "Hide"}
-            </button>
-            <button
-              className="rounded-full border border-neutral-200 px-3 py-1.5 text-xs font-semibold text-neutral-600 transition hover:border-neutral-300 hover:text-neutral-800 disabled:cursor-not-allowed disabled:border-neutral-100 disabled:text-neutral-300"
-              type="button"
-              onClick={() => setIsBoardExpanded(true)}
-              disabled={isDecisionOverlayActive}
-              title={
-                isDecisionOverlayActive
-                  ? "Resolve the current decision to open the full board."
-                  : "Open the full board view"
-              }
-            >
-              Expand board
-            </button>
-          </div>
-        </div>
-        <div
-          className={`transition-all duration-200 ${
-            miniBoardCollapsed ? "space-y-0" : "space-y-4"
-          }`}
-        >
-          {miniBoardCollapsed ? (
-            <div className="flex items-center justify-between gap-3 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2">
-              <p className="text-xs font-medium text-neutral-600">Mini-board hidden</p>
+      {miniBoardCollapsed ? (
+        <section className="rounded-2xl bg-white/90 p-3 shadow-[0_12px_30px_rgba(15,23,42,0.08)] ring-1 ring-black/5">
+          <button
+            className="rounded-full border border-neutral-200 bg-white px-3 py-1.5 text-xs font-semibold text-neutral-600 transition hover:border-neutral-300 hover:text-neutral-800"
+            type="button"
+            onClick={() => setMiniBoardCollapsed(false)}
+          >
+            Show mini-board
+          </button>
+        </section>
+      ) : (
+        <section className="rounded-2xl bg-white/90 p-4 shadow-[0_12px_30px_rgba(15,23,42,0.08)] ring-1 ring-black/5 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-400">
+                MINI-BOARD
+              </p>
+              <p className="text-xs text-neutral-400">
+                Board pack: {boardPack?.displayName ?? "Unknown"}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
               <button
-                className="rounded-full border border-neutral-200 bg-white px-3 py-1.5 text-xs font-semibold text-neutral-600 transition hover:border-neutral-300 hover:text-neutral-800"
+                className="rounded-full border border-neutral-200 px-3 py-1.5 text-xs font-semibold text-neutral-600 transition hover:border-neutral-300 hover:text-neutral-800"
                 type="button"
-                onClick={() => setMiniBoardCollapsed(false)}
+                onClick={() => setMiniBoardCollapsed(true)}
               >
-                Show mini-board
+                Hide
               </button>
-            </div>
-          ) : (
-            <div className="overflow-x-auto transition-opacity duration-200">
-              <div className="min-w-[320px]">
-                <BoardMiniMap
-                  tiles={boardPack?.tiles}
-                  players={players}
-                  currentPlayerId={currentPlayer?.id}
-                  ownershipByTile={ownershipByTile}
-                  showOwnership
-                  size="compact"
-                  selectedTileIndex={selectedTileIndex}
-                  onTileClick={(tileIndex) => {
-                    setSelectedTileIndex(tileIndex);
-                  }}
-                />
-              </div>
-            </div>
-          )}
-        </div>
-        {!miniBoardCollapsed && players.length > 0 ? (
-          <p className="text-xs text-neutral-500">
-            Turn order:{" "}
-            {players.map((player, index) => (
-              <span
-                key={player.id}
-                className={
-                  player.id === currentPlayer?.id
-                    ? "font-semibold text-neutral-900"
-                    : "text-neutral-500"
+              <button
+                className="rounded-full border border-neutral-200 px-3 py-1.5 text-xs font-semibold text-neutral-600 transition hover:border-neutral-300 hover:text-neutral-800 disabled:cursor-not-allowed disabled:border-neutral-100 disabled:text-neutral-300"
+                type="button"
+                onClick={() => setIsBoardExpanded(true)}
+                disabled={isDecisionOverlayActive}
+                title={
+                  isDecisionOverlayActive
+                    ? "Resolve the current decision to open the full board."
+                    : "Open the full board view"
                 }
               >
-                {player.display_name ?? "Player"}
-                {index < players.length - 1 ? " · " : ""}
-              </span>
-            ))}
-          </p>
-        ) : null}
-      </section>
+                Expand board
+              </button>
+            </div>
+          </div>
+          <div className="overflow-x-auto transition-opacity duration-200">
+            <div className="min-w-[320px]">
+              <BoardMiniMap
+                tiles={boardPack?.tiles}
+                players={players}
+                currentPlayerId={currentPlayer?.id}
+                ownershipByTile={ownershipByTile}
+                showOwnership
+                size="compact"
+                selectedTileIndex={selectedTileIndex}
+                onTileClick={(tileIndex) => {
+                  setSelectedTileIndex(tileIndex);
+                }}
+              />
+            </div>
+          </div>
+          {players.length > 0 ? (
+            <p className="text-xs text-neutral-500">
+              Turn order:{" "}
+              {players.map((player, index) => (
+                <span
+                  key={player.id}
+                  className={
+                    player.id === currentPlayer?.id
+                      ? "font-semibold text-neutral-900"
+                      : "text-neutral-500"
+                  }
+                >
+                  {player.display_name ?? "Player"}
+                  {index < players.length - 1 ? " · " : ""}
+                </span>
+              ))}
+            </p>
+          ) : null}
+        </section>
+      )}
 
       {!isBoardExpanded && selectedTileIndex !== null && selectedExpandedTile ? (
         <div
