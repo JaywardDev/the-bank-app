@@ -32,7 +32,7 @@ export const getBoardTileIconSrc = (tile: BoardTile | null): string | null => {
     return null;
   }
 
-  if (isRailroadTile(tile)) {
+  if (tile.type === "RAIL") {
     return "/icons/railroad.svg";
   }
 
@@ -42,6 +42,10 @@ export const getBoardTileIconSrc = (tile: BoardTile | null): string | null => {
       return "/icons/electricity.svg";
     }
     return "/icons/water_facility.svg";
+  }
+
+  if (isRailroadTile(tile)) {
+    return "/icons/railroad.svg";
   }
 
   if (tile.type === "START") {

@@ -89,6 +89,22 @@ const getTileIconSrc = (tile: BoardTile | null): string | null => {
   return getBoardTileIconSrc(tile);
 };
 
+const getDeedIconFallbackLabel = (tile: BoardTile | null): string | null => {
+  if (!tile) {
+    return null;
+  }
+
+  if (tile.type === "RAIL") {
+    return "RR";
+  }
+
+  if (tile.type === "UTILITY") {
+    return "UTIL";
+  }
+
+  return null;
+};
+
 type TileIconProps = {
   src: string | null;
   alt: string;
@@ -403,6 +419,7 @@ const TitleDeedPreview = ({
   const resolvedEyebrow = showActions ? eyebrow : undefined;
   const resolvedFooter = showActions ? footer : undefined;
   const tileIconSrc = getTileIconSrc(tile);
+  const tileIconFallbackLabel = getDeedIconFallbackLabel(tile);
   const utilityRentMultipliers = boardPackEconomy.utilityRentMultipliers;
   const resolvedDevelopment =
     typeof developmentCount === "number" ? developmentCount : null;
@@ -427,6 +444,7 @@ const TitleDeedPreview = ({
                 className="h-10 w-10 object-contain"
                 ariaHidden
               />
+              {!tileIconSrc ? tileIconFallbackLabel : null}
             </div>
             <p className="mt-2 text-lg font-black uppercase tracking-wide text-neutral-900">
               {tileName}
@@ -448,6 +466,7 @@ const TitleDeedPreview = ({
                 className="h-10 w-10 object-contain"
                 ariaHidden
               />
+              {!tileIconSrc ? tileIconFallbackLabel : null}
             </div>
             <p className="mt-2 text-lg font-black uppercase tracking-wide text-neutral-900">
               {tileName}
@@ -7375,6 +7394,8 @@ export default function PlayPage() {
                         lastRoll !== null ? lastRoll * utilityMultiplier : null;
                       const groupLabel = getTileGroupLabel(tile);
                       const tileIconSrc = getTileIconSrc(tile);
+                      const tileIconFallbackLabel =
+                        getDeedIconFallbackLabel(tile);
                       const showSellHouse = houses > 0;
                       const showSellHotel = houses >= 5;
                       const isHotelBoundary = houses >= 5 && houses % 5 === 0;
@@ -7398,6 +7419,7 @@ export default function PlayPage() {
                                     className="h-10 w-10 object-contain"
                                     ariaHidden
                                   />
+                                  {!tileIconSrc ? tileIconFallbackLabel : null}
                                 </div>
                                 <p className="mt-2 text-lg font-black uppercase tracking-wide text-neutral-900">
                                   {tile.name}
@@ -7417,6 +7439,7 @@ export default function PlayPage() {
                                     className="h-10 w-10 object-contain"
                                     ariaHidden
                                   />
+                                  {!tileIconSrc ? tileIconFallbackLabel : null}
                                 </div>
                                 <p className="mt-2 text-lg font-black uppercase tracking-wide text-neutral-900">
                                   {tile.name}
