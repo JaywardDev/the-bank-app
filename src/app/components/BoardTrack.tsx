@@ -81,6 +81,9 @@ export default function BoardTrack({
           const ownerColor = ownership?.owner_player_id
             ? (playerColorsById[ownership.owner_player_id] ?? "#e5e7eb")
             : null;
+          const isMortgaged = Boolean(
+            ownership?.collateral_loan_id || ownership?.purchase_mortgage_id,
+          );
           const tilePlayers = playersByTile[tile.index] ?? [];
           const isCorner = tile.index % 10 === 0;
           const tileIconSrc = getBoardTileIconSrc(tile);
@@ -95,9 +98,6 @@ export default function BoardTrack({
               style={{
                 gridRowStart: position.row + 1,
                 gridColumnStart: position.col + 1,
-                boxShadow: ownership
-                  ? `inset 0 0 0 1px ${ownerColor ?? "#9ca3af"}, 0 0 10px ${ownerColor ?? "#9ca3af"}66`
-                  : undefined,
               }}
             >
               <div className="pointer-events-none absolute inset-x-1.5 top-2 z-20 h-[calc(100%-0.75rem)]">
@@ -150,11 +150,28 @@ export default function BoardTrack({
                 ) : null}
 
                 {ownership?.houses ? (
-                  <div className="mt-1 flex justify-end">
+                  <div className="mt-1 flex justify-start pr-4">
                     <HousesDots houses={ownership.houses} size="sm" />
                   </div>
                 ) : null}
               </div>
+
+              {ownership ? (
+                <div className="pointer-events-none absolute bottom-1 right-1 z-30">
+                  <span
+                    className="relative block h-3.5 w-3.5 rounded-full border border-black/30 shadow-[0_1px_1px_rgba(0,0,0,0.35),inset_0_1px_1px_rgba(255,255,255,0.6)]"
+                    style={{
+                      backgroundColor: ownerColor ?? "#9ca3af",
+                      opacity: isMortgaged ? 0.45 : 1,
+                    }}
+                    aria-label={isMortgaged ? "Mortgaged property" : "Owned property"}
+                  >
+                    {isMortgaged ? (
+                      <span className="absolute left-1/2 top-1/2 h-[1px] w-[140%] -translate-x-1/2 -translate-y-1/2 rotate-[-35deg] bg-black/70" />
+                    ) : null}
+                  </span>
+                </div>
+              ) : null}
             </article>
           );
         })}
