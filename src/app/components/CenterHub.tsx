@@ -58,14 +58,13 @@ function DeckVisual({ label, deck, src, isHighlighted }: DeckVisualProps) {
 }
 
 export default function CenterHub({ boardPackName, lastRoll, highlightedDeck }: CenterHubProps) {
+  void boardPackName;
+
   return (
     <div className="pointer-events-none absolute inset-[16%] flex items-center justify-center">
-      <div className="w-full max-w-2xl rounded-3xl border border-neutral-700/30 bg-neutral-950/80 p-6 text-center text-white shadow-2xl backdrop-blur-sm">
-        <p className="text-xs uppercase tracking-[0.2em] text-emerald-300/80">Projection only</p>
-        <p className="mt-2 text-2xl font-semibold">{boardPackName}</p>
-        <p className="mt-3 text-sm text-white/70">Table display</p>
-        <p className="mt-4 text-lg font-semibold text-amber-300">Last roll: {lastRoll ?? "—"}</p>
-        <div className="mt-6 flex items-center justify-center gap-4">
+      <div className="w-full max-w-xl rounded-[1.6rem] border border-white/10 bg-neutral-950/55 p-4 text-center text-white shadow-[0_18px_45px_rgba(0,0,0,0.34)] backdrop-blur-md">
+        <p className="text-sm font-medium text-amber-200/90">Last roll: {lastRoll ?? "—"}</p>
+        <div className="mt-4 flex items-center justify-center gap-3">
           {[
             { label: "Chance", src: CHANCE_SVG, deck: "CHANCE" as const },
             { label: "Community Chest", src: COMMUNITY_CHEST_SVG, deck: "COMMUNITY" as const },

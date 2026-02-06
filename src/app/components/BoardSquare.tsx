@@ -13,6 +13,7 @@ export default function BoardSquare({ children }: BoardSquareProps) {
           className="pointer-events-none absolute inset-2 rounded-[1.35rem] border border-white/12 shadow-[inset_0_18px_28px_rgba(255,255,255,0.05),inset_0_-22px_40px_rgba(0,0,0,0.2)]"
         />
         <div className="relative h-full w-full overflow-hidden rounded-[1.3rem] bg-[url('/icons/board.svg')] bg-cover bg-center bg-no-repeat">
+          <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(242,229,196,0.09)_0%,rgba(26,22,16,0.07)_100%)]" />
           <div className="relative z-10 h-full w-full">{children}</div>
         </div>
       </div>

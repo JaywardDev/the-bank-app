@@ -98,7 +98,7 @@ export default function BoardTrack({
           return (
             <article
               key={tile.tile_id}
-              className={`relative overflow-hidden border border-neutral-700/20 bg-[#faf8ed] text-neutral-800 ${
+              className={`relative overflow-hidden border border-neutral-200/60 bg-[#f3f0e6] text-neutral-800 shadow-[0_1px_2px_rgba(0,0,0,0.08)] ${
                 isCorner ? "rounded-lg" : "rounded-md"
               } ${lastMovedTileIndex === tile.index ? "ring-2 ring-amber-400" : ""}`}
               style={{
