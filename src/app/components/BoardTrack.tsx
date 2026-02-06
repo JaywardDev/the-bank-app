@@ -36,8 +36,6 @@ const fallbackTiles: BoardTile[] = Array.from({ length: 40 }, (_, index) => ({
   name: `Tile ${index}`,
 }));
 
-const shortName = (name: string) => (name.length > 14 ? `${name.slice(0, 12)}…` : name);
-
 const getTypeIcon = (tile: BoardTile) => {
   if (tile.type === "RAIL") return "🚂";
   if (tile.type === "UTILITY") return "⚡";
@@ -83,8 +81,8 @@ export default function BoardTrack({
   }, {});
 
   return (
-    <div className="relative h-full w-full rounded-3xl border border-white/20 bg-transparent p-3 shadow-2xl">
-      <div className="grid h-full w-full grid-cols-11 grid-rows-11 gap-1.5 rounded-2xl bg-white/10 p-1.5">
+    <div className="relative h-full w-full rounded-lg border border-white/20 bg-transparent p-2 shadow-2xl">
+      <div className="grid h-full w-full grid-cols-11 grid-rows-11 gap-px rounded-[6px] bg-white/10 p-1.5">
         {boardTiles.map((tile) => {
           const position = getRowCol(tile.index);
           const ownership = ownershipByTile[tile.index];
@@ -98,12 +96,15 @@ export default function BoardTrack({
           return (
             <article
               key={tile.tile_id}
-              className={`relative overflow-hidden border border-neutral-200/60 bg-[#f3f0e6] text-neutral-800 shadow-[0_1px_2px_rgba(0,0,0,0.08)] ${
-                isCorner ? "rounded-lg" : "rounded-md"
+              className={`relative overflow-hidden border border-transparent bg-[#f3f0e6] text-neutral-800 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.2)] ${
+                isCorner ? "rounded-[6px]" : "rounded-sm"
               } ${lastMovedTileIndex === tile.index ? "ring-2 ring-amber-400" : ""}`}
               style={{
                 gridRowStart: position.row + 1,
                 gridColumnStart: position.col + 1,
+                boxShadow: ownership
+                  ? `inset 0 0 0 1px ${ownerColor ?? "#9ca3af"}, 0 0 10px ${ownerColor ?? "#9ca3af"}66`
+                  : undefined,
               }}
             >
               <div className="h-1.5 w-full" style={{ backgroundColor: getTileBandColor(tile) }} />
@@ -112,16 +113,9 @@ export default function BoardTrack({
                   <p className="text-[10px] font-bold leading-none">{tile.index}</p>
                   {typeIcon ? <span className="text-[10px] leading-none">{typeIcon}</span> : null}
                 </div>
-                <p className="mt-0.5 text-[9px] font-semibold leading-tight">{shortName(tile.name)}</p>
-
-                {ownership ? (
-                  <span
-                    className="mt-1 inline-block rounded-full border px-1.5 py-0.5 text-[8px] font-semibold"
-                    style={{ borderColor: ownerColor ?? "#9ca3af", backgroundColor: `${ownerColor ?? "#9ca3af"}33` }}
-                  >
-                    Owned
-                  </span>
-                ) : null}
+                <p className="mt-0.5 line-clamp-2 min-h-[1.7rem] text-[9px] font-semibold leading-tight">
+                  {tile.name}
+                </p>
 
                 {ownership?.houses ? (
                   <div className="mt-1">
