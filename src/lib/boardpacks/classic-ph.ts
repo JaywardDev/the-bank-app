@@ -1,9 +1,10 @@
-import type { BoardPack, BoardPackEconomy, BoardTile } from "../boardPacks";
-import {
-  CLASSIC_UK_ECONOMY,
-  classicUkChanceCards,
-  classicUkCommunityCards,
-} from "./classic-uk";
+import type {
+  BoardPack,
+  BoardPackEconomy,
+  BoardTile,
+  CardDefinition,
+} from "../boardPacks";
+import { CLASSIC_UK_ECONOMY } from "./classic-uk";
 
 type PropertyGroupConfig = {
   id: string;
@@ -77,14 +78,212 @@ const CLASSIC_PH_PROPERTY_GROUPS: PropertyGroupConfig[] = [
   { id: "dark-blue", houseCost: 200, tileIds: ["forbes-park", "bonifacio-high-street"] },
 ];
 
+export const classicPhChanceCards: CardDefinition[] = [
+  {
+    id: "classic-ph-chance-advance-go",
+    title: "Business Opportunity Opens — Advance to GO and collect salary",
+    kind: "MOVE_TO",
+    payload: { target_tile_id: "go" },
+  },
+  {
+    id: "classic-ph-chance-intramuros",
+    title: "Proceed to Intramuros",
+    kind: "MOVE_TO",
+    payload: { target_tile_id: "intramuros" },
+  },
+  {
+    id: "classic-ph-chance-ortigas-center",
+    title: "Advance to Ortigas Center",
+    kind: "MOVE_TO",
+    payload: { target_tile_id: "ortigas-center" },
+  },
+  {
+    id: "classic-ph-chance-bonifacio-high-street",
+    title: "Stroll to Bonifacio High Street",
+    kind: "MOVE_TO",
+    payload: { target_tile_id: "bonifacio-high-street" },
+  },
+  {
+    id: "classic-ph-chance-nearest-utility",
+    title: "Proceed to the nearest utility provider",
+    kind: "MOVE_TO",
+    payload: { nearest_kind: "UTILITY" },
+  },
+  {
+    id: "classic-ph-chance-nearest-railroad-1",
+    title: "Proceed to the nearest transport line",
+    kind: "MOVE_TO",
+    payload: { nearest_kind: "RAILROAD" },
+  },
+  {
+    id: "classic-ph-chance-nearest-railroad-2",
+    title: "Catch the next transport line ahead",
+    kind: "MOVE_TO",
+    payload: { nearest_kind: "RAILROAD" },
+  },
+  {
+    id: "classic-ph-chance-lrt",
+    title: "Take a trip to LRT",
+    kind: "MOVE_TO",
+    payload: { target_tile_id: "lrt" },
+  },
+  {
+    id: "classic-ph-chance-back-three",
+    title: "EDSA Traffic Jam — Move back three spaces",
+    kind: "MOVE_REL",
+    payload: { relative_spaces: -3 },
+  },
+  {
+    id: "classic-ph-chance-dividend",
+    title: "Investment Dividend Received",
+    kind: "RECEIVE",
+    payload: { amount: 400000 },
+  },
+  {
+    id: "classic-ph-chance-building-loan",
+    title: "Construction Project Completed",
+    kind: "RECEIVE",
+    payload: { amount: 1200000 },
+  },
+  {
+    id: "classic-ph-chance-business-pitch",
+    title: "You Won a Business Pitch",
+    kind: "RECEIVE",
+    payload: { amount: 800000 },
+  },
+  {
+    id: "classic-ph-chance-traffic-violation",
+    title: "Traffic Violation Fine",
+    kind: "PAY",
+    payload: { amount: 120000 },
+  },
+  {
+    id: "classic-ph-chance-local-government-fee",
+    title: "Local Government Fee",
+    kind: "PAY",
+    payload: { amount: 120000 },
+  },
+  {
+    id: "classic-ph-chance-go-to-jail",
+    title: "Caught in Legal Trouble — Go to Jail",
+    kind: "GO_TO_JAIL",
+    payload: {},
+  },
+  {
+    id: "classic-ph-chance-get-out-of-jail",
+    title: "Legal Connection — Get Out of Jail Free",
+    kind: "GET_OUT_OF_JAIL_FREE",
+    payload: {},
+  },
+];
+
+export const classicPhCommunityCards: CardDefinition[] = [
+  {
+    id: "classic-ph-community-advance-go",
+    title: "Barangay Clearance Completed — Advance to GO and collect salary",
+    kind: "MOVE_TO",
+    payload: { target_tile_id: "go" },
+  },
+  {
+    id: "classic-ph-community-bank-adjustment",
+    title: "Bank Adjustment in Your Favor",
+    kind: "RECEIVE",
+    payload: { amount: 1600000 },
+  },
+  {
+    id: "classic-ph-community-clinic-consultation",
+    title: "Clinic Consultation Fee",
+    kind: "PAY",
+    payload: { amount: 400000 },
+  },
+  {
+    id: "classic-ph-community-stock-profit",
+    title: "Stock Investment Profit",
+    kind: "RECEIVE",
+    payload: { amount: 400000 },
+  },
+  {
+    id: "classic-ph-community-13th-month-bonus",
+    title: "13th Month Bonus Released",
+    kind: "RECEIVE",
+    payload: { amount: 800000 },
+  },
+  {
+    id: "classic-ph-community-tax-refund",
+    title: "Tax Refund Processed",
+    kind: "RECEIVE",
+    payload: { amount: 160000 },
+  },
+  {
+    id: "classic-ph-community-insurance-claim",
+    title: "Insurance Claim Approved",
+    kind: "RECEIVE",
+    payload: { amount: 800000 },
+  },
+  {
+    id: "classic-ph-community-hospital-expenses",
+    title: "Hospital Expenses",
+    kind: "PAY",
+    payload: { amount: 800000 },
+  },
+  {
+    id: "classic-ph-community-tuition-fee",
+    title: "Tuition Fee Payment",
+    kind: "PAY",
+    payload: { amount: 400000 },
+  },
+  {
+    id: "classic-ph-community-freelance-project",
+    title: "Freelance Project Completed",
+    kind: "RECEIVE",
+    payload: { amount: 200000 },
+  },
+  {
+    id: "classic-ph-community-inheritance",
+    title: "Inheritance Received",
+    kind: "RECEIVE",
+    payload: { amount: 800000 },
+  },
+  {
+    id: "classic-ph-community-local-contest",
+    title: "Local Contest Prize",
+    kind: "RECEIVE",
+    payload: { amount: 80000 },
+  },
+  {
+    id: "classic-ph-community-get-out-of-jail",
+    title: "Bail / Legal Assistance — Get Out of Jail Free",
+    kind: "GET_OUT_OF_JAIL_FREE",
+    payload: {},
+  },
+  {
+    id: "classic-ph-community-go-to-jail",
+    title: "Legal Case Filed — Go to Jail",
+    kind: "GO_TO_JAIL",
+    payload: {},
+  },
+  {
+    id: "classic-ph-community-birthday-angpao",
+    title: "Birthday Angpao Received",
+    kind: "RECEIVE",
+    payload: { amount: 400000 },
+  },
+  {
+    id: "classic-ph-community-home-maintenance",
+    title: "Home Maintenance & Repairs",
+    kind: "PAY",
+    payload: { amount: 320000 },
+  },
+];
+
 export const classicPhBoardPack: BoardPack = {
   id: "classic-ph",
   displayName: "Philippines",
   properties: [],
   economy: CLASSIC_PH_ECONOMY,
   eventDecks: {
-    chance: classicUkChanceCards,
-    community: classicUkCommunityCards,
+    chance: classicPhChanceCards,
+    community: classicPhCommunityCards,
   },
   tiles: applyPropertyGroupConfig([
     { index: 0, tile_id: "go", type: "START", name: "Go" },
