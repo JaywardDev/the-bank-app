@@ -81,9 +81,13 @@ export default function BoardTrack({
           const ownerColor = ownership?.owner_player_id
             ? (playerColorsById[ownership.owner_player_id] ?? "#e5e7eb")
             : null;
-          const isMortgaged = Boolean(
-            ownership?.collateral_loan_id || ownership?.purchase_mortgage_id,
-          );
+          const isCollateralized = Boolean(ownership?.collateral_loan_id);
+          const isPurchaseMortgaged = Boolean(ownership?.purchase_mortgage_id);
+          const ownershipMarkerLabel = isCollateralized
+            ? "Collateralized property"
+            : isPurchaseMortgaged
+              ? "Mortgaged property"
+              : "Owned property";
           const tilePlayers = playersByTile[tile.index] ?? [];
           const isCorner = tile.index % 10 === 0;
           const tileIconSrc = getBoardTileIconSrc(tile);
@@ -162,12 +166,17 @@ export default function BoardTrack({
                     className="relative block h-3.5 w-3.5 rounded-full border border-black/30 shadow-[0_1px_1px_rgba(0,0,0,0.35),inset_0_1px_1px_rgba(255,255,255,0.6)]"
                     style={{
                       backgroundColor: ownerColor ?? "#9ca3af",
-                      opacity: isMortgaged ? 0.45 : 1,
+                      opacity: isCollateralized ? 0.45 : 1,
                     }}
-                    aria-label={isMortgaged ? "Mortgaged property" : "Owned property"}
+                    aria-label={ownershipMarkerLabel}
                   >
-                    {isMortgaged ? (
+                    {isCollateralized ? (
                       <span className="absolute left-1/2 top-1/2 h-[1px] w-[140%] -translate-x-1/2 -translate-y-1/2 rotate-[-35deg] bg-black/70" />
+                    ) : null}
+                    {isPurchaseMortgaged && !isCollateralized ? (
+                      <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-[8px] font-black leading-none text-black/80">
+                        M
+                      </span>
                     ) : null}
                   </span>
                 </div>
