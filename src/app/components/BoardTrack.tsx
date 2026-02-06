@@ -1,7 +1,9 @@
+import Image from "next/image";
 import HousesDots from "@/app/components/HousesDots";
 import TokenStack from "@/app/components/TokenStack";
 import type { BoardTile } from "@/lib/boardPacks";
 import { getTileBandColor } from "@/lib/boardTileStyles";
+import { getBoardTileIconSrc } from "@/lib/tileIcons";
 
 type BoardPlayer = {
   id: string;
@@ -36,31 +38,15 @@ const fallbackTiles: BoardTile[] = Array.from({ length: 40 }, (_, index) => ({
   name: `Tile ${index}`,
 }));
 
-const getTypeIcon = (tile: BoardTile) => {
-  if (tile.type === "RAIL") return "🚂";
-  if (tile.type === "UTILITY") return "⚡";
-  if (tile.type === "CHANCE") return "?";
-  if (tile.type === "COMMUNITY_CHEST") return "☰";
-  if (tile.type === "TAX") return "$";
-  return null;
-};
-
 const getRowCol = (tileIndex: number) => {
-  // Classic perimeter mapping for indices 0..39 (GO at bottom-right):
-  // 0: bottom-right corner
-  // 1..9: bottom edge moving right -> left
-  // 10: bottom-left corner
-  // 11..19: left edge moving bottom -> top
-  // 20: top-left corner
-  // 21..29: top edge moving left -> right
-  // 30: top-right corner
-  // 31..39: right edge moving top -> bottom
   if (tileIndex === 0) return { row: 10, col: 10 };
   if (tileIndex >= 1 && tileIndex <= 9) return { row: 10, col: 10 - tileIndex };
   if (tileIndex === 10) return { row: 10, col: 0 };
-  if (tileIndex >= 11 && tileIndex <= 19) return { row: 20 - tileIndex, col: 0 };
+  if (tileIndex >= 11 && tileIndex <= 19)
+    return { row: 20 - tileIndex, col: 0 };
   if (tileIndex === 20) return { row: 0, col: 0 };
-  if (tileIndex >= 21 && tileIndex <= 29) return { row: 0, col: tileIndex - 20 };
+  if (tileIndex >= 21 && tileIndex <= 29)
+    return { row: 0, col: tileIndex - 20 };
   if (tileIndex === 30) return { row: 0, col: 10 };
   return { row: tileIndex - 30, col: 10 };
 };
@@ -75,10 +61,15 @@ export default function BoardTrack({
   lastMovedTileIndex,
 }: BoardTrackProps) {
   const boardTiles = tiles && tiles.length > 0 ? tiles : fallbackTiles;
-  const playersByTile = players.reduce<Record<number, BoardPlayer[]>>((acc, player) => {
-    acc[player.position] = acc[player.position] ? [...acc[player.position], player] : [player];
-    return acc;
-  }, {});
+  const playersByTile = players.reduce<Record<number, BoardPlayer[]>>(
+    (acc, player) => {
+      acc[player.position] = acc[player.position]
+        ? [...acc[player.position], player]
+        : [player];
+      return acc;
+    },
+    {},
+  );
 
   return (
     <div className="relative h-full w-full rounded-lg border border-white/20 bg-transparent p-2 shadow-2xl">
@@ -87,11 +78,11 @@ export default function BoardTrack({
           const position = getRowCol(tile.index);
           const ownership = ownershipByTile[tile.index];
           const ownerColor = ownership?.owner_player_id
-            ? playerColorsById[ownership.owner_player_id] ?? "#e5e7eb"
+            ? (playerColorsById[ownership.owner_player_id] ?? "#e5e7eb")
             : null;
           const tilePlayers = playersByTile[tile.index] ?? [];
           const isCorner = tile.index % 10 === 0;
-          const typeIcon = getTypeIcon(tile);
+          const tileIconSrc = getBoardTileIconSrc(tile);
 
           return (
             <article
@@ -107,18 +98,32 @@ export default function BoardTrack({
                   : undefined,
               }}
             >
-              <div className="h-1.5 w-full" style={{ backgroundColor: getTileBandColor(tile) }} />
+              <div
+                className="h-1.5 w-full"
+                style={{ backgroundColor: getTileBandColor(tile) }}
+              />
               <div className="p-1">
                 <div className="flex items-start justify-between gap-1">
-                  <p className="text-[10px] font-bold leading-none">{tile.index}</p>
-                  {typeIcon ? <span className="text-[10px] leading-none">{typeIcon}</span> : null}
+                  <p className="text-[10px] font-bold leading-none">
+                    {tile.index}
+                  </p>
+                  {tileIconSrc ? (
+                    <Image
+                      src={tileIconSrc}
+                      alt=""
+                      width={12}
+                      height={12}
+                      aria-hidden
+                      className="h-3 w-3 shrink-0 object-contain opacity-85"
+                    />
+                  ) : null}
                 </div>
-                <p className="mt-0.5 line-clamp-2 min-h-[1.7rem] text-[9px] font-semibold leading-tight">
+                <p className="mt-0.5 line-clamp-2 min-h-[1.7rem] pr-0.5 text-[9px] font-semibold leading-tight">
                   {tile.name}
                 </p>
 
                 {ownership?.houses ? (
-                  <div className="mt-1">
+                  <div className="mt-1 flex justify-end">
                     <HousesDots houses={ownership.houses} size="sm" />
                   </div>
                 ) : null}
