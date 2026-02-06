@@ -83,8 +83,8 @@ export default function BoardTrack({
   }, {});
 
   return (
-    <div className="relative h-full w-full rounded-3xl border border-white/20 bg-[#f4f0dd] p-3 shadow-2xl">
-      <div className="grid h-full w-full grid-cols-11 grid-rows-11 gap-1.5 rounded-2xl bg-[#ddd6bd] p-1.5">
+    <div className="relative h-full w-full rounded-3xl border border-white/20 bg-transparent p-3 shadow-2xl">
+      <div className="grid h-full w-full grid-cols-11 grid-rows-11 gap-1.5 rounded-2xl bg-white/10 p-1.5">
         {boardTiles.map((tile) => {
           const position = getRowCol(tile.index);
           const ownership = ownershipByTile[tile.index];
