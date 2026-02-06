@@ -158,7 +158,7 @@ export default function BoardTrack({
                     width={96}
                     height={96}
                     aria-hidden
-                    className="h-[70%] w-[70%] scale-[0.75] object-contain opacity-25 blur-[0.2px]"
+                    className="h-[70%] w-[70%] scale-[0.75] object-contain opacity-[0.85]"
                   />
                 </div>
               ) : null}

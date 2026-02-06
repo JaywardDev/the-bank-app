@@ -38,6 +38,7 @@ type GameState = {
   version: number;
   // References players.id (not auth user_id).
   current_player_id: string | null;
+  balances: Record<string, number> | null;
   last_roll: number | null;
   chance_index: number | null;
   community_index: number | null;
@@ -311,7 +312,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
   const loadGameState = useCallback(
     async (accessToken?: string) => {
       const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
-        `game_state?select=game_id,version,current_player_id,last_roll,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index&game_id=eq.${gameId}&limit=1`,
+        `game_state?select=game_id,version,current_player_id,balances,last_roll,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index&game_id=eq.${gameId}&limit=1`,
         { method: "GET" },
         accessToken,
       );
@@ -1670,6 +1671,14 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
           gameStatus={gameMeta?.status ?? "unknown"}
           currentPlayerName={currentPlayer?.display_name ?? "Waiting for start"}
           currentPlayerColor={currentPlayerColor}
+          players={players.map((player) => ({
+            id: player.id,
+            name: player.display_name ?? "Player",
+            color: playerColorsById[player.id] ?? "#e5e7eb",
+            balance: gameState?.balances?.[player.id] ?? null,
+            isCurrentPlayer: player.id === currentPlayer?.id,
+          }))}
+          currencySymbol={boardPack?.economy.currency.symbol ?? "$"}
           lastRoll={gameState?.last_roll ?? null}
           currentTileName={currentPlayerTile?.name ?? "—"}
           jailStatusLabel={jailStatusLabel}

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { formatCurrencyCompact } from "@/lib/rent";
 
 type EventHighlight = {
   id: string;
@@ -12,6 +13,14 @@ type BoardDashboardProps = {
   gameStatus: string;
   currentPlayerName: string;
   currentPlayerColor: string;
+  players: {
+    id: string;
+    name: string;
+    color: string;
+    balance: number | null;
+    isCurrentPlayer: boolean;
+  }[];
+  currencySymbol: string;
   lastRoll: number | null;
   currentTileName: string;
   jailStatusLabel: string | null;
@@ -51,6 +60,8 @@ export default function BoardDashboard({
   gameStatus,
   currentPlayerName,
   currentPlayerColor,
+  players,
+  currencySymbol,
   lastRoll,
   currentTileName,
   jailStatusLabel,
@@ -62,6 +73,10 @@ export default function BoardDashboard({
   onManualRefresh,
 }: BoardDashboardProps) {
   const statusLabel = getStatusLabel(gameStatus);
+  const formatMoney = (amount: number | null) =>
+    typeof amount === "number"
+      ? formatCurrencyCompact(amount, currencySymbol)
+      : "—";
 
   return (
     <div className="space-y-3 text-white/90">
@@ -101,6 +116,32 @@ export default function BoardDashboard({
         <div className="border-b border-white/10 p-4">
           <p className="text-xs uppercase tracking-[0.18em] text-white/55">Phase / status</p>
           <p className="mt-2 text-xl font-semibold text-white">{phaseLabel}</p>
+        </div>
+
+        <div className="border-b border-white/10 p-4">
+          <p className="text-xs uppercase tracking-[0.18em] text-white/55">Players</p>
+          <ul className="mt-3 space-y-2">
+            {players.map((player) => (
+              <li
+                key={player.id}
+                className={`flex items-center gap-2 rounded-xl border px-3 py-2 ${
+                  player.isCurrentPlayer
+                    ? "border-white/35 bg-white/12"
+                    : "border-white/10 bg-black/20"
+                }`}
+              >
+                <span
+                  className="h-2.5 w-2.5 rounded-full"
+                  style={{ backgroundColor: player.color }}
+                  aria-hidden="true"
+                />
+                <p className={`text-sm ${player.isCurrentPlayer ? "font-semibold text-white" : "text-white/80"}`}>
+                  {player.name}
+                </p>
+                <p className="ml-auto text-sm tabular-nums text-white/85">{formatMoney(player.balance)}</p>
+              </li>
+            ))}
+          </ul>
         </div>
 
         {auctionSummary ? (
