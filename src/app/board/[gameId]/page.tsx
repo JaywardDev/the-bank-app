@@ -1710,6 +1710,8 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
             <div className="relative h-full w-full">
               <BoardTrack
                 tiles={boardPack?.tiles}
+                economy={boardPack?.economy}
+                lastRoll={gameState?.last_roll ?? null}
                 players={players}
                 ownershipByTile={ownershipByTile}
                 playerColorsById={playerColorsById}

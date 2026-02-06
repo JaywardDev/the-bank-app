@@ -5,6 +5,8 @@ import TokenStack from "@/app/components/TokenStack";
 import type { BoardTile } from "@/lib/boardPacks";
 import { getTileBandColor } from "@/lib/boardTileStyles";
 import { getBoardTileIconSrc, isIconOnlySpecialTile } from "@/lib/tileIcons";
+import type { BoardPackEconomy } from "@/lib/boardPacks";
+import { formatCurrencyCompact, getCurrentTileRent } from "@/lib/rent";
 
 type BoardPlayer = {
   id: string;
@@ -24,6 +26,8 @@ type OwnershipByTile = Record<
 
 type BoardTrackProps = {
   tiles?: BoardTile[];
+  economy?: BoardPackEconomy;
+  lastRoll?: number | null;
   players: BoardPlayer[];
   ownershipByTile: OwnershipByTile;
   playerColorsById: Record<string, string>;
@@ -60,8 +64,17 @@ export default function BoardTrack({
   currentPlayerId,
   lastMovedPlayerId,
   lastMovedTileIndex,
+  economy,
+  lastRoll,
 }: BoardTrackProps) {
   const boardTiles = tiles && tiles.length > 0 ? tiles : fallbackTiles;
+  const boardEconomy = economy ?? {
+    currency: { code: "USD", symbol: "$" },
+    houseRentMultipliersByGroup: {},
+    hotelIncrementMultiplier: 1.25,
+    railRentByCount: [0, 25, 50, 100, 200],
+    utilityRentMultipliers: { single: 4, double: 10 },
+  };
   const playersByTile = players.reduce<Record<number, BoardPlayer[]>>(
     (acc, player) => {
       acc[player.position] = acc[player.position]
@@ -92,6 +105,19 @@ export default function BoardTrack({
           const isCorner = tile.index % 10 === 0;
           const tileIconSrc = getBoardTileIconSrc(tile);
           const isIconOnlyTile = isIconOnlySpecialTile(tile) && !ownership;
+          const currentRent = getCurrentTileRent({
+            tile,
+            ownershipByTile,
+            boardTiles,
+            economy: boardEconomy,
+            lastRoll,
+          });
+          const showRent = currentRent !== null;
+          const rentLabel = isCollateralized
+            ? "—"
+            : currentRent !== null
+              ? formatCurrencyCompact(currentRent, boardEconomy.currency.symbol)
+              : null;
 
           return (
             <article
@@ -159,6 +185,25 @@ export default function BoardTrack({
                   </div>
                 ) : null}
               </div>
+
+              {showRent ? (
+                <div className="pointer-events-none absolute bottom-1 left-1 z-30">
+                  <span
+                    className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none ${
+                      isCollateralized
+                        ? "bg-neutral-700/35 text-neutral-900/50"
+                        : "bg-neutral-900/70 text-white/95"
+                    }`}
+                    aria-label={
+                      isCollateralized
+                        ? "Rent paused while collateralized"
+                        : `Current rent ${rentLabel}`
+                    }
+                  >
+                    {rentLabel}
+                  </span>
+                </div>
+              ) : null}
 
               {ownership ? (
                 <div className="pointer-events-none absolute bottom-1 right-1 z-30">

@@ -24,6 +24,7 @@ import {
   getTileBandColor,
 } from "@/lib/boardTileStyles";
 import { getRules } from "@/lib/rules";
+import { getPropertyRentWithDevelopment } from "@/lib/rent";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 import Image from "next/image";
 import { getBoardTileIconSrc } from "@/lib/tileIcons";
@@ -592,25 +593,8 @@ const getDevBreakdown = (dev: number) => {
 
 const getHotelIncrement = (rent4: number) => Math.ceil(rent4 * 1.25);
 
-const getPropertyRentWithDev = (tile: BoardTile, dev: number) => {
-  const rentByHouses = tile.rentByHouses;
-  if (!rentByHouses || rentByHouses.length === 0) {
-    return tile.baseRent ?? 0;
-  }
-  const normalizedDev = Number.isFinite(dev) ? Math.max(0, Math.floor(dev)) : 0;
-  if (normalizedDev <= rentByHouses.length - 1) {
-    return rentByHouses[normalizedDev] ?? tile.baseRent ?? 0;
-  }
-  const { hotelCount, houseCount } = getDevBreakdown(normalizedDev);
-  const rent4 =
-    rentByHouses[4] ??
-    rentByHouses[rentByHouses.length - 1] ??
-    tile.baseRent ??
-    0;
-  const hotelIncrement = getHotelIncrement(rent4);
-  const baseRent = rentByHouses[houseCount] ?? tile.baseRent ?? 0;
-  return baseRent + hotelCount * hotelIncrement;
-};
+const getPropertyRentWithDev = (tile: BoardTile, dev: number) =>
+  getPropertyRentWithDevelopment(tile, dev);
 
 const DevelopmentIcons = ({
   dev,
