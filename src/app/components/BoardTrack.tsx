@@ -167,7 +167,9 @@ export default function BoardTrack({
                 className="relative z-10 h-1.5 w-full"
                 style={{ backgroundColor: getTileBandColor(tile) }}
               />
-              <div className="relative z-10 p-1">
+              <div
+                className={`relative z-10 p-1 ${showRent ? "pb-5" : "pb-1"}`}
+              >
                 <div className="flex items-start justify-between gap-1">
                   <p className="text-[10px] font-bold leading-none">
                     {tile.index}
@@ -180,7 +182,7 @@ export default function BoardTrack({
                 ) : null}
 
                 {ownership?.houses ? (
-                  <div className="mt-1 flex justify-start pr-4">
+                  <div className="mt-1 flex justify-center">
                     <HousesDots houses={ownership.houses} size="sm" />
                   </div>
                 ) : null}
