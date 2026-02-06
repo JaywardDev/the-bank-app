@@ -12,12 +12,7 @@ export default function BoardSquare({ children }: BoardSquareProps) {
           aria-hidden
           className="pointer-events-none absolute inset-2 rounded-[1.35rem] border border-white/12 shadow-[inset_0_18px_28px_rgba(255,255,255,0.05),inset_0_-22px_40px_rgba(0,0,0,0.2)]"
         />
-        <div className="relative h-full w-full overflow-hidden rounded-[1.3rem] bg-[#d5c3a6]">
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-0 z-0 bg-[url('/icons/board.svg')] bg-cover bg-center bg-no-repeat opacity-15"
-          />
-          <div aria-hidden className="pointer-events-none absolute inset-0 z-0 bg-black/8" />
+        <div className="relative h-full w-full overflow-hidden rounded-[1.3rem] bg-[url('/icons/board.svg')] bg-cover bg-center bg-no-repeat">
           <div className="relative z-10 h-full w-full">{children}</div>
         </div>
       </div>
