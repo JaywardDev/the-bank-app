@@ -35,6 +35,7 @@ const JAIL_FINE_AMOUNT = 50;
 const EVENT_FETCH_LIMIT = 100;
 const EVENT_LOG_LIMIT = 10;
 const TRANSACTION_DISPLAY_LIMIT = 30;
+const MINI_BOARD_COLLAPSED_STORAGE_KEY = "thebank:miniBoardCollapsed";
 const fallbackExpandedTiles: BoardTile[] = Array.from(
   { length: 40 },
   (_, index) => ({
@@ -1713,6 +1714,7 @@ export default function PlayPage() {
   const [isActivityPanelOpen, setIsActivityPanelOpen] = useState(false);
   const [activityTab, setActivityTab] = useState<"log" | "transactions">("log");
   const [isBoardExpanded, setIsBoardExpanded] = useState(false);
+  const [miniBoardCollapsed, setMiniBoardCollapsed] = useState(false);
   const [walletPanelView, setWalletPanelView] = useState<
     "owned" | "loans" | "mortgages"
   >("owned");
@@ -1757,6 +1759,19 @@ export default function PlayPage() {
   const lastGoToJailAckVersionRef = useRef<number | null>(null);
   const goToJailOkButtonRef = useRef<HTMLButtonElement | null>(null);
   const minIntroMs = 5000;
+
+  useEffect(() => {
+    const storedPreference =
+      window.localStorage.getItem(MINI_BOARD_COLLAPSED_STORAGE_KEY) === "1";
+    setMiniBoardCollapsed(storedPreference);
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      MINI_BOARD_COLLAPSED_STORAGE_KEY,
+      miniBoardCollapsed ? "1" : "0",
+    );
+  }, [miniBoardCollapsed]);
 
   const isConfigured = useMemo(() => supabaseClient.isConfigured(), []);
   const latestRollEvent = useMemo(
@@ -5969,37 +5984,65 @@ export default function PlayPage() {
               Board pack: {boardPack?.displayName ?? "Unknown"}
             </p>
           </div>
-          <button
-            className="rounded-full border border-neutral-200 px-3 py-1.5 text-xs font-semibold text-neutral-600 transition hover:border-neutral-300 hover:text-neutral-800 disabled:cursor-not-allowed disabled:border-neutral-100 disabled:text-neutral-300"
-            type="button"
-            onClick={() => setIsBoardExpanded(true)}
-            disabled={isDecisionOverlayActive}
-            title={
-              isDecisionOverlayActive
-                ? "Resolve the current decision to open the full board."
-                : "Open the full board view"
-            }
-          >
-            Expand board
-          </button>
-        </div>
-        <div className="overflow-x-auto">
-          <div className="min-w-[320px]">
-            <BoardMiniMap
-              tiles={boardPack?.tiles}
-              players={players}
-              currentPlayerId={currentPlayer?.id}
-              ownershipByTile={ownershipByTile}
-              showOwnership
-              size="compact"
-              selectedTileIndex={selectedTileIndex}
-              onTileClick={(tileIndex) => {
-                setSelectedTileIndex(tileIndex);
-              }}
-            />
+          <div className="flex items-center gap-2">
+            <button
+              className="rounded-full border border-neutral-200 px-3 py-1.5 text-xs font-semibold text-neutral-600 transition hover:border-neutral-300 hover:text-neutral-800"
+              type="button"
+              onClick={() => setMiniBoardCollapsed((current) => !current)}
+            >
+              {miniBoardCollapsed ? "Show mini-board" : "Hide"}
+            </button>
+            <button
+              className="rounded-full border border-neutral-200 px-3 py-1.5 text-xs font-semibold text-neutral-600 transition hover:border-neutral-300 hover:text-neutral-800 disabled:cursor-not-allowed disabled:border-neutral-100 disabled:text-neutral-300"
+              type="button"
+              onClick={() => setIsBoardExpanded(true)}
+              disabled={isDecisionOverlayActive}
+              title={
+                isDecisionOverlayActive
+                  ? "Resolve the current decision to open the full board."
+                  : "Open the full board view"
+              }
+            >
+              Expand board
+            </button>
           </div>
         </div>
-        {players.length > 0 ? (
+        <div
+          className={`transition-all duration-200 ${
+            miniBoardCollapsed ? "space-y-0" : "space-y-4"
+          }`}
+        >
+          {miniBoardCollapsed ? (
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2">
+              <p className="text-xs font-medium text-neutral-600">Mini-board hidden</p>
+              <button
+                className="rounded-full border border-neutral-200 bg-white px-3 py-1.5 text-xs font-semibold text-neutral-600 transition hover:border-neutral-300 hover:text-neutral-800"
+                type="button"
+                onClick={() => setMiniBoardCollapsed(false)}
+              >
+                Show mini-board
+              </button>
+            </div>
+          ) : (
+            <div className="overflow-x-auto transition-opacity duration-200">
+              <div className="min-w-[320px]">
+                <BoardMiniMap
+                  tiles={boardPack?.tiles}
+                  players={players}
+                  currentPlayerId={currentPlayer?.id}
+                  ownershipByTile={ownershipByTile}
+                  showOwnership
+                  size="compact"
+                  selectedTileIndex={selectedTileIndex}
+                  onTileClick={(tileIndex) => {
+                    setSelectedTileIndex(tileIndex);
+                  }}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+        {!miniBoardCollapsed && players.length > 0 ? (
           <p className="text-xs text-neutral-500">
             Turn order:{" "}
             {players.map((player, index) => (
