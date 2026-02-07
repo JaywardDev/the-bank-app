@@ -186,17 +186,17 @@ export default function BoardTrack({
               ) : null}
 
               <div
-                className="relative z-10 h-1.5 w-full"
+                className="relative z-2 h-3 w-full"
                 style={{ backgroundColor: getTileBandColor(tile) }}
               />
-              <div className="relative z-10 flex h-full flex-col p-1">
+              <div className="relative z-2 flex h-full flex-col p-1">
                 <div className="flex items-start justify-between gap-1">
                   <p className="text-[10px] font-bold leading-none">
                     {tile.index}
                   </p>
                 </div>
                 {!isIconOnlyTile ? (
-                  <p className="mt-0.5 line-clamp-2 min-h-[1.7rem] pr-0.5 text-[9px] font-semibold leading-tight">
+                  <p className="mt-0.5 line-clamp-2 min-h-[1.7rem] pr-0.5 text-[15px] font-semibold leading-tight">
                     {tile.name}
                   </p>
                 ) : null}
@@ -212,7 +212,7 @@ export default function BoardTrack({
                     {showRent ? (
                       <div className="pointer-events-none z-30">
                         <span
-                          className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none ${
+                          className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[15px] font-semibold leading-none ${
                             isCollateralized
                               ? "bg-neutral-700/35 text-neutral-900/50"
                               : "bg-neutral-900/70 text-white/95"
