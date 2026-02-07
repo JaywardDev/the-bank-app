@@ -57,29 +57,30 @@ const CLASSIC_PH_ECONOMY: BoardPackEconomy = {
   passGoAmount: 1600000,
   jailFineAmount: 400000,
   auctionMinIncrement: 50000,
+  railRentByCount: [0, 200_000, 400_000, 800_000, 1_600_000],
 };
 
 const CLASSIC_PH_PROPERTY_GROUPS: PropertyGroupConfig[] = [
-  { id: "brown", houseCost: 50, tileIds: ["cavite", "bulacan"] },
+  { id: "brown", houseCost: 400_000, tileIds: ["cavite", "bulacan"] },
   {
     id: "light-blue",
-    houseCost: 50,
+    houseCost: 400_000,
     tileIds: ["paranaque", "las-pinas", "muntinlupa"],
   },
-  { id: "pink", houseCost: 100, tileIds: ["intramuros", "ermita", "malate"] },
+  { id: "pink", houseCost: 800_000, tileIds: ["intramuros", "ermita", "malate"] },
   {
     id: "orange",
-    houseCost: 100,
+    houseCost: 800_000,
     tileIds: ["quezon-city", "pasig", "mandaluyong"],
   },
-  { id: "red", houseCost: 150, tileIds: ["pasay", "marikina", "ortigas-center"] },
-  { id: "yellow", houseCost: 150, tileIds: ["rockwell", "greenhills", "eastwood"] },
+  { id: "red", houseCost: 1_200_000, tileIds: ["pasay", "marikina", "ortigas-center"] },
+  { id: "yellow", houseCost: 1_200_000, tileIds: ["rockwell", "greenhills", "eastwood"] },
   {
     id: "green",
-    houseCost: 200,
+    houseCost: 1_600_000,
     tileIds: ["dasmarinas-village", "ayala-alabang", "mckinley-hills"],
   },
-  { id: "dark-blue", houseCost: 200, tileIds: ["forbes-park", "bonifacio-high-street"] },
+  { id: "dark-blue", houseCost: 1_600_000, tileIds: ["forbes-park", "bonifacio-high-street"] },
 ];
 
 export const classicPhChanceCards: CardDefinition[] = [
