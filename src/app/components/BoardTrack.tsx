@@ -134,7 +134,7 @@ export default function BoardTrack({
                 <div
                   className="relative h-full w-full"
                   style={{
-                    "--token-size": "clamp(12px, 40%, 26px)",
+                    "--token-size": "clamp(12px, 100%, 26px)",
                     "--token-step": "24%",
                   } as CSSProperties}
                 >
