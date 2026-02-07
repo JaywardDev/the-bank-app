@@ -3575,7 +3575,7 @@ export async function POST(request: Request) {
 
     if (body.expectedVersion !== currentVersion) {
       return NextResponse.json(
-        { error: "Version mismatch." },
+        { error: "Version mismatch.", currentVersion },
         { status: 409 },
       );
     }

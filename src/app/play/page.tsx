@@ -4828,6 +4828,7 @@ export default function PlayPage() {
     currentUserPlayer && gameState?.balances
       ? gameState.balances[currentUserPlayer.id] ?? 0
       : 0;
+  const autoPassAttemptedTurnRef = useRef<string | null>(null);
   const isDecisionOverlayActive =
     showJailDecisionPanel ||
     pendingGoToJail !== null ||
@@ -5343,6 +5344,10 @@ export default function PlayPage() {
             requestTiles?: number[];
           }
         | { action: "ACCEPT_TRADE" | "REJECT_TRADE" | "CANCEL_TRADE"; tradeId: string },
+      options?: {
+        retryOnVersionMismatch?: boolean;
+        suppressVersionMismatchNotice?: boolean;
+      },
     ) => {
       const { action } = request;
       const tileIndex = "tileIndex" in request ? request.tileIndex : undefined;
@@ -5374,6 +5379,9 @@ export default function PlayPage() {
       }
 
       const snapshotVersion = gameState?.version ?? 0;
+      const retryOnVersionMismatch = options?.retryOnVersionMismatch ?? false;
+      const suppressVersionMismatchNotice =
+        options?.suppressVersionMismatchNotice ?? false;
       const snapshotLastRoll = gameState?.last_roll ?? null;
       console.info("[Play] action request", {
         action,
@@ -5413,7 +5421,10 @@ export default function PlayPage() {
           });
         };
 
-        const performBankAction = async (accessToken: string) => {
+        const performBankAction = async (
+          accessToken: string,
+          expectedVersionOverride?: number,
+        ) => {
           const response = await fetch("/api/bank/action", {
             method: "POST",
             headers: {
@@ -5434,13 +5445,17 @@ export default function PlayPage() {
               offerTiles,
               requestCash,
               requestTiles,
-              expectedVersion: snapshotVersion,
+              expectedVersion:
+                typeof expectedVersionOverride === "number"
+                  ? expectedVersionOverride
+                  : snapshotVersion,
             }),
           });
 
           let responseBody:
             | {
                 error?: string;
+                currentVersion?: number;
                 gameState?: GameState;
                 ownership?: OwnershipRow;
                 loan?: PlayerLoan | null;
@@ -5512,11 +5527,37 @@ export default function PlayPage() {
 
         if (!response.ok) {
           if (response.status === 409) {
-            setNotice("Syncing…");
-            await loadGameData(gameId, accessToken);
-            throw new Error(responseBody?.error ?? "Game updated. Try again.");
+            const serverVersion =
+              typeof responseBody?.currentVersion === "number"
+                ? responseBody.currentVersion
+                : null;
+            if (
+              retryOnVersionMismatch &&
+              action === "AUCTION_PASS" &&
+              typeof serverVersion === "number" &&
+              Number.isInteger(serverVersion) &&
+              serverVersion !== snapshotVersion
+            ) {
+              const retryResult = await performBankAction(accessToken, serverVersion);
+              response = retryResult.response;
+              responseBody = retryResult.responseBody;
+            }
+
+            if (!response.ok) {
+              if (!suppressVersionMismatchNotice) {
+                setNotice("Syncing…");
+              }
+              await loadGameData(gameId, accessToken);
+              throw new Error(
+                suppressVersionMismatchNotice
+                  ? responseBody?.error ?? "Game updated."
+                  : (responseBody?.error ?? "Game updated. Try again."),
+              );
+            }
           }
-          throw new Error(responseBody?.error ?? "Unable to perform action.");
+          if (!response.ok) {
+            throw new Error(responseBody?.error ?? "Unable to perform action.");
+          }
         }
 
         if (responseBody?.gameState) {
@@ -5772,8 +5813,41 @@ export default function PlayPage() {
     if (!isCurrentAuctionBidder) {
       return;
     }
-    void handleBankAction({ action: "AUCTION_PASS" });
+    void handleBankAction(
+      { action: "AUCTION_PASS" },
+      { retryOnVersionMismatch: true },
+    );
   }, [handleBankAction, isCurrentAuctionBidder]);
+
+  useEffect(() => {
+    if (!isAuctionActive || !isCurrentAuctionBidder || !auctionTurnEndsAt) {
+      autoPassAttemptedTurnRef.current = null;
+      return;
+    }
+    if (auctionRemainingSeconds !== 0) {
+      return;
+    }
+    const turnKey = `${auctionTileIndex ?? "none"}:${auctionTurnPlayerId ?? "none"}:${auctionTurnEndsAt}`;
+    if (autoPassAttemptedTurnRef.current === turnKey) {
+      return;
+    }
+    autoPassAttemptedTurnRef.current = turnKey;
+    void handleBankAction(
+      { action: "AUCTION_PASS" },
+      {
+        retryOnVersionMismatch: true,
+        suppressVersionMismatchNotice: true,
+      },
+    );
+  }, [
+    auctionRemainingSeconds,
+    auctionTileIndex,
+    auctionTurnEndsAt,
+    auctionTurnPlayerId,
+    handleBankAction,
+    isAuctionActive,
+    isCurrentAuctionBidder,
+  ]);
 
   const handlePayJailFine = useCallback(() => {
     void handleBankAction({ action: "JAIL_PAY_FINE" });
