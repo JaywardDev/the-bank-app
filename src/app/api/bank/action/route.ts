@@ -1055,6 +1055,79 @@ const loadOwnershipByTile = async (
   }, {});
 };
 
+const assignPropertyOwnership = async ({
+  gameId,
+  tileIndex,
+  ownerPlayerId,
+  purchaseMortgageId,
+}: {
+  gameId: string;
+  tileIndex: number;
+  ownerPlayerId: string;
+  purchaseMortgageId?: string | null;
+}): Promise<{
+  ok: boolean;
+  alreadyOwned?: boolean;
+  errorText?: string;
+}> => {
+  const patchRows =
+    (await fetchFromSupabaseWithService<
+      Array<{ tile_index: number; owner_player_id: string | null }>
+    >(
+      `property_ownership?select=tile_index,owner_player_id&game_id=eq.${gameId}&tile_index=eq.${tileIndex}&owner_player_id=is.null`,
+      {
+        method: "PATCH",
+        headers: {
+          Prefer: "return=representation",
+        },
+        body: JSON.stringify({
+          owner_player_id: ownerPlayerId,
+          collateral_loan_id: null,
+          purchase_mortgage_id: purchaseMortgageId ?? null,
+          houses: 0,
+        }),
+      },
+    )) ?? [];
+
+  if (patchRows.length > 0) {
+    return { ok: true };
+  }
+
+  const insertResponse = await fetch(`${supabaseUrl}/rest/v1/property_ownership`, {
+    method: "POST",
+    headers: {
+      ...bankHeaders,
+      Prefer: "return=representation",
+    },
+    body: JSON.stringify({
+      game_id: gameId,
+      tile_index: tileIndex,
+      owner_player_id: ownerPlayerId,
+      collateral_loan_id: null,
+      purchase_mortgage_id: purchaseMortgageId ?? null,
+      houses: 0,
+    }),
+  });
+
+  if (insertResponse.ok) {
+    return { ok: true };
+  }
+
+  const errorText = await insertResponse.text();
+  if (
+    insertResponse.status === 409 ||
+    errorText.includes("duplicate key value") ||
+    errorText.includes("23505")
+  ) {
+    return { ok: false, alreadyOwned: true };
+  }
+
+  return {
+    ok: false,
+    errorText,
+  };
+};
+
 const emitGameEvent = async (
   gameId: string,
   version: number,
@@ -4777,26 +4850,26 @@ export async function POST(request: Request) {
           };
           patchPayload.balances = updatedBalances;
 
-          const ownershipResponse = await fetch(
-            `${supabaseUrl}/rest/v1/property_ownership`,
-            {
-              method: "POST",
-              headers: {
-                ...bankHeaders,
-                Prefer: "return=representation",
-              },
-              body: JSON.stringify({
-                game_id: gameId,
-                tile_index: auctionTileIndex,
-                owner_player_id: winnerId,
-              }),
-            },
-          );
+          const ownershipResult = await assignPropertyOwnership({
+            gameId,
+            tileIndex: auctionTileIndex,
+            ownerPlayerId: winnerId,
+          });
 
-          if (!ownershipResponse.ok) {
-            const errorText = await ownershipResponse.text();
+          if (!ownershipResult.ok) {
+            if (ownershipResult.alreadyOwned) {
+              return NextResponse.json(
+                { error: "Property already owned." },
+                { status: 409 },
+              );
+            }
+
             return NextResponse.json(
-              { error: errorText || "Unable to record auction ownership." },
+              {
+                error:
+                  ownershipResult.errorText ||
+                  "Unable to record auction ownership.",
+              },
               { status: 500 },
             );
           }
@@ -6833,30 +6906,15 @@ export async function POST(request: Request) {
         }
       }
 
-      const ownershipResponse = await fetch(
-        `${supabaseUrl}/rest/v1/property_ownership`,
-        {
-          method: "POST",
-          headers: {
-            ...bankHeaders,
-            Prefer: "return=representation",
-          },
-          body: JSON.stringify({
-            game_id: gameId,
-            tile_index: tileIndex,
-            owner_player_id: currentPlayer.id,
-            ...(mortgageId ? { purchase_mortgage_id: mortgageId } : {}),
-          }),
-        },
-      );
+      const ownershipResult = await assignPropertyOwnership({
+        gameId,
+        tileIndex,
+        ownerPlayerId: currentPlayer.id,
+        purchaseMortgageId: mortgageId,
+      });
 
-      if (!ownershipResponse.ok) {
-        const errorText = await ownershipResponse.text();
-        if (
-          ownershipResponse.status === 409 ||
-          errorText.includes("duplicate key value") ||
-          errorText.includes("23505")
-        ) {
+      if (!ownershipResult.ok) {
+        if (ownershipResult.alreadyOwned) {
           return NextResponse.json(
             { error: "Property already owned." },
             { status: 409 },
@@ -6864,7 +6922,7 @@ export async function POST(request: Request) {
         }
 
         return NextResponse.json(
-          { error: errorText || "Unable to record ownership." },
+          { error: ownershipResult.errorText || "Unable to record ownership." },
           { status: 500 },
         );
       }
