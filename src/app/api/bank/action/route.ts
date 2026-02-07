@@ -4841,7 +4841,21 @@ export async function POST(request: Request) {
         };
 
         let updatedBalances = gameState.balances ?? {};
+        if (!skipped && !winnerId) {
+          return NextResponse.json(
+            { error: "Auction winner is missing." },
+            { status: 400 },
+          );
+        }
+
         if (winnerId && !skipped) {
+          if (auctionTileIndex == null) {
+            return NextResponse.json(
+              { error: "Auction tile is missing." },
+              { status: 400 },
+            );
+          }
+
           const currentBalance =
             updatedBalances[winnerId] ?? startingCash;
           updatedBalances = {
