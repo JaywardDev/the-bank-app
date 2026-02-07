@@ -7390,8 +7390,12 @@ export default function PlayPage() {
                         typeof gameState?.last_roll === "number"
                           ? gameState.last_roll
                           : null;
+                      const utilityBaseAmount =
+                        boardPackEconomy.utilityBaseAmount ?? 1;
                       const utilityRentPreview =
-                        lastRoll !== null ? lastRoll * utilityMultiplier : null;
+                        lastRoll !== null
+                          ? lastRoll * utilityMultiplier * utilityBaseAmount
+                          : null;
                       const groupLabel = getTileGroupLabel(tile);
                       const tileIconSrc = getTileIconSrc(tile);
                       const tileIconFallbackLabel =

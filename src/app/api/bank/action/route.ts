@@ -1703,7 +1703,8 @@ const calculateRent = ({
         ? boardPackEconomy.utilityRentMultipliers.double
         : boardPackEconomy.utilityRentMultipliers.single;
     const total = diceTotal ?? 0;
-    const baseAmount = multiplier * total;
+    const utilityBaseAmount = boardPackEconomy.utilityBaseAmount ?? 1;
+    const baseAmount = multiplier * total * utilityBaseAmount;
     const totalHousesOwned = Object.values(ownershipByTile).reduce(
       (sum, ownership) =>
         ownership.owner_player_id === ownerId ? sum + ownership.houses : sum,

@@ -58,6 +58,7 @@ const CLASSIC_PH_ECONOMY: BoardPackEconomy = {
   jailFineAmount: 400000,
   auctionMinIncrement: 50000,
   railRentByCount: [0, 200_000, 400_000, 800_000, 1_600_000],
+  utilityBaseAmount: 8000,
 };
 
 const CLASSIC_PH_PROPERTY_GROUPS: PropertyGroupConfig[] = [

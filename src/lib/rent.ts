@@ -120,7 +120,8 @@ export const getCurrentTileRent = ({
         ? economy.utilityRentMultipliers.double
         : economy.utilityRentMultipliers.single;
     const rentRoll = typeof lastRoll === "number" ? lastRoll : DEFAULT_UTILITY_ROLL;
-    return rentRoll * multiplier;
+    const utilityBaseAmount = economy.utilityBaseAmount ?? 1;
+    return rentRoll * multiplier * utilityBaseAmount;
   }
 
   return null;

@@ -24,6 +24,7 @@ export type BoardPackEconomy = {
     single: number;
     double: number;
   };
+  utilityBaseAmount?: number;
   startingBalance?: number;
   passGoAmount?: number;
   jailFineAmount?: number;

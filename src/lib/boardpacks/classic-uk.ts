@@ -64,6 +64,7 @@ export const CLASSIC_UK_ECONOMY: BoardPackEconomy = {
   hotelIncrementMultiplier: 1.25,
   railRentByCount: [0, 25, 50, 100, 200],
   utilityRentMultipliers: { single: 4, double: 10 },
+  utilityBaseAmount: 1,
   startingBalance: 1500,
   passGoAmount: 200,
   jailFineAmount: 50,
