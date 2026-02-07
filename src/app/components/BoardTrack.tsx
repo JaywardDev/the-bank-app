@@ -163,6 +163,28 @@ export default function BoardTrack({
                 </div>
               ) : null}
 
+              {ownership ? (
+                <div className="pointer-events-none absolute right-1 top-1 z-10">
+                  <span
+                    className="relative block h-3.5 w-3.5 rounded-full border border-black/30 shadow-[0_1px_1px_rgba(0,0,0,0.35),inset_0_1px_1px_rgba(255,255,255,0.6)]"
+                    style={{
+                      backgroundColor: ownerColor ?? "#9ca3af",
+                      opacity: isCollateralized ? 0.45 : 1,
+                    }}
+                    aria-label={ownershipMarkerLabel}
+                  >
+                    {isCollateralized ? (
+                      <span className="absolute left-1/2 top-1/2 h-[1px] w-[140%] -translate-x-1/2 -translate-y-1/2 rotate-[-35deg] bg-black/70" />
+                    ) : null}
+                    {isPurchaseMortgaged && !isCollateralized ? (
+                      <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-[8px] font-black leading-none text-black/80">
+                        M
+                      </span>
+                    ) : null}
+                  </span>
+                </div>
+              ) : null}
+
               <div
                 className="relative z-10 h-1.5 w-full"
                 style={{ backgroundColor: getTileBandColor(tile) }}
@@ -185,7 +207,7 @@ export default function BoardTrack({
                   </div>
                 ) : null}
 
-                {(showRent || ownership) ? (
+                {showRent ? (
                   <div className="mt-auto flex items-end justify-between gap-1">
                     {showRent ? (
                       <div className="pointer-events-none z-30">
@@ -207,28 +229,7 @@ export default function BoardTrack({
                     ) : (
                       <span />
                     )}
-
-                    {ownership ? (
-                      <div className="pointer-events-none z-30">
-                        <span
-                          className="relative block h-3.5 w-3.5 rounded-full border border-black/30 shadow-[0_1px_1px_rgba(0,0,0,0.35),inset_0_1px_1px_rgba(255,255,255,0.6)]"
-                          style={{
-                            backgroundColor: ownerColor ?? "#9ca3af",
-                            opacity: isCollateralized ? 0.45 : 1,
-                          }}
-                          aria-label={ownershipMarkerLabel}
-                        >
-                          {isCollateralized ? (
-                            <span className="absolute left-1/2 top-1/2 h-[1px] w-[140%] -translate-x-1/2 -translate-y-1/2 rotate-[-35deg] bg-black/70" />
-                          ) : null}
-                          {isPurchaseMortgaged && !isCollateralized ? (
-                            <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-[8px] font-black leading-none text-black/80">
-                              M
-                            </span>
-                          ) : null}
-                        </span>
-                      </div>
-                    ) : null}
+                    <span />
                   </div>
                 ) : null}
               </div>
