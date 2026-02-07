@@ -48,7 +48,9 @@ const DEFAULT_MACRO_DECK = {
   draw: (lastCardId?: string) => drawMacroCardV1(lastCardId),
 };
 
-const resolveMacroDeck = (boardPack: ReturnType<typeof getBoardPackById> | null) =>
+const resolveMacroDeck = (
+  boardPack: ReturnType<typeof getBoardPackById> | null | undefined,
+) =>
   boardPack?.macroDeck ?? DEFAULT_MACRO_DECK;
 
 type BaseActionRequest = {
@@ -2175,6 +2177,7 @@ const finalizeMoveResolution = async ({
   userId,
   ownershipByTile,
   boardTiles,
+  boardPack,
   boardPackEconomy,
   rules,
   startingCash,
@@ -2222,6 +2225,7 @@ const finalizeMoveResolution = async ({
   userId: string;
   ownershipByTile: OwnershipByTile;
   boardTiles: TileInfo[];
+  boardPack: ReturnType<typeof getBoardPackById> | null;
   boardPackEconomy: BoardPackEconomy;
   rules: ReturnType<typeof getRules>;
   startingCash: number;
@@ -5170,6 +5174,7 @@ export async function POST(request: Request) {
         userId: user.id,
         ownershipByTile,
         boardTiles,
+        boardPack,
         boardPackEconomy,
         rules,
         startingCash: startingCash,
@@ -5758,6 +5763,7 @@ export async function POST(request: Request) {
         userId: user.id,
         ownershipByTile,
         boardTiles,
+        boardPack,
         boardPackEconomy,
         rules,
         startingCash: startingCash,
@@ -8648,6 +8654,7 @@ export async function POST(request: Request) {
         userId: user.id,
         ownershipByTile,
         boardTiles,
+        boardPack,
         boardPackEconomy,
         rules,
         startingCash: startingCash,
