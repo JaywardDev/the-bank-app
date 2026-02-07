@@ -1,4 +1,5 @@
 import Image from "next/image";
+import type { CSSProperties } from "react";
 import HousesDots from "@/app/components/HousesDots";
 import TokenStack from "@/app/components/TokenStack";
 import type { BoardTile } from "@/lib/boardPacks";
@@ -121,7 +122,7 @@ export default function BoardTrack({
           return (
             <article
               key={tile.tile_id}
-              className={`relative overflow-hidden border border-transparent bg-[#f3f0e6] text-[clamp(8.5px,0.95vw,14.5px)] text-neutral-800 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.2)] ${
+              className={`relative overflow-hidden border border-transparent bg-[#f3f0e6] text-neutral-800 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.2)] ${
                 isCorner ? "rounded-[6px]" : "rounded-sm"
               } ${lastMovedTileIndex === tile.index ? "ring-2 ring-amber-400" : ""}`}
               style={{
@@ -130,7 +131,13 @@ export default function BoardTrack({
               }}
             >
               <div className="pointer-events-none absolute inset-x-1.5 top-2 z-20 h-[calc(100%-0.75rem)]">
-                <div className="relative h-full w-full">
+                <div
+                  className="relative h-full w-full"
+                  style={{
+                    "--token-size": "clamp(12px, 40%, 26px)",
+                    "--token-step": "24%",
+                  } as CSSProperties}
+                >
                   <TokenStack
                     players={tilePlayers.map((player) => ({
                       id: player.id,
