@@ -5,6 +5,7 @@ import type {
   CardDefinition,
 } from "../boardPacks";
 import { CLASSIC_UK_ECONOMY } from "./classic-uk";
+import { MACRO_DECK_PH_V1, drawMacroCardPhV1 } from "../macroDeckPhV1";
 
 type PropertyGroupConfig = {
   id: string;
@@ -287,6 +288,12 @@ export const classicPhBoardPack: BoardPack = {
   displayName: "Philippines",
   properties: [],
   economy: CLASSIC_PH_ECONOMY,
+  macroDeck: {
+    id: "macro-ph-v1",
+    name: "Macro PH V1",
+    cards: MACRO_DECK_PH_V1,
+    draw: drawMacroCardPhV1,
+  },
   eventDecks: {
     chance: classicPhChanceCards,
     community: classicPhCommunityCards,

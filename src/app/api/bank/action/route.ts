@@ -41,6 +41,16 @@ const bankHeaders = {
 
 const PURCHASE_MORTGAGE_RATE_PER_TURN = 0.015;
 
+const DEFAULT_MACRO_DECK = {
+  id: "macro-v1",
+  name: "Macro V1",
+  cards: MACRO_DECK_V1,
+  draw: (lastCardId?: string) => drawMacroCardV1(lastCardId),
+};
+
+const resolveMacroDeck = (boardPack: ReturnType<typeof getBoardPackById> | null) =>
+  boardPack?.macroDeck ?? DEFAULT_MACRO_DECK;
+
 type BaseActionRequest = {
   gameId?: string;
   playerName?: string;
@@ -2528,18 +2538,19 @@ const finalizeMoveResolution = async ({
         });
       }
 
+      const macroDeck = resolveMacroDeck(boardPack);
       if (
         nextRound % MACRO_EVENT_INTERVAL_ROUNDS === 0 &&
-        MACRO_DECK_V1.length > 0
+        macroDeck.cards.length > 0
       ) {
-        const macroEvent = drawMacroCardV1(nextLastMacroEventId);
+        const macroEvent = macroDeck.draw(nextLastMacroEventId ?? undefined);
         nextLastMacroEventId = macroEvent.id;
         triggeredMacroEvent = macroEvent;
         events.push({
           event_type: "MACRO_EVENT_TRIGGERED",
           payload: {
-            deck_id: "macro-v1",
-            deck_name: "Macro V1",
+            deck_id: macroDeck.id,
+            deck_name: macroDeck.name,
             event_id: macroEvent.id,
             event_name: macroEvent.name,
             duration_rounds: macroEvent.durationRounds,
@@ -3015,6 +3026,7 @@ const advanceTurn = async ({
   userId,
   rules,
   startingCash,
+  boardPack,
   extraEvents = [],
   extraGameStatePatch = {},
 }: {
@@ -3026,6 +3038,7 @@ const advanceTurn = async ({
   userId: string;
   rules: ReturnType<typeof getRules>;
   startingCash: number;
+  boardPack: ReturnType<typeof getBoardPackById> | null;
   extraEvents?: Array<{ event_type: string; payload: Record<string, unknown> }>;
   extraGameStatePatch?: Record<string, unknown>;
 }) => {
@@ -3096,18 +3109,19 @@ const advanceTurn = async ({
       });
     }
 
+    const macroDeck = resolveMacroDeck(boardPack);
     if (
       nextRound % MACRO_EVENT_INTERVAL_ROUNDS === 0 &&
-      MACRO_DECK_V1.length > 0
+      macroDeck.cards.length > 0
     ) {
-      const macroEvent = drawMacroCardV1(nextLastMacroEventId);
+      const macroEvent = macroDeck.draw(nextLastMacroEventId ?? undefined);
       nextLastMacroEventId = macroEvent.id;
       triggeredMacroEvent = macroEvent;
       events.push({
         event_type: "MACRO_EVENT_TRIGGERED",
         payload: {
-          deck_id: "macro-v1",
-          deck_name: "Macro V1",
+          deck_id: macroDeck.id,
+          deck_name: macroDeck.name,
           event_id: macroEvent.id,
           event_name: macroEvent.name,
           duration_rounds: macroEvent.durationRounds,
@@ -5231,6 +5245,7 @@ export async function POST(request: Request) {
           userId: user.id,
           rules,
           startingCash: startingCash,
+          boardPack,
           extraEvents: [
             {
               event_type: "TURN_SKIPPED_PANDEMIC",
@@ -8071,6 +8086,7 @@ export async function POST(request: Request) {
           userId: user.id,
           rules,
           startingCash: startingCash,
+          boardPack,
           extraEvents: [
             {
               event_type: "TURN_SKIPPED_PANDEMIC",
@@ -8882,6 +8898,7 @@ export async function POST(request: Request) {
         userId: user.id,
         rules,
         startingCash: startingCash,
+        boardPack,
       });
     }
 

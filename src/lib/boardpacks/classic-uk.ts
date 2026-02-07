@@ -4,6 +4,7 @@ import type {
   BoardTile,
   CardDefinition,
 } from "../boardPacks";
+import { MACRO_DECK_V1, drawMacroCardV1 } from "../macroDeckV1";
 
 type PropertyGroupConfig = {
   id: string;
@@ -293,6 +294,12 @@ export const classicUkBoardPack: BoardPack = {
   displayName: "Classic (UK)",
   properties: [],
   economy: CLASSIC_UK_ECONOMY,
+  macroDeck: {
+    id: "macro-v1",
+    name: "Macro V1",
+    cards: MACRO_DECK_V1,
+    draw: drawMacroCardV1,
+  },
   eventDecks: {
     chance: classicUkChanceCards,
     community: classicUkCommunityCards,

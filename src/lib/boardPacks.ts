@@ -1,5 +1,6 @@
 import { classicPhBoardPack } from "./boardpacks/classic-ph";
 import { classicUkBoardPack } from "./boardpacks/classic-uk";
+import type { MacroCardV1 } from "./macroDeckV1";
 
 export { classicUkChanceCards, classicUkCommunityCards } from "./boardpacks/classic-uk";
 
@@ -8,6 +9,12 @@ export type BoardPack = {
   displayName: string;
   properties: string[];
   economy: BoardPackEconomy;
+  macroDeck?: {
+    id: string;
+    name: string;
+    cards: MacroCardV1[];
+    draw: (lastCardId?: string) => MacroCardV1;
+  };
   eventDecks?: EventDecks;
   tiles: BoardTile[];
 };
