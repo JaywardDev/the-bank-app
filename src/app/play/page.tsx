@@ -25,7 +25,7 @@ import {
   getTileBandColor,
 } from "@/lib/boardTileStyles";
 import { getRules } from "@/lib/rules";
-import { getPropertyRentWithDevelopment } from "@/lib/rent";
+import { getCurrentTileRent, getPropertyRentWithDevelopment } from "@/lib/rent";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 import Image from "next/image";
 import { getBoardTileIconSrc } from "@/lib/tileIcons";
@@ -7507,7 +7507,13 @@ export default function PlayPage() {
                         ? getPropertyRentDetails(tile)
                         : null;
                       const currentPropertyRent = isProperty
-                        ? getPropertyRentWithDev(tile, houses)
+                        ? getCurrentTileRent({
+                            tile,
+                            ownershipByTile,
+                            boardTiles: boardPack?.tiles ?? [],
+                            economy: boardPackEconomy,
+                            lastRoll: gameState?.last_roll,
+                          })
                         : null;
                       const railRentByCount = boardPackEconomy.railRentByCount;
                       const railBaseRent = railRentByCount[1] ?? null;

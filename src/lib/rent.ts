@@ -72,6 +72,29 @@ const countOwnedTilesByType = (
   }, 0);
 };
 
+const ownsFullColorSet = (
+  tile: BoardTile,
+  boardTiles: BoardTile[],
+  ownershipByTile: OwnershipByTile,
+  ownerPlayerId: string,
+) => {
+  if (tile.type !== "PROPERTY" || !tile.colorGroup) {
+    return false;
+  }
+
+  const groupTiles = boardTiles.filter(
+    (entry) => entry.type === "PROPERTY" && entry.colorGroup === tile.colorGroup,
+  );
+
+  if (groupTiles.length === 0) {
+    return false;
+  }
+
+  return groupTiles.every(
+    (entry) => ownershipByTile[entry.index]?.owner_player_id === ownerPlayerId,
+  );
+};
+
 export const getCurrentTileRent = ({
   tile,
   ownershipByTile,
@@ -91,12 +114,39 @@ export const getCurrentTileRent = ({
   }
 
   if (tile.type === "PROPERTY") {
-    return getPropertyRentWithDevelopment(
+    const development = ownership.houses;
+    const rentWithDevelopment = getPropertyRentWithDevelopment(
       tile,
-      ownership.houses,
+      development,
       economy.hotelIncrementMultiplier,
     );
+
+    const hasMonopolyNoDevelopment =
+      development === 0 &&
+      ownsFullColorSet(tile, boardTiles, ownershipByTile, ownership.owner_player_id);
+    if (!hasMonopolyNoDevelopment) {
+      return rentWithDevelopment;
+    }
+
+    const baseNoHouseRent = tile.rentByHouses?.[0] ?? tile.baseRent ?? 0;
+    return baseNoHouseRent * 2;
   }
+
+  // Example assertion block (no test runner configured):
+  // A monopoly with zero development should preview doubled base rent.
+  // const sampleRent = getCurrentTileRent({
+  //   tile: { index: 1, tile_id: "x", type: "PROPERTY", name: "A", colorGroup: "BROWN", baseRent: 2 },
+  //   ownershipByTile: {
+  //     1: { owner_player_id: "p1", collateral_loan_id: null, purchase_mortgage_id: null, houses: 0 },
+  //     3: { owner_player_id: "p1", collateral_loan_id: null, purchase_mortgage_id: null, houses: 0 },
+  //   },
+  //   boardTiles: [
+  //     { index: 1, tile_id: "x", type: "PROPERTY", name: "A", colorGroup: "BROWN", baseRent: 2 },
+  //     { index: 3, tile_id: "y", type: "PROPERTY", name: "B", colorGroup: "BROWN", baseRent: 4 },
+  //   ],
+  //   economy: { currency: { code: "USD", symbol: "$" }, houseRentMultipliersByGroup: {}, hotelIncrementMultiplier: 1.25, railRentByCount: [0,25,50,100,200], utilityRentMultipliers: { single: 4, double: 10 } },
+  // });
+  // console.assert(sampleRent === 4, "Expected monopoly base rent to double");
 
   if (tile.type === "RAIL") {
     const railCount = countOwnedTilesByType(
