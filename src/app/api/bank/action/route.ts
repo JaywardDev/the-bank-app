@@ -1852,17 +1852,28 @@ const calculateRent = ({
   if (tile.type === "PROPERTY") {
     const dev = ownershipByTile[tile.index]?.houses ?? 0;
     const amount = getPropertyRentWithDev(tile, dev);
+    // Monopoly (complete color set) doubles only the no-house base rent.
+    // Do not apply this to developed properties; houses/hotels already define rent.
+    const hasMonopolyNoDev =
+      dev === 0 && ownsFullColorSet(tile, boardTiles, ownershipByTile, ownerId);
+    const baseNoHouseRent = tile.rentByHouses?.[0] ?? tile.baseRent ?? 0;
+    const monopolyAdjustedAmount = hasMonopolyNoDev
+      ? baseNoHouseRent * 2
+      : amount;
     const colorGroupMultiplier = getMacroRentMultiplierForColorGroupV1(
       activeMacroEffects,
       tile.colorGroup,
     );
-    const finalAmount = Math.round(amount * rentMultiplier * colorGroupMultiplier);
+    const finalAmount = Math.round(
+      monopolyAdjustedAmount * rentMultiplier * colorGroupMultiplier,
+    );
     return {
       amount: finalAmount,
       meta: {
         rent_type: "PROPERTY",
         houses: dev,
-        base_rent: amount,
+        base_rent: monopolyAdjustedAmount,
+        monopoly_applied: hasMonopolyNoDev,
         color_group_multiplier: colorGroupMultiplier,
         ...(macroMeta ?? {}),
       },
