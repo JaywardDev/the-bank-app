@@ -336,9 +336,9 @@ export default function LobbyPage() {
 
   useEffect(() => {
     if (activeGame?.status === "in_progress") {
-      router.replace("/play");
+      router.replace(`/play/${gameId}`);
     }
-  }, [activeGame?.status, router]);
+  }, [activeGame?.status, gameId, router]);
 
   useEffect(() => {
     if (activeGame?.status !== "ended") {
@@ -350,23 +350,62 @@ export default function LobbyPage() {
     setGameState(null);
 
     if (typeof window !== "undefined") {
-      window.localStorage.removeItem(lastGameKey);
+      if (window.localStorage.getItem(lastGameKey) === gameId) {
+        window.localStorage.removeItem(lastGameKey);
+      }
     }
 
     setNotice("This session has ended.");
     router.replace("/");
-  }, [activeGame?.status, router]);
+  }, [activeGame?.status, gameId, router]);
 
-  const handleLeaveLobby = () => {
-    setActiveGame(null);
-    setPlayers([]);
-    setGameState(null);
-
-    if (typeof window !== "undefined") {
-      window.localStorage.removeItem(lastGameKey);
+  const handleLeaveLobby = async () => {
+    if (!session || !gameId) {
+      router.push("/");
+      return;
     }
 
-    router.push("/");
+    setLoadingAction("leave");
+    setNotice(null);
+
+    try {
+      const response = await fetch("/api/bank/action", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          action: "LEAVE_GAME",
+          gameId,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = (await response.json()) as { error?: string };
+        throw new Error(error.error ?? "Unable to leave the table.");
+      }
+
+      setActiveGame(null);
+      setPlayers([]);
+      setGameState(null);
+
+      if (typeof window !== "undefined") {
+        if (window.localStorage.getItem(lastGameKey) === gameId) {
+          window.localStorage.removeItem(lastGameKey);
+        }
+      }
+
+      router.push("/");
+    } catch (error) {
+      if (error instanceof Error) {
+        setNotice(error.message);
+      } else {
+        setNotice("Unable to leave the table.");
+      }
+    } finally {
+      setLoadingAction(null);
+    }
   };
 
   const handleEndSession = async () => {
@@ -402,7 +441,9 @@ export default function LobbyPage() {
       }
 
       if (typeof window !== "undefined") {
-        window.localStorage.removeItem(lastGameKey);
+        if (window.localStorage.getItem(lastGameKey) === activeGame.id) {
+          window.localStorage.removeItem(lastGameKey);
+        }
       }
 
       router.push("/");
@@ -449,7 +490,7 @@ export default function LobbyPage() {
         throw new Error(error.error ?? "Unable to start the game.");
       }
 
-      router.push("/play");
+      router.push(`/play/${activeGame.id}`);
     } catch (error) {
       if (error instanceof Error) {
         setNotice(error.message);
@@ -537,7 +578,7 @@ export default function LobbyPage() {
                 type="button"
                 onClick={handleLeaveLobby}
               >
-                Leave
+                Leave table
               </button>
             </div>
             {isHost && activeGame.status === "lobby" ? (

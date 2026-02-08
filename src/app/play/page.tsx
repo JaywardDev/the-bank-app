@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { useRouter } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import PageShell from "../components/PageShell";
 import BoardMiniMap from "../components/BoardMiniMap";
@@ -1781,6 +1781,11 @@ const derivePlayerTransactions = ({
 
 export default function PlayPage() {
   const router = useRouter();
+  const params = useParams<{ gameId?: string | string[] }>();
+  const routeGameId = useMemo(() => {
+    const param = params?.gameId;
+    return Array.isArray(param) ? param[0] : param;
+  }, [params]);
   const [session, setSession] = useState<SupabaseSession | null>(null);
   const [gameId, setGameId] = useState<string | null>(null);
   const [gameMeta, setGameMeta] = useState<GameMeta | null>(null);
@@ -3311,19 +3316,13 @@ export default function PlayPage() {
     return "Update received";
   }, [boardPack?.tiles, currencySymbol, getOwnershipLabel, getTileNameByIndex, players]);
 
-  const clearResumeStorage = useCallback(() => {
-    if (typeof window === "undefined") {
+  const clearLastOpenedIfMatches = useCallback((targetGameId: string | null) => {
+    if (!targetGameId || typeof window === "undefined") {
       return;
     }
 
-    const { localStorage } = window;
-    localStorage.removeItem(lastGameKey);
-
-    for (let index = localStorage.length - 1; index >= 0; index -= 1) {
-      const key = localStorage.key(index);
-      if (key?.startsWith("bank.lobby")) {
-        localStorage.removeItem(key);
-      }
+    if (window.localStorage.getItem(lastGameKey) === targetGameId) {
+      window.localStorage.removeItem(lastGameKey);
     }
   }, []);
 
@@ -3892,24 +3891,37 @@ export default function PlayPage() {
 
       if (typeof window !== "undefined") {
         const storedGameId = window.localStorage.getItem(lastGameKey);
+        const targetGameId = routeGameId ?? storedGameId;
         const accessToken = currentSession?.access_token;
-        setGameId(storedGameId);
 
-        if (storedGameId && !accessToken) {
+        if (!routeGameId && !targetGameId) {
+          router.replace("/");
+          setLoading(false);
+          return;
+        }
+
+        setGameId(targetGameId);
+
+        if (!targetGameId) {
+          setLoading(false);
+          return;
+        }
+
+        window.localStorage.setItem(lastGameKey, targetGameId);
+
+        if (!accessToken) {
           setNeedsAuth(true);
           setLoading(false);
           return;
         }
 
-        if (storedGameId && accessToken) {
-          try {
-            await loadGameData(storedGameId, accessToken);
-          } catch (error) {
-            if (error instanceof Error) {
-              setNotice(error.message);
-            } else {
-              setNotice("Unable to load game data.");
-            }
+        try {
+          await loadGameData(targetGameId, accessToken);
+        } catch (error) {
+          if (error instanceof Error) {
+            setNotice(error.message);
+          } else {
+            setNotice("Unable to load game data.");
           }
         }
       }
@@ -3922,7 +3934,7 @@ export default function PlayPage() {
     return () => {
       isMounted = false;
     };
-  }, [isConfigured, loadGameData]);
+  }, [isConfigured, loadGameData, routeGameId, router]);
 
   useEffect(() => {
     if (!gameId) {
@@ -3949,7 +3961,7 @@ export default function PlayPage() {
       return;
     }
 
-    clearResumeStorage();
+    clearLastOpenedIfMatches(gameId);
     setGameId(null);
     setGameMeta(null);
     setGameMetaError(null);
@@ -3959,7 +3971,7 @@ export default function PlayPage() {
     setOwnershipByTile({});
     setNotice("This session has ended.");
     router.replace("/");
-  }, [clearResumeStorage, gameMeta?.status, router]);
+  }, [clearLastOpenedIfMatches, gameId, gameMeta?.status, router]);
 
   useEffect(() => {
     if (!isConfigured || !gameId || !session?.access_token) {
@@ -5967,23 +5979,57 @@ export default function PlayPage() {
     void handleBankAction({ action: "USE_GET_OUT_OF_JAIL_FREE" });
   }, [handleBankAction]);
 
-  const handleLeaveTable = useCallback(() => {
-    clearResumeStorage();
-    setGameId(null);
-    setGameMeta(null);
-    setGameMetaError(null);
-    setPlayers([]);
-    setGameState(null);
-    setEvents([]);
-    setOwnershipByTile({});
+  const handleLeaveTable = useCallback(async () => {
+    if (!session || !gameId) {
+      router.push("/");
+      return;
+    }
+
+    setActionLoading("LEAVE_GAME");
     setNotice(null);
-    router.push("/");
-  }, [clearResumeStorage, router]);
+
+    try {
+      const response = await fetch("/api/bank/action", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          gameId,
+          action: "LEAVE_GAME",
+        }),
+      });
+
+      if (!response.ok) {
+        const error = (await response.json()) as { error?: string };
+        throw new Error(error.error ?? "Unable to leave this table.");
+      }
+
+      clearLastOpenedIfMatches(gameId);
+      setGameId(null);
+      setGameMeta(null);
+      setGameMetaError(null);
+      setPlayers([]);
+      setGameState(null);
+      setEvents([]);
+      setOwnershipByTile({});
+      setNotice(null);
+      router.push("/");
+    } catch (error) {
+      if (error instanceof Error) {
+        setNotice(error.message);
+      } else {
+        setNotice("Unable to leave this table.");
+      }
+    } finally {
+      setActionLoading(null);
+    }
+  }, [clearLastOpenedIfMatches, gameId, router, session]);
 
   const handleSignInAgain = useCallback(() => {
-    clearResumeStorage();
     router.push("/");
-  }, [clearResumeStorage, router]);
+  }, [router]);
 
   const handleEndSession = useCallback(async () => {
     if (!session || !gameId) {
@@ -6017,7 +6063,7 @@ export default function PlayPage() {
         throw new Error(error.error ?? "Unable to end the session.");
       }
 
-      clearResumeStorage();
+      clearLastOpenedIfMatches(gameId);
       setGameId(null);
       setGameMeta(null);
       setGameMetaError(null);
@@ -6036,7 +6082,7 @@ export default function PlayPage() {
       setActionLoading(null);
     }
   }, [
-    clearResumeStorage,
+    clearLastOpenedIfMatches,
     gameId,
     gameState?.version,
     loadGameData,

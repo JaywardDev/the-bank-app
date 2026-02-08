@@ -18,14 +18,31 @@ type Game = {
   created_by: string | null;
 };
 
-type Player = {
-  id: string;
-  user_id: string | null;
+type ResumeGameRow = {
+  game_id: string;
   display_name: string | null;
-  created_at: string | null;
-  position: number;
-  is_eliminated: boolean;
-  eliminated_at: string | null;
+  games: Game | Game[] | null;
+  game_state:
+    | {
+        version: number;
+        current_player_id: string | null;
+        updated_at: string | null;
+      }
+    | Array<{
+        version: number;
+        current_player_id: string | null;
+        updated_at: string | null;
+      }>
+    | null;
+};
+
+type ResumeGame = {
+  gameId: string;
+  status: "lobby" | "in_progress";
+  joinCode: string;
+  displayName: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
 };
 
 export default function Home() {
@@ -35,8 +52,8 @@ export default function Home() {
   const [playerName, setPlayerName] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [boardPackId, setBoardPackId] = useState(defaultBoardPackId);
-  const [activeGame, setActiveGame] = useState<Game | null>(null);
-  const [players, setPlayers] = useState<Player[]>([]);
+  const [resumeGames, setResumeGames] = useState<ResumeGame[]>([]);
+  const [lastOpenedGameId, setLastOpenedGameId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -45,81 +62,43 @@ export default function Home() {
   const configErrors = useMemo(() => getConfigErrors(), []);
   const hasConfigErrors = configErrors.length > 0;
 
-  const clearResumeStorage = useCallback(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
+  const loadResumeGames = useCallback(async (currentSession: SupabaseSession) => {
+    const rows = await supabaseClient.fetchFromSupabase<ResumeGameRow[]>(
+      `players?select=game_id,display_name,games!inner(id,join_code,status,created_at,created_by),game_state(version,current_player_id,updated_at)&user_id=eq.${currentSession.user.id}&games.status=in.(lobby,in_progress)`,
+      { method: "GET" },
+      currentSession.access_token,
+    );
 
-    const { localStorage } = window;
-    localStorage.removeItem(lastGameKey);
-
-    for (let index = localStorage.length - 1; index >= 0; index -= 1) {
-      const key = localStorage.key(index);
-      if (key?.startsWith("bank.lobby")) {
-        localStorage.removeItem(key);
-      }
-    }
-  }, []);
-
-  const loadLobby = useCallback(
-    async (gameId: string, accessToken: string) => {
-      const game = await supabaseClient.fetchFromSupabase<Game[]>(
-        `games?select=id,join_code,created_at,board_pack_id,status,created_by&id=eq.${gameId}&limit=1`,
-        { method: "GET" },
-        accessToken,
-      );
-
-      if (!game[0]) {
-        throw new Error("Game not found.");
-      }
-
-      if (game[0].status === "ended") {
-        clearResumeStorage();
-        setActiveGame(null);
-        setPlayers([]);
-        setNotice("Last session ended.");
-        return;
-      }
-
-      const playerRows = await supabaseClient.fetchFromSupabase<Player[]>(
-        `players?select=id,user_id,display_name,created_at,position,is_eliminated,eliminated_at&game_id=eq.${gameId}&order=created_at.asc`,
-        { method: "GET" },
-        accessToken,
-      );
-
-      setActiveGame(game[0]);
-      setPlayers(playerRows);
-
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(lastGameKey, gameId);
-      }
-    },
-    [clearResumeStorage],
-  );
-
-  const restoreLobby = useCallback(
-    async (currentSession: SupabaseSession) => {
-      if (typeof window === "undefined") {
-        return;
-      }
-
-      const storedGameId = window.localStorage.getItem(lastGameKey);
-      if (!storedGameId) {
-        return;
-      }
-
-      try {
-        await loadLobby(storedGameId, currentSession.access_token);
-      } catch (error) {
-        if (error instanceof Error) {
-          setNotice(error.message);
-        } else {
-          setNotice("Unable to restore the lobby.");
+    const mapped = rows
+      .map<ResumeGame | null>((row) => {
+        const game = Array.isArray(row.games) ? row.games[0] : row.games;
+        if (!game || (game.status !== "lobby" && game.status !== "in_progress")) {
+          return null;
         }
-      }
-    },
-    [loadLobby],
-  );
+
+        const state = Array.isArray(row.game_state)
+          ? row.game_state[0]
+          : row.game_state;
+
+        return {
+          gameId: row.game_id,
+          status: game.status,
+          joinCode: game.join_code,
+          displayName: row.display_name,
+          createdAt: game.created_at,
+          updatedAt: state?.updated_at ?? null,
+        };
+      })
+      .filter((row): row is ResumeGame => Boolean(row));
+
+    mapped.sort((a, b) => {
+      const left = new Date(a.updatedAt ?? a.createdAt ?? 0).getTime();
+      const right = new Date(b.updatedAt ?? b.createdAt ?? 0).getTime();
+      return right - left;
+    });
+
+    setResumeGames(mapped);
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -138,8 +117,12 @@ export default function Home() {
       setSession(currentSession);
       setAuthLoading(false);
 
+      if (typeof window !== "undefined") {
+        setLastOpenedGameId(window.localStorage.getItem(lastGameKey));
+      }
+
       if (currentSession) {
-        await restoreLobby(currentSession);
+        await loadResumeGames(currentSession);
       }
     };
 
@@ -148,68 +131,7 @@ export default function Home() {
     return () => {
       isMounted = false;
     };
-  }, [isConfigured, restoreLobby]);
-
-  useEffect(() => {
-    if (!isConfigured || !activeGame) {
-      return;
-    }
-
-    const realtimeClient = supabaseClient.getRealtimeClient();
-    if (!realtimeClient) {
-      return;
-    }
-
-    const channel = realtimeClient
-      .channel(`home-lobby:${activeGame.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "players",
-          filter: `game_id=eq.${activeGame.id}`,
-        },
-        () => {
-          if (session) {
-            void loadLobby(activeGame.id, session.access_token);
-          }
-        },
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "game_state",
-          filter: `game_id=eq.${activeGame.id}`,
-        },
-        () => {
-          if (session) {
-            void loadLobby(activeGame.id, session.access_token);
-          }
-        },
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "games",
-          filter: `id=eq.${activeGame.id}`,
-        },
-        () => {
-          if (session) {
-            void loadLobby(activeGame.id, session.access_token);
-          }
-        },
-      )
-      .subscribe();
-
-    return () => {
-      realtimeClient.removeChannel(channel);
-    };
-  }, [activeGame, isConfigured, loadLobby, session]);
+  }, [isConfigured, loadResumeGames]);
 
   const handleSendMagicLink = async () => {
     if (!authEmail) {
@@ -249,8 +171,8 @@ export default function Home() {
 
     await supabaseClient.signOut();
     setSession(null);
-    setActiveGame(null);
-    setPlayers([]);
+    setResumeGames([]);
+    setLastOpenedGameId(null);
 
     if (typeof window !== "undefined") {
       window.localStorage.removeItem(lastGameKey);
@@ -297,7 +219,12 @@ export default function Home() {
         throw new Error("Unable to create the game.");
       }
 
-      await loadLobby(data.gameId, session.access_token);
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(lastGameKey, data.gameId);
+        setLastOpenedGameId(data.gameId);
+      }
+
+      await loadResumeGames(session);
       setNotice("Game created. Share the code to invite others.");
       router.push(`/lobby/${data.gameId}`);
     } catch (error) {
@@ -361,26 +288,18 @@ export default function Home() {
         board_pack_id?: string | null;
         status?: string | null;
         created_by?: string | null;
-        players?: Player[];
       };
 
       if (!data.gameId || !data.join_code) {
         throw new Error("Unable to join the game.");
       }
 
-      setActiveGame({
-        id: data.gameId,
-        join_code: data.join_code,
-        created_at: data.created_at ?? null,
-        board_pack_id: data.board_pack_id ?? null,
-        status: data.status ?? "lobby",
-        created_by: data.created_by ?? null,
-      });
-      setPlayers(data.players ?? []);
-
       if (typeof window !== "undefined") {
         window.localStorage.setItem(lastGameKey, data.gameId);
+        setLastOpenedGameId(data.gameId);
       }
+
+      await loadResumeGames(session);
 
       setNotice("You are in the lobby. Waiting for the host.");
       router.push(`/lobby/${data.gameId}`);
@@ -395,13 +314,16 @@ export default function Home() {
     }
   };
 
-  const isMember = useMemo(
-    () =>
-      Boolean(session && players.some((player) => player.user_id === session.user.id)),
-    [players, session],
-  );
-  const showLobbyResumeGate = Boolean(activeGame?.status === "lobby");
-  const showPlayResumeGate = Boolean(activeGame?.status === "in_progress");
+  const openResumeGame = (game: ResumeGame) => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(lastGameKey, game.gameId);
+      setLastOpenedGameId(game.gameId);
+    }
+
+    const href =
+      game.status === "lobby" ? `/lobby/${game.gameId}` : `/play/${game.gameId}`;
+    router.push(href);
+  };
 
   return (
     <main className="relative min-h-dvh bg-[#F6F1E8] p-6 flex items-start justify-center">
@@ -581,41 +503,36 @@ export default function Home() {
           </>
         ) : null}
 
-        {showLobbyResumeGate ? (
+        {session && resumeGames.length > 0 ? (
           <section className="space-y-3 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-4 shadow-[0_10px_24px_rgba(34,21,10,0.12)]">
             <div className="space-y-1">
-              <h2 className="text-base font-semibold">Lobby ready</h2>
+              <h2 className="text-base font-semibold">Resume tables</h2>
               <p className="text-sm text-neutral-500">
-                Resume your waiting room to see who has joined.
+                Active games you are currently part of.
               </p>
             </div>
-            <button
-              className="w-full rounded-xl bg-gradient-to-b from-neutral-900 to-neutral-800 px-4 py-3 text-sm font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_10px_22px_rgba(29,20,12,0.35)] transition active:translate-y-0.5 active:shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_5px_12px_rgba(29,20,12,0.3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[#FBFAF7]"
-              type="button"
-              onClick={() => router.push(`/lobby/${activeGame?.id ?? ""}`)}
-            >
-              Enter lobby
-            </button>
-          </section>
-        ) : null}
-
-        {showPlayResumeGate ? (
-          <section className="space-y-3 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-4 shadow-[0_10px_24px_rgba(34,21,10,0.12)]">
-            <div className="space-y-1">
-              <h2 className="text-base font-semibold">Game in progress</h2>
-              <p className="text-sm text-neutral-500">
-                A saved table is already running.
-              </p>
+            <div className="space-y-2">
+              {resumeGames.map((game) => (
+                <button
+                  key={game.gameId}
+                  type="button"
+                  onClick={() => openResumeGame(game)}
+                  className={`w-full rounded-xl border px-3 py-3 text-left text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70 ${
+                    lastOpenedGameId === game.gameId
+                      ? "border-amber-400 bg-amber-50"
+                      : "border-amber-200/70 bg-[#F7F2EA]/80 hover:bg-[#F1E9DD]"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2 font-semibold text-neutral-900">
+                    <span>{game.status === "lobby" ? "Lobby" : "In progress"}</span>
+                    <span className="font-mono text-xs tracking-[0.2em]">{game.joinCode}</span>
+                  </div>
+                  <div className="mt-1 text-xs text-neutral-600">
+                    {game.displayName ? `Playing as ${game.displayName}` : "Resume table"}
+                  </div>
+                </button>
+              ))}
             </div>
-            {isMember ? (
-              <button
-                className="w-full rounded-xl bg-gradient-to-b from-neutral-900 to-neutral-800 px-4 py-3 text-sm font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_10px_22px_rgba(29,20,12,0.35)] transition active:translate-y-0.5 active:shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_5px_12px_rgba(29,20,12,0.3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[#FBFAF7]"
-                type="button"
-                onClick={() => router.push("/play")}
-              >
-                Back to the table
-              </button>
-            ) : null}
           </section>
         ) : null}
 

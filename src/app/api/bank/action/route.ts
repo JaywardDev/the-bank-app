@@ -108,6 +108,7 @@ type BankActionRequest =
       action?: Exclude<
         | "CREATE_GAME"
         | "JOIN_GAME"
+        | "LEAVE_GAME"
         | "START_GAME"
         | "END_GAME"
         | "ROLL_DICE"
@@ -3595,6 +3596,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Missing gameId." }, { status: 400 });
     }
 
+    const gameId = body.gameId;
+
+    if (body.action === "LEAVE_GAME") {
+      await fetchFromSupabaseWithService(
+        `players?game_id=eq.${gameId}&user_id=eq.${user.id}`,
+        {
+          method: "DELETE",
+        },
+      );
+
+      return NextResponse.json({ ok: true });
+    }
+
     if (typeof body.expectedVersion !== "number") {
       return NextResponse.json(
         { error: "Missing expectedVersion." },
@@ -3608,8 +3622,6 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-
-    const gameId = body.gameId;
 
     const [game] = (await fetchFromSupabaseWithService<GameRow[]>(
       `games?select=id,join_code,starting_cash,created_by,status,board_pack_id&id=eq.${gameId}&limit=1`,
