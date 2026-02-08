@@ -72,7 +72,7 @@ const countOwnedTilesByType = (
   }, 0);
 };
 
-const ownsFullColorSet = (
+export const ownsFullColorSet = (
   tile: BoardTile,
   boardTiles: BoardTile[],
   ownershipByTile: OwnershipByTile,

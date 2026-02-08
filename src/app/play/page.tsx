@@ -25,7 +25,11 @@ import {
   getTileBandColor,
 } from "@/lib/boardTileStyles";
 import { getRules } from "@/lib/rules";
-import { getCurrentTileRent, getPropertyRentWithDevelopment } from "@/lib/rent";
+import {
+  getCurrentTileRent,
+  getPropertyRentWithDevelopment,
+  ownsFullColorSet,
+} from "@/lib/rent";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 import Image from "next/image";
 import { getBoardTileIconSrc } from "@/lib/tileIcons";
@@ -210,6 +214,7 @@ const PropertyRentTable = ({
   houseCost,
   hotelIncrement,
   currentRent,
+  monopolyActive = false,
   currencySymbol = "$",
   className,
 }: {
@@ -217,6 +222,7 @@ const PropertyRentTable = ({
   houseCost: number | null;
   hotelIncrement: number | null;
   currentRent?: number | null;
+  monopolyActive?: boolean;
   currencySymbol?: string;
   className?: string;
 }) => (
@@ -251,6 +257,11 @@ const PropertyRentTable = ({
       <div className="mt-2 text-xs font-semibold text-neutral-700">
         Current rent: {currentRent !== null ? formatMoney(currentRent, currencySymbol) : "—"}
       </div>
+    ) : null}
+    {monopolyActive ? (
+      <p className="mt-1 text-[11px] font-semibold uppercase tracking-wide text-emerald-600">
+        Monopoly ×2 base rent
+      </p>
     ) : null}
     <div className="mt-2 border-t border-neutral-200 pt-2 text-xs font-medium text-neutral-700">
       House cost: {houseCost ? `${formatMoney(houseCost, currencySymbol)} each` : "—"}
@@ -385,6 +396,9 @@ type TitleDeedPreviewProps = {
   showDevelopment?: boolean;
   developmentCount?: number | null;
   currencySymbol?: string;
+  ownerPlayerId?: string | null;
+  ownershipByTile?: OwnershipByTile;
+  boardTiles?: BoardTile[];
 };
 
 const TitleDeedPreview = ({
@@ -400,6 +414,9 @@ const TitleDeedPreview = ({
   showDevelopment = false,
   developmentCount = null,
   currencySymbol = "$",
+  ownerPlayerId = null,
+  ownershipByTile = {},
+  boardTiles = [],
 }: TitleDeedPreviewProps) => {
   if (!tile || !isOwnableTileType(tile.type)) {
     return null;
@@ -411,7 +428,15 @@ const TitleDeedPreview = ({
       : typeof tile.price === "number"
         ? tile.price
         : null;
-  const propertyRent = getPropertyRentDetails(tile);
+  const resolvedDevelopment =
+    typeof developmentCount === "number" ? developmentCount : null;
+  const propertyRent = getPropertyRentDetails({
+    tile,
+    development: resolvedDevelopment ?? 0,
+    ownerPlayerId,
+    ownershipByTile,
+    boardTiles,
+  });
   const railRentRows = isRailTileType(tile.type)
     ? buildRailRentRows(boardPackEconomy.railRentByCount)
     : [];
@@ -422,8 +447,6 @@ const TitleDeedPreview = ({
   const tileIconSrc = getTileIconSrc(tile);
   const tileIconFallbackLabel = getDeedIconFallbackLabel(tile);
   const utilityRentMultipliers = boardPackEconomy.utilityRentMultipliers;
-  const resolvedDevelopment =
-    typeof developmentCount === "number" ? developmentCount : null;
   const currentRent =
     tile.type === "PROPERTY" && resolvedDevelopment !== null
       ? getPropertyRentWithDev(tile, resolvedDevelopment)
@@ -526,6 +549,7 @@ const TitleDeedPreview = ({
               houseCost={propertyRent.houseCost}
               hotelIncrement={propertyRent.hotelIncrement}
               currentRent={resolvedDevelopment !== null ? currentRent : undefined}
+              monopolyActive={propertyRent.monopolyActive}
               currencySymbol={currencySymbol}
             />
           </div>
@@ -672,22 +696,47 @@ const DevelopmentIcons = ({
   );
 };
 
-const getPropertyRentDetails = (tile: BoardTile | null) => {
+const getPropertyRentDetails = ({
+  tile,
+  development = 0,
+  ownerPlayerId = null,
+  ownershipByTile = {},
+  boardTiles = [],
+}: {
+  tile: BoardTile | null;
+  development?: number;
+  ownerPlayerId?: string | null;
+  ownershipByTile?: OwnershipByTile;
+  boardTiles?: BoardTile[];
+}) => {
   const baseRent =
     tile && typeof tile.baseRent === "number" ? tile.baseRent : null;
   const rentByHouses =
     tile?.rentByHouses && tile.rentByHouses.length > 0
       ? tile.rentByHouses
       : null;
-  const baseRentDisplay = rentByHouses?.[0] ?? baseRent ?? null;
+  const baseNoHouseRent = rentByHouses?.[0] ?? baseRent ?? null;
+  const hasMonopolyNoDevelopment =
+    tile?.type === "PROPERTY" &&
+    development === 0 &&
+    ownerPlayerId !== null &&
+    ownsFullColorSet(tile, boardTiles, ownershipByTile, ownerPlayerId);
+  const baseRentDisplay =
+    baseNoHouseRent !== null && hasMonopolyNoDevelopment
+      ? baseNoHouseRent * 2
+      : baseNoHouseRent;
   const rent4 =
     rentByHouses?.[4] ?? rentByHouses?.[rentByHouses.length - 1] ?? null;
   const hotelIncrement = rent4 !== null ? getHotelIncrement(rent4) : null;
   return {
     houseCost: tile?.houseCost ?? null,
     hotelIncrement,
+    monopolyActive: hasMonopolyNoDevelopment,
     rentRows: [
-      { label: "Base rent", value: baseRentDisplay },
+      {
+        label: hasMonopolyNoDevelopment ? "Base rent (Monopoly ×2)" : "Base rent",
+        value: baseRentDisplay,
+      },
       { label: "Rent with 1 house", value: rentByHouses?.[1] ?? null },
       { label: "Rent with 2 houses", value: rentByHouses?.[2] ?? null },
       { label: "Rent with 3 houses", value: rentByHouses?.[3] ?? null },
@@ -873,6 +922,9 @@ type TileDetailsPanelProps = {
   selectedOwnerRailCount: number;
   selectedOwnerUtilityCount: number;
   selectedTileDevelopment?: number | null;
+  selectedTileOwnerId?: string | null;
+  ownershipByTile: OwnershipByTile;
+  boardTiles: BoardTile[];
   boardPackEconomy: BoardPackEconomy;
   currencySymbol?: string;
   onClose: () => void;
@@ -889,6 +941,9 @@ const TileDetailsPanel = ({
   selectedOwnerRailCount,
   selectedOwnerUtilityCount,
   selectedTileDevelopment,
+  selectedTileOwnerId = null,
+  ownershipByTile,
+  boardTiles,
   boardPackEconomy,
   currencySymbol = "$",
   onClose,
@@ -956,6 +1011,9 @@ const TileDetailsPanel = ({
             showDevelopment
             developmentCount={resolvedDevelopment}
             currencySymbol={currencySymbol}
+            ownerPlayerId={selectedTileOwnerId}
+            ownershipByTile={ownershipByTile}
+            boardTiles={boardTiles}
           />
         ) : tileIconSrc ? (
           <div className="rounded-2xl bg-neutral-50 px-3 py-6">
@@ -6237,6 +6295,9 @@ export default function PlayPage() {
             selectedOwnerRailCount={selectedOwnerRailCount}
             selectedOwnerUtilityCount={selectedOwnerUtilityCount}
             selectedTileDevelopment={selectedTileDevelopment}
+            selectedTileOwnerId={selectedTileOwnerId}
+            ownershipByTile={ownershipByTile}
+            boardTiles={boardPack?.tiles ?? expandedBoardTiles}
             boardPackEconomy={boardPackEconomy}
             onClose={() => setSelectedTileIndex(null)}
           />
@@ -6424,6 +6485,9 @@ export default function PlayPage() {
               ownedRailCount={pendingOwnerRailCount}
               ownedUtilityCount={pendingOwnerUtilityCount}
               currencySymbol={currencySymbol}
+              ownerPlayerId={pendingOwnerId}
+              ownershipByTile={ownershipByTile}
+              boardTiles={boardPack?.tiles ?? []}
               footer={
                 <>
                   <div className="grid gap-2">
@@ -7277,6 +7341,9 @@ export default function PlayPage() {
                       ownedRailCount={auctionOwnedRailCount}
                       ownedUtilityCount={auctionOwnedUtilityCount}
                       currencySymbol={currencySymbol}
+                      ownerPlayerId={currentUserPlayer?.id ?? null}
+                      ownershipByTile={ownershipByTile}
+                      boardTiles={boardPack?.tiles ?? []}
                     />
                   ) : null}
                   <div className="rounded-2xl border border-indigo-100 bg-indigo-50/60 p-3 text-sm text-indigo-900">
@@ -7504,7 +7571,14 @@ export default function PlayPage() {
                       const isRail = tile.type === "RAIL";
                       const isUtility = tile.type === "UTILITY";
                       const propertyRent = isProperty
-                        ? getPropertyRentDetails(tile)
+                        ? getPropertyRentDetails({
+                            tile,
+                            development: houses,
+                            ownerPlayerId:
+                              ownershipByTile[tile.index]?.owner_player_id ?? null,
+                            ownershipByTile,
+                            boardTiles: boardPack?.tiles ?? [],
+                          })
                         : null;
                       const currentPropertyRent = isProperty
                         ? getCurrentTileRent({
@@ -7622,6 +7696,7 @@ export default function PlayPage() {
                                 houseCost={propertyRent.houseCost}
                                 hotelIncrement={propertyRent.hotelIncrement}
                                 currentRent={currentPropertyRent}
+                                monopolyActive={propertyRent.monopolyActive}
                                 currencySymbol={currencySymbol}
                               />
                             ) : isRail ? (
@@ -8217,6 +8292,9 @@ export default function PlayPage() {
                     selectedOwnerRailCount={selectedOwnerRailCount}
                     selectedOwnerUtilityCount={selectedOwnerUtilityCount}
                     selectedTileDevelopment={selectedTileDevelopment}
+                    selectedTileOwnerId={selectedTileOwnerId}
+                    ownershipByTile={ownershipByTile}
+                    boardTiles={boardPack?.tiles ?? expandedBoardTiles}
                     boardPackEconomy={boardPackEconomy}
                     onClose={() => setSelectedTileIndex(null)}
                     sheetRef={expandedTileSheetRef}
