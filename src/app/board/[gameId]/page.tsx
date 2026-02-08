@@ -6,7 +6,7 @@ import BoardLayoutShell from "@/app/components/BoardLayoutShell";
 import BoardDashboard from "@/app/components/BoardDashboard";
 import BoardSquare from "@/app/components/BoardSquare";
 import BoardTrack from "@/app/components/BoardTrack";
-import CenterHub from "@/app/components/CenterHub";
+import CenterHub, { type MacroCenterCard } from "@/app/components/CenterHub";
 import { getBoardPackById } from "@/lib/boardPacks";
 import { getRules } from "@/lib/rules";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
@@ -31,6 +31,16 @@ type GameMeta = {
   id: string;
   board_pack_id: string | null;
   status?: string | null;
+};
+
+type ActiveMacroEffectV1 = {
+  id: string;
+  name: string;
+  rarity: string | null;
+  effects: Record<string, unknown> | null;
+  roundsRemaining: number;
+  roundsApplied: number;
+  tooltip?: string;
 };
 
 type GameState = {
@@ -58,6 +68,7 @@ type GameState = {
   pending_card_drawn_by_player_id: string | null;
   pending_card_drawn_at: string | null;
   pending_card_source_tile_index: number | null;
+  active_macro_effects_v1: ActiveMacroEffectV1[] | null;
 };
 
 type GameEvent = {
@@ -92,6 +103,32 @@ const getTurnsRemainingFromPayload = (payload: unknown): number | null => {
     return Number.isNaN(parsed) ? null : parsed;
   }
   return null;
+};
+
+const formatMacroEffectForCard = (effect: ActiveMacroEffectV1): MacroCenterCard => {
+  const title = effect.name?.trim() ? effect.name : "Macro Effect";
+  const effectsSummary =
+    effect.effects && typeof effect.effects === "object"
+      ? Object.keys(effect.effects)
+          .slice(0, 3)
+          .map((key) => key.replaceAll("_", " "))
+          .join(" · ")
+      : null;
+  const body =
+    typeof effect.tooltip === "string" && effect.tooltip.trim().length > 0
+      ? effect.tooltip
+      : effectsSummary && effectsSummary.length > 0
+        ? effectsSummary
+        : "Effect active.";
+
+  return {
+    id: effect.id,
+    title,
+    body,
+    turnsLeft: Number.isFinite(effect.roundsRemaining)
+      ? Math.max(0, Math.floor(effect.roundsRemaining))
+      : null,
+  };
 };
 
 const getPendingCardDescription = (
@@ -312,7 +349,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
   const loadGameState = useCallback(
     async (accessToken?: string) => {
       const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
-        `game_state?select=game_id,version,current_player_id,balances,last_roll,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index&game_id=eq.${gameId}&limit=1`,
+        `game_state?select=game_id,version,current_player_id,balances,last_roll,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,active_macro_effects_v1&game_id=eq.${gameId}&limit=1`,
         { method: "GET" },
         accessToken,
       );
@@ -393,10 +430,16 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
 
       setGameMeta(snapshot.gameMeta ?? null);
       setPlayers(snapshot.players ?? []);
-      setGameState(snapshot.gameState ?? null);
       setEvents((existingEvents) =>
         mergeBoardEvents(snapshot.events ?? [], existingEvents),
       );
+
+      const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
+        `game_state?select=game_id,version,current_player_id,balances,last_roll,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,active_macro_effects_v1&game_id=eq.${gameId}&limit=1`,
+        { method: "GET" },
+        currentSession?.access_token,
+      );
+      setGameState(stateRow ?? snapshot.gameState ?? null);
 
       const mapped = (snapshot.ownershipRows ?? []).reduce<OwnershipByTile>(
         (acc, row) => {
@@ -821,6 +864,27 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
       : pendingCard?.deck === "COMMUNITY"
         ? "Community"
         : "Card";
+  const MAX_CENTER_MACRO_CARDS = 4;
+  const activeMacroCards = useMemo(() => {
+    const activeEffects = Array.isArray(gameState?.active_macro_effects_v1)
+      ? gameState.active_macro_effects_v1.filter(
+          (effect): effect is ActiveMacroEffectV1 =>
+            Boolean(effect) &&
+            typeof effect === "object" &&
+            typeof effect.id === "string" &&
+            typeof effect.name === "string" &&
+            typeof effect.roundsRemaining === "number" &&
+            effect.roundsRemaining > 0,
+        )
+      : [];
+
+    return activeEffects.map(formatMacroEffectForCard);
+  }, [gameState?.active_macro_effects_v1]);
+  const centerMacroCards = activeMacroCards.slice(0, MAX_CENTER_MACRO_CARDS);
+  const centerMacroOverflowCount = Math.max(
+    0,
+    activeMacroCards.length - centerMacroCards.length,
+  );
   const currentPlayerTile = useMemo(() => {
     if (!currentPlayer || !boardPack?.tiles) {
       return null;
@@ -1731,7 +1795,8 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
               <CenterHub
                 boardPackName={boardPack?.displayName ?? "Board"}
                 lastRoll={gameState?.last_roll ?? null}
-                highlightedDeck={pendingCard?.deck ?? null}
+                activeMacroCards={centerMacroCards}
+                overflowCount={centerMacroOverflowCount}
               />
             </div>
           </BoardSquare>

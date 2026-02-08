@@ -1,83 +1,74 @@
-import Image from "next/image";
+export type MacroCenterCard = {
+  id: string;
+  title: string;
+  body: string;
+  turnsLeft: number | null;
+};
 
 type CenterHubProps = {
   boardPackName: string;
   lastRoll: number | null;
-  highlightedDeck: "CHANCE" | "COMMUNITY" | null;
+  activeMacroCards: MacroCenterCard[];
+  overflowCount: number;
 };
 
-const CHANCE_SVG = "/icons/chance.svg";
-const COMMUNITY_CHEST_SVG = "/icons/community_chest.svg";
-
-type DeckVisualProps = {
-  label: string;
-  deck: "CHANCE" | "COMMUNITY";
-  src: string;
-  isHighlighted: boolean;
-};
-
-function DeckVisual({ label, deck, src, isHighlighted }: DeckVisualProps) {
-  const accent =
-    deck === "CHANCE"
-      ? {
-          frame: "border-amber-400/65",
-          frameGlow: "ring-1 ring-amber-300/50",
-          iconTint: "brightness-100 saturate-100",
-        }
-      : {
-          frame: "border-sky-400/65",
-          frameGlow: "ring-1 ring-sky-300/50",
-          iconTint: "brightness-100 saturate-100",
-        };
+function MacroCard({ card }: { card: MacroCenterCard }) {
+  const turnsLabel =
+    typeof card.turnsLeft === "number"
+      ? `${card.turnsLeft} turn${card.turnsLeft === 1 ? "" : "s"} left`
+      : "Active";
 
   return (
-    <div className="relative w-[270px] text-center">
-      <div className="mx-auto w-[170px]">
-        <div className={`relative flex aspect-[4/3] items-center justify-center rounded-2xl border bg-gradient-to-br from-[#fffef8] via-[#f9f5ea] to-[#f3ece0] p-4 shadow-[0_10px_18px_rgba(0,0,0,0.28)] transition-all duration-300 ${accent.frameGlow} ${
-          isHighlighted
-            ? "border-emerald-200/70 ring-2 ring-emerald-300/45"
-            : "border-neutral-300/90"
-        }`}>
-          <div className="absolute inset-0 translate-x-[6px] translate-y-[6px] rounded-2xl border border-neutral-300/60 bg-neutral-200/50" />
-          <div className="absolute inset-0 translate-x-[12px] translate-y-[12px] rounded-2xl border border-neutral-400/55 bg-neutral-300/45" />
-          <div className={`absolute inset-[2px] rounded-[14px] border ${accent.frame}`} />
-          <div className="relative -rotate-[1.5deg]">
-            <Image
-              src={src}
-              alt={`${label} deck`}
-              width={90}
-              height={90}
-              className={`opacity-95 drop-shadow-[0_2px_4px_rgba(0,0,0,0.2)] ${accent.iconTint}`}
-            />
-          </div>
-        </div>
-        <p className="mt-2 text-xs font-semibold uppercase tracking-[0.16em] text-white/75">{label}</p>
-      </div>
-    </div>
+    <article className="flex h-[170px] w-[260px] flex-col overflow-hidden rounded-2xl border border-white/45 bg-white/80 p-4 text-left text-slate-900 shadow-[0_12px_28px_rgba(0,0,0,0.22)] backdrop-blur-md md:h-[190px] md:w-[340px]">
+      <header className="flex items-start justify-between gap-2">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-600">
+          Macro event
+        </p>
+        <span className="inline-flex shrink-0 rounded-full border border-amber-500/30 bg-amber-100/90 px-2 py-0.5 text-[10px] font-semibold text-amber-900">
+          {turnsLabel}
+        </span>
+      </header>
+
+      <h3 className="mt-2 line-clamp-2 text-base font-bold leading-tight md:text-lg">{card.title}</h3>
+      <p className="mt-2 line-clamp-4 text-xs leading-snug text-slate-700 md:text-sm">{card.body}</p>
+
+      <footer className="mt-auto flex items-center justify-between gap-2 pt-2">
+        <span className="text-[10px] uppercase tracking-[0.16em] text-emerald-700">Active</span>
+        <span className="text-[10px] text-slate-600">
+          Turns left: {typeof card.turnsLeft === "number" ? card.turnsLeft : "Active"}
+        </span>
+      </footer>
+    </article>
   );
 }
 
-export default function CenterHub({ boardPackName, lastRoll, highlightedDeck }: CenterHubProps) {
+export default function CenterHub({
+  boardPackName,
+  lastRoll,
+  activeMacroCards,
+  overflowCount,
+}: CenterHubProps) {
   void boardPackName;
 
   return (
     <div className="pointer-events-none absolute inset-[16%] flex items-center justify-center">
-      <div className="w-full max-w-xl rounded-[1.6rem] border border-white/10 bg-neutral-950/55 p-4 text-center text-white shadow-[0_18px_45px_rgba(0,0,0,0.34)] backdrop-blur-md">
-        <p className="text-sm font-medium text-amber-200/90">Last roll: {lastRoll ?? "—"}</p>
-        <div className="mt-4 flex items-center justify-center gap-3">
-          {[
-            { label: "Chance", src: CHANCE_SVG, deck: "CHANCE" as const },
-            { label: "Community Chest", src: COMMUNITY_CHEST_SVG, deck: "COMMUNITY" as const },
-          ].map((deck) => (
-            <DeckVisual
-              key={deck.label}
-              label={deck.label}
-              deck={deck.deck}
-              src={deck.src}
-              isHighlighted={highlightedDeck === deck.deck}
-            />
-          ))}
-        </div>
+      <div className="w-full max-w-5xl rounded-[1.6rem] border border-white/20 bg-slate-900/35 p-4 text-white shadow-[0_18px_45px_rgba(0,0,0,0.34)] backdrop-blur-md">
+        <p className="text-center text-sm font-medium text-amber-100/95">Last roll: {lastRoll ?? "—"}</p>
+
+        {activeMacroCards.length > 0 ? (
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
+            {activeMacroCards.map((card) => (
+              <MacroCard key={card.id} card={card} />
+            ))}
+            {overflowCount > 0 ? (
+              <span className="inline-flex h-10 items-center justify-center rounded-full border border-white/40 bg-black/25 px-4 text-sm font-semibold text-white">
+                +{overflowCount} more
+              </span>
+            ) : null}
+          </div>
+        ) : (
+          <p className="mt-4 text-center text-sm text-white/75">No active macro effects.</p>
+        )}
       </div>
     </div>
   );

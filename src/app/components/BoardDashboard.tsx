@@ -157,7 +157,7 @@ export default function BoardDashboard({
         ) : null}
 
         <div className="border-b border-white/10 bg-emerald-500/8 p-4">
-          <p className="text-xs uppercase tracking-[0.18em] text-emerald-200">Macro/Card spotlight</p>
+          <p className="text-xs uppercase tracking-[0.18em] text-emerald-200">Card spotlight</p>
           {pendingCard ? (
             <>
               <p className="mt-2 text-lg font-semibold">{pendingCard.deckLabel}</p>
