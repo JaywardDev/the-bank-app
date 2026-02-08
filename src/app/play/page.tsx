@@ -40,6 +40,7 @@ const EVENT_FETCH_LIMIT = 100;
 const EVENT_LOG_LIMIT = 10;
 const TRANSACTION_DISPLAY_LIMIT = 30;
 const MINI_BOARD_COLLAPSED_STORAGE_KEY = "thebank:miniBoardCollapsed";
+const SESSION_EXPIRED_MESSAGE = "Session expired — please sign in again";
 const fallbackExpandedTiles: BoardTile[] = Array.from(
   { length: 40 },
   (_, index) => ({
@@ -3919,6 +3920,9 @@ export default function PlayPage() {
           await loadGameData(targetGameId, accessToken);
         } catch (error) {
           if (error instanceof Error) {
+            if (error.message === SESSION_EXPIRED_MESSAGE) {
+              setSessionInvalid(true);
+            }
             setNotice(error.message);
           } else {
             setNotice("Unable to load game data.");
@@ -5607,13 +5611,13 @@ export default function PlayPage() {
             phase: "initial",
           });
 
-          const refreshedSession = await supabaseClient.getSession();
+          const refreshedSession = await supabaseClient.refreshSession();
           setSession(refreshedSession);
 
           if (!refreshedSession?.access_token) {
             invalidTokenRef.current = session.access_token ?? null;
             setSessionInvalid(true);
-            setNotice("Invalid session. Tap to re-auth.");
+            setNotice(SESSION_EXPIRED_MESSAGE);
             return false;
           }
 
@@ -5632,7 +5636,7 @@ export default function PlayPage() {
             });
             invalidTokenRef.current = accessToken;
             setSessionInvalid(true);
-            setNotice("Invalid session. Tap to re-auth.");
+            setNotice(SESSION_EXPIRED_MESSAGE);
             return false;
           }
 
@@ -5734,6 +5738,9 @@ export default function PlayPage() {
         return true;
       } catch (error) {
         if (error instanceof Error) {
+          if (error.message === SESSION_EXPIRED_MESSAGE) {
+            setSessionInvalid(true);
+          }
           setNotice(error.message);
         } else {
           setNotice("Unable to perform action.");
@@ -5989,17 +5996,39 @@ export default function PlayPage() {
     setNotice(null);
 
     try {
-      const response = await fetch("/api/bank/action", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          gameId,
-          action: "LEAVE_GAME",
-        }),
-      });
+      const performLeaveRequest = async (accessToken: string) =>
+        fetch("/api/bank/action", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            gameId,
+            action: "LEAVE_GAME",
+          }),
+        });
+
+      let response = await performLeaveRequest(session.access_token);
+
+      if (response.status === 401) {
+        const refreshedSession = await supabaseClient.refreshSession();
+        setSession(refreshedSession);
+
+        if (!refreshedSession?.access_token) {
+          setSessionInvalid(true);
+          setNotice(SESSION_EXPIRED_MESSAGE);
+          return;
+        }
+
+        response = await performLeaveRequest(refreshedSession.access_token);
+      }
+
+      if (response.status === 401) {
+        setSessionInvalid(true);
+        setNotice(SESSION_EXPIRED_MESSAGE);
+        return;
+      }
 
       if (!response.ok) {
         const error = (await response.json()) as { error?: string };
@@ -6028,8 +6057,12 @@ export default function PlayPage() {
   }, [clearLastOpenedIfMatches, gameId, router, session]);
 
   const handleSignInAgain = useCallback(() => {
+    void supabaseClient.signOut();
+    setSession(null);
+    clearLastOpenedIfMatches(gameId);
+    setGameId(null);
     router.push("/");
-  }, [router]);
+  }, [clearLastOpenedIfMatches, gameId, router]);
 
   const handleEndSession = useCallback(async () => {
     if (!session || !gameId) {
@@ -6041,23 +6074,47 @@ export default function PlayPage() {
     setNotice(null);
 
     try {
-      const response = await fetch("/api/bank/action", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          gameId,
-          action: "END_GAME",
-          expectedVersion: gameState?.version ?? 0,
-        }),
-      });
+      const performEndSessionRequest = async (accessToken: string) =>
+        fetch("/api/bank/action", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            gameId,
+            action: "END_GAME",
+            expectedVersion: gameState?.version ?? 0,
+          }),
+        });
+
+      let accessToken = session.access_token;
+      let response = await performEndSessionRequest(accessToken);
+
+      if (response.status === 401) {
+        const refreshedSession = await supabaseClient.refreshSession();
+        setSession(refreshedSession);
+
+        if (!refreshedSession?.access_token) {
+          setSessionInvalid(true);
+          setNotice(SESSION_EXPIRED_MESSAGE);
+          return;
+        }
+
+        accessToken = refreshedSession.access_token;
+        response = await performEndSessionRequest(accessToken);
+      }
+
+      if (response.status === 401) {
+        setSessionInvalid(true);
+        setNotice(SESSION_EXPIRED_MESSAGE);
+        return;
+      }
 
       if (!response.ok) {
         const error = (await response.json()) as { error?: string };
         if (response.status === 409) {
-          await loadGameData(gameId, session.access_token);
+          await loadGameData(gameId, accessToken);
           throw new Error(error.error ?? "Game updated. Try again.");
         }
         throw new Error(error.error ?? "Unable to end the session.");
@@ -6235,7 +6292,16 @@ export default function PlayPage() {
     >
       {notice ? (
         <div className="rounded-2xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
-          {notice}
+          <p>{notice}</p>
+          {sessionInvalid ? (
+            <button
+              className="mt-3 rounded-full bg-sky-900 px-4 py-2 text-xs font-semibold text-white"
+              type="button"
+              onClick={handleSignInAgain}
+            >
+              Sign out and go home
+            </button>
+          ) : null}
         </div>
       ) : null}
 

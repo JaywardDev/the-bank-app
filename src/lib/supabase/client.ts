@@ -81,6 +81,20 @@ const getSession = async () => {
   return data.session ?? null;
 };
 
+const refreshSession = async () => {
+  const client = getBrowserClient();
+  if (!client) {
+    return null;
+  }
+
+  const { data, error } = await client.auth.refreshSession();
+  if (error) {
+    return null;
+  }
+
+  return data.session ?? null;
+};
+
 const signInWithOtp = async (email: string) => {
   const client = getBrowserClient();
   if (!client) {
@@ -114,16 +128,29 @@ const fetchFromSupabase = async <T>(
   accessToken?: string,
 ): Promise<T> => {
   const config = requireSupabaseConfig();
-  const response = await fetch(`${config.supabaseUrl}/rest/v1/${path}`, {
-    ...options,
-    headers: {
-      ...baseHeaders,
-      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-      ...(options.headers ?? {}),
-    },
-  });
+  const performRequest = (token?: string) =>
+    fetch(`${config.supabaseUrl}/rest/v1/${path}`, {
+      ...options,
+      headers: {
+        ...baseHeaders,
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(options.headers ?? {}),
+      },
+    });
+
+  let response = await performRequest(accessToken);
+
+  if (response.status === 401) {
+    const refreshedSession = await refreshSession();
+    if (refreshedSession?.access_token) {
+      response = await performRequest(refreshedSession.access_token);
+    }
+  }
 
   if (!response.ok) {
+    if (response.status === 401) {
+      throw new Error("Session expired — please sign in again");
+    }
     const error = await response.text();
     throw new Error(error || "Supabase request failed.");
   }
@@ -135,6 +162,7 @@ export const supabaseClient = {
   isConfigured,
   getRealtimeClient,
   getSession,
+  refreshSession,
   signInWithOtp,
   signOut,
   fetchFromSupabase,

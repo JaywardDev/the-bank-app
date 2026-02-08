@@ -7,6 +7,7 @@ import { getConfigErrors } from "@/lib/env";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 
 const lastGameKey = "bank.lastGameId";
+const SESSION_EXPIRED_MESSAGE = "Session expired — please sign in again";
 
 type Game = {
   id: string;
@@ -43,6 +44,7 @@ export default function LobbyPage() {
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
+  const [sessionInvalid, setSessionInvalid] = useState(false);
   const latestSessionRef = useRef<SupabaseSession | null>(null);
   const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshInFlightRef = useRef(false);
@@ -115,12 +117,67 @@ export default function LobbyPage() {
       await loadLobby(gameId, currentSession.access_token);
     } catch (error) {
       if (error instanceof Error) {
+        if (error.message === SESSION_EXPIRED_MESSAGE) {
+          setSessionInvalid(true);
+        }
         setNotice(error.message);
       } else {
         setNotice("Unable to load the lobby.");
       }
     }
   }, [gameId, loadLobby]);
+
+
+  const performBankActionWithRecovery = useCallback(
+    async (body: Record<string, unknown>) => {
+      if (!session?.access_token) {
+        throw new Error("Sign in on the home page to continue.");
+      }
+
+      const performRequest = (accessToken: string) =>
+        fetch("/api/bank/action", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify(body),
+        });
+
+      let response = await performRequest(session.access_token);
+      let accessToken = session.access_token;
+
+      if (response.status === 401) {
+        const refreshedSession = await supabaseClient.refreshSession();
+        setSession(refreshedSession);
+        latestSessionRef.current = refreshedSession;
+
+        if (!refreshedSession?.access_token) {
+          setSessionInvalid(true);
+          setNotice(SESSION_EXPIRED_MESSAGE);
+          return null;
+        }
+
+        accessToken = refreshedSession.access_token;
+        response = await performRequest(accessToken);
+      }
+
+      if (response.status === 401) {
+        setSessionInvalid(true);
+        setNotice(SESSION_EXPIRED_MESSAGE);
+        return null;
+      }
+
+      if (!response.ok) {
+        const error = (await response.json()) as { error?: string };
+        throw new Error(error.error ?? "Unable to complete this action.");
+      }
+
+      setSessionInvalid(false);
+      return { response, accessToken };
+    },
+    [session],
+  );
 
   const setupRealtimeChannel = useCallback(() => {
     if (!isConfigured || !gameId || !isValidUuid) {
@@ -369,21 +426,13 @@ export default function LobbyPage() {
     setNotice(null);
 
     try {
-      const response = await fetch("/api/bank/action", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          action: "LEAVE_GAME",
-          gameId,
-        }),
+      const result = await performBankActionWithRecovery({
+        action: "LEAVE_GAME",
+        gameId,
       });
 
-      if (!response.ok) {
-        const error = (await response.json()) as { error?: string };
-        throw new Error(error.error ?? "Unable to leave the table.");
+      if (!result) {
+        return;
       }
 
       setActiveGame(null);
@@ -418,26 +467,14 @@ export default function LobbyPage() {
     setNotice(null);
 
     try {
-      const response = await fetch("/api/bank/action", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          action: "END_GAME",
-          gameId: activeGame.id,
-          expectedVersion: gameState?.version ?? 0,
-        }),
+      const result = await performBankActionWithRecovery({
+        action: "END_GAME",
+        gameId: activeGame.id,
+        expectedVersion: gameState?.version ?? 0,
       });
 
-      if (!response.ok) {
-        const error = (await response.json()) as { error?: string };
-        if (response.status === 409) {
-          await loadLobby(activeGame.id, session.access_token);
-          throw new Error(error.error ?? "Game updated. Try again.");
-        }
-        throw new Error(error.error ?? "Unable to end the session.");
+      if (!result) {
+        return;
       }
 
       if (typeof window !== "undefined") {
@@ -468,26 +505,14 @@ export default function LobbyPage() {
     setNotice(null);
 
     try {
-      const response = await fetch("/api/bank/action", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          action: "START_GAME",
-          gameId: activeGame.id,
-          expectedVersion: gameState?.version ?? 0,
-        }),
+      const result = await performBankActionWithRecovery({
+        action: "START_GAME",
+        gameId: activeGame.id,
+        expectedVersion: gameState?.version ?? 0,
       });
 
-      if (!response.ok) {
-        const error = (await response.json()) as { error?: string };
-        if (response.status === 409) {
-          await loadLobby(activeGame.id, session.access_token);
-          throw new Error(error.error ?? "Game updated. Try again.");
-        }
-        throw new Error(error.error ?? "Unable to start the game.");
+      if (!result) {
+        return;
       }
 
       router.push(`/play/${activeGame.id}`);
@@ -643,7 +668,22 @@ export default function LobbyPage() {
 
         {notice ? (
           <div className="rounded-2xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
-            {notice}
+            <p>{notice}</p>
+            {sessionInvalid ? (
+              <button
+                className="mt-3 rounded-full bg-sky-900 px-4 py-2 text-xs font-semibold text-white"
+                type="button"
+                onClick={async () => {
+                  await supabaseClient.signOut();
+                  if (typeof window !== "undefined") {
+                    window.localStorage.removeItem(lastGameKey);
+                  }
+                  router.push("/");
+                }}
+              >
+                Sign out and go home
+              </button>
+            ) : null}
           </div>
         ) : null}
       </div>
