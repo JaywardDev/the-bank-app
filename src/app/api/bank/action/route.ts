@@ -181,6 +181,7 @@ type ActiveMacroEffectV1 = {
   effects: MacroEffectsV1;
   roundsRemaining: number;
   roundsApplied: number;
+  tooltip?: string;
 };
 
 type GameStateRow = {
@@ -392,6 +393,7 @@ const normalizeActiveMacroEffectsV1 = (raw: unknown): ActiveMacroEffectV1[] => {
           typeof data.roundsRemaining === "number" ? data.roundsRemaining : 0,
         roundsApplied:
           typeof data.roundsApplied === "number" ? data.roundsApplied : 0,
+        ...(typeof data.tooltip === "string" ? { tooltip: data.tooltip } : {}),
       };
     })
     .filter((entry): entry is ActiveMacroEffectV1 => Boolean(entry));
@@ -2632,6 +2634,7 @@ const finalizeMoveResolution = async ({
       headline: string;
       flavor: string;
       rulesText: string;
+      tooltip?: string;
       effects: MacroEffectsV1;
       rarity?: "common" | "uncommon" | "black_swan";
     } | null = null;
@@ -2671,6 +2674,7 @@ const finalizeMoveResolution = async ({
             effects: macroEvent.effects,
             rarity: macroEvent.rarity ?? null,
             mode: "weighted",
+            tooltip: macroEvent.tooltip ?? null,
             round_index: nextRound,
           },
         });
@@ -2734,6 +2738,7 @@ const finalizeMoveResolution = async ({
           headline: triggeredMacroEvent.headline,
           flavor: triggeredMacroEvent.flavor,
           rulesText: triggeredMacroEvent.rulesText,
+          tooltip: triggeredMacroEvent.tooltip ?? null,
           effects: triggeredMacroEvent.effects,
           return_turn_phase: nextTurnPhase,
         }
@@ -3203,6 +3208,7 @@ const advanceTurn = async ({
     headline: string;
     flavor: string;
     rulesText: string;
+    tooltip?: string;
     effects: MacroEffectsV1;
     rarity?: "common" | "uncommon" | "black_swan";
   } | null = null;
@@ -6197,6 +6203,7 @@ export async function POST(request: Request) {
             headline?: unknown;
             flavor?: unknown;
             rulesText?: unknown;
+            tooltip?: unknown;
             effects?: unknown;
             return_turn_phase?: unknown;
           }
@@ -6242,6 +6249,8 @@ export async function POST(request: Request) {
         typeof pendingAction.flavor === "string" ? pendingAction.flavor : null;
       const macroRulesText =
         typeof pendingAction.rulesText === "string" ? pendingAction.rulesText : null;
+      const macroTooltip =
+        typeof pendingAction.tooltip === "string" ? pendingAction.tooltip : null;
       const macroEffects =
         pendingAction.effects && typeof pendingAction.effects === "object"
           ? (pendingAction.effects as MacroEffectsV1)
@@ -6277,6 +6286,7 @@ export async function POST(request: Request) {
               headline: macroHeadline,
               flavor: macroFlavor,
               rulesText: macroRulesText,
+              tooltip: macroTooltip,
               effects: macroEffects,
               event_id: macroCardId,
               event_name: macroName,
@@ -6888,6 +6898,7 @@ export async function POST(request: Request) {
           effects: macroEffects as MacroEffectsV1,
           roundsRemaining: macroDurationRounds,
           roundsApplied: 0,
+          tooltip: macroTooltip ?? undefined,
         };
         nextActiveMacroEffectsV1 = [
           ...nextActiveMacroEffectsV1,

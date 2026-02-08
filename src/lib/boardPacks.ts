@@ -8,6 +8,7 @@ export { classicUkChanceCards, classicUkCommunityCards } from "./boardpacks/clas
 export type BoardPack = {
   id: string;
   displayName: string;
+  tooltip?: string;
   properties: string[];
   economy: BoardPackEconomy;
   macroDeck?: {

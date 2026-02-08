@@ -46,6 +46,7 @@ export type MacroCardV1 = {
   headline: string; // 1 line
   flavor: string; // 1–2 sentences
   rulesText: string; // exact effect text shown to players
+  tooltip?: string;
   effects: MacroEffectsV1;
 };
 

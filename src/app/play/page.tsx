@@ -12,6 +12,7 @@ import { useRouter } from "next/navigation";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import PageShell from "../components/PageShell";
 import BoardMiniMap from "../components/BoardMiniMap";
+import InfoTooltip from "@/app/components/InfoTooltip";
 import HousesDots from "../components/HousesDots";
 import {
   DEFAULT_BOARD_PACK_ECONOMY,
@@ -715,6 +716,15 @@ type GameMeta = {
   created_by: string | null;
 };
 
+type ActiveMacroEffectV1 = {
+  id?: string;
+  name?: string;
+  effects?: {
+    house_build_blocked?: boolean;
+    loan_mortgage_new_blocked?: boolean;
+  };
+};
+
 type GameState = {
   game_id: string;
   version: number;
@@ -748,6 +758,7 @@ type GameState = {
   auction_eligible_player_ids: string[] | null;
   auction_passed_player_ids: string[] | null;
   auction_min_increment: number | null;
+  active_macro_effects_v1: ActiveMacroEffectV1[] | null;
   skip_next_roll_by_player: Record<string, boolean> | null;
 };
 
@@ -3409,7 +3420,7 @@ export default function PlayPage() {
   const loadGameState = useCallback(
     async (activeGameId: string, accessToken?: string) => {
       const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
-        `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${activeGameId}&limit=1`,
+        `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,active_macro_effects_v1,skip_next_roll_by_player,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${activeGameId}&limit=1`,
         { method: "GET" },
         accessToken,
       );
@@ -4200,6 +4211,7 @@ export default function PlayPage() {
       headline?: unknown;
       flavor?: unknown;
       rulesText?: unknown;
+      tooltip?: unknown;
       effects?: unknown;
     };
 
@@ -4220,6 +4232,7 @@ export default function PlayPage() {
     const flavor = typeof candidate.flavor === "string" ? candidate.flavor : "";
     const rulesText =
       typeof candidate.rulesText === "string" ? candidate.rulesText : "";
+    const tooltip = typeof candidate.tooltip === "string" ? candidate.tooltip : "";
     const effects =
       candidate.effects && typeof candidate.effects === "object"
         ? candidate.effects
@@ -4233,6 +4246,7 @@ export default function PlayPage() {
       headline,
       flavor,
       rulesText,
+      tooltip,
       effects,
     };
   }, [gameState?.pending_action]);
@@ -4282,6 +4296,36 @@ export default function PlayPage() {
     }
     return pendingMacroEvent.rarity.replaceAll("_", " ");
   }, [pendingMacroEvent?.rarity]);
+  const macroTooltipById = useMemo(() => {
+    const lookup = new Map<string, string>();
+    const cards = boardPack?.macroDeck?.cards ?? [];
+    cards.forEach((card) => {
+      if (card.tooltip) {
+        lookup.set(card.id, card.tooltip);
+      }
+    });
+    return lookup;
+  }, [boardPack?.macroDeck?.cards]);
+  const activeMacroEffectsV1 = useMemo(() => {
+    return (gameState?.active_macro_effects_v1 ?? []).filter(
+      (entry): entry is ActiveMacroEffectV1 => Boolean(entry),
+    );
+  }, [gameState?.active_macro_effects_v1]);
+  const houseBuildBlockedByMacro = useMemo(
+    () =>
+      activeMacroEffectsV1.find(
+        (entry) => entry?.effects?.house_build_blocked === true,
+      ) ?? null,
+    [activeMacroEffectsV1],
+  );
+  const loanBlockedByMacro = useMemo(
+    () =>
+      activeMacroEffectsV1.find(
+        (entry) => entry?.effects?.loan_mortgage_new_blocked === true,
+      ) ?? null,
+    [activeMacroEffectsV1],
+  );
+
   const pendingMacroRarityClass = useMemo(() => {
     switch (pendingMacroEvent?.rarity) {
       case "common":
@@ -4546,13 +4590,15 @@ export default function PlayPage() {
           );
         const houses = ownership?.houses ?? 0;
         const houseCost = tile.houseCost ?? 0;
+        const houseBuildMacroBlocked = houseBuildBlockedByMacro !== null;
         const canBuildHouse =
           canAct &&
           tile.type === "PROPERTY" &&
           hasFullSet &&
           !isCollateralized &&
           houseCost > 0 &&
-          myPlayerBalance >= houseCost;
+          myPlayerBalance >= houseCost &&
+          !houseBuildMacroBlocked;
         const canSellHouse =
           canAct &&
           tile.type === "PROPERTY" &&
@@ -4581,6 +4627,7 @@ export default function PlayPage() {
           canBuildHouse,
           canSellHouse,
           canSellToMarket,
+          houseBuildMacroBlocked,
           sellToMarketDisabledReason,
         };
       });
@@ -4588,6 +4635,7 @@ export default function PlayPage() {
     boardPack?.tiles,
     canAct,
     currentUserPlayer,
+    houseBuildBlockedByMacro,
     myPlayerBalance,
     ownershipByTile,
   ]);
@@ -6464,6 +6512,17 @@ export default function PlayPage() {
                 <div className="mt-1 flex flex-wrap items-center gap-2">
                   <p className="text-lg font-semibold text-neutral-900">
                     {pendingMacroEvent?.name ?? "Macroeconomic Shift"}
+                    {((pendingMacroEvent?.tooltip && pendingMacroEvent.tooltip.length > 0) ||
+                      (pendingMacroEvent?.macroCardId && macroTooltipById.get(pendingMacroEvent.macroCardId))) ? (
+                      <InfoTooltip
+                        text={
+                          pendingMacroEvent?.tooltip && pendingMacroEvent.tooltip.length > 0
+                            ? pendingMacroEvent.tooltip
+                            : macroTooltipById.get(pendingMacroEvent?.macroCardId ?? "") ?? ""
+                        }
+                        className="ml-2"
+                      />
+                    ) : null}
                   </p>
                   {pendingMacroRarityLabel ? (
                     <span
@@ -7436,6 +7495,7 @@ export default function PlayPage() {
                       canSellHouse,
                       canSellToMarket,
                       sellToMarketDisabledReason,
+                      houseBuildMacroBlocked,
                     }) => {
                       const principalPreview = Math.round(
                         (tile.price ?? 0) * rules.collateralLtv,
@@ -7596,11 +7656,28 @@ export default function PlayPage() {
                                       !canBuildHouse ||
                                       actionLoading === "BUILD_HOUSE"
                                     }
+                                    title={
+                                      houseBuildMacroBlocked
+                                        ? `Blocked by macro: ${houseBuildBlockedByMacro?.name ?? "Macroeconomic event"}`
+                                        : undefined
+                                    }
                                   >
                                     {actionLoading === "BUILD_HOUSE"
                                       ? "Building…"
                                       : "Build"}
                                   </button>
+                                  {!canBuildHouse && houseBuildMacroBlocked ? (
+                                    <p className="text-xs text-neutral-400">
+                                      <span>Blocked by macro: {houseBuildBlockedByMacro?.name ?? "Macroeconomic event"}</span>{" "}
+                                      {houseBuildBlockedByMacro?.id &&
+                                      macroTooltipById.get(houseBuildBlockedByMacro.id) ? (
+                                        <InfoTooltip
+                                          text={macroTooltipById.get(houseBuildBlockedByMacro.id) ?? ""}
+                                          className="align-middle"
+                                        />
+                                      ) : null}
+                                    </p>
+                                  ) : null}
                                   {showSellHouse ? (
                                     <button
                                       className="rounded-2xl border border-neutral-900 px-4 py-2 text-xs font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-300"
@@ -7697,13 +7774,31 @@ export default function PlayPage() {
                                   !canAct ||
                                   !rules.loanCollateralEnabled ||
                                   !isCollateralEligible ||
+                                  loanBlockedByMacro !== null ||
                                   actionLoading === "TAKE_COLLATERAL_LOAN"
+                                }
+                                title={
+                                  loanBlockedByMacro
+                                    ? `Blocked by macro: ${loanBlockedByMacro.name ?? "Macroeconomic event"}`
+                                    : undefined
                                 }
                               >
                                 {actionLoading === "TAKE_COLLATERAL_LOAN"
                                   ? "Collateralizing…"
                                   : "Collateralize"}
                               </button>
+                              {loanBlockedByMacro ? (
+                                <p className="text-xs text-neutral-400">
+                                  <span>Blocked by macro: {loanBlockedByMacro.name ?? "Macroeconomic event"}</span>{" "}
+                                  {loanBlockedByMacro.id &&
+                                  macroTooltipById.get(loanBlockedByMacro.id) ? (
+                                    <InfoTooltip
+                                      text={macroTooltipById.get(loanBlockedByMacro.id) ?? ""}
+                                      className="align-middle"
+                                    />
+                                  ) : null}
+                                </p>
+                              ) : null}
                             </div>
                           }
                         />
@@ -8228,8 +8323,18 @@ export default function PlayPage() {
                             <span>{event.event_type.replaceAll("_", " ")}</span>
                             <span>v{event.version}</span>
                           </div>
-                          <p className="mt-2 text-sm font-medium text-neutral-800">
-                            {formatEventDescription(event)}
+                          <p className="mt-2 flex items-start gap-2 text-sm font-medium text-neutral-800">
+                            <span>{formatEventDescription(event)}</span>
+                            {(["MACRO_EVENT", "MACRO_EVENT_TRIGGERED"].includes(event.event_type) &&
+                              (() => {
+                                const payload = event.payload as { event_id?: unknown } | null;
+                                const macroId = typeof payload?.event_id === "string" ? payload.event_id : null;
+                                if (!macroId) {
+                                  return null;
+                                }
+                                const tooltip = macroTooltipById.get(macroId);
+                                return tooltip ? <InfoTooltip text={tooltip} /> : null;
+                              })())}
                           </p>
                         </div>
                       ))

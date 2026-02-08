@@ -40,6 +40,8 @@ const withOverrides = (card: MacroCardV1): MacroCardV1 => {
         ...card,
         rulesText:
           "All new loans are blocked, including purchase mortgages, for 8 rounds.",
+        tooltip:
+          "No new debt can be opened while this macro is active. This includes collateral loans and purchase mortgages.",
         effects: {
           ...effects,
           loan_mortgage_new_blocked: true,
@@ -50,6 +52,8 @@ const withOverrides = (card: MacroCardV1): MacroCardV1 => {
         ...card,
         rulesText:
           "Each player pays 7% of their current cash balance immediately (rounded to the nearest peso).",
+        tooltip:
+          "Cash tax is percentage-based, so players with larger liquidity pay more this turn.",
         effects: {
           ...effects,
           cash_delta: undefined,
@@ -62,6 +66,8 @@ const withOverrides = (card: MacroCardV1): MacroCardV1 => {
         weight: 1,
         rulesText:
           "All players skip their next roll. Loans and mortgages still tick. Each player receives ₱800,000 stimulus. If a player is currently on an owned tile, they must pay that tile's rent again.",
+        tooltip:
+          "Skipped rolls do not pause debt servicing. Loan payments and mortgage interest still apply while turns are skipped.",
         effects: {
           ...effects,
           pandemic: {
@@ -81,6 +87,8 @@ const withOverrides = (card: MacroCardV1): MacroCardV1 => {
         ...card,
         rulesText:
           "House sell price is 150% of build cost for 4 rounds. Building houses is blocked while active.",
+        tooltip:
+          "You can liquidate existing houses at a premium, but you cannot build new houses until this macro expires.",
         effects: {
           ...effects,
           house_sell_multiplier: 1.5,

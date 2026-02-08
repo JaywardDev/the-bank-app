@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { getConfigErrors } from "@/lib/env";
 import { boardPacks, defaultBoardPackId } from "@/lib/boardPacks";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
+import InfoTooltip from "@/app/components/InfoTooltip";
 
 const lastGameKey = "bank.lastGameId";
 
@@ -531,10 +532,20 @@ export default function Home() {
                 >
                   {boardPacks.map((pack) => (
                     <option key={pack.id} value={pack.id}>
-                      {pack.displayName}
+                      {pack.displayName}{pack.tooltip ? " ℹ️" : ""}
                     </option>
                   ))}
                 </select>
+                {boardPacks.find((pack) => pack.id === boardPackId)?.tooltip ? (
+                  <div className="flex items-center gap-2 text-xs text-neutral-600">
+                    <span>Board details</span>
+                    <InfoTooltip
+                      text={
+                        boardPacks.find((pack) => pack.id === boardPackId)?.tooltip ?? ""
+                      }
+                    />
+                  </div>
+                ) : null}
               </div>
               <button
                 className="w-full rounded-xl bg-gradient-to-b from-neutral-900 to-neutral-800 px-4 py-3 text-sm font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_10px_22px_rgba(29,20,12,0.35)] transition active:translate-y-0.5 active:shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_5px_12px_rgba(29,20,12,0.3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[#FBFAF7] disabled:cursor-not-allowed disabled:opacity-60"

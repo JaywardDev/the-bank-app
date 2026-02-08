@@ -18,6 +18,8 @@ const PHILIPPINES_HARD_ECONOMY: BoardPackEconomy = {
 export const philippinesHardBoardPack: BoardPack = {
   id: "philippines-hard",
   displayName: "Philippines (Hard Mode)",
+  tooltip:
+    "Lower starting capital, reduced GO salary, and harsher macroeconomic events. Debt is riskier. Liquidity matters. Timing is everything. Recommended for experienced players.",
   properties: [...classicPhBoardPack.properties],
   economy: PHILIPPINES_HARD_ECONOMY,
   macroDeck: {
