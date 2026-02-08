@@ -2,6 +2,7 @@ import { classicPhBoardPack } from "./boardpacks/classic-ph";
 import { classicUkBoardPack } from "./boardpacks/classic-uk";
 import { philippinesHardBoardPack } from "./boardpacks/philippines-hard";
 import type { MacroCardV1 } from "./macroDeckV1";
+import type { GameRules } from "./rules";
 
 export { classicUkChanceCards, classicUkCommunityCards } from "./boardpacks/classic-uk";
 
@@ -11,6 +12,7 @@ export type BoardPack = {
   tooltip?: string;
   properties: string[];
   economy: BoardPackEconomy;
+  rules?: Partial<GameRules>;
   macroDeck?: {
     id: string;
     name: string;

@@ -40,7 +40,26 @@ const bankHeaders = {
   "Content-Type": "application/json",
 };
 
-const PURCHASE_MORTGAGE_RATE_PER_TURN = 0.015;
+const calculateAmortizedPaymentPerTurn = (
+  principal: number,
+  ratePerTurn: number,
+  termTurns: number,
+) => {
+  if (principal <= 0 || termTurns <= 0) {
+    return 0;
+  }
+
+  if (ratePerTurn <= 0) {
+    return Math.round(principal / termTurns);
+  }
+
+  const denominator = 1 - (1 + ratePerTurn) ** (-termTurns);
+  if (denominator <= 0) {
+    return Math.round(principal / termTurns);
+  }
+
+  return Math.round((principal * ratePerTurn) / denominator);
+};
 
 const DEFAULT_MACRO_DECK = {
   id: "macro-v1",
@@ -273,6 +292,8 @@ type PurchaseMortgageRow = {
   principal_remaining: number;
   rate_per_turn: number;
   term_turns: number;
+  turns_remaining: number;
+  payment_per_turn: number;
   turns_elapsed: number;
   accrued_interest_unpaid: number;
   status: string;
@@ -3484,7 +3505,7 @@ export async function POST(request: Request) {
             turn_phase: "AWAITING_ROLL",
             pending_action: null,
             free_parking_pot: 0,
-            rules: DEFAULT_RULES,
+            rules: getRules(resolvedBoardPack?.rules),
             updated_at: new Date().toISOString(),
           }),
         },
@@ -3635,7 +3656,10 @@ export async function POST(request: Request) {
     }
 
     const nextVersion = currentVersion + 1;
-    const rules = getRules(gameState?.rules);
+    const rules = getRules({
+      ...(boardPack?.rules ?? {}),
+      ...(gameState?.rules ?? {}),
+    });
 
     if (body.action === "START_GAME") {
       if (game.created_by && game.created_by !== user.id) {
@@ -7043,7 +7067,9 @@ export async function POST(request: Request) {
           );
         }
       }
-      const principal = usingMortgage ? Math.round(price * 0.5) : 0;
+      const principal = usingMortgage
+        ? Math.round(price * rules.mortgageLtv)
+        : 0;
       const downPayment = usingMortgage ? price - principal : price;
 
       if (currentBalance < downPayment) {
@@ -7062,6 +7088,14 @@ export async function POST(request: Request) {
         [currentPlayer.id]: currentBalance - downPayment,
       };
 
+      const mortgageRatePerTurn = rules.mortgageRatePerTurn;
+      const mortgageTermTurns = rules.mortgageTermTurns;
+      const mortgagePaymentPerTurn = calculateAmortizedPaymentPerTurn(
+        principal,
+        mortgageRatePerTurn,
+        mortgageTermTurns,
+      );
+
       let mortgageId: string | null = null;
       if (usingMortgage) {
         const mortgageResponse = await fetch(
@@ -7078,8 +7112,10 @@ export async function POST(request: Request) {
               tile_index: tileIndex,
               principal_original: principal,
               principal_remaining: principal,
-              rate_per_turn: PURCHASE_MORTGAGE_RATE_PER_TURN,
-              term_turns: rules.loanTermTurns,
+              rate_per_turn: mortgageRatePerTurn,
+              term_turns: mortgageTermTurns,
+              turns_remaining: mortgageTermTurns,
+              payment_per_turn: mortgagePaymentPerTurn,
               turns_elapsed: 0,
               accrued_interest_unpaid: 0,
               status: "active",
@@ -7160,8 +7196,9 @@ export async function POST(request: Request) {
             tile_index: tileIndex,
             principal,
             down_payment: downPayment,
-            rate_per_turn: PURCHASE_MORTGAGE_RATE_PER_TURN,
-            term_turns: rules.loanTermTurns,
+            rate_per_turn: mortgageRatePerTurn,
+            term_turns: mortgageTermTurns,
+            payment_per_turn: mortgagePaymentPerTurn,
           },
         });
       }
@@ -8003,6 +8040,9 @@ export async function POST(request: Request) {
             tile_type: tile.type,
             tile_id: tile.tile_id,
             actor_user_id: user.id,
+            collateral_ltv_input: rules.collateralLtv,
+            rate_per_turn_input: rules.collateralRatePerTurn,
+            term_turns_input: rules.collateralTermTurns,
           }),
         },
       );

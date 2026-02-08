@@ -22,6 +22,14 @@ export const philippinesHardBoardPack: BoardPack = {
     "Lower starting capital, reduced GO salary, and harsher macroeconomic events. Debt is riskier. Liquidity matters. Timing is everything. Recommended for experienced players.",
   properties: [...classicPhBoardPack.properties],
   economy: PHILIPPINES_HARD_ECONOMY,
+  rules: {
+    mortgageRatePerTurn: 0.02,
+    mortgageTermTurns: 24,
+    mortgageLtv: 0.45,
+    collateralLtv: 0.45,
+    collateralRatePerTurn: 0.01,
+    collateralTermTurns: 8,
+  },
   macroDeck: {
     id: "macro-ph-hard-v1",
     name: "Macro PH Hard V1",
