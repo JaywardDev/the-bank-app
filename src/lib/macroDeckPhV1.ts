@@ -32,6 +32,9 @@ export type MacroEffectsV1 = {
   };
 
   house_sell_multiplier?: number; // 1.0 for 100%, 1.1 for 110% if enabled later
+  rent_multiplier_by_color_group?: Record<string, number>; // e.g. { red: 1.2 }
+  tax_cash_percent?: number; // one-off % of current cash charged to each player at trigger
+  house_build_blocked?: boolean; // blocks BUILD_HOUSE while active
 };
 
 export type MacroCardV1 = {

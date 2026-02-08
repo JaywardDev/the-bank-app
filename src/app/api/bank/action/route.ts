@@ -20,6 +20,7 @@ import {
   type MacroRarity,
 } from "@/lib/macroDeckV1";
 import { DEFAULT_RULES, getRules } from "@/lib/rules";
+import { MACRO_DECK_PH_HARD_V1, drawMacroCardPhHardV1 } from "@/lib/macroDeckPhHardV1";
 import { computeEffectiveGoSalary } from "@/lib/salary";
 
 const supabaseUrl = (process.env.SUPABASE_URL ?? SUPABASE_URL ?? "").trim();
@@ -50,8 +51,17 @@ const DEFAULT_MACRO_DECK = {
 
 const resolveMacroDeck = (
   boardPack: ReturnType<typeof getBoardPackById> | null | undefined,
-) =>
-  boardPack?.macroDeck ?? DEFAULT_MACRO_DECK;
+) => {
+  if (boardPack?.id === "philippines-hard") {
+    return {
+      id: "macro-ph-hard-v1",
+      name: "Macro PH Hard V1",
+      cards: MACRO_DECK_PH_HARD_V1,
+      draw: (lastCardId?: string) => drawMacroCardPhHardV1(lastCardId),
+    };
+  }
+  return boardPack?.macroDeck ?? DEFAULT_MACRO_DECK;
+};
 
 type BaseActionRequest = {
   gameId?: string;
@@ -520,6 +530,27 @@ const getMacroHouseSellMultiplierV1 = (activeEffects: ActiveMacroEffectV1[]) =>
     return product;
   }, 1);
 
+const getMacroHouseBuildBlockedV1 = (activeEffects: ActiveMacroEffectV1[]) =>
+  activeEffects.some((effect) => effect.effects.house_build_blocked === true);
+
+const getMacroRentMultiplierForColorGroupV1 = (
+  activeEffects: ActiveMacroEffectV1[],
+  colorGroup?: string | null,
+) => {
+  if (!colorGroup) {
+    return 1;
+  }
+  const normalizedColorGroup = colorGroup.toLowerCase();
+  return activeEffects.reduce((product, effect) => {
+    const byGroup = effect.effects.rent_multiplier_by_color_group;
+    if (!byGroup) {
+      return product;
+    }
+    const entry = byGroup[normalizedColorGroup];
+    return typeof entry === "number" ? product * entry : product;
+  }, 1);
+};
+
 const getMacroMortgageFlatDeltaV1 = (activeEffects: ActiveMacroEffectV1[]) =>
   activeEffects.reduce((total, effect) => {
     const delta = effect.effects.mortgage_interest_flat_delta;
@@ -549,6 +580,7 @@ const hasMacroOneOffEffects = (effects: MacroEffectsV1 | null) => {
   }
   return (
     typeof effects.cash_delta === "number" ||
+    typeof effects.tax_cash_percent === "number" ||
     Boolean(effects.regional_disaster) ||
     Boolean(effects.bank_stress_test) ||
     Boolean(effects.pandemic) ||
@@ -1818,13 +1850,18 @@ const calculateRent = ({
   if (tile.type === "PROPERTY") {
     const dev = ownershipByTile[tile.index]?.houses ?? 0;
     const amount = getPropertyRentWithDev(tile, dev);
-    const finalAmount = Math.round(amount * rentMultiplier);
+    const colorGroupMultiplier = getMacroRentMultiplierForColorGroupV1(
+      activeMacroEffects,
+      tile.colorGroup,
+    );
+    const finalAmount = Math.round(amount * rentMultiplier * colorGroupMultiplier);
     return {
       amount: finalAmount,
       meta: {
         rent_type: "PROPERTY",
         houses: dev,
         base_rent: amount,
+        color_group_multiplier: colorGroupMultiplier,
         ...(macroMeta ?? {}),
       },
     };
@@ -6255,6 +6292,7 @@ export async function POST(request: Request) {
         const activePlayers = getActivePlayers(players);
         const boardPack = getBoardPackById(game.board_pack_id);
         const boardTiles = boardPack?.tiles ?? [];
+        const boardPackEconomy = boardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY;
         const activeMacroEffectsForRules = getActiveMacroEffectsV1ForRules(
           gameState.active_macro_effects_v1,
           rules.macroEnabled,
@@ -6310,6 +6348,47 @@ export async function POST(request: Request) {
             event_type: "MACRO_CASH_DELTA_APPLIED",
             payload: {
               effect_type: "cash_delta",
+              per_player: perPlayerAmounts,
+              ...macroMetaBase,
+            },
+          });
+        }
+
+        if (typeof macroEffects.tax_cash_percent === "number") {
+          const taxRate = macroEffects.tax_cash_percent;
+          const perPlayerAmounts: Array<{
+            player_id: string;
+            amount: number;
+          }> = [];
+          for (const player of activePlayers) {
+            const currentBalance = updatedBalances[player.id] ?? startingCash;
+            const taxAmount = Math.round(currentBalance * taxRate);
+            const nextBalance = currentBalance - taxAmount;
+            updatedBalances = {
+              ...updatedBalances,
+              [player.id]: nextBalance,
+            };
+            if (taxAmount !== 0) {
+              balancesChanged = true;
+            }
+            perPlayerAmounts.push({ player_id: player.id, amount: taxAmount });
+            events.push({
+              event_type: "CASH_DEBIT",
+              payload: {
+                player_id: player.id,
+                amount: taxAmount,
+                reason: "MACRO_TAX_PERCENT",
+                effect_type: "tax_cash_percent",
+                tax_rate: taxRate,
+                ...macroMetaBase,
+              },
+            });
+          }
+          events.push({
+            event_type: "MACRO_TAX_PERCENT_APPLIED",
+            payload: {
+              effect_type: "tax_cash_percent",
+              tax_rate: taxRate,
               per_player: perPlayerAmounts,
               ...macroMetaBase,
             },
@@ -6608,6 +6687,92 @@ export async function POST(request: Request) {
             for (const player of activePlayers) {
               nextSkipNextRollByPlayer[player.id] = true;
             }
+          }
+
+          if (!ownershipByTileLoaded) {
+            ownershipByTile = (await loadOwnershipByTile(gameId)) ?? {};
+            ownershipByTileLoaded = true;
+          }
+          const pandemicMacroEffects = getActiveMacroEffectsV1ForRules(
+            gameState.active_macro_effects_v1,
+            rules.macroEnabled,
+          );
+          for (const player of activePlayers) {
+            const playerPosition = Number.isFinite(player.position)
+              ? player.position
+              : null;
+            if (playerPosition == null) {
+              continue;
+            }
+            const currentTile = boardTiles.find((tile) => tile.index === playerPosition);
+            if (!currentTile) {
+              continue;
+            }
+            const ownership = ownershipByTile[currentTile.index];
+            const ownerId = ownership?.owner_player_id ?? null;
+            if (!ownerId || ownerId === player.id) {
+              continue;
+            }
+            const rentResult = calculateRent({
+              tile: currentTile,
+              ownerId,
+              currentPlayerId: player.id,
+              boardTiles,
+              ownershipByTile,
+              diceTotal: gameState.last_roll,
+              activeMacroEffects: pandemicMacroEffects,
+              boardPackEconomy,
+            });
+            if (rentResult.amount <= 0) {
+              continue;
+            }
+            const payerBalance = updatedBalances[player.id] ?? startingCash;
+            const ownerBalance = updatedBalances[ownerId] ?? startingCash;
+            updatedBalances = {
+              ...updatedBalances,
+              [player.id]: payerBalance - rentResult.amount,
+              [ownerId]: ownerBalance + rentResult.amount,
+            };
+            balancesChanged = true;
+            events.push({
+              event_type: "CASH_DEBIT",
+              payload: {
+                player_id: player.id,
+                amount: rentResult.amount,
+                reason: "MACRO_PANDEMIC_RENT_RECHARGE",
+                tile_index: currentTile.index,
+                tile_id: currentTile.tile_id,
+                effect_type: "pandemic",
+                ...macroMetaBase,
+              },
+            });
+            events.push({
+              event_type: "CASH_CREDIT",
+              payload: {
+                player_id: ownerId,
+                amount: rentResult.amount,
+                reason: "MACRO_PANDEMIC_RENT_RECHARGE",
+                tile_index: currentTile.index,
+                tile_id: currentTile.tile_id,
+                from_player_id: player.id,
+                effect_type: "pandemic",
+                ...macroMetaBase,
+              },
+            });
+            events.push({
+              event_type: "RENT_PAID",
+              payload: {
+                from_player_id: player.id,
+                to_player_id: ownerId,
+                amount: rentResult.amount,
+                tile_index: currentTile.index,
+                tile_id: currentTile.tile_id,
+                reason: "MACRO_PANDEMIC_RENT_RECHARGE",
+                rent_meta: rentResult.meta,
+                effect_type: "pandemic",
+                ...macroMetaBase,
+              },
+            });
           }
         }
 
@@ -7096,6 +7261,12 @@ export async function POST(request: Request) {
       };
 
       if (action === "BUILD_HOUSE") {
+        if (getMacroHouseBuildBlockedV1(activeMacroEffects)) {
+          return NextResponse.json(
+            { error: "Building houses is currently blocked by a macro event." },
+            { status: 409 },
+          );
+        }
         if (!houseCost) {
           return NextResponse.json(
             { error: "House cost not configured for this property." },

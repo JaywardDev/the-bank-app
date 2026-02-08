@@ -1,5 +1,6 @@
 import { classicPhBoardPack } from "./boardpacks/classic-ph";
 import { classicUkBoardPack } from "./boardpacks/classic-uk";
+import { philippinesHardBoardPack } from "./boardpacks/philippines-hard";
 import type { MacroCardV1 } from "./macroDeckV1";
 
 export { classicUkChanceCards, classicUkCommunityCards } from "./boardpacks/classic-uk";
@@ -787,6 +788,7 @@ export const boardPacks: BoardPack[] = [
   },
   classicUkBoardPack,
   classicPhBoardPack,
+  philippinesHardBoardPack,
   {
     id: "new-zealand",
     displayName: "New Zealand",
