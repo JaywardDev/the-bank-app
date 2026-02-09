@@ -869,6 +869,8 @@ type PurchaseMortgage = {
   principal_remaining: number;
   rate_per_turn: number;
   term_turns: number;
+  turns_remaining: number;
+  payment_per_turn: number;
   turns_elapsed: number;
   accrued_interest_unpaid: number;
   status: string;
@@ -3397,7 +3399,7 @@ export default function PlayPage() {
       const mortgageRows = await supabaseClient.fetchFromSupabase<
         PurchaseMortgage[]
       >(
-        `purchase_mortgages?select=id,player_id,tile_index,principal_original,principal_remaining,rate_per_turn,term_turns,turns_elapsed,accrued_interest_unpaid,status&game_id=eq.${activeGameId}&player_id=eq.${playerId}`,
+        `purchase_mortgages?select=id,player_id,tile_index,principal_original,principal_remaining,rate_per_turn,term_turns,turns_remaining,payment_per_turn,turns_elapsed,accrued_interest_unpaid,status&game_id=eq.${activeGameId}&player_id=eq.${playerId}`,
         { method: "GET" },
         accessToken,
       );
@@ -3444,7 +3446,7 @@ export default function PlayPage() {
         const mortgageRows = await supabaseClient.fetchFromSupabase<
           PurchaseMortgage[]
         >(
-          `purchase_mortgages?select=id,player_id,tile_index,principal_original,principal_remaining,rate_per_turn,term_turns,turns_elapsed,accrued_interest_unpaid,status&game_id=eq.${activeGameId}&id=in.(${mortgageIds.join(",")})`,
+          `purchase_mortgages?select=id,player_id,tile_index,principal_original,principal_remaining,rate_per_turn,term_turns,turns_remaining,payment_per_turn,turns_elapsed,accrued_interest_unpaid,status&game_id=eq.${activeGameId}&id=in.(${mortgageIds.join(",")})`,
           { method: "GET" },
           accessToken,
         );
@@ -4794,71 +4796,6 @@ export default function PlayPage() {
   const activePurchaseMortgages = purchaseMortgages.filter(
     (mortgage) => mortgage.status === "active",
   );
-  const latestMortgageInterestById = useMemo(() => {
-    const latestById = new Map<
-      string,
-      { amount: number; version: number; ts: string | null }
-    >();
-    for (const event of events) {
-      const payload =
-        event.payload && typeof event.payload === "object"
-          ? event.payload
-          : null;
-      if (!payload) {
-        continue;
-      }
-      const version = typeof event.version === "number" ? event.version : 0;
-      if (event.event_type === "CASH_DEBIT") {
-        const reason =
-          typeof payload.reason === "string" ? payload.reason : null;
-        if (reason !== "PURCHASE_MORTGAGE_INTEREST") {
-          continue;
-        }
-        const mortgageId =
-          typeof payload.mortgage_id === "string" ? payload.mortgage_id : null;
-        if (!mortgageId) {
-          continue;
-        }
-        const amount = parseNumber(payload.amount);
-        if (amount === null) {
-          continue;
-        }
-        const existing = latestById.get(mortgageId);
-        if (!existing || version > existing.version) {
-          latestById.set(mortgageId, {
-            amount,
-            version,
-            ts: event.created_at ?? null,
-          });
-        }
-        continue;
-      }
-      if (
-        event.event_type !== "PURCHASE_MORTGAGE_INTEREST_PAID" &&
-        event.event_type !== "PURCHASE_MORTGAGE_INTEREST_ACCRUED"
-      ) {
-        continue;
-      }
-      const mortgageId =
-        typeof payload.mortgage_id === "string" ? payload.mortgage_id : null;
-      if (!mortgageId) {
-        continue;
-      }
-      const amount = parseNumber(payload.interest_amount);
-      if (amount === null) {
-        continue;
-      }
-      const existing = latestById.get(mortgageId);
-      if (!existing || version > existing.version) {
-        latestById.set(mortgageId, {
-          amount,
-          version,
-          ts: event.created_at ?? null,
-        });
-      }
-    }
-    return latestById;
-  }, [events]);
   const netWorth = useMemo(() => {
     const propertyValue = ownedProperties.reduce((total, entry) => {
       if (entry.isCollateralized || entry.isPurchaseMortgaged) {
@@ -8118,7 +8055,7 @@ export default function PlayPage() {
           {walletPanelView === "mortgages" ? (
             <div className="space-y-2">
               <p className="text-xs text-neutral-500">
-                Interest is charged each turn; unpaid interest accumulates.
+                Fixed payment amortization each turn (interest first, then principal).
               </p>
               {activePurchaseMortgages.length === 0 ? (
                 <p className="text-sm text-neutral-500">
@@ -8137,13 +8074,19 @@ export default function PlayPage() {
                     const payoffAmount =
                       (mortgage.principal_remaining ?? 0) +
                       (mortgage.accrued_interest_unpaid ?? 0);
+                    const paymentPerTurn = Math.max(
+                      0,
+                      mortgage.payment_per_turn ?? 0,
+                    );
                     const interestPerTurn = calculateMortgageInterestPerTurn(
                       mortgage.principal_remaining,
                       mortgage.rate_per_turn,
                     );
-                    const lastCharged = latestMortgageInterestById.get(
-                      mortgage.id,
+                    const principalPerTurn = Math.max(
+                      0,
+                      paymentPerTurn - interestPerTurn,
                     );
+                    const turnsRemaining = mortgage.turns_remaining ?? 0;
                     const canPayoff =
                       canAct &&
                       payoffAmount > 0 &&
@@ -8173,13 +8116,22 @@ export default function PlayPage() {
                               {groupLabel}
                             </p>
                             <p className="text-xs text-neutral-500">
+                              Payment / turn: {formatMoney(paymentPerTurn, currencySymbol)}
+                            </p>
+                            <p className="text-xs text-neutral-500">
+                              Turns remaining: {turnsRemaining > 0 ? turnsRemaining : "continuing"}
+                            </p>
+                            <p className="text-xs text-neutral-500">
                               Principal remaining: {formatMoney(mortgage.principal_remaining, currencySymbol)}
                             </p>
                             <p className="text-xs text-neutral-500">
-                              Accrued interest: {formatMoney(mortgage.accrued_interest_unpaid, currencySymbol)}
+                              Interest this turn (est.): {formatMoney(interestPerTurn, currencySymbol)}
                             </p>
                             <p className="text-xs text-neutral-500">
-                              Interest per turn: {formatMoney(interestPerTurn, currencySymbol)}
+                              Principal this turn (est.): {formatMoney(principalPerTurn, currencySymbol)}
+                            </p>
+                            <p className="text-xs text-neutral-500">
+                              Accrued interest: {formatMoney(mortgage.accrued_interest_unpaid, currencySymbol)}
                             </p>
                             <p className="text-xs text-neutral-500">
                               Payoff amount: {formatMoney(payoffAmount, currencySymbol)}

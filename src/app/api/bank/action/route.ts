@@ -2943,7 +2943,7 @@ const applyLoanPaymentsForPlayer = async ({
   const activeMortgages = (await fetchFromSupabaseWithService<
     PurchaseMortgageRow[]
   >(
-    `purchase_mortgages?select=id,tile_index,principal_original,principal_remaining,rate_per_turn,term_turns,turns_elapsed,accrued_interest_unpaid,status&game_id=eq.${gameId}&player_id=eq.${player.id}&status=eq.active`,
+    `purchase_mortgages?select=id,tile_index,principal_original,principal_remaining,rate_per_turn,term_turns,turns_remaining,payment_per_turn,turns_elapsed,accrued_interest_unpaid,status&game_id=eq.${gameId}&player_id=eq.${player.id}&status=eq.active`,
     { method: "GET" },
   )) ?? [];
 
@@ -3091,28 +3091,84 @@ const applyLoanPaymentsForPlayer = async ({
     const interestAmount = Math.round(
       mortgage.principal_remaining * effectiveRatePerTurn,
     );
+    const fallbackTurns = Math.max(
+      1,
+      (mortgage.term_turns ?? 0) - (mortgage.turns_elapsed ?? 0),
+    );
+    const fallbackPaymentAmount = calculateAmortizedPaymentPerTurn(
+      mortgage.principal_remaining,
+      effectiveRatePerTurn,
+      fallbackTurns,
+    );
+    const paymentAmount =
+      typeof mortgage.payment_per_turn === "number" &&
+      mortgage.payment_per_turn > 0
+        ? mortgage.payment_per_turn
+        : fallbackPaymentAmount;
+    const principalComponent = Math.max(0, paymentAmount - interestAmount);
     const turnsElapsedAfter = (mortgage.turns_elapsed ?? 0) + 1;
+    const turnsRemainingAfter = Math.max(0, (mortgage.turns_remaining ?? 0) - 1);
     const currentBalance = updatedBalances[player.id] ?? startingCash;
-    const canPayInterest = currentBalance >= interestAmount;
-    const accruedInterestAfter = canPayInterest
-      ? mortgage.accrued_interest_unpaid ?? 0
-      : (mortgage.accrued_interest_unpaid ?? 0) + interestAmount;
+    const canPayPayment = currentBalance >= paymentAmount;
+
+    if (!canPayPayment) {
+      await fetchFromSupabaseWithService(`purchase_mortgages?id=eq.${mortgage.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          status: "defaulted",
+          updated_at: new Date().toISOString(),
+        }),
+      });
+      await fetchFromSupabaseWithService(
+        `property_ownership?game_id=eq.${gameId}&tile_index=eq.${mortgage.tile_index}&owner_player_id=eq.${player.id}&purchase_mortgage_id=eq.${mortgage.id}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            owner_player_id: null,
+            purchase_mortgage_id: null,
+            collateral_loan_id: null,
+            houses: 0,
+          }),
+        },
+      );
+      events.push({
+        event_type: "PROPERTY_DEFAULTED",
+        payload: {
+          tile_index: mortgage.tile_index,
+          player_id: player.id,
+          purchase_mortgage_id: mortgage.id,
+          reason: "PURCHASE_MORTGAGE_MISSED_PAYMENT",
+          required_payment: paymentAmount,
+          balance_before: currentBalance,
+        },
+      });
+      continue;
+    }
+
+    const principalRemainingAfter = Math.max(
+      0,
+      mortgage.principal_remaining - principalComponent,
+    );
+    const isPaid = principalRemainingAfter <= 0;
 
     await fetchFromSupabaseWithService(`purchase_mortgages?id=eq.${mortgage.id}`, {
       method: "PATCH",
       body: JSON.stringify({
-        accrued_interest_unpaid: accruedInterestAfter,
+        principal_remaining: principalRemainingAfter,
+        accrued_interest_unpaid: mortgage.accrued_interest_unpaid ?? 0,
         turns_elapsed: turnsElapsedAfter,
+        turns_remaining: turnsRemainingAfter,
+        status: isPaid ? "paid" : "active",
         updated_at: new Date().toISOString(),
       }),
     });
 
-    if (canPayInterest) {
+    {
       updatedBalances = {
         ...updatedBalances,
-        [player.id]: currentBalance - interestAmount,
+        [player.id]: currentBalance - paymentAmount,
       };
-      if (interestAmount !== 0) {
+      if (paymentAmount !== 0) {
         balancesChanged = true;
       }
       events.push(
@@ -3120,8 +3176,8 @@ const applyLoanPaymentsForPlayer = async ({
           event_type: "CASH_DEBIT",
           payload: {
             player_id: player.id,
-            amount: interestAmount,
-            reason: "PURCHASE_MORTGAGE_INTEREST",
+            amount: paymentAmount,
+            reason: "PURCHASE_MORTGAGE_PAYMENT",
             tile_index: mortgage.tile_index,
             mortgage_id: mortgage.id,
             base_rate_per_turn: mortgage.rate_per_turn,
@@ -3131,12 +3187,16 @@ const applyLoanPaymentsForPlayer = async ({
           },
         },
         {
-          event_type: "PURCHASE_MORTGAGE_INTEREST_PAID",
+          event_type: "PURCHASE_MORTGAGE_PAYMENT",
           payload: {
             player_id: player.id,
             mortgage_id: mortgage.id,
             tile_index: mortgage.tile_index,
+            payment_amount: paymentAmount,
             interest_amount: interestAmount,
+            principal_amount: principalComponent,
+            principal_remaining_after: principalRemainingAfter,
+            turns_remaining_after: turnsRemainingAfter,
             turns_elapsed_after: turnsElapsedAfter,
             base_rate_per_turn: mortgage.rate_per_turn,
             macro_interest_delta_per_turn: macroInterestTrendAccumulator,
@@ -3145,22 +3205,26 @@ const applyLoanPaymentsForPlayer = async ({
           },
         },
       );
-    } else {
+    }
+
+    if (isPaid) {
+      await fetchFromSupabaseWithService(
+        `property_ownership?game_id=eq.${gameId}&tile_index=eq.${mortgage.tile_index}&purchase_mortgage_id=eq.${mortgage.id}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            purchase_mortgage_id: null,
+          }),
+        },
+      );
       events.push({
-        event_type: "PURCHASE_MORTGAGE_INTEREST_ACCRUED",
+        event_type: "PURCHASE_MORTGAGE_PAID",
         payload: {
           player_id: player.id,
           mortgage_id: mortgage.id,
           tile_index: mortgage.tile_index,
-          interest_amount: interestAmount,
-          accrued_interest_unpaid_after: accruedInterestAfter,
+          payment_amount: paymentAmount,
           turns_elapsed_after: turnsElapsedAfter,
-          paid: false,
-          unpaid: interestAmount,
-          base_rate_per_turn: mortgage.rate_per_turn,
-          macro_interest_delta_per_turn: macroInterestTrendAccumulator,
-          macro_mortgage_flat_delta: macroMortgageFlatDelta,
-          effective_rate_per_turn: effectiveRatePerTurn,
         },
       });
     }
