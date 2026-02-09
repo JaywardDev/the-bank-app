@@ -23,12 +23,12 @@ export const philippinesHardBoardPack: BoardPack = {
   properties: [...classicPhBoardPack.properties],
   economy: PHILIPPINES_HARD_ECONOMY,
   rules: {
-    mortgageRatePerTurn: 0.02,
-    mortgageTermTurns: 24,
-    mortgageLtv: 0.45,
-    collateralLtv: 0.45,
-    collateralRatePerTurn: 0.01,
-    collateralTermTurns: 8,
+    mortgageRatePerTurn: 0.015,
+    mortgageTermTurns: 40,
+    mortgageLtv: 0.7,
+    collateralLtv: 0.5,
+    collateralRatePerTurn: 0.02,
+    collateralTermTurns: 12,
   },
   macroDeck: {
     id: "macro-ph-hard-v1",
