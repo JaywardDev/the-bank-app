@@ -60,6 +60,7 @@ type GameState = {
   pending_card_drawn_by_player_id: string | null;
   pending_card_drawn_at: string | null;
   pending_card_source_tile_index: number | null;
+  active_macro_effects_v1: Record<string, unknown>[] | null;
 };
 
 type GameEvent = {
@@ -128,7 +129,7 @@ export async function POST(request: Request) {
         `players?select=id,user_id,display_name,created_at,position,is_eliminated,eliminated_at&game_id=eq.${encodeURIComponent(gameId)}&order=created_at.asc`,
       ),
       fetchTable<GameState[]>(
-        `game_state?select=game_id,version,current_player_id,balances,last_roll,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index&game_id=eq.${encodeURIComponent(gameId)}&limit=1`,
+        `game_state?select=game_id,version,current_player_id,balances,last_roll,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,active_macro_effects_v1&game_id=eq.${encodeURIComponent(gameId)}&limit=1`,
       ),
       fetchTable<GameEvent[]>(
         `game_events?select=id,event_type,payload,created_at,version&game_id=eq.${encodeURIComponent(gameId)}&order=version.desc&limit=12`,
