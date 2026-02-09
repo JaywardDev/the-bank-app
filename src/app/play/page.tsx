@@ -4470,8 +4470,15 @@ export default function PlayPage() {
   const canAffordPendingPurchase = pendingPurchase
     ? myPlayerBalance >= pendingPurchase.price
     : false;
+  const mortgageLtv =
+    typeof rules.mortgageLtv === "number" && Number.isFinite(rules.mortgageLtv)
+      ? rules.mortgageLtv
+      : 0.5;
+  const mortgageDownPaymentRate = 1 - mortgageLtv;
+  const mortgageLtvPercent = Math.round(mortgageLtv * 100);
+  const mortgageDownPaymentPercent = Math.round(mortgageDownPaymentRate * 100);
   const pendingMortgagePrincipal = pendingPurchase
-    ? Math.round(pendingPurchase.price * 0.5)
+    ? Math.round(pendingPurchase.price * mortgageLtv)
     : 0;
   const pendingMortgageDownPayment = pendingPurchase
     ? pendingPurchase.price - pendingMortgagePrincipal
@@ -6564,7 +6571,7 @@ export default function PlayPage() {
                       }
                       title={
                         canAffordPendingMortgage
-                          ? "Buy with a 50% down payment"
+                          ? `Financing: ${mortgageLtvPercent}% (Down: ${mortgageDownPaymentPercent}%)`
                           : "Not enough cash for down payment"
                       }
                     >
@@ -8055,7 +8062,7 @@ export default function PlayPage() {
           {walletPanelView === "mortgages" ? (
             <div className="space-y-2">
               <p className="text-xs text-neutral-500">
-                Fixed payment amortization each turn (interest first, then principal).
+                Fixed payment each turn. If you can’t pay, the property defaults.
               </p>
               {activePurchaseMortgages.length === 0 ? (
                 <p className="text-sm text-neutral-500">
@@ -8077,14 +8084,6 @@ export default function PlayPage() {
                     const paymentPerTurn = Math.max(
                       0,
                       mortgage.payment_per_turn ?? 0,
-                    );
-                    const interestPerTurn = calculateMortgageInterestPerTurn(
-                      mortgage.principal_remaining,
-                      mortgage.rate_per_turn,
-                    );
-                    const principalPerTurn = Math.max(
-                      0,
-                      paymentPerTurn - interestPerTurn,
                     );
                     const turnsRemaining = mortgage.turns_remaining ?? 0;
                     const canPayoff =
@@ -8124,15 +8123,11 @@ export default function PlayPage() {
                             <p className="text-xs text-neutral-500">
                               Principal remaining: {formatMoney(mortgage.principal_remaining, currencySymbol)}
                             </p>
-                            <p className="text-xs text-neutral-500">
-                              Interest this turn (est.): {formatMoney(interestPerTurn, currencySymbol)}
-                            </p>
-                            <p className="text-xs text-neutral-500">
-                              Principal this turn (est.): {formatMoney(principalPerTurn, currencySymbol)}
-                            </p>
-                            <p className="text-xs text-neutral-500">
-                              Accrued interest: {formatMoney(mortgage.accrued_interest_unpaid, currencySymbol)}
-                            </p>
+                            {mortgage.accrued_interest_unpaid > 0 ? (
+                              <p className="text-xs text-neutral-500">
+                                Accrued interest: {formatMoney(mortgage.accrued_interest_unpaid, currencySymbol)}
+                              </p>
+                            ) : null}
                             <p className="text-xs text-neutral-500">
                               Payoff amount: {formatMoney(payoffAmount, currencySymbol)}
                             </p>
