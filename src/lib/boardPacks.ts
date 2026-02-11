@@ -1,5 +1,6 @@
 import { classicPhBoardPack } from "./boardpacks/classic-ph";
 import { classicUkBoardPack } from "./boardpacks/classic-uk";
+import { newZealandBoardPack } from "./boardpacks/new-zealand";
 import { philippinesHardBoardPack } from "./boardpacks/philippines-hard";
 import type { MacroCardV1 } from "./macroDeckV1";
 import type { GameRules } from "./rules";
@@ -165,17 +166,6 @@ const CLASSIC_US_ECONOMY: BoardPackEconomy = {
   startingBalance: 1500,
   passGoAmount: 200,
   jailFineAmount: 50,
-};
-
-const NEW_ZEALAND_ECONOMY: BoardPackEconomy = {
-  currency: {
-    code: "NZD",
-    symbol: "$",
-  },
-  houseRentMultipliersByGroup: {},
-  hotelIncrementMultiplier: 1.25,
-  railRentByCount: DEFAULT_RAIL_RENT_BY_COUNT,
-  utilityRentMultipliers: DEFAULT_UTILITY_RENT_MULTIPLIERS,
 };
 
 export const DEFAULT_BOARD_PACK_ECONOMY = CLASSIC_US_ECONOMY;
@@ -792,13 +782,7 @@ export const boardPacks: BoardPack[] = [
   classicUkBoardPack,
   classicPhBoardPack,
   philippinesHardBoardPack,
-  {
-    id: "new-zealand",
-    displayName: "New Zealand",
-    properties: [],
-    economy: NEW_ZEALAND_ECONOMY,
-    tiles: [],
-  },
+  newZealandBoardPack,
 ];
 
 export const defaultBoardPackId = boardPacks[0]?.id ?? "classic";
