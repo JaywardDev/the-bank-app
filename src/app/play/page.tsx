@@ -12,6 +12,12 @@ import { useParams, useRouter } from "next/navigation";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import PageShell from "../components/PageShell";
 import BoardMiniMap from "../components/BoardMiniMap";
+import InvestPanel, {
+  type InvestHolding,
+  type InvestPrice,
+  type InvestSymbol,
+  type TradeSide,
+} from "../components/InvestPanel";
 import InfoTooltip from "@/app/components/InfoTooltip";
 import HousesDots from "../components/HousesDots";
 import {
@@ -40,6 +46,7 @@ const EVENT_FETCH_LIMIT = 100;
 const EVENT_LOG_LIMIT = 10;
 const TRANSACTION_DISPLAY_LIMIT = 30;
 const MINI_BOARD_COLLAPSED_STORAGE_KEY = "thebank:miniBoardCollapsed";
+const INVEST_PANEL_COLLAPSED_STORAGE_KEY = "ui.investPanelCollapsed";
 const SESSION_EXPIRED_MESSAGE = "Session expired — please sign in again";
 const fallbackExpandedTiles: BoardTile[] = Array.from(
   { length: 40 },
@@ -876,6 +883,18 @@ type PurchaseMortgage = {
   status: string;
 };
 
+type MarketPriceRow = {
+  symbol: InvestSymbol;
+  price: number | string | null;
+  as_of_date: string | null;
+};
+
+type PlayerHoldingRow = {
+  symbol: InvestSymbol;
+  qty: number | string | null;
+  avg_cost_local: number | string | null;
+};
+
 type TradeSnapshotTile = {
   tile_index: number;
   collateral_loan_id: string | null;
@@ -1161,6 +1180,17 @@ const parseNumber = (value: unknown): number | null => {
   if (typeof value === "string") {
     const parsed = Number.parseInt(value, 10);
     return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
+};
+
+const parseDecimal = (value: unknown): number | null => {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : null;
   }
   return null;
 };
@@ -1831,6 +1861,19 @@ export default function PlayPage() {
   const [activityTab, setActivityTab] = useState<"log" | "transactions">("log");
   const [isBoardExpanded, setIsBoardExpanded] = useState(false);
   const [miniBoardCollapsed, setMiniBoardCollapsed] = useState(false);
+  const [investPanelCollapsed, setInvestPanelCollapsed] = useState(true);
+  const [marketPrices, setMarketPrices] = useState<Record<InvestSymbol, InvestPrice>>({
+    SPY: { price: null, asOfDate: null },
+    BTC: { price: null, asOfDate: null },
+  });
+  const [playerHoldings, setPlayerHoldings] = useState<
+    Record<InvestSymbol, InvestHolding>
+  >({
+    SPY: { qty: 0, avgCostLocal: 0 },
+    BTC: { qty: 0, avgCostLocal: 0 },
+  });
+  const [isTradeSubmitting, setIsTradeSubmitting] = useState(false);
+  const [tradeError, setTradeError] = useState<string | null>(null);
   const [walletPanelView, setWalletPanelView] = useState<
     "owned" | "loans" | "mortgages"
   >("owned");
@@ -1877,9 +1920,13 @@ export default function PlayPage() {
   const minIntroMs = 5000;
 
   useEffect(() => {
-    const storedPreference =
+    const miniBoardStoredPreference =
       window.localStorage.getItem(MINI_BOARD_COLLAPSED_STORAGE_KEY) === "1";
-    setMiniBoardCollapsed(storedPreference);
+    setMiniBoardCollapsed(miniBoardStoredPreference);
+
+    const investPanelStoredPreference =
+      window.localStorage.getItem(INVEST_PANEL_COLLAPSED_STORAGE_KEY) ?? "1";
+    setInvestPanelCollapsed(investPanelStoredPreference === "1");
   }, []);
 
   useEffect(() => {
@@ -1888,6 +1935,13 @@ export default function PlayPage() {
       miniBoardCollapsed ? "1" : "0",
     );
   }, [miniBoardCollapsed]);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      INVEST_PANEL_COLLAPSED_STORAGE_KEY,
+      investPanelCollapsed ? "1" : "0",
+    );
+  }, [investPanelCollapsed]);
 
   const isConfigured = useMemo(() => supabaseClient.isConfigured(), []);
   const latestRollEvent = useMemo(
@@ -3422,6 +3476,60 @@ export default function PlayPage() {
     [],
   );
 
+  const loadMarketPrices = useCallback(async (accessToken?: string) => {
+    const priceRows = await supabaseClient.fetchFromSupabase<MarketPriceRow[]>(
+      "market_prices?select=symbol,price,as_of_date&symbol=in.(SPY,BTC)",
+      { method: "GET" },
+      accessToken,
+    );
+    const nextPrices: Record<InvestSymbol, InvestPrice> = {
+      SPY: { price: null, asOfDate: null },
+      BTC: { price: null, asOfDate: null },
+    };
+    for (const row of priceRows) {
+      if (row.symbol !== "SPY" && row.symbol !== "BTC") {
+        continue;
+      }
+      nextPrices[row.symbol] = {
+        price: parseDecimal(row.price),
+        asOfDate: row.as_of_date,
+      };
+    }
+    setMarketPrices(nextPrices);
+  }, []);
+
+  const loadPlayerHoldings = useCallback(
+    async (playerId?: string | null, accessToken?: string) => {
+      if (!playerId) {
+        setPlayerHoldings({
+          SPY: { qty: 0, avgCostLocal: 0 },
+          BTC: { qty: 0, avgCostLocal: 0 },
+        });
+        return;
+      }
+      const holdingRows = await supabaseClient.fetchFromSupabase<PlayerHoldingRow[]>(
+        `player_holdings?select=symbol,qty,avg_cost_local&player_id=eq.${playerId}&symbol=in.(SPY,BTC)`,
+        { method: "GET" },
+        accessToken,
+      );
+      const nextHoldings: Record<InvestSymbol, InvestHolding> = {
+        SPY: { qty: 0, avgCostLocal: 0 },
+        BTC: { qty: 0, avgCostLocal: 0 },
+      };
+      for (const row of holdingRows) {
+        if (row.symbol !== "SPY" && row.symbol !== "BTC") {
+          continue;
+        }
+        nextHoldings[row.symbol] = {
+          qty: parseDecimal(row.qty) ?? 0,
+          avgCostLocal: parseDecimal(row.avg_cost_local) ?? 0,
+        };
+      }
+      setPlayerHoldings(nextHoldings);
+    },
+    [],
+  );
+
   const loadTradeLiabilities = useCallback(
     async (
       activeGameId: string,
@@ -3510,6 +3618,7 @@ export default function PlayPage() {
         loadEvents(activeGameId, accessToken),
         loadOwnership(activeGameId, accessToken),
         loadTradeProposals(activeGameId, accessToken),
+        loadMarketPrices(accessToken),
       ]);
       if (!activeGameIdRef.current || activeGameIdRef.current === activeGameId) {
         setInitialSnapshotReady(true);
@@ -3519,6 +3628,7 @@ export default function PlayPage() {
       loadEvents,
       loadGameMeta,
       loadGameState,
+      loadMarketPrices,
       loadOwnership,
       loadPlayers,
       loadTradeProposals,
@@ -3837,6 +3947,46 @@ export default function PlayPage() {
     sessionInvalid,
     setupRealtimeChannel,
   ]);
+
+  const handleMarketTrade = useCallback(
+    async (symbol: InvestSymbol, side: TradeSide, qty: number) => {
+      if (!gameId || !session?.access_token) {
+        setTradeError("Missing session. Please refresh and sign in again.");
+        return;
+      }
+      setIsTradeSubmitting(true);
+      setTradeError(null);
+      try {
+        const response = await fetch("/api/market/trade", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ symbol, side, qty }),
+        });
+        const responseBody = (await response.json()) as { error?: string };
+        if (!response.ok) {
+          throw new Error(responseBody.error ?? "Trade failed.");
+        }
+        await Promise.all([
+          loadGameData(gameId, session.access_token),
+          loadPlayerHoldings(currentUserPlayer?.id, session.access_token),
+        ]);
+      } catch (error) {
+        setTradeError(error instanceof Error ? error.message : "Trade failed.");
+      } finally {
+        setIsTradeSubmitting(false);
+      }
+    },
+    [
+      currentUserPlayer?.id,
+      gameId,
+      loadGameData,
+      loadPlayerHoldings,
+      session?.access_token,
+    ],
+  );
 
   const requestFirstRoundResync = useCallback(
     (accessTokenOverride?: string) => {
@@ -5167,10 +5317,12 @@ export default function PlayPage() {
       session.access_token,
       currentUserPlayer?.id,
     );
+    void loadPlayerHoldings(currentUserPlayer?.id, session.access_token);
   }, [
     currentUserPlayer?.id,
     gameId,
     loadLoans,
+    loadPlayerHoldings,
     loadPurchaseMortgages,
     session?.access_token,
   ]);
@@ -7557,6 +7709,18 @@ export default function PlayPage() {
           </div>
         </div>
       </section>
+
+      <InvestPanel
+        currencySymbol={currencySymbol}
+        prices={marketPrices}
+        holdings={playerHoldings}
+        collapsed={investPanelCollapsed}
+        onToggleCollapsed={() => setInvestPanelCollapsed((prev) => !prev)}
+        isTrading={isTradeSubmitting}
+        tradeError={tradeError}
+        onTrade={handleMarketTrade}
+        formatMoney={formatMoney}
+      />
 
       <section className="rounded-2xl bg-white/95 p-5 shadow-[0_12px_30px_rgba(15,23,42,0.08)] ring-1 ring-black/5 space-y-4">
         <div>
