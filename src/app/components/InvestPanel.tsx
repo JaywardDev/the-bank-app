@@ -18,6 +18,9 @@ export type InvestHolding = {
 
 type InvestPanelProps = {
   currencySymbol: string;
+  currencyCode: string;
+  cashLocal: number;
+  fxRate: number;
   prices: Record<InvestSymbol, InvestPrice>;
   holdings: Record<InvestSymbol, InvestHolding>;
   collapsed: boolean;
@@ -39,6 +42,9 @@ const formatCompactNumber = (value: number) => {
 
 export default function InvestPanel({
   currencySymbol,
+  currencyCode,
+  cashLocal,
+  fxRate,
   prices,
   holdings,
   collapsed,
@@ -72,9 +78,9 @@ export default function InvestPanel({
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
-            Invest (SPY / BTC)
+            Invest in Markets
           </p>
-          <p className="text-xs text-neutral-500">Simple buy/sell at latest cached market price.</p>
+          <p className="text-xs text-neutral-500">Grow your money through stocks and crypto.</p>
         </div>
         <button
           className="rounded-full border border-neutral-200 px-3 py-1.5 text-xs font-semibold text-neutral-600 transition hover:border-neutral-300 hover:text-neutral-800"
@@ -99,14 +105,27 @@ export default function InvestPanel({
             const avgCost = holding?.avgCostLocal ?? 0;
             const price = priceRow?.price ?? null;
             const hasPrice = typeof price === "number";
-            const marketValue = hasPrice ? qty * price : null;
+            const localPrice = hasPrice ? price * fxRate : null;
+            const marketValue = localPrice !== null ? qty * localPrice : null;
             const costBasis = qty * avgCost;
             const unrealizedPl = marketValue !== null ? marketValue - costBasis : null;
             const inputQty = parsedQty[symbol];
             const tradeDisabled = isTrading || !hasPrice || inputQty === null;
-            const estFee = hasPrice && inputQty ? inputQty * price * feeRate : null;
-            const estProceeds = hasPrice && inputQty ? inputQty * price : null;
-            const roughMaxTax = estProceeds !== null ? estProceeds * taxRate : null;
+            const estFee = localPrice !== null && inputQty ? inputQty * localPrice * feeRate : null;
+            const sellQty = inputQty ? Math.min(inputQty, qty) : 0;
+            const estProceeds = localPrice !== null && sellQty > 0 ? sellQty * localPrice : null;
+            const sellCostBasis = sellQty > 0 ? sellQty * avgCost : null;
+            const estGain =
+              estProceeds !== null && estFee !== null && sellCostBasis !== null
+                ? estProceeds - estFee - sellCostBasis
+                : null;
+            const estTax = estGain !== null ? Math.max(estGain, 0) * taxRate : null;
+            const maxQty =
+              localPrice !== null && localPrice > 0
+                ? Math.max(Math.floor(cashLocal / (localPrice * (1 + feeRate))), 0)
+                : 0;
+            const localPricePrefix =
+              currencyCode === "NZD" ? "NZ" : currencyCode === "PHP" ? "PHP" : "USD";
 
             return (
               <div
@@ -117,10 +136,13 @@ export default function InvestPanel({
                   <p className="text-sm font-semibold text-neutral-800">{symbol}</p>
                   <p className="text-xs text-neutral-500">
                     {hasPrice
-                      ? `${currencySymbol}${formatCompactNumber(price)}${priceRow.asOfDate ? ` · ${priceRow.asOfDate}` : ""}`
+                      ? `US$${formatCompactNumber(price)}${priceRow.asOfDate ? ` · ${priceRow.asOfDate}` : ""}`
                       : "Market not updated"}
                   </p>
                 </div>
+                <p className="mt-1 text-xs text-neutral-500">
+                  {localPrice !== null ? `≈ ${localPricePrefix}${currencySymbol}${formatCompactNumber(localPrice)}` : ""}
+                </p>
                 <p className="mt-1 text-xs text-neutral-600">
                   Qty: {formatCompactNumber(qty)} · Avg: {formatMoney(avgCost, currencySymbol)}
                 </p>
@@ -146,6 +168,20 @@ export default function InvestPanel({
                     }
                     placeholder="Qty"
                   />
+                  <button
+                    className="rounded-xl border border-neutral-300 px-2 py-1 text-[11px] font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:border-neutral-100 disabled:text-neutral-300"
+                    type="button"
+                    disabled={!hasPrice || maxQty <= 0 || isTrading}
+                    onClick={() =>
+                      setQtyInputs((prev) => ({
+                        ...prev,
+                        [symbol]: String(maxQty),
+                      }))
+                    }
+                  >
+                    MAX
+                  </button>
+                  <span className="text-[11px] text-neutral-500">Max: {formatCompactNumber(maxQty)}</span>
                   <button
                     className="rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-indigo-200"
                     type="button"
@@ -177,8 +213,13 @@ export default function InvestPanel({
                   Est. fee: {estFee !== null ? formatMoney(estFee, currencySymbol) : "—"}
                 </p>
                 <p className="text-[11px] text-neutral-500">
-                  Tax applies on realized gains{roughMaxTax !== null ? ` (rough max ${formatMoney(roughMaxTax, currencySymbol)}).` : "."}
+                  Tax is charged only on profit when you sell.
                 </p>
+                {inputQty !== null && inputQty > 0 && qty > 0 && estGain !== null && estTax !== null ? (
+                  <p className="text-[11px] text-neutral-500">
+                    Est. gain: {formatMoney(estGain, currencySymbol)} · Est. tax: {formatMoney(estTax, currencySymbol)}
+                  </p>
+                ) : null}
               </div>
             );
           })}

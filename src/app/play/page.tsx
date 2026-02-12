@@ -895,6 +895,11 @@ type PlayerHoldingRow = {
   avg_cost_local: number | string | null;
 };
 
+type FxRateRow = {
+  pair: string;
+  rate: number | string;
+};
+
 type TradeSnapshotTile = {
   tile_index: number;
   collateral_loan_id: string | null;
@@ -1866,6 +1871,7 @@ export default function PlayPage() {
     SPY: { price: null, asOfDate: null },
     BTC: { price: null, asOfDate: null },
   });
+  const [investFxRate, setInvestFxRate] = useState(1);
   const [playerHoldings, setPlayerHoldings] = useState<
     Record<InvestSymbol, InvestHolding>
   >({
@@ -3530,6 +3536,31 @@ export default function PlayPage() {
     [],
   );
 
+  const loadInvestFxRate = useCallback(
+    async (boardPackId: string | null | undefined, accessToken?: string) => {
+      if (boardPackId === "new-zealand") {
+        const [fxRow] = await supabaseClient.fetchFromSupabase<FxRateRow[]>(
+          "fx_rates?select=pair,rate&pair=eq.NZDUSD&limit=1",
+          { method: "GET" },
+          accessToken,
+        );
+        setInvestFxRate(parseDecimal(fxRow?.rate) ?? 1);
+        return;
+      }
+      if (boardPackId === "classic-ph" || boardPackId === "philippines-hard") {
+        const [fxRow] = await supabaseClient.fetchFromSupabase<FxRateRow[]>(
+          "fx_rates?select=pair,rate&pair=eq.USDPHP&limit=1",
+          { method: "GET" },
+          accessToken,
+        );
+        setInvestFxRate(parseDecimal(fxRow?.rate) ?? 1);
+        return;
+      }
+      setInvestFxRate(1);
+    },
+    [],
+  );
+
   const loadTradeLiabilities = useCallback(
     async (
       activeGameId: string,
@@ -3576,11 +3607,12 @@ export default function PlayPage() {
         setGameMetaError(
           "Game exists but is not visible — membership or RLS issue.",
         );
-        return;
+        return null;
       }
 
       setGameMeta(game);
       setGameMetaError(null);
+      return game;
     },
     [],
   );
@@ -3611,14 +3643,15 @@ export default function PlayPage() {
 
   const loadGameData = useCallback(
     async (activeGameId: string, accessToken?: string) => {
+      const game = await loadGameMeta(activeGameId, accessToken);
       await Promise.all([
-        loadGameMeta(activeGameId, accessToken),
         loadPlayers(activeGameId, accessToken),
         loadGameState(activeGameId, accessToken),
         loadEvents(activeGameId, accessToken),
         loadOwnership(activeGameId, accessToken),
         loadTradeProposals(activeGameId, accessToken),
         loadMarketPrices(accessToken),
+        loadInvestFxRate(game?.board_pack_id, accessToken),
       ]);
       if (!activeGameIdRef.current || activeGameIdRef.current === activeGameId) {
         setInitialSnapshotReady(true);
@@ -3628,6 +3661,7 @@ export default function PlayPage() {
       loadEvents,
       loadGameMeta,
       loadGameState,
+      loadInvestFxRate,
       loadMarketPrices,
       loadOwnership,
       loadPlayers,
@@ -4634,6 +4668,7 @@ export default function PlayPage() {
     gameState?.balances && currentUserPlayer
       ? gameState.balances[currentUserPlayer.id] ?? 0
       : 0;
+  const currencyCode = boardPackEconomy?.currency?.code ?? "USD";
   const canAffordPendingPurchase = pendingPurchase
     ? myPlayerBalance >= pendingPurchase.price
     : false;
@@ -7712,6 +7747,9 @@ export default function PlayPage() {
 
       <InvestPanel
         currencySymbol={currencySymbol}
+        currencyCode={currencyCode}
+        cashLocal={myPlayerBalance}
+        fxRate={investFxRate}
         prices={marketPrices}
         holdings={playerHoldings}
         collapsed={investPanelCollapsed}
