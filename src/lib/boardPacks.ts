@@ -67,6 +67,7 @@ export type CardPayload = {
 export type CardDefinition = {
   id: string;
   title: string;
+  text?: string;
   kind: CardKind;
   payload: CardPayload;
 };
