@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { SUPABASE_URL } from "@/lib/env";
 
-const STOOQ_SPY_DAILY_CSV_URL = "https://stooq.pl/q/d/l/?s=spy.us&i=d";
+const STOOQ_SPY_CSV_URLS = [
+  "https://stooq.pl/q/d/l/?s=spy.us&i=d",
+  "https://stooq.com/q/d/l/?s=spy.us&i=d",
+  "https://stooq.com/q/l/?s=spy.us&f=sd2t2ohlcv&h&e=csv",
+];
+const STOOQ_FETCH_TIMEOUT_MS = 10_000;
 
 const supabaseUrl = (process.env.SUPABASE_URL ?? SUPABASE_URL ?? "").trim();
 const supabaseServiceRoleKey = (process.env.SUPABASE_SERVICE_ROLE_KEY ?? "").trim();
@@ -68,6 +73,44 @@ const parseStooqCsv = (csv: string): ParsedPriceRow | null => {
   return latest;
 };
 
+const parseStooqQuoteCsv = (csv: string): ParsedPriceRow | null => {
+  const lines = csv
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (lines.length <= 1) {
+    return null;
+  }
+
+  const header = lines[0].split(",").map((cell) => cell.trim().toLowerCase());
+  const row = lines[1].split(",").map((cell) => cell.trim());
+  const closeIndex = header.indexOf("close");
+  const dateIndex = header.indexOf("date");
+
+  if (closeIndex < 0) {
+    throw new Error("Quote CSV missing Close column");
+  }
+
+  const rawClose = row[closeIndex];
+  if (!rawClose) {
+    return null;
+  }
+
+  const close = Number(rawClose);
+  if (Number.isNaN(close)) {
+    return null;
+  }
+
+  const rawDate = row[dateIndex] ?? "";
+  const parsedDate = rawDate ? new Date(`${rawDate}T00:00:00Z`) : null;
+  const date = parsedDate && !Number.isNaN(parsedDate.getTime())
+    ? rawDate
+    : new Date().toISOString().slice(0, 10);
+
+  return { date, close };
+};
+
 const isAuthorized = (request: Request) => {
   const cronSecret = (process.env.CRON_SECRET ?? "").trim();
   if (!cronSecret) {
@@ -97,36 +140,62 @@ export async function POST(request: Request) {
   }
 
   let latestPriceRow: ParsedPriceRow | null = null;
+  const attempts: Array<{ url: string; status: number | null; message: string }> = [];
 
-  try {
-    const csvResponse = await fetch(STOOQ_SPY_DAILY_CSV_URL, {
-      method: "GET",
-      cache: "no-store",
-      headers: {
-        "User-Agent": "Mozilla/5.0",
-        Accept: "text/csv",
-      },
-    });
+  for (const url of STOOQ_SPY_CSV_URLS) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), STOOQ_FETCH_TIMEOUT_MS);
 
-    if (!csvResponse.ok) {
-      return NextResponse.json(
-        { error: "Failed to fetch SPY prices from Stooq." },
-        { status: 502 },
-      );
+    try {
+      const csvResponse = await fetch(url, {
+        method: "GET",
+        cache: "no-store",
+        headers: {
+          "User-Agent": "Mozilla/5.0",
+          Accept: "text/csv",
+        },
+        signal: controller.signal,
+      });
+
+      if (!csvResponse.ok) {
+        attempts.push({
+          url,
+          status: csvResponse.status,
+          message: csvResponse.statusText || "HTTP error",
+        });
+        continue;
+      }
+
+      const csvText = await csvResponse.text();
+      latestPriceRow = url.includes("/q/d/l/") ? parseStooqCsv(csvText) : parseStooqQuoteCsv(csvText);
+
+      if (!latestPriceRow) {
+        attempts.push({
+          url,
+          status: csvResponse.status,
+          message: "Stooq CSV is empty or invalid.",
+        });
+        continue;
+      }
+
+      break;
+    } catch (error) {
+      attempts.push({
+        url,
+        status: null,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      clearTimeout(timeoutId);
     }
+  }
 
-    const csvText = await csvResponse.text();
-    latestPriceRow = parseStooqCsv(csvText);
-
-    if (!latestPriceRow) {
-      return NextResponse.json(
-        { error: "Stooq CSV is empty or invalid." },
-        { status: 502 },
-      );
-    }
-  } catch {
+  if (!latestPriceRow) {
     return NextResponse.json(
-      { error: "Failed to fetch SPY prices from Stooq." },
+      {
+        error: "Failed to fetch SPY prices from Stooq.",
+        attempts,
+      },
       { status: 502 },
     );
   }
