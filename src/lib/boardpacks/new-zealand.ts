@@ -102,8 +102,8 @@ const NEW_ZEALAND_PROPERTY_GROUPS: PropertyGroupConfig[] = [
 export const newZealandChanceCards: CardDefinition[] = [
   {
     id: "new-zealand-chance-advance-go",
-    title: "IRD Payroll Glitch Clears Overnight",
-    text: "An IRD payroll backlog finally clears and your wages land all at once. Advance to Go and collect NZ$480,000.",
+    title: "IRD Refund Lands Early",
+    text: "Your PAYE refund clears sooner than expected. Advance to Go and collect NZ$480,000.",
     kind: "MOVE_TO",
     payload: { target_tile_id: "go" },
   },
@@ -144,8 +144,8 @@ export const newZealandChanceCards: CardDefinition[] = [
   },
   {
     id: "new-zealand-chance-nearest-railroad-2",
-    title: "Bee Card Still Loaded",
-    text: "Too right — you have just enough fare for one more leg. Catch the next station ahead.",
+    title: "Transit Card Still Loaded",
+    text: "Too right — you've got just enough fare for one more leg. Catch the next station ahead.",
     kind: "MOVE_TO",
     payload: { nearest_kind: "RAILROAD" },
   },
@@ -200,7 +200,7 @@ export const newZealandChanceCards: CardDefinition[] = [
   },
   {
     id: "new-zealand-chance-go-to-jail",
-    title: "Court Date in the Beehive Precinct",
+    title: "Mandatory Court Appearance",
     text: "No detours, no coffees, no excuses. Head straight to jail.",
     kind: "GO_TO_JAIL",
     payload: {},
