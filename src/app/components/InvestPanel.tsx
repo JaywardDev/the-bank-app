@@ -61,6 +61,8 @@ export default function InvestPanel({
 
   const feeRate = MARKET_CONFIG.tradingFeeRate;
   const taxRate = MARKET_CONFIG.capitalGainsTaxRate;
+  // NZDUSD is quoted as USD per 1 NZD, so USD->NZD must use the inverse rate.
+  const usdToLocal = currencyCode === "NZD" ? 1 / fxRate : fxRate;
 
   const parsedQty = useMemo(() => {
     return symbols.reduce<Record<InvestSymbol, number | null>>(
@@ -105,7 +107,7 @@ export default function InvestPanel({
             const avgCost = holding?.avgCostLocal ?? 0;
             const price = priceRow?.price ?? null;
             const hasPrice = typeof price === "number";
-            const localPrice = hasPrice ? price * fxRate : null;
+            const localPrice = hasPrice ? price * usdToLocal : null;
             const marketValue = localPrice !== null ? qty * localPrice : null;
             const costBasis = qty * avgCost;
             const unrealizedPl = marketValue !== null ? marketValue - costBasis : null;
