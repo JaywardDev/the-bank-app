@@ -1,11 +1,6 @@
 import { NextResponse } from "next/server";
 import { SUPABASE_URL } from "@/lib/env";
 
-const STOOQ_SPY_CSV_URLS = [
-  "https://stooq.pl/q/d/l/?s=spy.us&i=d",
-  "https://stooq.com/q/d/l/?s=spy.us&i=d",
-  "https://stooq.com/q/l/?s=spy.us&f=sd2t2ohlcv&h&e=csv",
-];
 const STOOQ_FETCH_TIMEOUT_MS = 10_000;
 
 const supabaseUrl = (process.env.SUPABASE_URL ?? SUPABASE_URL ?? "").trim();
@@ -22,6 +17,26 @@ type ParsedPriceRow = {
   date: string;
   close: number;
 };
+
+type FetchAttempt = {
+  url: string;
+  status: number | null;
+  message: string;
+};
+
+type FetchLatestCloseResult = {
+  close: number;
+  asOfDate: string;
+};
+
+class StooqFetchError extends Error {
+  constructor(
+    message: string,
+    public readonly attempts: FetchAttempt[],
+  ) {
+    super(message);
+  }
+}
 
 const parseStooqCsv = (csv: string): ParsedPriceRow | null => {
   const lines = csv
@@ -111,38 +126,17 @@ const parseStooqQuoteCsv = (csv: string): ParsedPriceRow | null => {
   return { date, close };
 };
 
-const isAuthorized = (request: Request) => {
-  const cronSecret = (process.env.CRON_SECRET ?? "").trim();
-  if (!cronSecret) {
-    return false;
-  }
+const getStooqUrlsForSymbol = (stooqSymbol: string) => [
+  `https://stooq.pl/q/d/l/?s=${stooqSymbol}&i=d`,
+  `https://stooq.com/q/d/l/?s=${stooqSymbol}&i=d`,
+  `https://stooq.com/q/l/?s=${stooqSymbol}&f=sd2t2ohlcv&h&e=csv`,
+];
 
-  const authHeader = request.headers.get("authorization") ?? "";
-  return authHeader === `Bearer ${cronSecret}`;
-};
-
-/**
- * How to test:
- * 1) Set CRON_SECRET in your environment.
- * 2) Call POST /api/market/refresh with Authorization: Bearer <CRON_SECRET>.
- * 3) Verify a row exists in public.market_prices for symbol SPY.
- */
-export async function POST(request: Request) {
-  if (!isAuthorized(request)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  if (!supabaseUrl || !supabaseServiceRoleKey) {
-    return NextResponse.json(
-      { error: "Market refresh service is not configured." },
-      { status: 503 },
-    );
-  }
-
+const fetchLatestCloseFromStooq = async (stooqSymbol: string): Promise<FetchLatestCloseResult> => {
   let latestPriceRow: ParsedPriceRow | null = null;
-  const attempts: Array<{ url: string; status: number | null; message: string }> = [];
+  const attempts: FetchAttempt[] = [];
 
-  for (const url of STOOQ_SPY_CSV_URLS) {
+  for (const url of getStooqUrlsForSymbol(stooqSymbol)) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), STOOQ_FETCH_TIMEOUT_MS);
 
@@ -191,32 +185,119 @@ export async function POST(request: Request) {
   }
 
   if (!latestPriceRow) {
+    throw new StooqFetchError(`Failed to fetch ${stooqSymbol.toUpperCase()} prices from Stooq.`, attempts);
+  }
+
+  return {
+    close: latestPriceRow.close,
+    asOfDate: latestPriceRow.date,
+  };
+};
+
+const isAuthorized = (request: Request) => {
+  const cronSecret = (process.env.CRON_SECRET ?? "").trim();
+  if (!cronSecret) {
+    return false;
+  }
+
+  const authHeader = request.headers.get("authorization") ?? "";
+  return authHeader === `Bearer ${cronSecret}`;
+};
+
+/**
+ * How to test:
+ * 1) Set CRON_SECRET in your environment.
+ * 2) Call POST /api/market/refresh with Authorization: Bearer <CRON_SECRET>.
+ * 3) Verify rows exist in public.market_prices for symbols SPY/BTC and
+ *    public.fx_rates for pairs NZDUSD/USDPHP.
+ */
+export async function POST(request: Request) {
+  if (!isAuthorized(request)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  if (!supabaseUrl || !supabaseServiceRoleKey) {
     return NextResponse.json(
-      {
-        error: "Failed to fetch SPY prices from Stooq.",
-        attempts,
-      },
-      { status: 502 },
+      { error: "Market refresh service is not configured." },
+      { status: 503 },
     );
   }
 
+  const stooqSymbols = {
+    SPY: "spy.us",
+    BTC: "btcusd",
+    NZDUSD: "nzdusd",
+    USDPHP: "usdphp",
+  } as const;
+
+  const latestBySymbol: {
+    SPY: FetchLatestCloseResult;
+    BTC: FetchLatestCloseResult;
+    NZDUSD: FetchLatestCloseResult;
+    USDPHP: FetchLatestCloseResult;
+  } = {
+    SPY: { close: 0, asOfDate: "" },
+    BTC: { close: 0, asOfDate: "" },
+    NZDUSD: { close: 0, asOfDate: "" },
+    USDPHP: { close: 0, asOfDate: "" },
+  };
+
+  const diagnosticsBySymbol: Record<string, FetchAttempt[] | null> = {
+    SPY: null,
+    BTC: null,
+    NZDUSD: null,
+    USDPHP: null,
+  };
+
+  for (const [key, symbol] of Object.entries(stooqSymbols) as Array<[keyof typeof stooqSymbols, string]>) {
+    try {
+      latestBySymbol[key] = await fetchLatestCloseFromStooq(symbol);
+    } catch (error) {
+      if (error instanceof StooqFetchError) {
+        diagnosticsBySymbol[key] = error.attempts;
+        return NextResponse.json(
+          {
+            error: `Failed to fetch required symbol ${key} from Stooq.`,
+            diagnostics: diagnosticsBySymbol,
+          },
+          { status: 502 },
+        );
+      }
+
+      return NextResponse.json(
+        {
+          error: "Failed to fetch market data from Stooq.",
+          diagnostics: diagnosticsBySymbol,
+        },
+        { status: 502 },
+      );
+    }
+  }
+
   try {
-    const upsertResponse = await fetch(`${supabaseUrl}/rest/v1/market_prices?on_conflict=symbol`, {
+    const upsertMarketResponse = await fetch(`${supabaseUrl}/rest/v1/market_prices?on_conflict=symbol`, {
       method: "POST",
       headers: adminHeaders,
       body: JSON.stringify([
         {
           symbol: "SPY",
-          price: latestPriceRow.close,
-          as_of_date: latestPriceRow.date,
+          price: latestBySymbol.SPY.close,
+          as_of_date: latestBySymbol.SPY.asOfDate,
+          source: "stooq",
+          updated_at: new Date().toISOString(),
+        },
+        {
+          symbol: "BTC",
+          price: latestBySymbol.BTC.close,
+          as_of_date: latestBySymbol.BTC.asOfDate,
           source: "stooq",
           updated_at: new Date().toISOString(),
         },
       ]),
     });
 
-    if (!upsertResponse.ok) {
-      const dbErrorText = await upsertResponse.text();
+    if (!upsertMarketResponse.ok) {
+      const dbErrorText = await upsertMarketResponse.text();
       console.error("market refresh upsert failed", dbErrorText);
       return NextResponse.json(
         {
@@ -227,11 +308,59 @@ export async function POST(request: Request) {
       );
     }
 
+    const upsertFxResponse = await fetch(`${supabaseUrl}/rest/v1/fx_rates?on_conflict=pair`, {
+      method: "POST",
+      headers: adminHeaders,
+      body: JSON.stringify([
+        {
+          pair: "NZDUSD",
+          rate: latestBySymbol.NZDUSD.close,
+          as_of_date: latestBySymbol.NZDUSD.asOfDate,
+          source: "stooq",
+          updated_at: new Date().toISOString(),
+        },
+        {
+          pair: "USDPHP",
+          rate: latestBySymbol.USDPHP.close,
+          as_of_date: latestBySymbol.USDPHP.asOfDate,
+          source: "stooq",
+          updated_at: new Date().toISOString(),
+        },
+      ]),
+    });
+
+    if (!upsertFxResponse.ok) {
+      const dbErrorText = await upsertFxResponse.text();
+      console.error("market refresh fx upsert failed", dbErrorText);
+      return NextResponse.json(
+        {
+          error: "Failed to upsert fx rate cache.",
+          details: dbErrorText || "Unknown database error",
+        },
+        { status: 500 },
+      );
+    }
+
     return NextResponse.json({
       ok: true,
-      symbol: "SPY",
-      price: latestPriceRow.close,
-      as_of_date: latestPriceRow.date,
+      results: {
+        SPY: {
+          price: latestBySymbol.SPY.close,
+          as_of_date: latestBySymbol.SPY.asOfDate,
+        },
+        BTC: {
+          price: latestBySymbol.BTC.close,
+          as_of_date: latestBySymbol.BTC.asOfDate,
+        },
+        NZDUSD: {
+          rate: latestBySymbol.NZDUSD.close,
+          as_of_date: latestBySymbol.NZDUSD.asOfDate,
+        },
+        USDPHP: {
+          rate: latestBySymbol.USDPHP.close,
+          as_of_date: latestBySymbol.USDPHP.asOfDate,
+        },
+      },
       source: "stooq",
     });
   } catch (error) {
