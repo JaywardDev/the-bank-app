@@ -4,7 +4,7 @@ import type {
   BoardTile,
   CardDefinition,
 } from "../boardPacks";
-import { MACRO_DECK_V1, drawMacroCardV1 } from "../macroDeckV1";
+import { NZ_MACRO_DECK, drawNZMacroCard } from "../macroDeckNZ";
 
 type PropertyGroupConfig = {
   id: string;
@@ -343,10 +343,10 @@ export const newZealandBoardPack: BoardPack = {
     collateralTermTurns: 12,
   },
   macroDeck: {
-    id: "macro-v1",
-    name: "Macro V1",
-    cards: MACRO_DECK_V1,
-    draw: drawMacroCardV1,
+    id: "macro-nz",
+    name: "NZ Macro Deck",
+    cards: NZ_MACRO_DECK,
+    draw: drawNZMacroCard,
   },
   eventDecks: {
     chance: newZealandChanceCards,
