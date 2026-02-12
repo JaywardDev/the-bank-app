@@ -4331,6 +4331,7 @@ export default function PlayPage() {
       return null;
     }
     return {
+      id: gameState.pending_card_id ?? null,
       deck: gameState.pending_card_deck ?? null,
       title: gameState.pending_card_title ?? "Card",
       kind: gameState.pending_card_kind ?? null,
@@ -4340,23 +4341,39 @@ export default function PlayPage() {
   }, [
     gameState?.pending_card_active,
     gameState?.pending_card_deck,
+    gameState?.pending_card_id,
     gameState?.pending_card_kind,
     gameState?.pending_card_payload,
     gameState?.pending_card_title,
     gameState?.pending_card_drawn_by_player_id,
   ]);
-  const pendingCardDescription = useMemo(
-    () =>
-      pendingCard
-        ? getPendingCardDescription(
-            pendingCard.kind,
-            pendingCard.payload,
-            boardPack,
-            currencySymbol,
-          )
-        : null,
-    [boardPack, currencySymbol, pendingCard],
-  );
+  const pendingCardText = useMemo(() => {
+    if (!pendingCard?.id || !pendingCard.deck) {
+      return null;
+    }
+    const eventDecks = boardPack.eventDecks;
+    const eventDeck =
+      pendingCard.deck === "CHANCE"
+        ? eventDecks?.chance ?? []
+        : pendingCard.deck === "COMMUNITY"
+          ? eventDecks?.community ?? []
+          : [];
+    const card = eventDeck.find((entry) => entry.id === pendingCard.id);
+    return card?.text ?? null;
+  }, [boardPack.eventDecks, pendingCard]);
+  const pendingCardDescription = useMemo(() => {
+    if (!pendingCard) {
+      return null;
+    }
+    const computedDescription = getPendingCardDescription(
+      pendingCard.kind,
+      pendingCard.payload,
+      boardPack,
+      currencySymbol,
+    );
+    const bodyText = pendingCardText ?? computedDescription;
+    return bodyText;
+  }, [boardPack, currencySymbol, pendingCard, pendingCardText]);
   const pendingCardActorName = useMemo(() => {
     if (!pendingCard?.drawnBy) {
       return null;
