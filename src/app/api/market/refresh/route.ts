@@ -102,6 +102,10 @@ export async function POST(request: Request) {
     const csvResponse = await fetch(STOOQ_SPY_DAILY_CSV_URL, {
       method: "GET",
       cache: "no-store",
+      headers: {
+        "User-Agent": "Mozilla/5.0",
+        Accept: "text/csv",
+      },
     });
 
     if (!csvResponse.ok) {
