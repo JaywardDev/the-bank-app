@@ -4076,7 +4076,7 @@ export default function PlayPage() {
 
   const handleManualMarketRefresh = useCallback(async () => {
     if (isMarketRefreshSubmitting) {
-      return;
+      return null;
     }
 
     let accessToken = session?.access_token ?? null;
@@ -4099,7 +4099,14 @@ export default function PlayPage() {
         },
       });
 
-      const responseBody = (await response.json()) as { error?: string };
+      const responseBody = (await response.json()) as {
+        error?: string;
+        minutesRemaining?: number;
+      };
+      if (response.status === 429 && responseBody.error === "REFRESH_COOLDOWN") {
+        return `Market was refreshed recently. Try again in ${responseBody.minutesRemaining ?? 1} minutes.`;
+      }
+
       if (!response.ok) {
         throw new Error(responseBody.error ?? "Failed to refresh market prices.");
       }
@@ -4109,6 +4116,8 @@ export default function PlayPage() {
       } else {
         await loadMarketPrices(accessToken);
       }
+
+      return null;
     } finally {
       setIsMarketRefreshSubmitting(false);
     }

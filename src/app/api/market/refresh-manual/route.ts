@@ -6,6 +6,10 @@ type SupabaseUser = {
   id: string;
 };
 
+type MarketPriceRow = {
+  updated_at: string | null;
+};
+
 const supabaseUrl = (process.env.SUPABASE_URL ?? SUPABASE_URL ?? "").trim();
 const supabaseAnonKey = (process.env.SUPABASE_ANON_KEY ?? SUPABASE_ANON_KEY ?? "").trim();
 
@@ -38,6 +42,26 @@ const fetchUser = async (accessToken: string): Promise<SupabaseUser | null> => {
   return (await response.json()) as SupabaseUser;
 };
 
+const fetchLatestMarketUpdate = async (accessToken: string): Promise<string | null> => {
+  const response = await fetch(
+    `${supabaseUrl}/rest/v1/market_prices?select=updated_at&order=updated_at.desc&limit=1`,
+    {
+      headers: {
+        apikey: supabaseAnonKey,
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch latest market update.");
+  }
+
+  const rows = (await response.json()) as MarketPriceRow[];
+  return rows[0]?.updated_at ?? null;
+};
+
 export async function POST(request: Request) {
   if (!supabaseUrl || !supabaseAnonKey) {
     return NextResponse.json({ error: "Supabase is not configured." }, { status: 500 });
@@ -54,6 +78,23 @@ export async function POST(request: Request) {
   }
 
   try {
+    const latestUpdatedAt = await fetchLatestMarketUpdate(token);
+    if (latestUpdatedAt) {
+      const lastRefresh = new Date(latestUpdatedAt);
+      const now = new Date();
+      const diffMinutes = (now.getTime() - lastRefresh.getTime()) / 60000;
+
+      if (diffMinutes < 10) {
+        return NextResponse.json(
+          {
+            error: "REFRESH_COOLDOWN",
+            minutesRemaining: Math.ceil(10 - diffMinutes),
+          },
+          { status: 429 },
+        );
+      }
+    }
+
     await refreshMarketData();
     return NextResponse.json({ ok: true, refreshedAt: new Date().toISOString() });
   } catch (error) {

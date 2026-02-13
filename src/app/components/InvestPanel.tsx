@@ -28,7 +28,7 @@ type InvestPanelProps = {
   isTrading: boolean;
   tradeError: string | null;
   isRefreshingMarket: boolean;
-  onRefreshMarket: () => Promise<void>;
+  onRefreshMarket: () => Promise<string | null>;
   onTrade: (symbol: InvestSymbol, side: TradeSide, qty: number) => Promise<void>;
 };
 
@@ -407,10 +407,16 @@ export default function InvestPanel({
             title="Refresh Market Prices"
             disabled={isRefreshingMarket}
             onClick={() => {
-              void onRefreshMarket().catch((error) => {
-                const message = error instanceof Error ? error.message : "Failed to refresh market prices.";
-                setRefreshErrorToast(message);
-              });
+              void onRefreshMarket()
+                .then((message) => {
+                  if (message) {
+                    setRefreshErrorToast(message);
+                  }
+                })
+                .catch((error) => {
+                  const message = error instanceof Error ? error.message : "Failed to refresh market prices.";
+                  setRefreshErrorToast(message);
+                });
             }}
           >
             {isRefreshingMarket ? "…" : "↻"}
