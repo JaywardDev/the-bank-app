@@ -8,6 +8,17 @@ type TradeRequestBody = {
   qty?: number;
 };
 
+type AllowedSymbol =
+  | "SPY"
+  | "BTC"
+  | "AAPL"
+  | "MSFT"
+  | "AMZN"
+  | "NVDA"
+  | "GOOGL"
+  | "META"
+  | "TSLA";
+
 type SupabaseUser = {
   id: string;
 };
@@ -48,7 +59,7 @@ const bankHeaders = {
   "Content-Type": "application/json",
 };
 
-const allowedSymbols = new Set<NonNullable<TradeRequestBody["symbol"]>>([
+const allowedSymbols = new Set<AllowedSymbol>([
   "SPY",
   "BTC",
   "AAPL",
@@ -59,6 +70,8 @@ const allowedSymbols = new Set<NonNullable<TradeRequestBody["symbol"]>>([
   "META",
   "TSLA",
 ]);
+
+const isAllowedSymbol = (s: string): s is AllowedSymbol => allowedSymbols.has(s as AllowedSymbol);
 
 const parseBearerToken = (authorization: string | null) => {
   if (!authorization) {
@@ -191,11 +204,23 @@ export async function POST(request: Request) {
     }
 
     const body = (await request.json()) as TradeRequestBody;
-    const symbol = body.symbol;
-    const side = body.side;
-    const qty = Number(body.qty);
+    const symbolRaw = body?.symbol;
+    const sideRaw = body?.side;
+    const qtyRaw = body?.qty;
 
-    if (!allowedSymbols.has(symbol) || (side !== "BUY" && side !== "SELL") || !Number.isFinite(qty) || qty <= 0) {
+    const symbol = typeof symbolRaw === "string" ? symbolRaw.trim().toUpperCase() : "";
+    const side = typeof sideRaw === "string" ? sideRaw.trim().toUpperCase() : "";
+    const qty = typeof qtyRaw === "number" ? qtyRaw : Number(qtyRaw);
+
+    if (!isAllowedSymbol(symbol)) {
+      return NextResponse.json({ error: "Invalid trade payload." }, { status: 400 });
+    }
+
+    if (side !== "BUY" && side !== "SELL") {
+      return NextResponse.json({ error: "Invalid trade payload." }, { status: 400 });
+    }
+
+    if (!Number.isFinite(qty) || qty <= 0) {
       return NextResponse.json({ error: "Invalid trade payload." }, { status: 400 });
     }
 
