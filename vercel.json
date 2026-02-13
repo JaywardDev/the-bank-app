@@ -1,8 +1,6 @@
 {
   "crons": [
-    {
-      "path": "/api/market/refresh",
-      "schedule": "*/30 * * * *"
-    }
+    { "path": "/api/market/refresh", "schedule": "0 2 * * *" }
   ]
 }
+
