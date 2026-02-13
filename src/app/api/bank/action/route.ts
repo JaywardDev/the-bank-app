@@ -3524,6 +3524,7 @@ export async function POST(request: Request) {
             created_by: user.id,
             board_pack_id: resolvedBoardPackId,
             starting_cash: resolvedEconomy.startingBalance,
+            base_currency: resolvedEconomy.currency.code,
           }),
         },
       )) ?? [];

@@ -183,6 +183,8 @@ const mapTradeErrorToResponse = (error: string) => {
       return { status: 400, message: "Invalid trade payload." };
     case "PRICE_NOT_FOUND":
       return { status: 400, message: "Price not found for symbol." };
+    case "FX_NOT_FOUND":
+      return { status: 500, message: "FX rate not available for this game currency." };
     case "INSUFFICIENT_CASH":
       return { status: 400, message: "Insufficient cash for this trade." };
     case "INSUFFICIENT_HOLDINGS":
