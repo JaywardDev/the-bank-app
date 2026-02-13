@@ -7757,7 +7757,6 @@ export default function PlayPage() {
         isTrading={isTradeSubmitting}
         tradeError={tradeError}
         onTrade={handleMarketTrade}
-        formatMoney={formatMoney}
       />
 
       <section className="rounded-2xl bg-white/95 p-5 shadow-[0_12px_30px_rgba(15,23,42,0.08)] ring-1 ring-black/5 space-y-4">

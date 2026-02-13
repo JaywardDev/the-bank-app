@@ -28,15 +28,14 @@ type InvestPanelProps = {
   isTrading: boolean;
   tradeError: string | null;
   onTrade: (symbol: InvestSymbol, side: TradeSide, qty: number) => Promise<void>;
-  formatMoney: (amount: number, currencySymbol?: string) => string;
 };
 
 const symbols: InvestSymbol[] = ["SPY", "BTC"];
 
-const formatCompactNumber = (value: number) => {
+const formatNumber = (value: number, decimals = 2) => {
   return new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: value >= 1000 ? 0 : 2,
-    maximumFractionDigits: 2,
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
   }).format(value);
 };
 
@@ -52,7 +51,6 @@ export default function InvestPanel({
   isTrading,
   tradeError,
   onTrade,
-  formatMoney,
 }: InvestPanelProps) {
   const [qtyInputs, setQtyInputs] = useState<Record<InvestSymbol, string>>({
     SPY: "",
@@ -63,6 +61,24 @@ export default function InvestPanel({
   const taxRate = MARKET_CONFIG.capitalGainsTaxRate;
   // NZDUSD is quoted as USD per 1 NZD, so USD->NZD must use the inverse rate.
   const usdToLocal = currencyCode === "NZD" ? 1 / fxRate : fxRate;
+
+  const formatUsd = (amount: number, decimals = 2) => {
+    const sign = amount < 0 ? "-" : "";
+    return `${sign}US$${formatNumber(Math.abs(amount), decimals)}`;
+  };
+
+  const formatLocal = (amount: number, localCurrencyCode: string, decimals = 2) => {
+    const prefix =
+      localCurrencyCode === "NZD"
+        ? "NZ$"
+        : localCurrencyCode === "USD"
+          ? "US$"
+          : currencySymbol;
+    const sign = amount < 0 ? "-" : "";
+    return `${sign}${prefix}${formatNumber(Math.abs(amount), decimals)}`;
+  };
+
+  const formatQty = (qty: number) => formatNumber(qty, 0);
 
   const parsedQty = useMemo(() => {
     return symbols.reduce<Record<InvestSymbol, number | null>>(
@@ -107,27 +123,27 @@ export default function InvestPanel({
             const avgCost = holding?.avgCostLocal ?? 0;
             const price = priceRow?.price ?? null;
             const hasPrice = typeof price === "number";
-            const localPrice = hasPrice ? price * usdToLocal : null;
-            const marketValue = localPrice !== null ? qty * localPrice : null;
-            const costBasis = qty * avgCost;
-            const unrealizedPl = marketValue !== null ? marketValue - costBasis : null;
+            const priceUsd = hasPrice ? price : null;
+            const marketValueUsd = priceUsd !== null ? qty * priceUsd : null;
+            const costBasisUsd = qty * avgCost;
+            const unrealizedPlUsd = marketValueUsd !== null ? marketValueUsd - costBasisUsd : null;
+            const marketValueLocal = marketValueUsd !== null ? marketValueUsd * usdToLocal : null;
             const inputQty = parsedQty[symbol];
             const tradeDisabled = isTrading || !hasPrice || inputQty === null;
-            const estFee = localPrice !== null && inputQty ? inputQty * localPrice * feeRate : null;
+            const estFeeUsd = priceUsd !== null && inputQty ? inputQty * priceUsd * feeRate : null;
             const sellQty = inputQty ? Math.min(inputQty, qty) : 0;
-            const estProceeds = localPrice !== null && sellQty > 0 ? sellQty * localPrice : null;
-            const sellCostBasis = sellQty > 0 ? sellQty * avgCost : null;
+            const estProceedsUsd = priceUsd !== null && sellQty > 0 ? sellQty * priceUsd : null;
+            const sellCostBasisUsd = sellQty > 0 ? sellQty * avgCost : null;
             const estGain =
-              estProceeds !== null && estFee !== null && sellCostBasis !== null
-                ? estProceeds - estFee - sellCostBasis
+              estProceedsUsd !== null && estFeeUsd !== null && sellCostBasisUsd !== null
+                ? estProceedsUsd - estFeeUsd - sellCostBasisUsd
                 : null;
-            const estTax = estGain !== null ? Math.max(estGain, 0) * taxRate : null;
+            const estTaxUsd = estGain !== null ? Math.max(estGain, 0) * taxRate : null;
             const maxQty =
-              localPrice !== null && localPrice > 0
-                ? Math.max(Math.floor(cashLocal / (localPrice * (1 + feeRate))), 0)
+              priceUsd !== null && usdToLocal > 0 && priceUsd > 0
+                ? Math.max(Math.floor(cashLocal / (priceUsd * usdToLocal * (1 + feeRate))), 0)
                 : 0;
-            const localPricePrefix =
-              currencyCode === "NZD" ? "NZ" : currencyCode === "PHP" ? "PHP" : "USD";
+            const localPrice = priceUsd !== null ? priceUsd * usdToLocal : null;
 
             return (
               <div
@@ -138,21 +154,28 @@ export default function InvestPanel({
                   <p className="text-sm font-semibold text-neutral-800">{symbol}</p>
                   <p className="text-xs text-neutral-500">
                     {hasPrice
-                      ? `US$${formatCompactNumber(price)}${priceRow.asOfDate ? ` · ${priceRow.asOfDate}` : ""}`
+                      ? `${formatUsd(price)}${priceRow.asOfDate ? ` · ${priceRow.asOfDate}` : ""}`
                       : "Market not updated"}
                   </p>
                 </div>
                 <p className="mt-1 text-xs text-neutral-500">
-                  {localPrice !== null ? `≈ ${localPricePrefix}${currencySymbol}${formatCompactNumber(localPrice)}` : ""}
+                  {localPrice !== null ? `≈ ${formatLocal(localPrice, currencyCode)}` : ""}
                 </p>
                 <p className="mt-1 text-xs text-neutral-600">
-                  Qty: {formatCompactNumber(qty)} · Avg: {formatMoney(avgCost, currencySymbol)}
+                  Qty: {formatQty(qty)} · Avg: {formatUsd(avgCost)}
                 </p>
                 <p className="text-xs text-neutral-600">
-                  Value: {marketValue !== null ? formatMoney(marketValue, currencySymbol) : "—"} · P/L:{" "}
-                  <span className={unrealizedPl !== null && unrealizedPl < 0 ? "text-rose-700" : "text-emerald-700"}>
-                    {unrealizedPl !== null ? formatMoney(unrealizedPl, currencySymbol) : "—"}
+                  Value: {marketValueUsd !== null ? formatUsd(marketValueUsd) : "—"} · P/L:{" "}
+                  <span
+                    className={
+                      unrealizedPlUsd !== null && unrealizedPlUsd < 0 ? "text-rose-700" : "text-emerald-700"
+                    }
+                  >
+                    {unrealizedPlUsd !== null ? formatUsd(unrealizedPlUsd) : "—"}
                   </span>
+                </p>
+                <p className="text-xs text-neutral-500">
+                  ≈ Value: {marketValueLocal !== null ? formatLocal(marketValueLocal, currencyCode) : "—"}
                 </p>
 
                 <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -183,7 +206,7 @@ export default function InvestPanel({
                   >
                     MAX
                   </button>
-                  <span className="text-[11px] text-neutral-500">Max: {formatCompactNumber(maxQty)}</span>
+                  <span className="text-[11px] text-neutral-500">Max: {formatQty(maxQty)}</span>
                   <button
                     className="rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-indigo-200"
                     type="button"
@@ -212,14 +235,14 @@ export default function InvestPanel({
                   </button>
                 </div>
                 <p className="mt-1 text-[11px] text-neutral-500">
-                  Est. fee: {estFee !== null ? formatMoney(estFee, currencySymbol) : "—"}
+                  Est. fee: {estFeeUsd !== null ? formatUsd(estFeeUsd) : "—"}
                 </p>
                 <p className="text-[11px] text-neutral-500">
                   Tax is charged only on profit when you sell.
                 </p>
-                {inputQty !== null && inputQty > 0 && qty > 0 && estGain !== null && estTax !== null ? (
+                {inputQty !== null && inputQty > 0 && qty > 0 && estGain !== null && estTaxUsd !== null ? (
                   <p className="text-[11px] text-neutral-500">
-                    Est. gain: {formatMoney(estGain, currencySymbol)} · Est. tax: {formatMoney(estTax, currencySymbol)}
+                    Est. gain: {formatUsd(estGain)} · Est. tax: {formatUsd(estTaxUsd)}
                   </p>
                 ) : null}
               </div>
