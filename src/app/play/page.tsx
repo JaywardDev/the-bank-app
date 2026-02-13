@@ -1899,6 +1899,7 @@ export default function PlayPage() {
     TSLA: { qty: 0, avgCostLocal: 0 },
   });
   const [isTradeSubmitting, setIsTradeSubmitting] = useState(false);
+  const [isMarketRefreshSubmitting, setIsMarketRefreshSubmitting] = useState(false);
   const [tradeError, setTradeError] = useState<string | null>(null);
   const [walletPanelView, setWalletPanelView] = useState<
     "owned" | "loans" | "mortgages"
@@ -4072,6 +4073,46 @@ export default function PlayPage() {
       session?.access_token,
     ],
   );
+
+  const handleManualMarketRefresh = useCallback(async () => {
+    if (isMarketRefreshSubmitting) {
+      return;
+    }
+
+    let accessToken = session?.access_token ?? null;
+    if (!accessToken) {
+      const refreshedSession = await supabaseClient.refreshSession();
+      setSession(refreshedSession);
+      if (!refreshedSession?.access_token) {
+        throw new Error("Missing session. Please refresh and sign in again.");
+      }
+      accessToken = refreshedSession.access_token;
+    }
+
+    setIsMarketRefreshSubmitting(true);
+
+    try {
+      const response = await fetch("/api/market/refresh-manual", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      const responseBody = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(responseBody.error ?? "Failed to refresh market prices.");
+      }
+
+      if (gameId) {
+        await loadGameData(gameId, accessToken);
+      } else {
+        await loadMarketPrices(accessToken);
+      }
+    } finally {
+      setIsMarketRefreshSubmitting(false);
+    }
+  }, [gameId, isMarketRefreshSubmitting, loadGameData, loadMarketPrices, session?.access_token]);
 
   const requestFirstRoundResync = useCallback(
     (accessTokenOverride?: string) => {
@@ -7806,7 +7847,9 @@ export default function PlayPage() {
         collapsed={investPanelCollapsed}
         onToggleCollapsed={() => setInvestPanelCollapsed((prev) => !prev)}
         isTrading={isTradeSubmitting}
+        isRefreshingMarket={isMarketRefreshSubmitting}
         tradeError={tradeError}
+        onRefreshMarket={handleManualMarketRefresh}
         onTrade={handleMarketTrade}
       />
 

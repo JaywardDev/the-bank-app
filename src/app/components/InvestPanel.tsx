@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { MARKET_CONFIG } from "@/lib/marketConfig";
 
 export type InvestSymbol = "SPY" | "BTC" | "AAPL" | "MSFT" | "AMZN" | "NVDA" | "GOOGL" | "META" | "TSLA";
@@ -27,6 +27,8 @@ type InvestPanelProps = {
   onToggleCollapsed: () => void;
   isTrading: boolean;
   tradeError: string | null;
+  isRefreshingMarket: boolean;
+  onRefreshMarket: () => Promise<void>;
   onTrade: (symbol: InvestSymbol, side: TradeSide, qty: number) => Promise<void>;
 };
 
@@ -235,6 +237,8 @@ export default function InvestPanel({
   onToggleCollapsed,
   isTrading,
   tradeError,
+  isRefreshingMarket,
+  onRefreshMarket,
   onTrade,
 }: InvestPanelProps) {
   const [qtyInputs, setQtyInputs] = useState<Record<InvestSymbol, string>>({
@@ -249,6 +253,21 @@ export default function InvestPanel({
     TSLA: "",
   });
   const [expandedSymbol, setExpandedSymbol] = useState<InvestSymbol | null>(null);
+  const [refreshErrorToast, setRefreshErrorToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!refreshErrorToast) {
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      setRefreshErrorToast(null);
+    }, 4000);
+
+    return () => {
+      clearTimeout(timeoutId);
+    };
+  }, [refreshErrorToast]);
 
   const feeRate = MARKET_CONFIG.tradingFeeRate;
   const taxRate = MARKET_CONFIG.capitalGainsTaxRate;
@@ -380,14 +399,35 @@ export default function InvestPanel({
           <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Invest in Markets</p>
           <p className="text-xs text-neutral-500">Grow your money through stocks and crypto.</p>
         </div>
-        <button
-          className="rounded-full border border-neutral-200 px-3 py-1.5 text-xs font-semibold text-neutral-600 transition hover:border-neutral-300 hover:text-neutral-800"
-          type="button"
-          onClick={onToggleCollapsed}
-        >
-          {collapsed ? "Show" : "Hide"}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-neutral-200 text-sm text-neutral-600 transition hover:border-neutral-300 hover:text-neutral-800 disabled:cursor-not-allowed disabled:border-neutral-100 disabled:text-neutral-300"
+            type="button"
+            aria-label="Refresh Market Prices"
+            title="Refresh Market Prices"
+            disabled={isRefreshingMarket}
+            onClick={() => {
+              void onRefreshMarket().catch((error) => {
+                const message = error instanceof Error ? error.message : "Failed to refresh market prices.";
+                setRefreshErrorToast(message);
+              });
+            }}
+          >
+            {isRefreshingMarket ? "…" : "↻"}
+          </button>
+          <button
+            className="rounded-full border border-neutral-200 px-3 py-1.5 text-xs font-semibold text-neutral-600 transition hover:border-neutral-300 hover:text-neutral-800"
+            type="button"
+            onClick={onToggleCollapsed}
+          >
+            {collapsed ? "Show" : "Hide"}
+          </button>
+        </div>
       </div>
+
+      {refreshErrorToast ? (
+        <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">{refreshErrorToast}</p>
+      ) : null}
 
       {collapsed ? null : (
         <div className="space-y-3">
