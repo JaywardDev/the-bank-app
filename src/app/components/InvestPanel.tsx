@@ -59,6 +59,7 @@ export default function InvestPanel({
 
   const feeRate = MARKET_CONFIG.tradingFeeRate;
   const taxRate = MARKET_CONFIG.capitalGainsTaxRate;
+  const currencyDecimals = currencyCode === "USD" ? 2 : 0;
   // NZDUSD is quoted as USD per 1 NZD, so USD->NZD must use the inverse rate.
   const usdToLocal = currencyCode === "NZD" ? 1 / fxRate : fxRate;
 
@@ -78,7 +79,11 @@ export default function InvestPanel({
     return `${sign}${prefix}${formatNumber(Math.abs(amount), decimals)}`;
   };
 
-  const formatQty = (qty: number) => formatNumber(qty, 0);
+  const formatQty = (qty: number) =>
+    new Intl.NumberFormat("en-US", {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    }).format(qty);
 
   const parsedQty = useMemo(() => {
     return symbols.reduce<Record<InvestSymbol, number | null>>(
@@ -125,7 +130,8 @@ export default function InvestPanel({
             const hasPrice = typeof price === "number";
             const priceUsd = hasPrice ? price : null;
             const marketValueUsd = priceUsd !== null ? qty * priceUsd : null;
-            const costBasisUsd = qty * avgCost;
+            const feeAdjustedAvgCostUsd = avgCost * (1 + feeRate);
+            const costBasisUsd = qty * feeAdjustedAvgCostUsd;
             const unrealizedPlUsd = marketValueUsd !== null ? marketValueUsd - costBasisUsd : null;
             const marketValueLocal = marketValueUsd !== null ? marketValueUsd * usdToLocal : null;
             const inputQty = parsedQty[symbol];
@@ -133,7 +139,7 @@ export default function InvestPanel({
             const estFeeUsd = priceUsd !== null && inputQty ? inputQty * priceUsd * feeRate : null;
             const sellQty = inputQty ? Math.min(inputQty, qty) : 0;
             const estProceedsUsd = priceUsd !== null && sellQty > 0 ? sellQty * priceUsd : null;
-            const sellCostBasisUsd = sellQty > 0 ? sellQty * avgCost : null;
+            const sellCostBasisUsd = sellQty > 0 ? sellQty * feeAdjustedAvgCostUsd : null;
             const estGain =
               estProceedsUsd !== null && estFeeUsd !== null && sellCostBasisUsd !== null
                 ? estProceedsUsd - estFeeUsd - sellCostBasisUsd
@@ -159,23 +165,23 @@ export default function InvestPanel({
                   </p>
                 </div>
                 <p className="mt-1 text-xs text-neutral-500">
-                  {localPrice !== null ? `≈ ${formatLocal(localPrice, currencyCode)}` : ""}
+                  {localPrice !== null ? `≈ ${formatLocal(localPrice, currencyCode, currencyDecimals)}` : ""}
                 </p>
                 <p className="mt-1 text-xs text-neutral-600">
                   Qty: {formatQty(qty)} · Avg: {formatUsd(avgCost)}
                 </p>
                 <p className="text-xs text-neutral-600">
-                  Value: {marketValueUsd !== null ? formatUsd(marketValueUsd) : "—"} · P/L:{" "}
+                  Value: {marketValueUsd !== null ? formatUsd(marketValueUsd, currencyDecimals) : "—"} · P/L:{" "}
                   <span
                     className={
                       unrealizedPlUsd !== null && unrealizedPlUsd < 0 ? "text-rose-700" : "text-emerald-700"
                     }
                   >
-                    {unrealizedPlUsd !== null ? formatUsd(unrealizedPlUsd) : "—"}
+                    {unrealizedPlUsd !== null ? formatUsd(unrealizedPlUsd, currencyDecimals) : "—"}
                   </span>
                 </p>
                 <p className="text-xs text-neutral-500">
-                  ≈ Value: {marketValueLocal !== null ? formatLocal(marketValueLocal, currencyCode) : "—"}
+                  ≈ Value: {marketValueLocal !== null ? formatLocal(marketValueLocal, currencyCode, currencyDecimals) : "—"}
                 </p>
 
                 <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -235,14 +241,14 @@ export default function InvestPanel({
                   </button>
                 </div>
                 <p className="mt-1 text-[11px] text-neutral-500">
-                  Est. fee: {estFeeUsd !== null ? formatUsd(estFeeUsd) : "—"}
+                  Est. fee: {estFeeUsd !== null ? formatUsd(estFeeUsd, currencyDecimals) : "—"}
                 </p>
                 <p className="text-[11px] text-neutral-500">
                   Tax is charged only on profit when you sell.
                 </p>
                 {inputQty !== null && inputQty > 0 && qty > 0 && estGain !== null && estTaxUsd !== null ? (
                   <p className="text-[11px] text-neutral-500">
-                    Est. gain: {formatUsd(estGain)} · Est. tax: {formatUsd(estTaxUsd)}
+                    Est. gain: {formatUsd(estGain, currencyDecimals)} · Est. tax: {formatUsd(estTaxUsd, currencyDecimals)}
                   </p>
                 ) : null}
               </div>

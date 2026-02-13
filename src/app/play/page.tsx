@@ -649,6 +649,12 @@ const formatMultiplier = (value: number) => `${value.toFixed(2)}×`;
 const formatMoney = (amount: number, currencySymbol = "$") =>
   `${currencySymbol}${amount.toLocaleString()}`;
 
+const formatMoneyRounded = (amount: number, currencySymbol = "$") =>
+  `${currencySymbol}${amount.toLocaleString(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  })}`;
+
 const formatSignedMoney = (amount: number, currencySymbol = "$") =>
   `${amount < 0 ? "-" : "+"}${formatMoney(Math.abs(amount), currencySymbol)}`;
 
@@ -7723,7 +7729,7 @@ export default function PlayPage() {
                 Balance
               </p>
               <p className="text-3xl font-semibold text-neutral-900">
-                {formatMoney(myPlayerBalance, currencySymbol)}
+                {formatMoneyRounded(myPlayerBalance, currencySymbol)}
               </p>
               <p className="text-sm text-neutral-500">Available to spend</p>
               {getOutOfJailFreeCount > 0 ? (
@@ -7738,7 +7744,7 @@ export default function PlayPage() {
                 Net worth
               </p>
               <p className="text-lg font-semibold text-neutral-700">
-                {formatMoney(netWorth, currencySymbol)}
+                {formatMoneyRounded(netWorth, currencySymbol)}
               </p>
             </div>
           </div>
