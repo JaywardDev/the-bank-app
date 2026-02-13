@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { MARKET_CONFIG } from "@/lib/marketConfig";
 
 export type InvestSymbol = "SPY" | "BTC" | "AAPL" | "MSFT" | "AMZN" | "NVDA" | "GOOGL" | "META" | "TSLA";
@@ -60,12 +60,10 @@ type InvestAssetRowProps = {
   formatQty: (qty: number) => string;
   formatLocal: (amount: number, localCurrencyCode: string, decimals?: number) => string;
   currencyCode: string;
+  showDivider: boolean;
 };
 
-const coreSymbols: InvestSymbol[] = ["SPY", "BTC"];
-const stockSymbols: InvestSymbol[] = ["AAPL", "MSFT", "AMZN", "NVDA", "GOOGL", "META", "TSLA"];
-const allSymbols: InvestSymbol[] = [...coreSymbols, ...stockSymbols];
-const STOCKS_COLLAPSED_STORAGE_KEY = "ui.investStocksCollapsed";
+const allSymbols: InvestSymbol[] = ["SPY", "BTC", "AAPL", "MSFT", "AMZN", "NVDA", "GOOGL", "META", "TSLA"];
 
 const symbolNames: Partial<Record<InvestSymbol, string>> = {
   SPY: "S&P 500 ETF",
@@ -116,14 +114,15 @@ function InvestAssetRow({
   formatQty,
   formatLocal,
   currencyCode,
+  showDivider,
 }: InvestAssetRowProps) {
   const pnlToneClass = pnlLocal !== null && pnlLocal < 0 ? "text-rose-700" : "text-emerald-700";
 
   return (
-    <div className="rounded-xl border border-neutral-200 bg-white">
+    <div className={showDivider ? "border-b border-neutral-200" : ""}>
       <button
         type="button"
-        className="flex w-full items-start justify-between gap-3 p-3 text-left"
+        className="flex w-full items-start justify-between gap-3 px-1 py-3 text-left"
         onClick={onToggleExpanded}
       >
         <div>
@@ -155,7 +154,7 @@ function InvestAssetRow({
       </button>
 
       {expanded ? (
-        <div className="border-t border-neutral-200 px-3 pb-3 pt-2">
+        <div className="rounded-lg bg-neutral-50 px-3 pb-3 pt-2">
           <p className="text-xs text-neutral-500">
             {hasPrice ? `${priceLabel}${asOfDate ? ` · ${asOfDate}` : ""}` : "Market not updated"}
           </p>
@@ -250,21 +249,6 @@ export default function InvestPanel({
     TSLA: "",
   });
   const [expandedSymbol, setExpandedSymbol] = useState<InvestSymbol | null>(null);
-  const [stocksCollapsed, setStocksCollapsed] = useState(() => {
-    if (typeof window === "undefined") {
-      return true;
-    }
-
-    return window.localStorage.getItem(STOCKS_COLLAPSED_STORAGE_KEY) !== "0";
-  });
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    window.localStorage.setItem(STOCKS_COLLAPSED_STORAGE_KEY, stocksCollapsed ? "1" : "0");
-  }, [stocksCollapsed]);
 
   const feeRate = MARKET_CONFIG.tradingFeeRate;
   const taxRate = MARKET_CONFIG.capitalGainsTaxRate;
@@ -305,7 +289,7 @@ export default function InvestPanel({
     );
   }, [qtyInputs]);
 
-  const renderAssetRow = (symbol: InvestSymbol) => {
+  const renderAssetRow = (symbol: InvestSymbol, index: number) => {
     const priceRow = prices[symbol];
     const holding = holdings[symbol];
     const qty = holding?.qty ?? 0;
@@ -384,6 +368,7 @@ export default function InvestPanel({
         formatQty={formatQty}
         formatLocal={formatLocal}
         currencyCode={currencyCode}
+        showDivider={index < allSymbols.length - 1}
       />
     );
   };
@@ -410,20 +395,7 @@ export default function InvestPanel({
             <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">{tradeError}</p>
           ) : null}
 
-          {coreSymbols.map(renderAssetRow)}
-
-          <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-3">
-            <button
-              type="button"
-              className="flex w-full items-center justify-between text-left"
-              onClick={() => setStocksCollapsed((prev) => !prev)}
-            >
-              <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Stocks (Mag 7)</p>
-              <span className="text-xs font-semibold text-neutral-600">{stocksCollapsed ? "Show" : "Hide"}</span>
-            </button>
-
-            {stocksCollapsed ? null : <div className="mt-3 space-y-2">{stockSymbols.map(renderAssetRow)}</div>}
-          </div>
+          <div className="space-y-0">{allSymbols.map(renderAssetRow)}</div>
         </div>
       )}
     </section>
