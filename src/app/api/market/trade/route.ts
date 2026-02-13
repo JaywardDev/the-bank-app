@@ -35,13 +35,20 @@ type GameRow = {
 };
 
 type TradeRpcResultRow = {
-  symbol: "SPY" | "BTC" | "AAPL" | "MSFT" | "AMZN" | "NVDA" | "GOOGL" | "META" | "TSLA";
-  side: "BUY" | "SELL";
-  qty: number;
-  price: number;
-  fee: number;
-  tax: number;
-  new_cash_balance: number;
+  out_symbol?: AllowedSymbol;
+  out_side?: "BUY" | "SELL";
+  out_qty?: number;
+  out_price?: number;
+  out_fee?: number;
+  out_tax?: number;
+  out_new_cash_balance?: number;
+  symbol?: AllowedSymbol;
+  side?: "BUY" | "SELL";
+  qty?: number;
+  price?: number;
+  fee?: number;
+  tax?: number;
+  new_cash_balance?: number;
 };
 
 const supabaseUrl = (process.env.SUPABASE_URL ?? SUPABASE_URL ?? "").trim();
@@ -253,15 +260,38 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Trade execution failed." }, { status: 500 });
     }
 
+    const normalized = {
+      symbol: trade.out_symbol ?? trade.symbol,
+      side: trade.out_side ?? trade.side,
+      qty: trade.out_qty ?? trade.qty,
+      price: trade.out_price ?? trade.price,
+      fee: trade.out_fee ?? trade.fee,
+      tax: trade.out_tax ?? trade.tax,
+      new_cash_balance: trade.out_new_cash_balance ?? trade.new_cash_balance,
+    };
+
+    if (
+      normalized.symbol === undefined ||
+      normalized.side === undefined ||
+      normalized.qty === undefined ||
+      normalized.price === undefined
+    ) {
+      console.error("Trade executed but response shape unexpected", trade);
+      return NextResponse.json(
+        { error: "Trade executed but response shape unexpected" },
+        { status: 500 },
+      );
+    }
+
     return NextResponse.json({
       ok: true,
-      symbol: trade.symbol,
-      side: trade.side,
-      qty: trade.qty,
-      price: trade.price,
-      fee: trade.fee,
-      tax: trade.tax,
-      new_cash_balance: trade.new_cash_balance,
+      symbol: normalized.symbol,
+      side: normalized.side,
+      qty: normalized.qty,
+      price: normalized.price,
+      fee: normalized.fee,
+      tax: normalized.tax,
+      new_cash_balance: normalized.new_cash_balance,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error.";
