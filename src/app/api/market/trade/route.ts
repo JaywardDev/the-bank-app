@@ -3,7 +3,7 @@ import { MARKET_CONFIG } from "@/lib/marketConfig";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "@/lib/env";
 
 type TradeRequestBody = {
-  symbol?: "SPY" | "BTC";
+  symbol?: "SPY" | "BTC" | "AAPL" | "MSFT" | "AMZN" | "NVDA" | "GOOGL" | "META" | "TSLA";
   side?: "BUY" | "SELL";
   qty?: number;
 };
@@ -24,7 +24,7 @@ type GameRow = {
 };
 
 type TradeRpcResultRow = {
-  symbol: "SPY" | "BTC";
+  symbol: "SPY" | "BTC" | "AAPL" | "MSFT" | "AMZN" | "NVDA" | "GOOGL" | "META" | "TSLA";
   side: "BUY" | "SELL";
   qty: number;
   price: number;
@@ -47,6 +47,18 @@ const bankHeaders = {
   Authorization: `Bearer ${supabaseServiceRoleKey}`,
   "Content-Type": "application/json",
 };
+
+const allowedSymbols = new Set<NonNullable<TradeRequestBody["symbol"]>>([
+  "SPY",
+  "BTC",
+  "AAPL",
+  "MSFT",
+  "AMZN",
+  "NVDA",
+  "GOOGL",
+  "META",
+  "TSLA",
+]);
 
 const parseBearerToken = (authorization: string | null) => {
   if (!authorization) {
@@ -183,7 +195,7 @@ export async function POST(request: Request) {
     const side = body.side;
     const qty = Number(body.qty);
 
-    if ((symbol !== "SPY" && symbol !== "BTC") || (side !== "BUY" && side !== "SELL") || !Number.isFinite(qty) || qty <= 0) {
+    if (!allowedSymbols.has(symbol) || (side !== "BUY" && side !== "SELL") || !Number.isFinite(qty) || qty <= 0) {
       return NextResponse.json({ error: "Invalid trade payload." }, { status: 400 });
     }
 

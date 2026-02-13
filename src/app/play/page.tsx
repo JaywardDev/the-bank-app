@@ -4032,13 +4032,23 @@ export default function PlayPage() {
       setIsTradeSubmitting(true);
       setTradeError(null);
       try {
+        const payload = {
+          symbol,
+          side: side.toUpperCase() as TradeSide,
+          qty: Number(qty),
+        };
+
+        if (process.env.NODE_ENV !== "production") {
+          console.debug("market trade payload", payload);
+        }
+
         const response = await fetch("/api/market/trade", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${session.access_token}`,
           },
-          body: JSON.stringify({ symbol, side, qty }),
+          body: JSON.stringify(payload),
         });
         const responseBody = (await response.json()) as { error?: string };
         if (!response.ok) {
