@@ -226,18 +226,27 @@ export async function POST(request: Request) {
   const stooqSymbols = {
     SPY: "spy.us",
     BTC: "btcusd",
+    AAPL: "aapl.us",
+    MSFT: "msft.us",
+    AMZN: "amzn.us",
+    NVDA: "nvda.us",
+    GOOGL: "googl.us",
+    META: "meta.us",
+    TSLA: "tsla.us",
     NZDUSD: "nzdusd",
     USDPHP: "usdphp",
   } as const;
 
-  const latestBySymbol: {
-    SPY: FetchLatestCloseResult;
-    BTC: FetchLatestCloseResult;
-    NZDUSD: FetchLatestCloseResult;
-    USDPHP: FetchLatestCloseResult;
-  } = {
+  const latestBySymbol: Record<keyof typeof stooqSymbols, FetchLatestCloseResult> = {
     SPY: { close: 0, asOfDate: "" },
     BTC: { close: 0, asOfDate: "" },
+    AAPL: { close: 0, asOfDate: "" },
+    MSFT: { close: 0, asOfDate: "" },
+    AMZN: { close: 0, asOfDate: "" },
+    NVDA: { close: 0, asOfDate: "" },
+    GOOGL: { close: 0, asOfDate: "" },
+    META: { close: 0, asOfDate: "" },
+    TSLA: { close: 0, asOfDate: "" },
     NZDUSD: { close: 0, asOfDate: "" },
     USDPHP: { close: 0, asOfDate: "" },
   };
@@ -245,6 +254,13 @@ export async function POST(request: Request) {
   const diagnosticsBySymbol: Record<string, FetchAttempt[] | null> = {
     SPY: null,
     BTC: null,
+    AAPL: null,
+    MSFT: null,
+    AMZN: null,
+    NVDA: null,
+    GOOGL: null,
+    META: null,
+    TSLA: null,
     NZDUSD: null,
     USDPHP: null,
   };
@@ -275,25 +291,19 @@ export async function POST(request: Request) {
   }
 
   try {
+    const marketSymbols = ["SPY", "BTC", "AAPL", "MSFT", "AMZN", "NVDA", "GOOGL", "META", "TSLA"] as const;
+    const marketPayload = marketSymbols.map((symbol) => ({
+      symbol,
+      price: latestBySymbol[symbol].close,
+      as_of_date: latestBySymbol[symbol].asOfDate,
+      source: "stooq",
+      updated_at: new Date().toISOString(),
+    }));
+
     const upsertMarketResponse = await fetch(`${supabaseUrl}/rest/v1/market_prices?on_conflict=symbol`, {
       method: "POST",
       headers: adminHeaders,
-      body: JSON.stringify([
-        {
-          symbol: "SPY",
-          price: latestBySymbol.SPY.close,
-          as_of_date: latestBySymbol.SPY.asOfDate,
-          source: "stooq",
-          updated_at: new Date().toISOString(),
-        },
-        {
-          symbol: "BTC",
-          price: latestBySymbol.BTC.close,
-          as_of_date: latestBySymbol.BTC.asOfDate,
-          source: "stooq",
-          updated_at: new Date().toISOString(),
-        },
-      ]),
+      body: JSON.stringify(marketPayload),
     });
 
     if (!upsertMarketResponse.ok) {
@@ -351,6 +361,34 @@ export async function POST(request: Request) {
         BTC: {
           price: latestBySymbol.BTC.close,
           as_of_date: latestBySymbol.BTC.asOfDate,
+        },
+        AAPL: {
+          price: latestBySymbol.AAPL.close,
+          as_of_date: latestBySymbol.AAPL.asOfDate,
+        },
+        MSFT: {
+          price: latestBySymbol.MSFT.close,
+          as_of_date: latestBySymbol.MSFT.asOfDate,
+        },
+        AMZN: {
+          price: latestBySymbol.AMZN.close,
+          as_of_date: latestBySymbol.AMZN.asOfDate,
+        },
+        NVDA: {
+          price: latestBySymbol.NVDA.close,
+          as_of_date: latestBySymbol.NVDA.asOfDate,
+        },
+        GOOGL: {
+          price: latestBySymbol.GOOGL.close,
+          as_of_date: latestBySymbol.GOOGL.asOfDate,
+        },
+        META: {
+          price: latestBySymbol.META.close,
+          as_of_date: latestBySymbol.META.asOfDate,
+        },
+        TSLA: {
+          price: latestBySymbol.TSLA.close,
+          as_of_date: latestBySymbol.TSLA.asOfDate,
         },
         NZDUSD: {
           rate: latestBySymbol.NZDUSD.close,
