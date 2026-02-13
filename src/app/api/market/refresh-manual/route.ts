@@ -55,11 +55,15 @@ const fetchLatestMarketUpdate = async (accessToken: string): Promise<string | nu
   );
 
   if (!response.ok) {
-    throw new Error("Failed to fetch latest market update.");
+    return null;
   }
 
-  const rows = (await response.json()) as MarketPriceRow[];
-  return rows[0]?.updated_at ?? null;
+  const rows = (await response.json()) as unknown;
+  if (!Array.isArray(rows)) {
+    return null;
+  }
+
+  return (rows as MarketPriceRow[])[0]?.updated_at ?? null;
 };
 
 export async function POST(request: Request) {
@@ -72,26 +76,29 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Missing session." }, { status: 401 });
   }
 
-  const user = await fetchUser(token);
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   try {
+    const user = await fetchUser(token);
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const latestUpdatedAt = await fetchLatestMarketUpdate(token);
     if (latestUpdatedAt) {
       const lastRefresh = new Date(latestUpdatedAt);
-      const now = new Date();
-      const diffMinutes = (now.getTime() - lastRefresh.getTime()) / 60000;
+      if (!Number.isNaN(lastRefresh.getTime())) {
+        const now = new Date();
+        const rawDiffMinutes = (now.getTime() - lastRefresh.getTime()) / 60000;
+        const diffMinutes = rawDiffMinutes < 0 ? 0 : rawDiffMinutes;
 
-      if (diffMinutes < 10) {
-        return NextResponse.json(
-          {
-            error: "REFRESH_COOLDOWN",
-            minutesRemaining: Math.ceil(10 - diffMinutes),
-          },
-          { status: 429 },
-        );
+        if (diffMinutes < 10) {
+          return NextResponse.json(
+            {
+              error: "REFRESH_COOLDOWN",
+              minutesRemaining: Math.ceil(10 - diffMinutes),
+            },
+            { status: 429 },
+          );
+        }
       }
     }
 
@@ -99,13 +106,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, refreshedAt: new Date().toISOString() });
   } catch (error) {
     if (error instanceof MarketRefreshHttpError) {
-      return NextResponse.json(error.body, { status: error.status });
+      return NextResponse.json(error.body ?? { error: "MARKET_REFRESH_FAILED" }, { status: error.status });
     }
 
     console.error("manual market refresh unexpected error", error);
-    return NextResponse.json(
-      { error: "Failed to refresh market prices." },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: "FAILED_TO_REFRESH_MARKET" }, { status: 500 });
   }
 }

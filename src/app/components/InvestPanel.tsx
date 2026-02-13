@@ -28,7 +28,7 @@ type InvestPanelProps = {
   isTrading: boolean;
   tradeError: string | null;
   isRefreshingMarket: boolean;
-  onRefreshMarket: () => Promise<string | null>;
+  onRefreshMarket: () => Promise<{ message: string | null; minutesRemaining?: number }>;
   onTrade: (symbol: InvestSymbol, side: TradeSide, qty: number) => Promise<void>;
 };
 
@@ -254,6 +254,8 @@ export default function InvestPanel({
   });
   const [expandedSymbol, setExpandedSymbol] = useState<InvestSymbol | null>(null);
   const [refreshErrorToast, setRefreshErrorToast] = useState<string | null>(null);
+  const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
+  const [cooldownNow, setCooldownNow] = useState(0);
 
   useEffect(() => {
     if (!refreshErrorToast) {
@@ -268,6 +270,20 @@ export default function InvestPanel({
       clearTimeout(timeoutId);
     };
   }, [refreshErrorToast]);
+
+  useEffect(() => {
+    if (cooldownUntil === null) {
+      return;
+    }
+
+    const intervalId = setInterval(() => {
+      setCooldownNow(Date.now());
+    }, 30000);
+
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, [cooldownUntil]);
 
   const feeRate = MARKET_CONFIG.tradingFeeRate;
   const taxRate = MARKET_CONFIG.capitalGainsTaxRate;
@@ -307,6 +323,11 @@ export default function InvestPanel({
       { SPY: null, BTC: null, AAPL: null, MSFT: null, AMZN: null, NVDA: null, GOOGL: null, META: null, TSLA: null },
     );
   }, [qtyInputs]);
+
+  const isCooldownActive = cooldownUntil !== null && cooldownNow < cooldownUntil;
+  const cooldownMinutesRemaining = isCooldownActive
+    ? Math.ceil((cooldownUntil - cooldownNow) / 60000)
+    : 0;
 
   const renderAssetRow = (symbol: InvestSymbol, index: number) => {
     const priceRow = prices[symbol];
@@ -405,10 +426,14 @@ export default function InvestPanel({
             type="button"
             aria-label="Refresh Market Prices"
             title="Refresh Market Prices"
-            disabled={isRefreshingMarket}
+            disabled={isRefreshingMarket || isCooldownActive}
             onClick={() => {
               void onRefreshMarket()
-                .then((message) => {
+                .then(({ message, minutesRemaining }) => {
+                  if (typeof minutesRemaining === "number" && minutesRemaining > 0) {
+                    setCooldownUntil(Date.now() + minutesRemaining * 60 * 1000);
+                  }
+
                   if (message) {
                     setRefreshErrorToast(message);
                   }
@@ -421,6 +446,9 @@ export default function InvestPanel({
           >
             {isRefreshingMarket ? "…" : "↻"}
           </button>
+          {isCooldownActive ? (
+            <p className="text-xs text-neutral-500">Available in {cooldownMinutesRemaining}m</p>
+          ) : null}
           <button
             className="rounded-full border border-neutral-200 px-3 py-1.5 text-xs font-semibold text-neutral-600 transition hover:border-neutral-300 hover:text-neutral-800"
             type="button"
