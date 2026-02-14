@@ -30,6 +30,7 @@ type FetchLatestCloseResult = {
 
 type RefreshResult = {
   ok: true;
+  refreshedAt: string;
   results: {
     SPY: { price: number; as_of_date: string };
     BTC: { price: number; as_of_date: string };
@@ -345,6 +346,7 @@ export async function refreshMarketData(): Promise<RefreshResult> {
 
     return {
       ok: true,
+      refreshedAt,
       results: {
         SPY: {
           price: latestBySymbol.SPY.close,

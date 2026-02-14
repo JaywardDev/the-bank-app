@@ -4094,6 +4094,7 @@ export default function PlayPage() {
     try {
       const response = await fetch("/api/market/refresh-manual", {
         method: "POST",
+        cache: "no-store",
         headers: {
           Authorization: `Bearer ${accessToken}`,
         },
@@ -4104,7 +4105,7 @@ export default function PlayPage() {
         minutesRemaining?: number;
       };
       if (response.status === 429 && responseBody.error === "REFRESH_COOLDOWN") {
-        const minutesRemaining = Math.max(responseBody.minutesRemaining ?? 1, 1);
+        const minutesRemaining = Math.min(10, Math.max(responseBody.minutesRemaining ?? 1, 1));
         return {
           message: `Market was refreshed recently. Try again in ${minutesRemaining} minutes.`,
           minutesRemaining,

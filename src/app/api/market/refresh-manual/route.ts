@@ -28,6 +28,7 @@ const parseBearerToken = (authorization: string | null) => {
 
 const fetchUser = async (accessToken: string): Promise<SupabaseUser | null> => {
   const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
+    cache: "no-store",
     headers: {
       apikey: supabaseAnonKey,
       Authorization: `Bearer ${accessToken}`,
@@ -46,6 +47,7 @@ const fetchLatestMarketUpdate = async (accessToken: string): Promise<string | nu
   const response = await fetch(
     `${supabaseUrl}/rest/v1/market_prices?select=updated_at&order=updated_at.desc&limit=1`,
     {
+      cache: "no-store",
       headers: {
         apikey: supabaseAnonKey,
         Authorization: `Bearer ${accessToken}`,
@@ -118,8 +120,8 @@ export async function POST(request: Request) {
       );
     }
 
-    await refreshMarketData();
-    return NextResponse.json({ ok: true, refreshedAt: new Date().toISOString() });
+    const result = await refreshMarketData();
+    return NextResponse.json({ ok: true, refreshedAt: result.refreshedAt });
   } catch (error) {
     if (error instanceof MarketRefreshHttpError) {
       return NextResponse.json(error.body ?? { error: "MARKET_REFRESH_FAILED" }, { status: error.status });

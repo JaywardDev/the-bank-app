@@ -131,6 +131,7 @@ const fetchFromSupabase = async <T>(
   const performRequest = (token?: string) =>
     fetch(`${config.supabaseUrl}/rest/v1/${path}`, {
       ...options,
+      cache: options.cache ?? "no-store",
       headers: {
         ...baseHeaders,
         ...(token ? { Authorization: `Bearer ${token}` } : {}),

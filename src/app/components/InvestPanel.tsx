@@ -428,7 +428,7 @@ export default function InvestPanel({
         </div>
         <div className="flex items-center gap-2">
           <button
-            className="inline-flex h-8 items-center justify-center rounded-full border border-neutral-200 px-3 text-xs font-semibold text-neutral-600 transition hover:border-neutral-300 hover:text-neutral-800 disabled:cursor-not-allowed disabled:border-neutral-100 disabled:text-neutral-300"
+            className="inline-flex h-8 items-center justify-center rounded-full border border-neutral-200 px-3 text-xs font-semibold text-neutral-600 transition hover:border-neutral-300 hover:text-neutral-800 disabled:cursor-not-allowed disabled:border-neutral-100 disabled:text-neutral-300 disabled:opacity-60"
             type="button"
             aria-label="Refresh Market Prices"
             title={refreshLabel}
