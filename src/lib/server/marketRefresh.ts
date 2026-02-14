@@ -289,12 +289,13 @@ export async function refreshMarketData(): Promise<RefreshResult> {
 
   try {
     const marketSymbols = ["SPY", "BTC", "AAPL", "MSFT", "AMZN", "NVDA", "GOOGL", "META", "TSLA"] as const;
+    const refreshedAt = new Date().toISOString();
     const marketPayload = marketSymbols.map((symbol) => ({
       symbol,
       price: latestBySymbol[symbol].close,
       as_of_date: latestBySymbol[symbol].asOfDate,
       source: "stooq",
-      updated_at: new Date().toISOString(),
+      updated_at: refreshedAt,
     }));
 
     const upsertMarketResponse = await fetch(`${supabaseUrl}/rest/v1/market_prices?on_conflict=symbol`, {
@@ -321,14 +322,14 @@ export async function refreshMarketData(): Promise<RefreshResult> {
           rate: latestBySymbol.NZDUSD.close,
           as_of_date: latestBySymbol.NZDUSD.asOfDate,
           source: "stooq",
-          updated_at: new Date().toISOString(),
+          updated_at: refreshedAt,
         },
         {
           pair: "USDPHP",
           rate: latestBySymbol.USDPHP.close,
           as_of_date: latestBySymbol.USDPHP.asOfDate,
           source: "stooq",
-          updated_at: new Date().toISOString(),
+          updated_at: refreshedAt,
         },
       ]),
     });

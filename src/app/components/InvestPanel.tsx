@@ -255,7 +255,7 @@ export default function InvestPanel({
   const [expandedSymbol, setExpandedSymbol] = useState<InvestSymbol | null>(null);
   const [refreshErrorToast, setRefreshErrorToast] = useState<string | null>(null);
   const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
-  const [cooldownNow, setCooldownNow] = useState(0);
+  const [cooldownNow, setCooldownNow] = useState(() => Date.now());
 
   useEffect(() => {
     if (!refreshErrorToast) {
@@ -326,8 +326,14 @@ export default function InvestPanel({
 
   const isCooldownActive = cooldownUntil !== null && cooldownNow < cooldownUntil;
   const cooldownMinutesRemaining = isCooldownActive
-    ? Math.ceil((cooldownUntil - cooldownNow) / 60000)
+    ? Math.min(10, Math.max(1, Math.ceil((cooldownUntil - cooldownNow) / 60000)))
     : 0;
+  const isRefreshDisabled = isRefreshingMarket || isCooldownActive;
+  const refreshLabel = isRefreshingMarket
+    ? "Refreshing…"
+    : isCooldownActive
+      ? `Available in ${cooldownMinutesRemaining}m`
+      : "Refresh";
 
   const renderAssetRow = (symbol: InvestSymbol, index: number) => {
     const priceRow = prices[symbol];
@@ -422,16 +428,22 @@ export default function InvestPanel({
         </div>
         <div className="flex items-center gap-2">
           <button
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-neutral-200 text-sm text-neutral-600 transition hover:border-neutral-300 hover:text-neutral-800 disabled:cursor-not-allowed disabled:border-neutral-100 disabled:text-neutral-300"
+            className="inline-flex h-8 items-center justify-center rounded-full border border-neutral-200 px-3 text-xs font-semibold text-neutral-600 transition hover:border-neutral-300 hover:text-neutral-800 disabled:cursor-not-allowed disabled:border-neutral-100 disabled:text-neutral-300"
             type="button"
             aria-label="Refresh Market Prices"
-            title="Refresh Market Prices"
-            disabled={isRefreshingMarket || isCooldownActive}
+            title={refreshLabel}
+            disabled={isRefreshDisabled}
             onClick={() => {
+              if (isRefreshDisabled) {
+                return;
+              }
+
               void onRefreshMarket()
                 .then(({ message, minutesRemaining }) => {
                   if (typeof minutesRemaining === "number" && minutesRemaining > 0) {
-                    setCooldownUntil(Date.now() + minutesRemaining * 60 * 1000);
+                    const now = Date.now();
+                    setCooldownNow(now);
+                    setCooldownUntil(now + minutesRemaining * 60 * 1000);
                   }
 
                   if (message) {
@@ -444,11 +456,8 @@ export default function InvestPanel({
                 });
             }}
           >
-            {isRefreshingMarket ? "…" : "↻"}
+            {refreshLabel}
           </button>
-          {isCooldownActive ? (
-            <p className="text-xs text-neutral-500">Available in {cooldownMinutesRemaining}m</p>
-          ) : null}
           <button
             className="rounded-full border border-neutral-200 px-3 py-1.5 text-xs font-semibold text-neutral-600 transition hover:border-neutral-300 hover:text-neutral-800"
             type="button"

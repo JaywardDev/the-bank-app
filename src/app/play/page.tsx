@@ -4118,14 +4118,25 @@ export default function PlayPage() {
       if (gameId) {
         await loadGameData(gameId, accessToken);
       } else {
-        await loadMarketPrices(accessToken);
+        await Promise.all([
+          loadMarketPrices(accessToken),
+          loadInvestFxRate(gameMeta?.board_pack_id, accessToken),
+        ]);
       }
 
       return { message: null };
     } finally {
       setIsMarketRefreshSubmitting(false);
     }
-  }, [gameId, isMarketRefreshSubmitting, loadGameData, loadMarketPrices, session?.access_token]);
+  }, [
+    gameId,
+    gameMeta?.board_pack_id,
+    isMarketRefreshSubmitting,
+    loadGameData,
+    loadInvestFxRate,
+    loadMarketPrices,
+    session?.access_token,
+  ]);
 
   const requestFirstRoundResync = useCallback(
     (accessTokenOverride?: string) => {

@@ -66,6 +66,30 @@ const fetchLatestMarketUpdate = async (accessToken: string): Promise<string | nu
   return (rows as MarketPriceRow[])[0]?.updated_at ?? null;
 };
 
+const MANUAL_REFRESH_COOLDOWN_MINUTES = 10;
+
+const getCooldownMinutesRemaining = (latestUpdatedAt: string | null): number | null => {
+  if (!latestUpdatedAt) {
+    return null;
+  }
+
+  const lastRefresh = new Date(latestUpdatedAt);
+  if (Number.isNaN(lastRefresh.getTime())) {
+    return null;
+  }
+
+  const nowMs = Date.now();
+  const elapsedMinutesRaw = (nowMs - lastRefresh.getTime()) / 60000;
+  const elapsedMinutes = Math.max(0, elapsedMinutesRaw);
+
+  if (elapsedMinutes >= MANUAL_REFRESH_COOLDOWN_MINUTES) {
+    return null;
+  }
+
+  const unclampedRemaining = Math.ceil(MANUAL_REFRESH_COOLDOWN_MINUTES - elapsedMinutes);
+  return Math.min(MANUAL_REFRESH_COOLDOWN_MINUTES, Math.max(1, unclampedRemaining));
+};
+
 export async function POST(request: Request) {
   if (!supabaseUrl || !supabaseAnonKey) {
     return NextResponse.json({ error: "Supabase is not configured." }, { status: 500 });
@@ -83,23 +107,15 @@ export async function POST(request: Request) {
     }
 
     const latestUpdatedAt = await fetchLatestMarketUpdate(token);
-    if (latestUpdatedAt) {
-      const lastRefresh = new Date(latestUpdatedAt);
-      if (!Number.isNaN(lastRefresh.getTime())) {
-        const now = new Date();
-        const rawDiffMinutes = (now.getTime() - lastRefresh.getTime()) / 60000;
-        const diffMinutes = rawDiffMinutes < 0 ? 0 : rawDiffMinutes;
-
-        if (diffMinutes < 10) {
-          return NextResponse.json(
-            {
-              error: "REFRESH_COOLDOWN",
-              minutesRemaining: Math.ceil(10 - diffMinutes),
-            },
-            { status: 429 },
-          );
-        }
-      }
+    const minutesRemaining = getCooldownMinutesRemaining(latestUpdatedAt);
+    if (minutesRemaining !== null) {
+      return NextResponse.json(
+        {
+          error: "REFRESH_COOLDOWN",
+          minutesRemaining,
+        },
+        { status: 429 },
+      );
     }
 
     await refreshMarketData();
