@@ -143,9 +143,9 @@ export default function BoardViewport({
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-[url('/icons/board.svg')] bg-cover bg-center bg-no-repeat">
-      <div className="grid h-full w-full place-items-center p-2 md:p-3">
+      <div className="grid h-full w-full place-items-center p-1">
         <div className="relative aspect-square h-full max-h-full max-w-full">
-          <BoardSquare>
+          <BoardSquare variant="viewport">
             <BoardTrack
               tiles={boardTiles}
               economy={boardEconomy}
