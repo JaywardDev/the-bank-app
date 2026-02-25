@@ -9,6 +9,7 @@ type PlayV2ShellProps = {
   loading: boolean;
   notice: string | null;
   debugPanel: ReactNode;
+  boardViewport: ReactNode;
 };
 
 export default function PlayV2Shell({
@@ -18,6 +19,7 @@ export default function PlayV2Shell({
   loading,
   notice,
   debugPanel,
+  boardViewport,
 }: PlayV2ShellProps) {
   const [leftOpen, setLeftOpen] = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
@@ -27,9 +29,7 @@ export default function PlayV2Shell({
     <main className="relative h-screen w-screen overflow-hidden bg-neutral-950 text-white">
       <div className="play-v2-shell-content">
         <section className="absolute inset-0 p-4 md:p-6 lg:p-8">
-          <div className="flex h-full items-center justify-center rounded-2xl border border-white/15 bg-neutral-900/70">
-            <p className="text-sm font-medium uppercase tracking-[0.2em] text-white/70">Board viewport</p>
-          </div>
+          <div className="h-full w-full">{boardViewport}</div>
         </section>
 
         <section className="pointer-events-none absolute left-1/2 top-3 z-20 w-[min(92vw,920px)] -translate-x-1/2 rounded-xl border border-white/15 bg-black/55 p-3 backdrop-blur">

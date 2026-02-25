@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 import PlayV2Shell from "@/components/play-v2/PlayV2Shell";
+import BoardViewport from "@/components/play-v2/BoardViewport";
 
 type GameMeta = {
   id: string;
@@ -18,6 +19,7 @@ type Player = {
   user_id: string;
   display_name: string;
   created_at: string;
+  position: number | null;
 };
 
 type GameState = {
@@ -101,6 +103,7 @@ export default function PlayV2Page() {
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
   const [needsAuth, setNeedsAuth] = useState(false);
+  const [selectedTileIndex, setSelectedTileIndex] = useState<number | null>(0);
 
   const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
 
@@ -115,7 +118,7 @@ export default function PlayV2Page() {
 
   const loadPlayers = useCallback(async (gameId: string, accessToken?: string) => {
     const rows = await supabaseClient.fetchFromSupabase<Player[]>(
-      `players?select=id,user_id,display_name,created_at&game_id=eq.${gameId}&order=created_at.asc`,
+      `players?select=id,user_id,display_name,created_at,position&game_id=eq.${gameId}&order=created_at.asc`,
       { method: "GET" },
       accessToken,
     );
@@ -339,6 +342,16 @@ export default function PlayV2Page() {
       turnPlayerLabel={turnPlayerLabel}
       loading={loading}
       notice={notice}
+      boardViewport={(
+        <BoardViewport
+          boardPackId={gameMeta?.board_pack_id ?? null}
+          players={players}
+          ownershipByTile={ownershipByTile}
+          currentPlayerId={turnPlayerId}
+          selectedTileIndex={selectedTileIndex}
+          onSelectTileIndex={setSelectedTileIndex}
+        />
+      )}
       debugPanel={(
         <div className="space-y-4">
           <h1 className="text-xl font-semibold">Play V2 Debug</h1>

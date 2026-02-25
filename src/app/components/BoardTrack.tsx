@@ -34,6 +34,8 @@ type BoardTrackProps = {
   currentPlayerId?: string | null;
   lastMovedPlayerId?: string | null;
   lastMovedTileIndex?: number | null;
+  selectedTileIndex?: number | null;
+  onTileClick?: (tileIndex: number) => void;
 };
 
 const fallbackTiles: BoardTile[] = Array.from({ length: 40 }, (_, index) => ({
@@ -64,6 +66,8 @@ export default function BoardTrack({
   currentPlayerId,
   lastMovedPlayerId,
   lastMovedTileIndex,
+  selectedTileIndex,
+  onTileClick,
   economy,
   lastRoll,
 }: BoardTrackProps) {
@@ -122,9 +126,25 @@ export default function BoardTrack({
           return (
             <article
               key={tile.tile_id}
+              role={onTileClick ? "button" : undefined}
+              tabIndex={onTileClick ? 0 : undefined}
+              onClick={() => onTileClick?.(tile.index)}
+              onKeyDown={(event) => {
+                if (!onTileClick) {
+                  return;
+                }
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  onTileClick(tile.index);
+                }
+              }}
               className={`relative overflow-hidden border border-transparent bg-[#f3f0e6] text-neutral-800 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.2)] ${
                 isCorner ? "rounded-[6px]" : "rounded-sm"
-              } ${lastMovedTileIndex === tile.index ? "ring-2 ring-amber-400" : ""}`}
+              } ${lastMovedTileIndex === tile.index ? "ring-2 ring-amber-400" : ""} ${
+                selectedTileIndex === tile.index
+                  ? "outline outline-2 outline-indigo-500 outline-offset-[-3px]"
+                  : ""
+              } ${onTileClick ? "cursor-pointer transition hover:bg-[#f8f4eb]" : ""}`}
               style={{
                 gridRowStart: position.row + 1,
                 gridColumnStart: position.col + 1,
