@@ -1,5 +1,5 @@
 import Image from "next/image";
-import type { CSSProperties } from "react";
+import type { CSSProperties, PointerEvent } from "react";
 import HousesDots from "@/app/components/HousesDots";
 import TokenStack from "@/app/components/TokenStack";
 import type { BoardTile } from "@/lib/boardPacks";
@@ -36,6 +36,8 @@ type BoardTrackProps = {
   lastMovedTileIndex?: number | null;
   selectedTileIndex?: number | null;
   onTileClick?: (tileIndex: number) => void;
+  onTilePointerDown?: (tileIndex: number, tileRect: DOMRect) => void;
+  onTilePointerRelease?: () => void;
 };
 
 const fallbackTiles: BoardTile[] = Array.from({ length: 40 }, (_, index) => ({
@@ -68,6 +70,8 @@ export default function BoardTrack({
   lastMovedTileIndex,
   selectedTileIndex,
   onTileClick,
+  onTilePointerDown,
+  onTilePointerRelease,
   economy,
   lastRoll,
 }: BoardTrackProps) {
@@ -123,12 +127,24 @@ export default function BoardTrack({
               ? formatCurrencyCompact(currentRent, boardEconomy.currency.symbol)
               : null;
 
+          const handleTilePointerDown = (event: PointerEvent<HTMLElement>) => {
+            onTilePointerDown?.(tile.index, event.currentTarget.getBoundingClientRect());
+          };
+
+          const handleTilePointerRelease = () => {
+            onTilePointerRelease?.();
+          };
+
           return (
             <article
               key={tile.tile_id}
               role={onTileClick ? "button" : undefined}
               tabIndex={onTileClick ? 0 : undefined}
               onClick={() => onTileClick?.(tile.index)}
+              onPointerDown={handleTilePointerDown}
+              onPointerUp={handleTilePointerRelease}
+              onPointerCancel={handleTilePointerRelease}
+              onPointerLeave={handleTilePointerRelease}
               onKeyDown={(event) => {
                 if (!onTileClick) {
                   return;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { DEFAULT_BOARD_PACK_ECONOMY } from "@/lib/boardPacks";
 import BoardSquare from "@/app/components/BoardSquare";
 import BoardTrack from "@/app/components/BoardTrack";
@@ -62,6 +62,11 @@ const getTileTypeLabel = (tileType: string) => {
   }
 };
 
+type PressedTileTooltip = {
+  tileIndex: number;
+  tileRect: DOMRect;
+};
+
 export default function BoardViewport({
   boardPackId,
   players,
@@ -73,6 +78,7 @@ export default function BoardViewport({
   const boardPack = useMemo(() => getBoardPackById(boardPackId), [boardPackId]);
   const boardTiles = useMemo(() => boardPack?.tiles ?? [], [boardPack]);
   const boardEconomy = boardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY;
+  const [pressedTileTooltip, setPressedTileTooltip] = useState<PressedTileTooltip | null>(null);
 
   const boardPlayers = useMemo(
     () =>
@@ -93,48 +99,84 @@ export default function BoardViewport({
     [players],
   );
 
-  const selectedTile = useMemo(() => {
-    if (selectedTileIndex === null) {
+  const tooltipTile = useMemo(() => {
+    if (!pressedTileTooltip) {
       return null;
     }
-    return boardTiles.find((tile) => tile.index === selectedTileIndex) ?? fallbackTile(selectedTileIndex);
-  }, [boardTiles, selectedTileIndex]);
+    return (
+      boardTiles.find((tile) => tile.index === pressedTileTooltip.tileIndex) ??
+      fallbackTile(pressedTileTooltip.tileIndex)
+    );
+  }, [boardTiles, pressedTileTooltip]);
 
   const ownerLabel = useMemo(() => {
-    if (selectedTileIndex === null) {
+    if (!pressedTileTooltip) {
       return "—";
     }
-    const ownerId = ownershipByTile[selectedTileIndex]?.owner_player_id;
+    const ownerId = ownershipByTile[pressedTileTooltip.tileIndex]?.owner_player_id;
     if (!ownerId) {
       return "Unowned";
     }
     return players.find((player) => player.id === ownerId)?.display_name ?? "Player";
-  }, [ownershipByTile, players, selectedTileIndex]);
+  }, [ownershipByTile, players, pressedTileTooltip]);
+
+  const tooltipPosition = useMemo(() => {
+    if (!pressedTileTooltip || typeof window === "undefined") {
+      return null;
+    }
+    const spacing = 8;
+    const tooltipWidth = 220;
+    const tooltipHeight = 132;
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const { tileRect } = pressedTileTooltip;
+    const rightPreferred = tileRect.right + spacing;
+    const leftFallback = tileRect.left - tooltipWidth - spacing;
+    const left = rightPreferred + tooltipWidth <= viewportWidth - spacing
+      ? rightPreferred
+      : Math.max(spacing, leftFallback);
+    const unclampedTop = tileRect.top + tileRect.height / 2 - tooltipHeight / 2;
+    const top = Math.max(spacing, Math.min(unclampedTop, viewportHeight - tooltipHeight - spacing));
+
+    return { left, top };
+  }, [pressedTileTooltip]);
 
   return (
-    <div className="relative h-full w-full">
-      <BoardSquare>
-        <BoardTrack
-          tiles={boardTiles}
-          economy={boardEconomy}
-          players={boardPlayers}
-          ownershipByTile={ownershipByTile}
-          playerColorsById={playerColorsById}
-          currentPlayerId={currentPlayerId}
-          selectedTileIndex={selectedTileIndex}
-          onTileClick={onSelectTileIndex}
-        />
-      </BoardSquare>
+    <div className="relative h-full w-full overflow-hidden bg-[url('/icons/board.svg')] bg-cover bg-center bg-no-repeat">
+      <div className="grid h-full w-full place-items-center p-2 md:p-3">
+        <div className="relative aspect-square h-full max-h-full max-w-full">
+          <BoardSquare>
+            <BoardTrack
+              tiles={boardTiles}
+              economy={boardEconomy}
+              players={boardPlayers}
+              ownershipByTile={ownershipByTile}
+              playerColorsById={playerColorsById}
+              currentPlayerId={currentPlayerId}
+              selectedTileIndex={selectedTileIndex}
+              onTileClick={onSelectTileIndex}
+              onTilePointerDown={(tileIndex, tileRect) => {
+                setPressedTileTooltip({ tileIndex, tileRect });
+                onSelectTileIndex(tileIndex);
+              }}
+              onTilePointerRelease={() => setPressedTileTooltip(null)}
+            />
+          </BoardSquare>
+        </div>
+      </div>
 
-      {selectedTile ? (
-        <section className="pointer-events-none absolute bottom-4 left-4 z-20 w-[min(90vw,320px)] rounded-xl border border-white/20 bg-black/70 p-3 text-xs text-white shadow-2xl backdrop-blur-md">
-          <p className="text-[11px] uppercase tracking-[0.18em] text-white/60">Tile {selectedTile.index}</p>
-          <p className="mt-1 text-base font-semibold text-white">{selectedTile.name}</p>
+      {tooltipTile && tooltipPosition ? (
+        <section
+          className="pointer-events-none fixed z-40 w-[220px] rounded-lg border border-white/20 bg-neutral-950 p-3 text-xs text-white shadow-2xl"
+          style={{ left: tooltipPosition.left, top: tooltipPosition.top }}
+        >
+          <p className="text-[11px] uppercase tracking-[0.18em] text-white/60">Tile {tooltipTile.index}</p>
+          <p className="mt-1 text-sm font-semibold text-white">{tooltipTile.name}</p>
           <dl className="mt-2 grid grid-cols-[auto,1fr] gap-x-2 gap-y-1 text-white/85">
             <dt className="text-white/60">Type</dt>
-            <dd>{getTileTypeLabel(selectedTile.type)}</dd>
+            <dd>{getTileTypeLabel(tooltipTile.type)}</dd>
             <dt className="text-white/60">Price</dt>
-            <dd>{typeof selectedTile.price === "number" ? `$${selectedTile.price}` : "—"}</dd>
+            <dd>{typeof tooltipTile.price === "number" ? `$${tooltipTile.price}` : "—"}</dd>
             <dt className="text-white/60">Owner</dt>
             <dd>{ownerLabel}</dd>
           </dl>

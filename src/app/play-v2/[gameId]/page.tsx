@@ -103,7 +103,7 @@ export default function PlayV2Page() {
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
   const [needsAuth, setNeedsAuth] = useState(false);
-  const [selectedTileIndex, setSelectedTileIndex] = useState<number | null>(0);
+  const [selectedTileIndex, setSelectedTileIndex] = useState<number | null>(null);
 
   const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
 

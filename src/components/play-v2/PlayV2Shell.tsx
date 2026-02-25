@@ -28,12 +28,8 @@ export default function PlayV2Shell({
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-neutral-950 text-white">
       <div className="play-v2-shell-content">
-        <section className="absolute inset-0 p-4 md:p-6 lg:p-8">
-          <div className="h-full w-full">{boardViewport}</div>
-        </section>
-
-        <section className="pointer-events-none absolute left-1/2 top-3 z-20 w-[min(92vw,920px)] -translate-x-1/2 rounded-xl border border-white/15 bg-black/55 p-3 backdrop-blur">
-          <div className="grid grid-cols-3 gap-3 text-xs sm:text-sm">
+        <section className="absolute inset-x-0 top-0 z-20 h-14 border-b border-white/10 bg-neutral-950 px-3 md:h-16 md:px-4">
+          <div className="grid h-full grid-cols-3 items-center gap-3 text-xs sm:text-sm">
             <div>
               <p className="text-white/60">Cash</p>
               <p className="font-semibold">{cashLabel}</p>
@@ -47,28 +43,54 @@ export default function PlayV2Shell({
               <p className="font-semibold">{turnPlayerLabel}</p>
             </div>
           </div>
-          {loading ? <p className="mt-2 text-xs text-white/70">Loading…</p> : null}
-          {notice ? <p className="mt-2 text-xs text-red-300">{notice}</p> : null}
         </section>
 
-        <button
-          type="button"
-          onClick={() => setLeftOpen((value) => !value)}
-          className="absolute left-2 top-1/2 z-30 -translate-y-1/2 rounded-r-lg border border-white/20 bg-black/70 px-2 py-3 text-xs font-semibold uppercase tracking-wide"
-        >
-          {leftOpen ? "Close" : "Left"}
-        </button>
+        {loading ? (
+          <p className="absolute right-3 top-[3.5rem] z-20 text-xs text-white/70 md:top-[4.25rem]">Loading…</p>
+        ) : null}
+        {notice ? (
+          <p className="absolute left-3 top-[3.5rem] z-20 text-xs text-red-300 md:top-[4.25rem]">{notice}</p>
+        ) : null}
 
-        <button
-          type="button"
-          onClick={() => setRightOpen((value) => !value)}
-          className="absolute right-2 top-1/2 z-30 -translate-y-1/2 rounded-l-lg border border-white/20 bg-black/70 px-2 py-3 text-xs font-semibold uppercase tracking-wide"
-        >
-          {rightOpen ? "Close" : "Right"}
-        </button>
+        <section className="absolute inset-x-0 bottom-0 top-14 md:top-16">
+          {boardViewport}
+
+          <button
+            type="button"
+            onClick={() => setLeftOpen((value) => !value)}
+            className="absolute left-0 top-1/2 z-30 -translate-y-1/2 rounded-r-lg border border-white/20 bg-neutral-900 px-2 py-3 text-xs font-semibold uppercase tracking-wide"
+          >
+            {leftOpen ? "Close" : "Left"}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setRightOpen((value) => !value)}
+            className="absolute right-0 top-1/2 z-30 -translate-y-1/2 rounded-l-lg border border-white/20 bg-neutral-900 px-2 py-3 text-xs font-semibold uppercase tracking-wide"
+          >
+            {rightOpen ? "Close" : "Right"}
+          </button>
+
+          <section className="absolute bottom-2 right-2 z-20 flex flex-col gap-2">
+            {[
+              { label: "Roll" },
+              { label: "End" },
+              { label: "Confirm" },
+            ].map((button) => (
+              <button
+                key={button.label}
+                type="button"
+                disabled
+                className="rounded-full border border-white/25 bg-neutral-900 px-4 py-2 text-sm font-semibold text-white/70 disabled:cursor-not-allowed"
+              >
+                {button.label}
+              </button>
+            ))}
+          </section>
+        </section>
 
         <aside
-          className={`absolute left-0 top-0 z-20 h-full w-72 border-r border-white/15 bg-neutral-900/95 p-4 transition-transform duration-200 ${
+          className={`absolute bottom-0 left-0 top-14 z-20 w-72 border-r border-white/15 bg-neutral-900 p-4 transition-transform duration-200 md:top-16 ${
             leftOpen ? "translate-x-0" : "-translate-x-full"
           }`}
         >
@@ -76,34 +98,17 @@ export default function PlayV2Shell({
         </aside>
 
         <aside
-          className={`absolute right-0 top-0 z-20 h-full w-72 border-l border-white/15 bg-neutral-900/95 p-4 transition-transform duration-200 ${
+          className={`absolute bottom-0 right-0 top-14 z-20 w-72 border-l border-white/15 bg-neutral-900 p-4 transition-transform duration-200 md:top-16 ${
             rightOpen ? "translate-x-0" : "translate-x-full"
           }`}
         >
           <h2 className="text-sm font-semibold uppercase tracking-wide text-white/80">Right Drawer</h2>
         </aside>
 
-        <section className="absolute bottom-4 right-4 z-20 flex flex-col gap-2">
-          {[
-            { label: "Roll" },
-            { label: "End" },
-            { label: "Confirm" },
-          ].map((button) => (
-            <button
-              key={button.label}
-              type="button"
-              disabled
-              className="rounded-full border border-white/25 bg-white/10 px-4 py-2 text-sm font-semibold text-white/70 disabled:cursor-not-allowed"
-            >
-              {button.label}
-            </button>
-          ))}
-        </section>
-
         <button
           type="button"
           onClick={() => setDevOpen((value) => !value)}
-          className="absolute bottom-4 left-4 z-30 rounded border border-white/30 bg-black/65 px-2 py-1 text-xs font-semibold"
+          className="absolute bottom-2 left-2 z-30 rounded border border-white/30 bg-neutral-900 px-2 py-1 text-xs font-semibold"
         >
           DEV
         </button>
