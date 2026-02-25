@@ -16,7 +16,6 @@ type Player = {
   id: string;
   user_id: string;
   display_name: string;
-  cash?: number | null;
   created_at: string;
 };
 
@@ -24,6 +23,7 @@ type GameState = {
   game_id: string;
   version: number;
   current_player_id: string | null;
+  balances: Record<string, number> | null;
 };
 
 type GameEvent = {
@@ -105,7 +105,7 @@ export default function PlayV2Page() {
 
   const loadPlayers = useCallback(async (gameId: string, accessToken?: string) => {
     const rows = await supabaseClient.fetchFromSupabase<Player[]>(
-      `players?select=id,user_id,display_name,cash,created_at&game_id=eq.${gameId}&order=created_at.asc`,
+      `players?select=id,user_id,display_name,created_at&game_id=eq.${gameId}&order=created_at.asc`,
       { method: "GET" },
       accessToken,
     );
@@ -114,7 +114,7 @@ export default function PlayV2Page() {
 
   const loadGameState = useCallback(async (gameId: string, accessToken?: string) => {
     const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
-      `game_state?select=game_id,version,current_player_id&game_id=eq.${gameId}&limit=1`,
+      `game_state?select=game_id,version,current_player_id,balances&game_id=eq.${gameId}&limit=1`,
       { method: "GET" },
       accessToken,
     );
@@ -283,10 +283,14 @@ export default function PlayV2Page() {
     session,
   ]);
 
+  const turnPlayerId = gameState?.current_player_id ?? null;
+
   const currentTurnPlayer = useMemo(
-    () => players.find((player) => player.id === gameState?.current_player_id) ?? null,
-    [gameState?.current_player_id, players],
+    () => players.find((player) => player.id === turnPlayerId) ?? null,
+    [players, turnPlayerId],
   );
+
+  const turnPlayerMissingFromPlayers = Boolean(turnPlayerId) && !currentTurnPlayer;
 
   const lastFiveEvents = useMemo(() => events.slice(0, 5), [events]);
 
@@ -314,7 +318,11 @@ export default function PlayV2Page() {
         <p><strong>gameId:</strong> {routeGameId ?? "—"}</p>
         <p><strong>current user id:</strong> {session?.user.id ?? "—"}</p>
         <p><strong>gameMeta.status:</strong> {gameMeta?.status ?? "—"}</p>
+        <p><strong>turnPlayerId (game_state.current_player_id):</strong> {turnPlayerId ?? "—"}</p>
         <p><strong>current turn player:</strong> {currentTurnPlayer ? `${currentTurnPlayer.id} / ${currentTurnPlayer.display_name}` : "—"}</p>
+        {turnPlayerMissingFromPlayers ? (
+          <p className="text-red-600"><strong>warning:</strong> Turn player id {turnPlayerId} not found in players list</p>
+        ) : null}
         <p><strong>gameState.version:</strong> {gameState?.version ?? "—"}</p>
         <p><strong>ownership rows:</strong> {Object.keys(ownershipByTile).length}</p>
         <p><strong>trade proposals:</strong> {tradeProposals.length}</p>
@@ -326,7 +334,9 @@ export default function PlayV2Page() {
         <h2 className="font-semibold">Players</h2>
         <ul className="mt-2 list-disc space-y-1 pl-5">
           {players.map((player) => (
-            <li key={player.id}>{player.display_name} — cash: {player.cash ?? "—"}</li>
+            <li key={player.id}>
+              {player.display_name} — id: {player.id} — cash: {gameState?.balances?.[player.id] ?? "—"}
+            </li>
           ))}
         </ul>
       </section>
