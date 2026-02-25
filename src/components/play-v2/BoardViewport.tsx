@@ -70,6 +70,7 @@ type PressedTileTooltip = {
 const MIN_SCALE = 1;
 const MAX_SCALE = 2.2;
 const PAN_ACTIVATION_DISTANCE_PX = 8;
+const SCENE_EXTENT = 1.4;
 
 type PointerPosition = {
   x: number;
@@ -113,8 +114,10 @@ export default function BoardViewport({
 
     const stageRect = stage.getBoundingClientRect();
     const clampedScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, nextScale));
-    const extraWidth = stageRect.width * clampedScale - stageRect.width;
-    const extraHeight = stageRect.height * clampedScale - stageRect.height;
+    const scaledSceneWidth = stageRect.width * SCENE_EXTENT * clampedScale;
+    const scaledSceneHeight = stageRect.height * SCENE_EXTENT * clampedScale;
+    const extraWidth = scaledSceneWidth - stageRect.width;
+    const extraHeight = scaledSceneHeight - stageRect.height;
     const maxPanX = Math.max(0, extraWidth / 2);
     const maxPanY = Math.max(0, extraHeight / 2);
 
@@ -368,7 +371,7 @@ export default function BoardViewport({
   }, [applyTransform]);
 
   return (
-    <div className="relative h-full w-full overflow-hidden bg-[url('/icons/board.svg')] bg-cover bg-center bg-no-repeat">
+    <div className="relative h-full w-full overflow-hidden">
       <div className="flex h-full w-full items-center justify-center p-1">
         <div
           ref={stageRef}
@@ -380,38 +383,41 @@ export default function BoardViewport({
           onWheel={handleWheel}
         >
           <div
-            className="h-full w-full"
+            className="absolute inset-0"
             style={{
               transform: `translate(${translateX}px, ${translateY}px) scale(${scale})`,
               transformOrigin: "center center",
             }}
           >
-            <BoardSquare variant="viewport">
-              <BoardTrack
-                density="compact"
-                tiles={boardTiles}
-                economy={boardEconomy}
-                players={boardPlayers}
-                ownershipByTile={ownershipByTile}
-                playerColorsById={playerColorsById}
-                currentPlayerId={currentPlayerId}
-                selectedTileIndex={selectedTileIndex}
-                onTileClick={(tileIndex) => {
-                  if (suppressTileInteractionRef.current) {
-                    return;
-                  }
-                  onSelectTileIndex(tileIndex);
-                }}
-                onTilePointerDown={(tileIndex, tileRect) => {
-                  if (suppressTileInteractionRef.current) {
-                    return;
-                  }
-                  setPressedTileTooltip({ tileIndex, tileRect });
-                  onSelectTileIndex(tileIndex);
-                }}
-                onTilePointerRelease={() => setPressedTileTooltip(null)}
-              />
-            </BoardSquare>
+            <div className="absolute inset-[-20%] z-0 bg-[url('/icons/board.svg')] bg-cover bg-center bg-no-repeat" />
+            <div className="absolute inset-0 z-10 flex items-center justify-center">
+              <BoardSquare variant="viewport">
+                <BoardTrack
+                  density="compact"
+                  tiles={boardTiles}
+                  economy={boardEconomy}
+                  players={boardPlayers}
+                  ownershipByTile={ownershipByTile}
+                  playerColorsById={playerColorsById}
+                  currentPlayerId={currentPlayerId}
+                  selectedTileIndex={selectedTileIndex}
+                  onTileClick={(tileIndex) => {
+                    if (suppressTileInteractionRef.current) {
+                      return;
+                    }
+                    onSelectTileIndex(tileIndex);
+                  }}
+                  onTilePointerDown={(tileIndex, tileRect) => {
+                    if (suppressTileInteractionRef.current) {
+                      return;
+                    }
+                    setPressedTileTooltip({ tileIndex, tileRect });
+                    onSelectTileIndex(tileIndex);
+                  }}
+                  onTilePointerRelease={() => setPressedTileTooltip(null)}
+                />
+              </BoardSquare>
+            </div>
           </div>
 
           <button
