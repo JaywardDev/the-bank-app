@@ -372,25 +372,25 @@ export default function BoardViewport({
 
   return (
     <div className="relative h-full w-full overflow-hidden">
-      <div className="flex h-full w-full items-center justify-center p-1">
+      <div
+        ref={stageRef}
+        className="relative h-full w-full touch-none bg-[url('/icons/board.svg')] bg-cover bg-center bg-no-repeat"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerEnd}
+        onPointerCancel={handlePointerEnd}
+        onWheel={handleWheel}
+      >
         <div
-          ref={stageRef}
-          className="relative aspect-square h-full w-auto max-h-full max-w-full touch-none"
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerEnd}
-          onPointerCancel={handlePointerEnd}
-          onWheel={handleWheel}
+          className="absolute inset-0"
+          style={{
+            transform: `translate(${translateX}px, ${translateY}px) scale(${scale})`,
+            transformOrigin: "center center",
+          }}
         >
-          <div
-            className="absolute inset-0"
-            style={{
-              transform: `translate(${translateX}px, ${translateY}px) scale(${scale})`,
-              transformOrigin: "center center",
-            }}
-          >
-            <div className="absolute inset-[-20%] z-0 bg-[url('/icons/board.svg')] bg-cover bg-center bg-no-repeat" />
-            <div className="absolute inset-0 z-10 flex items-center justify-center">
+          <div className="absolute inset-[-20%] z-0 bg-[url('/icons/board.svg')] bg-cover bg-center bg-no-repeat" />
+          <div className="absolute inset-0 z-10 flex items-center justify-center p-1">
+            <div className="relative aspect-square h-full w-auto max-h-full max-w-full">
               <BoardSquare variant="viewport">
                 <BoardTrack
                   density="compact"
@@ -419,15 +419,15 @@ export default function BoardViewport({
               </BoardSquare>
             </div>
           </div>
-
-          <button
-            type="button"
-            onClick={handleRecenter}
-            className="absolute right-2 top-2 z-20 rounded-full border border-white/20 bg-black/70 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-white shadow-lg transition hover:bg-black/80"
-          >
-            Recenter
-          </button>
         </div>
+
+        <button
+          type="button"
+          onClick={handleRecenter}
+          className="absolute right-2 top-2 z-20 rounded-full border border-white/20 bg-black/70 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-white shadow-lg transition hover:bg-black/80"
+        >
+          Recenter
+        </button>
       </div>
 
       {tooltipTile && tooltipPosition ? (
