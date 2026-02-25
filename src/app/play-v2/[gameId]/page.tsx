@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
+import PlayV2Shell from "@/components/play-v2/PlayV2Shell";
 
 type GameMeta = {
   id: string;
@@ -70,6 +71,15 @@ type PurchaseMortgage = {
 };
 
 const SESSION_EXPIRED_MESSAGE = "Session expired — please sign in again";
+
+const formatMoney = (value: number | null) => {
+  if (value === null) return "—";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(value);
+};
 
 export default function PlayV2Page() {
   const router = useRouter();
@@ -290,6 +300,16 @@ export default function PlayV2Page() {
     [players, turnPlayerId],
   );
 
+  const currentUserPlayer = useMemo(
+    () => players.find((player) => player.user_id === session?.user.id) ?? null,
+    [players, session?.user.id],
+  );
+
+  const currentUserCash = useMemo(() => {
+    if (!currentUserPlayer) return null;
+    return gameState?.balances?.[currentUserPlayer.id] ?? null;
+  }, [currentUserPlayer, gameState?.balances]);
+
   const turnPlayerMissingFromPlayers = Boolean(turnPlayerId) && !currentTurnPlayer;
 
   const lastFiveEvents = useMemo(() => events.slice(0, 5), [events]);
@@ -308,55 +328,65 @@ export default function PlayV2Page() {
     );
   }
 
+  const turnPlayerLabel = currentTurnPlayer
+    ? `${currentTurnPlayer.display_name}`
+    : turnPlayerId ?? "—";
+
   return (
-    <main className="mx-auto max-w-3xl space-y-4 p-6">
-      <h1 className="text-xl font-semibold">Play V2 Debug</h1>
-      {loading ? <p className="text-sm text-neutral-600">Loading…</p> : null}
-      {notice ? <p className="text-sm text-red-600">{notice}</p> : null}
+    <PlayV2Shell
+      cashLabel={formatMoney(currentUserCash)}
+      netWorthLabel={formatMoney(currentUserCash)}
+      turnPlayerLabel={turnPlayerLabel}
+      loading={loading}
+      notice={notice}
+      debugPanel={(
+        <div className="space-y-4">
+          <h1 className="text-xl font-semibold">Play V2 Debug</h1>
+          <section className="rounded border p-4 text-sm">
+            <p><strong>gameId:</strong> {routeGameId ?? "—"}</p>
+            <p><strong>current user id:</strong> {session?.user.id ?? "—"}</p>
+            <p><strong>gameMeta.status:</strong> {gameMeta?.status ?? "—"}</p>
+            <p><strong>turnPlayerId (game_state.current_player_id):</strong> {turnPlayerId ?? "—"}</p>
+            <p><strong>current turn player:</strong> {currentTurnPlayer ? `${currentTurnPlayer.id} / ${currentTurnPlayer.display_name}` : "—"}</p>
+            {turnPlayerMissingFromPlayers ? (
+              <p className="text-red-600"><strong>warning:</strong> Turn player id {turnPlayerId} not found in players list</p>
+            ) : null}
+            <p><strong>gameState.version:</strong> {gameState?.version ?? "—"}</p>
+            <p><strong>ownership rows:</strong> {Object.keys(ownershipByTile).length}</p>
+            <p><strong>trade proposals:</strong> {tradeProposals.length}</p>
+            <p><strong>loans:</strong> {playerLoans.length}</p>
+            <p><strong>mortgages:</strong> {purchaseMortgages.length}</p>
+          </section>
 
-      <section className="rounded border p-4 text-sm">
-        <p><strong>gameId:</strong> {routeGameId ?? "—"}</p>
-        <p><strong>current user id:</strong> {session?.user.id ?? "—"}</p>
-        <p><strong>gameMeta.status:</strong> {gameMeta?.status ?? "—"}</p>
-        <p><strong>turnPlayerId (game_state.current_player_id):</strong> {turnPlayerId ?? "—"}</p>
-        <p><strong>current turn player:</strong> {currentTurnPlayer ? `${currentTurnPlayer.id} / ${currentTurnPlayer.display_name}` : "—"}</p>
-        {turnPlayerMissingFromPlayers ? (
-          <p className="text-red-600"><strong>warning:</strong> Turn player id {turnPlayerId} not found in players list</p>
-        ) : null}
-        <p><strong>gameState.version:</strong> {gameState?.version ?? "—"}</p>
-        <p><strong>ownership rows:</strong> {Object.keys(ownershipByTile).length}</p>
-        <p><strong>trade proposals:</strong> {tradeProposals.length}</p>
-        <p><strong>loans:</strong> {playerLoans.length}</p>
-        <p><strong>mortgages:</strong> {purchaseMortgages.length}</p>
-      </section>
+          <section className="rounded border p-4 text-sm">
+            <h2 className="font-semibold">Players</h2>
+            <ul className="mt-2 list-disc space-y-1 pl-5">
+              {players.map((player) => (
+                <li key={player.id}>
+                  {player.display_name} — id: {player.id} — cash: {gameState?.balances?.[player.id] ?? "—"}
+                </li>
+              ))}
+            </ul>
+          </section>
 
-      <section className="rounded border p-4 text-sm">
-        <h2 className="font-semibold">Players</h2>
-        <ul className="mt-2 list-disc space-y-1 pl-5">
-          {players.map((player) => (
-            <li key={player.id}>
-              {player.display_name} — id: {player.id} — cash: {gameState?.balances?.[player.id] ?? "—"}
-            </li>
-          ))}
-        </ul>
-      </section>
+          <section className="rounded border p-4 text-sm">
+            <h2 className="font-semibold">Last 5 game events</h2>
+            <ul className="mt-2 list-disc space-y-1 pl-5">
+              {lastFiveEvents.map((event) => (
+                <li key={event.id}>{event.event_type} — {event.created_at}</li>
+              ))}
+            </ul>
+          </section>
 
-      <section className="rounded border p-4 text-sm">
-        <h2 className="font-semibold">Last 5 game events</h2>
-        <ul className="mt-2 list-disc space-y-1 pl-5">
-          {lastFiveEvents.map((event) => (
-            <li key={event.id}>{event.event_type} — {event.created_at}</li>
-          ))}
-        </ul>
-      </section>
-
-      <button
-        type="button"
-        onClick={() => void onRefetch()}
-        className="rounded bg-black px-3 py-2 text-sm text-white"
-      >
-        Refetch all slices
-      </button>
-    </main>
+          <button
+            type="button"
+            onClick={() => void onRefetch()}
+            className="rounded bg-black px-3 py-2 text-sm text-white"
+          >
+            Refetch all slices
+          </button>
+        </div>
+      )}
+    />
   );
 }
