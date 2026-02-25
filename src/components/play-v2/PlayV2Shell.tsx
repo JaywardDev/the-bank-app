@@ -28,31 +28,31 @@ export default function PlayV2Shell({
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-neutral-950 text-white">
       <div className="play-v2-shell-content">
-        <section className="absolute inset-x-0 top-0 z-20 h-14 border-b border-white/10 bg-neutral-950 px-3 md:h-16 md:px-4">
-          <div className="grid h-full grid-cols-3 items-center gap-3 text-xs sm:text-sm">
+        <section className="absolute inset-x-0 top-0 z-20 h-9 border-b border-white/10 bg-neutral-950 px-2.5 md:h-10 md:px-3">
+          <div className="grid h-full grid-cols-3 items-center gap-2 text-[11px] sm:text-xs">
             <div>
-              <p className="text-white/60">Cash</p>
-              <p className="font-semibold">{cashLabel}</p>
+              <p className="text-[10px] uppercase tracking-wide text-white/55">Cash</p>
+              <p className="font-semibold leading-tight">{cashLabel}</p>
             </div>
             <div>
-              <p className="text-white/60">Net Worth</p>
-              <p className="font-semibold">{netWorthLabel}</p>
+              <p className="text-[10px] uppercase tracking-wide text-white/55">Net Worth</p>
+              <p className="font-semibold leading-tight">{netWorthLabel}</p>
             </div>
             <div>
-              <p className="text-white/60">Turn</p>
-              <p className="font-semibold">{turnPlayerLabel}</p>
+              <p className="text-[10px] uppercase tracking-wide text-white/55">Turn</p>
+              <p className="font-semibold leading-tight">{turnPlayerLabel}</p>
             </div>
           </div>
         </section>
 
         {loading ? (
-          <p className="absolute right-3 top-[3.5rem] z-20 text-xs text-white/70 md:top-[4.25rem]">Loading…</p>
+          <p className="absolute right-3 top-11 z-20 text-xs text-white/70 md:top-[2.8rem]">Loading…</p>
         ) : null}
         {notice ? (
-          <p className="absolute left-3 top-[3.5rem] z-20 text-xs text-red-300 md:top-[4.25rem]">{notice}</p>
+          <p className="absolute left-3 top-11 z-20 text-xs text-red-300 md:top-[2.8rem]">{notice}</p>
         ) : null}
 
-        <section className="absolute inset-x-0 bottom-0 top-14 md:top-16">
+        <section className="absolute inset-x-0 bottom-0 top-9 md:top-10">
           {boardViewport}
 
           <button
@@ -90,7 +90,7 @@ export default function PlayV2Shell({
         </section>
 
         <aside
-          className={`absolute bottom-0 left-0 top-14 z-20 w-72 border-r border-white/15 bg-neutral-900 p-4 transition-transform duration-200 md:top-16 ${
+          className={`absolute bottom-0 left-0 top-9 z-20 w-72 border-r border-white/15 bg-neutral-900 p-4 transition-transform duration-200 md:top-10 ${
             leftOpen ? "translate-x-0" : "-translate-x-full"
           }`}
         >
@@ -98,7 +98,7 @@ export default function PlayV2Shell({
         </aside>
 
         <aside
-          className={`absolute bottom-0 right-0 top-14 z-20 w-72 border-l border-white/15 bg-neutral-900 p-4 transition-transform duration-200 md:top-16 ${
+          className={`absolute bottom-0 right-0 top-9 z-20 w-72 border-l border-white/15 bg-neutral-900 p-4 transition-transform duration-200 md:top-10 ${
             rightOpen ? "translate-x-0" : "translate-x-full"
           }`}
         >

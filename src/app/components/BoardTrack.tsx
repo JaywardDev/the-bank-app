@@ -24,6 +24,8 @@ type OwnershipByTile = Record<
   }
 >;
 
+type BoardTrackDensity = "default" | "compact";
+
 type BoardTrackProps = {
   tiles?: BoardTile[];
   economy?: BoardPackEconomy;
@@ -38,6 +40,7 @@ type BoardTrackProps = {
   onTileClick?: (tileIndex: number) => void;
   onTilePointerDown?: (tileIndex: number, tileRect: DOMRect) => void;
   onTilePointerRelease?: () => void;
+  density?: BoardTrackDensity;
 };
 
 const fallbackTiles: BoardTile[] = Array.from({ length: 40 }, (_, index) => ({
@@ -74,6 +77,7 @@ export default function BoardTrack({
   onTilePointerRelease,
   economy,
   lastRoll,
+  density = "default",
 }: BoardTrackProps) {
   const boardTiles = tiles && tiles.length > 0 ? tiles : fallbackTiles;
   const boardEconomy = economy ?? {
@@ -83,6 +87,8 @@ export default function BoardTrack({
     railRentByCount: [0, 25, 50, 100, 200],
     utilityRentMultipliers: { single: 4, double: 10 },
   };
+  const isCompact = density === "compact";
+
   const playersByTile = players.reduce<Record<number, BoardPlayer[]>>(
     (acc, player) => {
       acc[player.position] = acc[player.position]
@@ -94,8 +100,16 @@ export default function BoardTrack({
   );
 
   return (
-    <div className="relative h-full w-full rounded-lg border border-white/20 bg-transparent p-2 shadow-2xl">
-      <div className="grid h-full w-full grid-cols-11 grid-rows-11 gap-px rounded-[6px] bg-white/10 p-1.5">
+    <div
+      className={`relative h-full w-full rounded-lg border border-white/20 bg-transparent shadow-2xl ${
+        isCompact ? "p-1" : "p-2"
+      }`}
+    >
+      <div
+        className={`grid h-full w-full grid-cols-11 grid-rows-11 gap-px rounded-[6px] bg-white/10 ${
+          isCompact ? "p-1" : "p-1.5"
+        }`}
+      >
         {boardTiles.map((tile) => {
           const position = getRowCol(tile.index);
           const ownership = ownershipByTile[tile.index];

@@ -147,6 +147,7 @@ export default function BoardViewport({
         <div className="relative aspect-square w-full max-h-full max-w-full">
           <BoardSquare variant="viewport">
             <BoardTrack
+              density="compact"
               tiles={boardTiles}
               economy={boardEconomy}
               players={boardPlayers}
