@@ -144,7 +144,7 @@ export default function BoardViewport({
   return (
     <div className="relative h-full w-full overflow-hidden bg-[url('/icons/board.svg')] bg-cover bg-center bg-no-repeat">
       <div className="flex h-full w-full items-center justify-center p-1">
-        <div className="relative aspect-square w-full max-h-full max-w-full">
+        <div className="relative aspect-square h-full w-auto max-h-full max-w-full">
           <BoardSquare variant="viewport">
             <BoardTrack
               density="compact"
