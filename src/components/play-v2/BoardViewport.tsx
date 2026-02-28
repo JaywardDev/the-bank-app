@@ -4,9 +4,7 @@ import { useCallback, useMemo, useRef, useState, type PointerEvent, type WheelEv
 import { DEFAULT_BOARD_PACK_ECONOMY } from "@/lib/boardPacks";
 import BoardSquare from "@/app/components/BoardSquare";
 import BoardTrack from "@/app/components/BoardTrack";
-import { TitleDeedPreview } from "@/app/components/TitleDeedPreview";
-import { getBoardPackById, type BoardTile } from "@/lib/boardPacks";
-import { getTileBandColor } from "@/lib/boardTileStyles";
+import { getBoardPackById } from "@/lib/boardPacks";
 
 type BoardViewportPlayer = {
   id: string;
@@ -42,18 +40,6 @@ const playerColors = [
   "#06b6d4",
 ];
 
-const fallbackTile = (index: number): BoardTile => ({
-  index,
-  tile_id: `tile-${index}`,
-  type: index === 0 ? "START" : "PROPERTY",
-  name: `Tile ${index}`,
-});
-
-type PressedTileTooltip = {
-  tileIndex: number;
-  tileRect: DOMRect;
-};
-
 const MIN_SCALE = 1;
 const MAX_SCALE = 2.2;
 const PAN_ACTIVATION_DISTANCE_PX = 8;
@@ -75,7 +61,6 @@ export default function BoardViewport({
   const boardPack = useMemo(() => getBoardPackById(boardPackId), [boardPackId]);
   const boardTiles = useMemo(() => boardPack?.tiles ?? [], [boardPack]);
   const boardEconomy = boardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY;
-  const [pressedTileTooltip, setPressedTileTooltip] = useState<PressedTileTooltip | null>(null);
   const [scale, setScale] = useState(MIN_SCALE);
   const [translateX, setTranslateX] = useState(0);
   const [translateY, setTranslateY] = useState(0);
@@ -173,62 +158,6 @@ export default function BoardViewport({
     [players],
   );
 
-  const tooltipTile = useMemo(() => {
-    if (!pressedTileTooltip) {
-      return null;
-    }
-    return (
-      boardTiles.find((tile) => tile.index === pressedTileTooltip.tileIndex) ??
-      fallbackTile(pressedTileTooltip.tileIndex)
-    );
-  }, [boardTiles, pressedTileTooltip]);
-
-  const tooltipOwnerId = useMemo(() => {
-    if (!pressedTileTooltip) {
-      return null;
-    }
-    return ownershipByTile[pressedTileTooltip.tileIndex]?.owner_player_id ?? null;
-  }, [ownershipByTile, pressedTileTooltip]);
-
-  const tooltipOwnerRailCount = useMemo(() => {
-    if (!tooltipOwnerId) {
-      return 0;
-    }
-    return boardTiles.filter(
-      (tile) => tile.type === "RAIL" && ownershipByTile[tile.index]?.owner_player_id === tooltipOwnerId,
-    ).length;
-  }, [boardTiles, ownershipByTile, tooltipOwnerId]);
-
-  const tooltipOwnerUtilityCount = useMemo(() => {
-    if (!tooltipOwnerId) {
-      return 0;
-    }
-    return boardTiles.filter(
-      (tile) => tile.type === "UTILITY" && ownershipByTile[tile.index]?.owner_player_id === tooltipOwnerId,
-    ).length;
-  }, [boardTiles, ownershipByTile, tooltipOwnerId]);
-
-  const tooltipPosition = useMemo(() => {
-    if (!pressedTileTooltip || typeof window === "undefined") {
-      return null;
-    }
-    const spacing = 8;
-    const tooltipWidth = 220;
-    const tooltipHeight = 132;
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
-    const { tileRect } = pressedTileTooltip;
-    const rightPreferred = tileRect.right + spacing;
-    const leftFallback = tileRect.left - tooltipWidth - spacing;
-    const left = rightPreferred + tooltipWidth <= viewportWidth - spacing
-      ? rightPreferred
-      : Math.max(spacing, leftFallback);
-    const unclampedTop = tileRect.top + tileRect.height / 2 - tooltipHeight / 2;
-    const top = Math.max(spacing, Math.min(unclampedTop, viewportHeight - tooltipHeight - spacing));
-
-    return { left, top };
-  }, [pressedTileTooltip]);
-
   const handlePointerDown = useCallback(
     (event: PointerEvent<HTMLDivElement>) => {
       pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
@@ -252,7 +181,6 @@ export default function BoardViewport({
         gestureRef.current.pinchCenter = getLocalPoint((points[0].x + points[1].x) / 2, (points[0].y + points[1].y) / 2);
         gestureRef.current.isPanning = true;
         suppressTileInteractionRef.current = true;
-        setPressedTileTooltip(null);
       }
     },
     [getLocalPoint, translateX, translateY],
@@ -283,7 +211,6 @@ export default function BoardViewport({
         gestureRef.current.pinchDistance = nextDistance;
         gestureRef.current.pinchCenter = center;
         suppressTileInteractionRef.current = true;
-        setPressedTileTooltip(null);
         return;
       }
 
@@ -298,7 +225,6 @@ export default function BoardViewport({
       if (!gestureRef.current.isPanning && movedDistance >= PAN_ACTIVATION_DISTANCE_PX && scale > MIN_SCALE) {
         gestureRef.current.isPanning = true;
         suppressTileInteractionRef.current = true;
-        setPressedTileTooltip(null);
       }
 
       if (!gestureRef.current.isPanning || scale <= MIN_SCALE) {
@@ -359,7 +285,6 @@ export default function BoardViewport({
       const focus = getLocalPoint(event.clientX, event.clientY);
       zoomAroundPoint(desiredScale, focus);
       suppressTileInteractionRef.current = true;
-      setPressedTileTooltip(null);
       scheduleTileInteractionReset();
     },
     [getLocalPoint, scale, scheduleTileInteractionReset, zoomAroundPoint],
@@ -367,7 +292,6 @@ export default function BoardViewport({
 
   const handleRecenter = useCallback(() => {
     suppressTileInteractionRef.current = false;
-    setPressedTileTooltip(null);
     applyTransform(MIN_SCALE, 0, 0);
   }, [applyTransform]);
 
@@ -408,14 +332,6 @@ export default function BoardViewport({
                     }
                     onSelectTileIndex(tileIndex);
                   }}
-                  onTilePointerDown={(tileIndex, tileRect) => {
-                    if (suppressTileInteractionRef.current) {
-                      return;
-                    }
-                    setPressedTileTooltip({ tileIndex, tileRect });
-                    onSelectTileIndex(tileIndex);
-                  }}
-                  onTilePointerRelease={() => setPressedTileTooltip(null)}
                 />
               </BoardSquare>
             </div>
@@ -430,23 +346,6 @@ export default function BoardViewport({
           Recenter
         </button>
       </div>
-
-      {tooltipTile && tooltipPosition ? (
-        <section
-          className="pointer-events-none fixed z-40 w-[220px]"
-          style={{ left: tooltipPosition.left, top: tooltipPosition.top }}
-        >
-          <TitleDeedPreview
-            tile={tooltipTile}
-            bandColor={getTileBandColor(tooltipTile)}
-            boardPackEconomy={boardEconomy}
-            price={tooltipTile.price}
-            ownedRailCount={tooltipOwnerRailCount}
-            ownedUtilityCount={tooltipOwnerUtilityCount}
-            mode="readonly"
-          />
-        </section>
-      ) : null}
     </div>
   );
 }

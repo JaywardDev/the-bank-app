@@ -6,6 +6,9 @@ import type { RealtimeChannel } from "@supabase/supabase-js";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 import PlayV2Shell from "@/components/play-v2/PlayV2Shell";
 import BoardViewport from "@/components/play-v2/BoardViewport";
+import { TitleDeedPreview } from "@/app/components/TitleDeedPreview";
+import { DEFAULT_BOARD_PACK_ECONOMY, getBoardPackById } from "@/lib/boardPacks";
+import { getTileBandColor } from "@/lib/boardTileStyles";
 
 type GameMeta = {
   id: string;
@@ -104,6 +107,7 @@ export default function PlayV2Page() {
   const [notice, setNotice] = useState<string | null>(null);
   const [needsAuth, setNeedsAuth] = useState(false);
   const [selectedTileIndex, setSelectedTileIndex] = useState<number | null>(null);
+  const [isLeftDrawerOpen, setIsLeftDrawerOpen] = useState(false);
 
   const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
 
@@ -317,6 +321,40 @@ export default function PlayV2Page() {
 
   const lastFiveEvents = useMemo(() => events.slice(0, 5), [events]);
 
+  const selectedBoardPack = useMemo(() => getBoardPackById(gameMeta?.board_pack_id ?? null), [gameMeta?.board_pack_id]);
+
+  const selectedTile = useMemo(() => {
+    if (selectedTileIndex === null) {
+      return null;
+    }
+    const boardTiles = selectedBoardPack?.tiles ?? [];
+    return boardTiles.find((tile) => tile.index === selectedTileIndex) ?? null;
+  }, [selectedBoardPack, selectedTileIndex]);
+
+  const selectedOwnerId = selectedTileIndex === null
+    ? null
+    : ownershipByTile[selectedTileIndex]?.owner_player_id ?? null;
+
+  const selectedOwnerRailCount = useMemo(() => {
+    if (!selectedOwnerId) {
+      return 0;
+    }
+    const boardTiles = selectedBoardPack?.tiles ?? [];
+    return boardTiles.filter(
+      (tile) => tile.type === "RAIL" && ownershipByTile[tile.index]?.owner_player_id === selectedOwnerId,
+    ).length;
+  }, [ownershipByTile, selectedBoardPack, selectedOwnerId]);
+
+  const selectedOwnerUtilityCount = useMemo(() => {
+    if (!selectedOwnerId) {
+      return 0;
+    }
+    const boardTiles = selectedBoardPack?.tiles ?? [];
+    return boardTiles.filter(
+      (tile) => tile.type === "UTILITY" && ownershipByTile[tile.index]?.owner_player_id === selectedOwnerId,
+    ).length;
+  }, [ownershipByTile, selectedBoardPack, selectedOwnerId]);
+
   const onRefetch = useCallback(async () => {
     if (!routeGameId || !session?.access_token) return;
     await loadAllSlices(routeGameId, session.access_token);
@@ -342,6 +380,21 @@ export default function PlayV2Page() {
       turnPlayerLabel={turnPlayerLabel}
       loading={loading}
       notice={notice}
+      leftOpen={isLeftDrawerOpen}
+      onLeftOpenChange={setIsLeftDrawerOpen}
+      leftDrawerContent={selectedTile ? (
+        <TitleDeedPreview
+          tile={selectedTile}
+          bandColor={getTileBandColor(selectedTile)}
+          boardPackEconomy={selectedBoardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY}
+          price={selectedTile.price}
+          ownedRailCount={selectedOwnerRailCount}
+          ownedUtilityCount={selectedOwnerUtilityCount}
+          mode="readonly"
+        />
+      ) : (
+        <p className="text-sm text-white/70">Select a tile to view the title deed</p>
+      )}
       boardViewport={(
         <BoardViewport
           boardPackId={gameMeta?.board_pack_id ?? null}
@@ -349,7 +402,10 @@ export default function PlayV2Page() {
           ownershipByTile={ownershipByTile}
           currentPlayerId={turnPlayerId}
           selectedTileIndex={selectedTileIndex}
-          onSelectTileIndex={setSelectedTileIndex}
+          onSelectTileIndex={(tileIndex) => {
+            setSelectedTileIndex(tileIndex);
+            setIsLeftDrawerOpen(true);
+          }}
         />
       )}
       debugPanel={(

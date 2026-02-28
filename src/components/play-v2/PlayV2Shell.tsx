@@ -10,6 +10,9 @@ type PlayV2ShellProps = {
   notice: string | null;
   debugPanel: ReactNode;
   boardViewport: ReactNode;
+  leftDrawerContent?: ReactNode;
+  leftOpen?: boolean;
+  onLeftOpenChange?: (open: boolean) => void;
 };
 
 export default function PlayV2Shell({
@@ -20,10 +23,21 @@ export default function PlayV2Shell({
   notice,
   debugPanel,
   boardViewport,
+  leftDrawerContent,
+  leftOpen: controlledLeftOpen,
+  onLeftOpenChange,
 }: PlayV2ShellProps) {
-  const [leftOpen, setLeftOpen] = useState(false);
+  const [uncontrolledLeftOpen, setUncontrolledLeftOpen] = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
   const [devOpen, setDevOpen] = useState(false);
+  const leftOpen = controlledLeftOpen ?? uncontrolledLeftOpen;
+
+  const setLeftOpen = (nextOpen: boolean) => {
+    if (controlledLeftOpen === undefined) {
+      setUncontrolledLeftOpen(nextOpen);
+    }
+    onLeftOpenChange?.(nextOpen);
+  };
 
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-neutral-950 text-white">
@@ -57,7 +71,7 @@ export default function PlayV2Shell({
 
           <button
             type="button"
-            onClick={() => setLeftOpen((value) => !value)}
+            onClick={() => setLeftOpen(!leftOpen)}
             className="absolute left-0 top-1/2 z-30 -translate-y-1/2 rounded-r-lg border border-white/20 bg-neutral-900 px-2 py-3 text-xs font-semibold uppercase tracking-wide"
           >
             {leftOpen ? "Close" : "Left"}
@@ -95,6 +109,7 @@ export default function PlayV2Shell({
           }`}
         >
           <h2 className="text-sm font-semibold uppercase tracking-wide text-white/80">Left Drawer</h2>
+          <div className="mt-3">{leftDrawerContent}</div>
         </aside>
 
         <aside
