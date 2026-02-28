@@ -61,8 +61,6 @@ const FOREST_VARIANTS = [
   "/assets/forest-3.png",
 ];
 
-const getInteriorHash = (row: number, col: number) => (row * 73856093) ^ (col * 19349663);
-
 const getRowCol = (tileIndex: number, boardWidth: number, boardHeight: number) => {
   const topRowEndIndex = 2 * boardWidth + boardHeight - 3;
 
@@ -92,18 +90,8 @@ const getInteriorCells = (boardWidth: number, boardHeight: number) => {
 };
 
 const getForestVariantIndex = (row: number, col: number) => {
-  const hash = getInteriorHash(row, col);
+  const hash = (row * 73856093) ^ (col * 19349663);
   return Math.abs(hash) % FOREST_VARIANTS.length;
-};
-
-const getForestJitter = (row: number, col: number) => {
-  const hash = getInteriorHash(row, col);
-  const positiveHash = hash >>> 0;
-  const dx = (positiveHash % 7) - 3;
-  const dy = (Math.floor(positiveHash / 7) % 5) - 2;
-  const scale = 0.96 + (Math.floor(positiveHash / 35) % 8) * 0.01;
-
-  return { dx, dy, scale };
 };
 
 export default function BoardTrack({
@@ -168,8 +156,6 @@ export default function BoardTrack({
               return null;
             }
 
-            const jitter = getForestJitter(cell.row, cell.col);
-
             return (
               <div
                 key={`interior-${cell.row}-${cell.col}`}
@@ -189,9 +175,6 @@ export default function BoardTrack({
                   height={192}
                   aria-hidden
                   className="pointer-events-none absolute bottom-0 left-1/2 h-[160%] w-[160%] max-w-none -translate-x-1/2 object-contain"
-                  style={{
-                    transform: `translate(calc(-50% + ${jitter.dx}px), ${jitter.dy}px) scale(${jitter.scale})`,
-                  }}
                 />
               </div>
             );
