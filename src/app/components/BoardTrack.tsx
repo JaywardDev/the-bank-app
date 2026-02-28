@@ -209,7 +209,11 @@ export default function BoardTrack({
           const isIconOnlyTile = isIconOnlySpecialTile(tile) && !ownership;
           const isPropertyTile = tile.type === "PROPERTY";
           const isRailOrUtilityTile = tile.type === "RAIL" || tile.type === "UTILITY";
+          const isOwnableTile = isPropertyTile || isRailOrUtilityTile;
           const isOwned = Boolean(ownership);
+          const isOwnedByPlayer = Boolean(ownership?.owner_player_id);
+          const housesCount = ownershipByTile[tile.index]?.houses ?? 0;
+          const buildingCount = Math.min(housesCount, 6);
           const mapTileBaseColor = isMapTileFace
             ? isPropertyTile
               ? isOwned
@@ -302,7 +306,7 @@ export default function BoardTrack({
               </div>
 
               <div
-                className={`relative h-full w-full overflow-hidden ${
+                className={`relative h-full w-full ${isMapTileFace ? "overflow-visible" : "overflow-hidden"} ${
                   isCorner ? "rounded-[6px]" : "rounded-sm"
                 } bg-[#f3f0e6] ${onTileClick ? "transition group-hover:bg-[#f8f4eb]" : ""}`}
                 style={{ backgroundColor: mapTileBaseColor }}
@@ -348,6 +352,34 @@ export default function BoardTrack({
                     style={{ backgroundColor: getTileBandColor(tile) }}
                   />
                 ) : null}
+
+                {isMapTileFace && isOwnableTile && isOwnedByPlayer && buildingCount > 0 ? (
+                  <div className="pointer-events-none absolute inset-x-1 bottom-1 z-10">
+                    <div className="grid grid-cols-3 gap-0.5">
+                      {Array.from({ length: buildingCount }, (_, slotIndex) => {
+                        const isHotelSlot = housesCount >= 5 && slotIndex === 5;
+
+                        return (
+                          <div key={`${tile.tile_id}-building-${slotIndex}`} className="flex justify-center">
+                            <Image
+                              src={
+                                isHotelSlot
+                                  ? "/assets/ph-boardpack/ph-hotel.svg"
+                                  : "/assets/ph-boardpack/ph-house.svg"
+                              }
+                              alt=""
+                              width={18}
+                              height={18}
+                              aria-hidden
+                              className="h-4 w-4 object-contain"
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
+
                 {!isMapTileFace ? (
                   <div className="relative z-2 flex h-full flex-col p-1">
                     <div className="flex items-start justify-between gap-1">
