@@ -55,6 +55,11 @@ const DEFAULT_BOARD_WIDTH = 15;
 const DEFAULT_BOARD_HEIGHT = 7;
 const COMPACT_BOARD_WIDTH = 13;
 const COMPACT_BOARD_HEIGHT = 9;
+const FOREST_VARIANTS = [
+  "/assets/forest.png",
+  "/assets/forest-2.png",
+  "/assets/forest-3.png",
+];
 
 const getRowCol = (tileIndex: number, boardWidth: number, boardHeight: number) => {
   const topRowEndIndex = 2 * boardWidth + boardHeight - 3;
@@ -82,6 +87,11 @@ const getInteriorCells = (boardWidth: number, boardHeight: number) => {
   }
 
   return cells;
+};
+
+const getForestVariantIndex = (row: number, col: number) => {
+  const hash = (row * 73856093) ^ (col * 19349663);
+  return Math.abs(hash) % FOREST_VARIANTS.length;
 };
 
 export default function BoardTrack({
@@ -159,7 +169,7 @@ export default function BoardTrack({
                 }}
               >
                 <Image
-                  src="/assets/forest.png"
+                  src={FOREST_VARIANTS[getForestVariantIndex(cell.row, cell.col)]}
                   alt=""
                   width={192}
                   height={192}
