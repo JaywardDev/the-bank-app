@@ -50,17 +50,21 @@ const fallbackTiles: BoardTile[] = Array.from({ length: 40 }, (_, index) => ({
   name: `Tile ${index}`,
 }));
 
+const BOARD_WIDTH = 15;
+const BOARD_HEIGHT = 7;
+
 const getRowCol = (tileIndex: number) => {
-  if (tileIndex === 0) return { row: 10, col: 10 };
-  if (tileIndex >= 1 && tileIndex <= 9) return { row: 10, col: 10 - tileIndex };
-  if (tileIndex === 10) return { row: 10, col: 0 };
-  if (tileIndex >= 11 && tileIndex <= 19)
-    return { row: 20 - tileIndex, col: 0 };
-  if (tileIndex === 20) return { row: 0, col: 0 };
-  if (tileIndex >= 21 && tileIndex <= 29)
-    return { row: 0, col: tileIndex - 20 };
-  if (tileIndex === 30) return { row: 0, col: 10 };
-  return { row: tileIndex - 30, col: 10 };
+  if (tileIndex === 0) return { row: BOARD_HEIGHT - 1, col: BOARD_WIDTH - 1 };
+  if (tileIndex >= 1 && tileIndex <= BOARD_WIDTH - 1) {
+    return { row: BOARD_HEIGHT - 1, col: BOARD_WIDTH - 1 - tileIndex };
+  }
+  if (tileIndex >= BOARD_WIDTH && tileIndex <= BOARD_WIDTH + BOARD_HEIGHT - 2) {
+    return { row: BOARD_HEIGHT - 1 - (tileIndex - (BOARD_WIDTH - 1)), col: 0 };
+  }
+  if (tileIndex >= BOARD_WIDTH + BOARD_HEIGHT - 1 && tileIndex <= 34) {
+    return { row: 0, col: tileIndex - (BOARD_WIDTH + BOARD_HEIGHT - 1) };
+  }
+  return { row: tileIndex - 34, col: BOARD_WIDTH - 1 };
 };
 
 export default function BoardTrack({
@@ -106,9 +110,13 @@ export default function BoardTrack({
       }`}
     >
       <div
-        className={`grid h-full w-full grid-cols-11 grid-rows-11 gap-px rounded-[6px] bg-white/10 ${
+        className={`grid h-full w-full gap-px rounded-[6px] bg-white/10 ${
           isCompact ? "p-1" : "p-1.5"
         }`}
+        style={{
+          gridTemplateColumns: `repeat(${BOARD_WIDTH}, minmax(0, 1fr))`,
+          gridTemplateRows: `repeat(${BOARD_HEIGHT}, minmax(0, 1fr))`,
+        }}
       >
         {boardTiles.map((tile) => {
           const position = getRowCol(tile.index);
@@ -124,7 +132,7 @@ export default function BoardTrack({
               ? "Mortgaged property"
               : "Owned property";
           const tilePlayers = playersByTile[tile.index] ?? [];
-          const isCorner = tile.index % 10 === 0;
+          const isCorner = tile.index === 0 || tile.index === 14 || tile.index === 19 || tile.index === 34;
           const tileIconSrc = getBoardTileIconSrc(tile);
           const isIconOnlyTile = isIconOnlySpecialTile(tile) && !ownership;
           const currentRent = getCurrentTileRent({
