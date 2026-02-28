@@ -355,12 +355,16 @@ export default function BoardTrack({
 
                 {isMapTileFace && isOwnableTile && isOwnedByPlayer && buildingCount > 0 ? (
                   <div className="pointer-events-none absolute inset-x-1 bottom-1 z-10">
-                    <div className="grid grid-cols-3 gap-0.5">
+                    <div className="grid grid-cols-3 grid-rows-2 gap-x-0.5 gap-y-0.5">
                       {Array.from({ length: buildingCount }, (_, slotIndex) => {
                         const isHotelSlot = housesCount >= 5 && slotIndex === 5;
+                        const isBackRow = slotIndex < 3;
 
                         return (
-                          <div key={`${tile.tile_id}-building-${slotIndex}`} className="flex justify-center">
+                          <div
+                            key={`${tile.tile_id}-building-${slotIndex}`}
+                            className="flex aspect-square items-center justify-center"
+                          >
                             <Image
                               src={
                                 isHotelSlot
@@ -371,7 +375,9 @@ export default function BoardTrack({
                               width={18}
                               height={18}
                               aria-hidden
-                              className="h-4 w-4 object-contain"
+                              className={`h-auto w-[92%] object-contain ${
+                                isBackRow ? "scale-[0.9]" : "scale-[0.96]"
+                              }`}
                             />
                           </div>
                         );
