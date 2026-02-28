@@ -25,6 +25,7 @@ type OwnershipByTile = Record<
 >;
 
 type BoardTrackDensity = "default" | "compact";
+type InteriorCellState = "FOREST" | "CLEARED";
 
 type BoardTrackProps = {
   tiles?: BoardTile[];
@@ -71,6 +72,18 @@ const getRowCol = (tileIndex: number, boardWidth: number, boardHeight: number) =
   return { row: tileIndex - topRowEndIndex, col: boardWidth - 1 };
 };
 
+const getInteriorCells = (boardWidth: number, boardHeight: number) => {
+  const cells: Array<{ row: number; col: number; state: InteriorCellState }> = [];
+
+  for (let row = 1; row <= boardHeight - 2; row += 1) {
+    for (let col = 1; col <= boardWidth - 2; col += 1) {
+      cells.push({ row, col, state: "FOREST" });
+    }
+  }
+
+  return cells;
+};
+
 export default function BoardTrack({
   tiles,
   players,
@@ -104,6 +117,7 @@ export default function BoardTrack({
   const bottomLeftCorner = bottomLen - 1;
   const topLeftCorner = bottomLen + leftLen - 1;
   const topRightCorner = bottomLen + leftLen + topLen - 1;
+  const interiorCells = getInteriorCells(boardWidth, boardHeight);
 
   const playersByTile = players.reduce<Record<number, BoardPlayer[]>>(
     (acc, player) => {
@@ -120,12 +134,43 @@ export default function BoardTrack({
       className={`relative h-full w-full ${isCompact ? "p-1" : "rounded-lg border border-white/20 bg-transparent p-2 shadow-2xl"}`}
     >
       <div
-        className={`grid h-full w-full gap-px ${isCompact ? "p-1" : "rounded-[6px] bg-white/10 p-1.5"}`}
+        className={`relative grid h-full w-full gap-px ${isCompact ? "p-1" : "rounded-[6px] bg-white/10 p-1.5"}`}
         style={{
           gridTemplateColumns: `repeat(${boardWidth}, minmax(0, 1fr))`,
           gridTemplateRows: `repeat(${boardHeight}, minmax(0, 1fr))`,
         }}
       >
+        <div className="pointer-events-none absolute inset-0 z-0">
+          {interiorCells.map((cell) => {
+            if (cell.state !== "FOREST") {
+              return null;
+            }
+
+            return (
+              <div
+                key={`interior-${cell.row}-${cell.col}`}
+                className="absolute overflow-visible"
+                style={{
+                  top: `${(cell.row / boardHeight) * 100}%`,
+                  left: `${(cell.col / boardWidth) * 100}%`,
+                  width: `${100 / boardWidth}%`,
+                  height: `${100 / boardHeight}%`,
+                  zIndex: cell.row * 100 + cell.col,
+                }}
+              >
+                <Image
+                  src="/assets/forest.png"
+                  alt=""
+                  width={192}
+                  height={192}
+                  aria-hidden
+                  className="pointer-events-none absolute bottom-0 left-1/2 h-[160%] w-[160%] max-w-none -translate-x-1/2 object-contain"
+                />
+              </div>
+            );
+          })}
+        </div>
+
         {boardTiles.map((tile) => {
           const position = getRowCol(tile.index, boardWidth, boardHeight);
           const ownership = ownershipByTile[tile.index];
@@ -198,6 +243,7 @@ export default function BoardTrack({
               style={{
                 gridRowStart: position.row + 1,
                 gridColumnStart: position.col + 1,
+                zIndex: 2000,
               }}
             >
               <div className="pointer-events-none absolute inset-x-1.5 top-2 z-20 h-[calc(100%-0.75rem)]">
