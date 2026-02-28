@@ -50,21 +50,25 @@ const fallbackTiles: BoardTile[] = Array.from({ length: 40 }, (_, index) => ({
   name: `Tile ${index}`,
 }));
 
-const BOARD_WIDTH = 15;
-const BOARD_HEIGHT = 7;
+const DEFAULT_BOARD_WIDTH = 15;
+const DEFAULT_BOARD_HEIGHT = 7;
+const COMPACT_BOARD_WIDTH = 13;
+const COMPACT_BOARD_HEIGHT = 9;
 
-const getRowCol = (tileIndex: number) => {
-  if (tileIndex === 0) return { row: BOARD_HEIGHT - 1, col: BOARD_WIDTH - 1 };
-  if (tileIndex >= 1 && tileIndex <= BOARD_WIDTH - 1) {
-    return { row: BOARD_HEIGHT - 1, col: BOARD_WIDTH - 1 - tileIndex };
+const getRowCol = (tileIndex: number, boardWidth: number, boardHeight: number) => {
+  const topRowEndIndex = 2 * boardWidth + boardHeight - 3;
+
+  if (tileIndex === 0) return { row: boardHeight - 1, col: boardWidth - 1 };
+  if (tileIndex >= 1 && tileIndex <= boardWidth - 1) {
+    return { row: boardHeight - 1, col: boardWidth - 1 - tileIndex };
   }
-  if (tileIndex >= BOARD_WIDTH && tileIndex <= BOARD_WIDTH + BOARD_HEIGHT - 3) {
-    return { row: BOARD_HEIGHT - 1 - (tileIndex - (BOARD_WIDTH - 1)), col: 0 };
+  if (tileIndex >= boardWidth && tileIndex <= boardWidth + boardHeight - 3) {
+    return { row: boardHeight - 1 - (tileIndex - (boardWidth - 1)), col: 0 };
   }
-  if (tileIndex >= BOARD_WIDTH + BOARD_HEIGHT - 2 && tileIndex <= 34) {
-    return { row: 0, col: tileIndex - (BOARD_WIDTH + BOARD_HEIGHT - 2) };
+  if (tileIndex >= boardWidth + boardHeight - 2 && tileIndex <= topRowEndIndex) {
+    return { row: 0, col: tileIndex - (boardWidth + boardHeight - 2) };
   }
-  return { row: tileIndex - 34, col: BOARD_WIDTH - 1 };
+  return { row: tileIndex - topRowEndIndex, col: boardWidth - 1 };
 };
 
 export default function BoardTrack({
@@ -92,6 +96,8 @@ export default function BoardTrack({
     utilityRentMultipliers: { single: 4, double: 10 },
   };
   const isCompact = density === "compact";
+  const boardWidth = isCompact ? COMPACT_BOARD_WIDTH : DEFAULT_BOARD_WIDTH;
+  const boardHeight = isCompact ? COMPACT_BOARD_HEIGHT : DEFAULT_BOARD_HEIGHT;
 
   const playersByTile = players.reduce<Record<number, BoardPlayer[]>>(
     (acc, player) => {
@@ -114,12 +120,12 @@ export default function BoardTrack({
           isCompact ? "p-1" : "p-1.5"
         }`}
         style={{
-          gridTemplateColumns: `repeat(${BOARD_WIDTH}, minmax(0, 1fr))`,
-          gridTemplateRows: `repeat(${BOARD_HEIGHT}, minmax(0, 1fr))`,
+          gridTemplateColumns: `repeat(${boardWidth}, minmax(0, 1fr))`,
+          gridTemplateRows: `repeat(${boardHeight}, minmax(0, 1fr))`,
         }}
       >
         {boardTiles.map((tile) => {
-          const position = getRowCol(tile.index);
+          const position = getRowCol(tile.index, boardWidth, boardHeight);
           const ownership = ownershipByTile[tile.index];
           const ownerColor = ownership?.owner_player_id
             ? (playerColorsById[ownership.owner_player_id] ?? "#e5e7eb")
@@ -132,7 +138,9 @@ export default function BoardTrack({
               ? "Mortgaged property"
               : "Owned property";
           const tilePlayers = playersByTile[tile.index] ?? [];
-          const isCorner = tile.index === 0 || tile.index === 14 || tile.index === 19 || tile.index === 34;
+          const isCorner = isCompact
+            ? tile.index === 0 || tile.index === 12 || tile.index === 19 || tile.index === 32
+            : tile.index === 0 || tile.index === 14 || tile.index === 19 || tile.index === 34;
           const tileIconSrc = getBoardTileIconSrc(tile);
           const isIconOnlyTile = isIconOnlySpecialTile(tile) && !ownership;
           const currentRent = getCurrentTileRent({
