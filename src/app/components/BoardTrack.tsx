@@ -98,6 +98,12 @@ export default function BoardTrack({
   const isCompact = density === "compact";
   const boardWidth = isCompact ? COMPACT_BOARD_WIDTH : DEFAULT_BOARD_WIDTH;
   const boardHeight = isCompact ? COMPACT_BOARD_HEIGHT : DEFAULT_BOARD_HEIGHT;
+  const bottomLen = boardWidth;
+  const leftLen = boardHeight - 2;
+  const topLen = boardWidth;
+  const bottomLeftCorner = bottomLen - 1;
+  const topLeftCorner = bottomLen + leftLen - 1;
+  const topRightCorner = bottomLen + leftLen + topLen - 1;
 
   const playersByTile = players.reduce<Record<number, BoardPlayer[]>>(
     (acc, player) => {
@@ -138,9 +144,11 @@ export default function BoardTrack({
               ? "Mortgaged property"
               : "Owned property";
           const tilePlayers = playersByTile[tile.index] ?? [];
-          const isCorner = isCompact
-            ? tile.index === 0 || tile.index === 12 || tile.index === 19 || tile.index === 32
-            : tile.index === 0 || tile.index === 14 || tile.index === 19 || tile.index === 34;
+          const isCorner =
+            tile.index === 0 ||
+            tile.index === bottomLeftCorner ||
+            tile.index === topLeftCorner ||
+            tile.index === topRightCorner;
           const tileIconSrc = getBoardTileIconSrc(tile);
           const isIconOnlyTile = isIconOnlySpecialTile(tile) && !ownership;
           const currentRent = getCurrentTileRent({
