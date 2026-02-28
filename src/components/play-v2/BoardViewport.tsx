@@ -4,7 +4,9 @@ import { useCallback, useMemo, useRef, useState, type PointerEvent, type WheelEv
 import { DEFAULT_BOARD_PACK_ECONOMY } from "@/lib/boardPacks";
 import BoardSquare from "@/app/components/BoardSquare";
 import BoardTrack from "@/app/components/BoardTrack";
+import { TitleDeedPreview } from "@/app/components/TitleDeedPreview";
 import { getBoardPackById, type BoardTile } from "@/lib/boardPacks";
+import { getTileBandColor } from "@/lib/boardTileStyles";
 
 type BoardViewportPlayer = {
   id: string;
@@ -46,21 +48,6 @@ const fallbackTile = (index: number): BoardTile => ({
   type: index === 0 ? "START" : "PROPERTY",
   name: `Tile ${index}`,
 });
-
-const getTileTypeLabel = (tileType: string) => {
-  switch (tileType) {
-    case "COMMUNITY_CHEST":
-      return "Community Chest";
-    case "FREE_PARKING":
-      return "Free Parking";
-    case "GO_TO_JAIL":
-      return "Go To Jail";
-    case "RAIL":
-      return "Railroad";
-    default:
-      return tileType[0] + tileType.slice(1).toLowerCase();
-  }
-};
 
 type PressedTileTooltip = {
   tileIndex: number;
@@ -196,16 +183,30 @@ export default function BoardViewport({
     );
   }, [boardTiles, pressedTileTooltip]);
 
-  const ownerLabel = useMemo(() => {
+  const tooltipOwnerId = useMemo(() => {
     if (!pressedTileTooltip) {
-      return "—";
+      return null;
     }
-    const ownerId = ownershipByTile[pressedTileTooltip.tileIndex]?.owner_player_id;
-    if (!ownerId) {
-      return "Unowned";
+    return ownershipByTile[pressedTileTooltip.tileIndex]?.owner_player_id ?? null;
+  }, [ownershipByTile, pressedTileTooltip]);
+
+  const tooltipOwnerRailCount = useMemo(() => {
+    if (!tooltipOwnerId) {
+      return 0;
     }
-    return players.find((player) => player.id === ownerId)?.display_name ?? "Player";
-  }, [ownershipByTile, players, pressedTileTooltip]);
+    return boardTiles.filter(
+      (tile) => tile.type === "RAIL" && ownershipByTile[tile.index]?.owner_player_id === tooltipOwnerId,
+    ).length;
+  }, [boardTiles, ownershipByTile, tooltipOwnerId]);
+
+  const tooltipOwnerUtilityCount = useMemo(() => {
+    if (!tooltipOwnerId) {
+      return 0;
+    }
+    return boardTiles.filter(
+      (tile) => tile.type === "UTILITY" && ownershipByTile[tile.index]?.owner_player_id === tooltipOwnerId,
+    ).length;
+  }, [boardTiles, ownershipByTile, tooltipOwnerId]);
 
   const tooltipPosition = useMemo(() => {
     if (!pressedTileTooltip || typeof window === "undefined") {
@@ -432,19 +433,18 @@ export default function BoardViewport({
 
       {tooltipTile && tooltipPosition ? (
         <section
-          className="pointer-events-none fixed z-40 w-[220px] rounded-lg border border-white/20 bg-neutral-950 p-3 text-xs text-white shadow-2xl"
+          className="pointer-events-none fixed z-40 w-[220px]"
           style={{ left: tooltipPosition.left, top: tooltipPosition.top }}
         >
-          <p className="text-[11px] uppercase tracking-[0.18em] text-white/60">Tile {tooltipTile.index}</p>
-          <p className="mt-1 text-sm font-semibold text-white">{tooltipTile.name}</p>
-          <dl className="mt-2 grid grid-cols-[auto,1fr] gap-x-2 gap-y-1 text-white/85">
-            <dt className="text-white/60">Type</dt>
-            <dd>{getTileTypeLabel(tooltipTile.type)}</dd>
-            <dt className="text-white/60">Price</dt>
-            <dd>{typeof tooltipTile.price === "number" ? `$${tooltipTile.price}` : "—"}</dd>
-            <dt className="text-white/60">Owner</dt>
-            <dd>{ownerLabel}</dd>
-          </dl>
+          <TitleDeedPreview
+            tile={tooltipTile}
+            bandColor={getTileBandColor(tooltipTile)}
+            boardPackEconomy={boardEconomy}
+            price={tooltipTile.price}
+            ownedRailCount={tooltipOwnerRailCount}
+            ownedUtilityCount={tooltipOwnerUtilityCount}
+            mode="readonly"
+          />
         </section>
       ) : null}
     </div>
