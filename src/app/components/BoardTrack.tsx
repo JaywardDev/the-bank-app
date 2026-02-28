@@ -58,11 +58,11 @@ const getRowCol = (tileIndex: number) => {
   if (tileIndex >= 1 && tileIndex <= BOARD_WIDTH - 1) {
     return { row: BOARD_HEIGHT - 1, col: BOARD_WIDTH - 1 - tileIndex };
   }
-  if (tileIndex >= BOARD_WIDTH && tileIndex <= BOARD_WIDTH + BOARD_HEIGHT - 2) {
+  if (tileIndex >= BOARD_WIDTH && tileIndex <= BOARD_WIDTH + BOARD_HEIGHT - 3) {
     return { row: BOARD_HEIGHT - 1 - (tileIndex - (BOARD_WIDTH - 1)), col: 0 };
   }
-  if (tileIndex >= BOARD_WIDTH + BOARD_HEIGHT - 1 && tileIndex <= 34) {
-    return { row: 0, col: tileIndex - (BOARD_WIDTH + BOARD_HEIGHT - 1) };
+  if (tileIndex >= BOARD_WIDTH + BOARD_HEIGHT - 2 && tileIndex <= 34) {
+    return { row: 0, col: tileIndex - (BOARD_WIDTH + BOARD_HEIGHT - 2) };
   }
   return { row: tileIndex - 34, col: BOARD_WIDTH - 1 };
 };
