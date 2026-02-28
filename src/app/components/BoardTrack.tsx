@@ -266,18 +266,17 @@ export default function BoardTrack({
                   onTileClick(tile.index);
                 }
               }}
-              className={`relative overflow-hidden border border-transparent bg-[#f3f0e6] text-neutral-800 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.2)] ${
+              className={`group relative ${isMapTileFace ? "overflow-visible" : "overflow-hidden"} border border-transparent text-neutral-800 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.2)] ${
                 isCorner ? "rounded-[6px]" : "rounded-sm"
               } ${lastMovedTileIndex === tile.index ? "ring-2 ring-amber-400" : ""} ${
                 selectedTileIndex === tile.index
                   ? "outline outline-2 outline-indigo-500 outline-offset-[-3px]"
                   : ""
-              } ${onTileClick ? "cursor-pointer transition hover:bg-[#f8f4eb]" : ""}`}
+              } ${onTileClick ? "cursor-pointer" : ""}`}
               style={{
                 gridRowStart: position.row + 1,
                 gridColumnStart: position.col + 1,
                 zIndex: 2000,
-                backgroundColor: mapTileBaseColor,
               }}
             >
               <div className="pointer-events-none absolute inset-x-1.5 top-2 z-20 h-[calc(100%-0.75rem)]">
@@ -302,93 +301,97 @@ export default function BoardTrack({
                 </div>
               </div>
 
-              {tileIconSrc && showMapCenteredIcon ? (
-                <div className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center">
-                  <Image
-                    src={tileIconSrc}
-                    alt=""
-                    width={96}
-                    height={96}
-                    aria-hidden
-                    className="h-full w-full scale-[0.95] object-contain opacity-[0.85]"
-                  />
-                </div>
-              ) : null}
-
-              {ownership && !isMapTileFace ? (
-                <div className="pointer-events-none absolute right-1 top-1 z-10">
-                  <span
-                    className="relative block h-3.5 w-3.5 rounded-full border border-black/30 shadow-[0_1px_1px_rgba(0,0,0,0.35),inset_0_1px_1px_rgba(255,255,255,0.6)]"
-                    style={{
-                      backgroundColor: ownerColor ?? "#9ca3af",
-                      opacity: isCollateralized ? 0.45 : 1,
-                    }}
-                    aria-label={ownershipMarkerLabel}
-                  >
-                    {isCollateralized ? (
-                      <span className="absolute left-1/2 top-1/2 h-[1px] w-[140%] -translate-x-1/2 -translate-y-1/2 rotate-[-35deg] bg-black/70" />
-                    ) : null}
-                    {isPurchaseMortgaged && !isCollateralized ? (
-                      <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-[8px] font-black leading-none text-black/80">
-                        M
-                      </span>
-                    ) : null}
-                  </span>
-                </div>
-              ) : null}
-
-              {!isMapTileFace ? (
-                <div
-                  className="relative z-2 h-3 w-full"
-                  style={{ backgroundColor: getTileBandColor(tile) }}
-                />
-              ) : null}
-              {!isMapTileFace ? (
-                <div className="relative z-2 flex h-full flex-col p-1">
-                <div className="flex items-start justify-between gap-1">
-                  <p className="text-[10px] font-bold leading-none">
-                    {tile.index}
-                  </p>
-                </div>
-                {!isIconOnlyTile ? (
-                  <p className="mt-0.5 line-clamp-2 min-h-[1.7rem] pr-0.5 text-[15px] font-semibold leading-tight">
-                    {tile.name}
-                  </p>
-                ) : null}
-
-                {ownership?.houses ? (
-                  <div className="mt-1 flex justify-center">
-                    <HousesDots houses={ownership.houses} size="sm" />
+              <div
+                className={`relative h-full w-full overflow-hidden ${
+                  isCorner ? "rounded-[6px]" : "rounded-sm"
+                } bg-[#f3f0e6] ${onTileClick ? "transition group-hover:bg-[#f8f4eb]" : ""}`}
+                style={{ backgroundColor: mapTileBaseColor }}
+              >
+                {tileIconSrc && showMapCenteredIcon ? (
+                  <div className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center">
+                    <Image
+                      src={tileIconSrc}
+                      alt=""
+                      width={96}
+                      height={96}
+                      aria-hidden
+                      className="h-full w-full scale-[0.95] object-contain opacity-[0.85]"
+                    />
                   </div>
                 ) : null}
 
-                {showRent ? (
-                  <div className="mt-auto flex items-end justify-between gap-1">
-                    {showRent ? (
-                      <div className="pointer-events-none z-30">
-                        <span
-                          className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[15px] font-semibold leading-none ${
-                            isCollateralized
-                              ? "bg-neutral-700/35 text-neutral-900/50"
-                              : "bg-neutral-900/70 text-white/95"
-                          }`}
-                          aria-label={
-                            isCollateralized
-                              ? "Rent paused while collateralized"
-                              : `Current rent ${rentLabel}`
-                          }
-                        >
-                          {rentLabel}
+                {ownership && !isMapTileFace ? (
+                  <div className="pointer-events-none absolute right-1 top-1 z-10">
+                    <span
+                      className="relative block h-3.5 w-3.5 rounded-full border border-black/30 shadow-[0_1px_1px_rgba(0,0,0,0.35),inset_0_1px_1px_rgba(255,255,255,0.6)]"
+                      style={{
+                        backgroundColor: ownerColor ?? "#9ca3af",
+                        opacity: isCollateralized ? 0.45 : 1,
+                      }}
+                      aria-label={ownershipMarkerLabel}
+                    >
+                      {isCollateralized ? (
+                        <span className="absolute left-1/2 top-1/2 h-[1px] w-[140%] -translate-x-1/2 -translate-y-1/2 rotate-[-35deg] bg-black/70" />
+                      ) : null}
+                      {isPurchaseMortgaged && !isCollateralized ? (
+                        <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-[8px] font-black leading-none text-black/80">
+                          M
                         </span>
-                      </div>
-                    ) : (
-                      <span />
-                    )}
-                    <span />
+                      ) : null}
+                    </span>
                   </div>
                 ) : null}
-                </div>
-              ) : null}
+
+                {!isMapTileFace ? (
+                  <div
+                    className="relative z-2 h-3 w-full"
+                    style={{ backgroundColor: getTileBandColor(tile) }}
+                  />
+                ) : null}
+                {!isMapTileFace ? (
+                  <div className="relative z-2 flex h-full flex-col p-1">
+                    <div className="flex items-start justify-between gap-1">
+                      <p className="text-[10px] font-bold leading-none">{tile.index}</p>
+                    </div>
+                    {!isIconOnlyTile ? (
+                      <p className="mt-0.5 line-clamp-2 min-h-[1.7rem] pr-0.5 text-[15px] font-semibold leading-tight">
+                        {tile.name}
+                      </p>
+                    ) : null}
+
+                    {ownership?.houses ? (
+                      <div className="mt-1 flex justify-center">
+                        <HousesDots houses={ownership.houses} size="sm" />
+                      </div>
+                    ) : null}
+                    {showRent ? (
+                      <div className="mt-auto flex items-end justify-between gap-1">
+                        {showRent ? (
+                          <div className="pointer-events-none z-30">
+                            <span
+                              className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[15px] font-semibold leading-none ${
+                                isCollateralized
+                                  ? "bg-neutral-700/35 text-neutral-900/50"
+                                  : "bg-neutral-900/70 text-white/95"
+                              }`}
+                              aria-label={
+                                isCollateralized
+                                  ? "Rent paused while collateralized"
+                                  : `Current rent ${rentLabel}`
+                              }
+                            >
+                              {rentLabel}
+                            </span>
+                          </div>
+                        ) : (
+                          <span />
+                        )}
+                        <span />
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
             </article>
           );
         })}
