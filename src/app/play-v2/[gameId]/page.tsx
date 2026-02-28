@@ -9,6 +9,7 @@ import BoardViewport from "@/components/play-v2/BoardViewport";
 import { TitleDeedPreview } from "@/app/components/TitleDeedPreview";
 import { DEFAULT_BOARD_PACK_ECONOMY, getBoardPackById } from "@/lib/boardPacks";
 import { getTileBandColor } from "@/lib/boardTileStyles";
+import { getCurrentTileRent } from "@/lib/rent";
 
 type GameMeta = {
   id: string;
@@ -335,6 +336,42 @@ export default function PlayV2Page() {
     ? null
     : ownershipByTile[selectedTileIndex]?.owner_player_id ?? null;
 
+  const selectedOwnerLabel = useMemo(() => {
+    if (!selectedOwnerId) {
+      return "Unowned";
+    }
+    return players.find((player) => player.id === selectedOwnerId)?.display_name ?? selectedOwnerId;
+  }, [players, selectedOwnerId]);
+
+  const selectedTileStatus = useMemo(() => {
+    if (selectedTileIndex === null) {
+      return "None";
+    }
+    const ownership = ownershipByTile[selectedTileIndex];
+    if (!ownership) {
+      return "None";
+    }
+    if (ownership.purchase_mortgage_id) {
+      return "Mortgaged";
+    }
+    if (ownership.collateral_loan_id) {
+      return "Collateralized";
+    }
+    return "None";
+  }, [ownershipByTile, selectedTileIndex]);
+
+  const selectedTileCurrentRent = useMemo(() => {
+    if (!selectedTile || !selectedBoardPack) {
+      return null;
+    }
+    return getCurrentTileRent({
+      tile: selectedTile,
+      ownershipByTile,
+      boardTiles: selectedBoardPack.tiles,
+      economy: selectedBoardPack.economy,
+    });
+  }, [ownershipByTile, selectedBoardPack, selectedTile]);
+
   const selectedOwnerRailCount = useMemo(() => {
     if (!selectedOwnerId) {
       return 0;
@@ -383,7 +420,12 @@ export default function PlayV2Page() {
       leftOpen={isLeftDrawerOpen}
       onLeftOpenChange={setIsLeftDrawerOpen}
       leftDrawerContent={selectedTile ? (
-        <div className="h-full">
+        <div className="h-full space-y-2">
+          <div className="rounded-lg border border-white/15 bg-white/10 px-3 py-2 text-xs text-white/90">
+            <p>Current Rent: {selectedTileCurrentRent !== null ? formatMoney(selectedTileCurrentRent) : "—"}</p>
+            <p>Owner: {selectedOwnerLabel}</p>
+            <p>Status: {selectedTileStatus}</p>
+          </div>
           <TitleDeedPreview
             tile={selectedTile}
             bandColor={getTileBandColor(selectedTile)}
