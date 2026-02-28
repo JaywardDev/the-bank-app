@@ -117,14 +117,10 @@ export default function BoardTrack({
 
   return (
     <div
-      className={`relative h-full w-full rounded-lg border border-white/20 bg-transparent shadow-2xl ${
-        isCompact ? "p-1" : "p-2"
-      }`}
+      className={`relative h-full w-full ${isCompact ? "p-1" : "rounded-lg border border-white/20 bg-transparent p-2 shadow-2xl"}`}
     >
       <div
-        className={`grid h-full w-full gap-px rounded-[6px] bg-white/10 ${
-          isCompact ? "p-1" : "p-1.5"
-        }`}
+        className={`grid h-full w-full gap-px ${isCompact ? "p-1" : "rounded-[6px] bg-white/10 p-1.5"}`}
         style={{
           gridTemplateColumns: `repeat(${boardWidth}, minmax(0, 1fr))`,
           gridTemplateRows: `repeat(${boardHeight}, minmax(0, 1fr))`,
