@@ -421,11 +421,6 @@ export default function PlayV2Page() {
       onLeftOpenChange={setIsLeftDrawerOpen}
       leftDrawerContent={selectedTile ? (
         <div className="h-full space-y-2">
-          <div className="rounded-lg border border-white/15 bg-white/10 px-3 py-2 text-xs text-white/90">
-            <p>Current Rent: {selectedTileCurrentRent !== null ? formatMoney(selectedTileCurrentRent) : "—"}</p>
-            <p>Owner: {selectedOwnerLabel}</p>
-            <p>Status: {selectedTileStatus}</p>
-          </div>
           <TitleDeedPreview
             tile={selectedTile}
             bandColor={getTileBandColor(selectedTile)}
@@ -436,6 +431,11 @@ export default function PlayV2Page() {
             mode="readonly"
             size="compact"
           />
+          <div className="rounded-lg border border-white/15 bg-white/10 px-3 py-2 text-xs text-white/90">
+            <p>Current Rent: {selectedTileCurrentRent !== null ? formatMoney(selectedTileCurrentRent) : "—"}</p>
+            <p>Owner: {selectedOwnerLabel}</p>
+            <p>Status: {selectedTileStatus}</p>
+          </div>          
         </div>
       ) : (
         <p className="text-sm text-white/70">Select a tile to view the title deed</p>
