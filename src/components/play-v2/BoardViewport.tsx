@@ -390,7 +390,7 @@ export default function BoardViewport({
         >
           <div className="absolute inset-[-20%] z-0 bg-[url('/icons/board.svg')] bg-cover bg-center bg-no-repeat" />
           <div className="absolute inset-0 z-10 flex items-center justify-center p-1">
-            <div className="relative h-full w-auto max-h-full max-w-full">
+            <div className="relative h-full w-[90%] max-h-full max-w-[90vw]">
               <BoardSquare variant="viewport">
                 <BoardTrack
                   density="compact"
