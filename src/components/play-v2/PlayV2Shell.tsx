@@ -104,12 +104,21 @@ export default function PlayV2Shell({
         </section>
 
         <aside
-          className={`absolute bottom-0 left-0 top-9 z-20 w-72 border-r border-white/15 bg-neutral-900 p-4 transition-transform duration-200 md:top-10 ${
+          className={`absolute bottom-0 left-0 top-9 z-20 flex w-72 flex-col border-r border-white/15 bg-neutral-900 transition-transform duration-200 md:top-10 ${
             leftOpen ? "translate-x-0" : "-translate-x-full"
           }`}
         >
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-white/80">Left Drawer</h2>
-          <div className="mt-3">{leftDrawerContent}</div>
+          <div className="flex h-11 items-center justify-end border-b border-white/10 px-2">
+            <button
+              type="button"
+              aria-label="Close"
+              onClick={() => setLeftOpen(false)}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-lg leading-none text-white/80 transition hover:bg-white/10 hover:text-white"
+            >
+              ×
+            </button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-auto p-3">{leftDrawerContent}</div>
         </aside>
 
         <aside

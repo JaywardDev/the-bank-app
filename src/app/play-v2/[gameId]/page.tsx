@@ -383,15 +383,18 @@ export default function PlayV2Page() {
       leftOpen={isLeftDrawerOpen}
       onLeftOpenChange={setIsLeftDrawerOpen}
       leftDrawerContent={selectedTile ? (
-        <TitleDeedPreview
-          tile={selectedTile}
-          bandColor={getTileBandColor(selectedTile)}
-          boardPackEconomy={selectedBoardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY}
-          price={selectedTile.price}
-          ownedRailCount={selectedOwnerRailCount}
-          ownedUtilityCount={selectedOwnerUtilityCount}
-          mode="readonly"
-        />
+        <div className="h-full">
+          <TitleDeedPreview
+            tile={selectedTile}
+            bandColor={getTileBandColor(selectedTile)}
+            boardPackEconomy={selectedBoardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY}
+            price={selectedTile.price}
+            ownedRailCount={selectedOwnerRailCount}
+            ownedUtilityCount={selectedOwnerUtilityCount}
+            mode="readonly"
+            size="compact"
+          />
+        </div>
       ) : (
         <p className="text-sm text-white/70">Select a tile to view the title deed</p>
       )}

@@ -95,6 +95,7 @@ const TileIcon = ({
 
 type TitleDeedCardProps = {
   bandColor: string;
+  size?: "default" | "compact";
   eyebrow?: string;
   header: ReactNode;
   subheader?: ReactNode;
@@ -104,15 +105,16 @@ type TitleDeedCardProps = {
 
 const TitleDeedCard = ({
   bandColor,
+  size = "default",
   eyebrow,
   header,
   subheader,
   rentSection,
   footer,
 }: TitleDeedCardProps) => (
-  <div className="overflow-hidden rounded-2xl border border-neutral-200 bg-white text-sm text-neutral-900 shadow-sm">
-    <div className="h-4 w-full" style={{ backgroundColor: bandColor }} />
-    <div className="px-4 pb-4 pt-3">
+  <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-white text-sm text-neutral-900 shadow-sm">
+    <div className={`${size === "compact" ? "h-3" : "h-4"} w-full`} style={{ backgroundColor: bandColor }} />
+    <div className={`flex min-h-0 flex-1 flex-col ${size === "compact" ? "px-3 pb-3 pt-2" : "px-4 pb-4 pt-3"}`}>
       {eyebrow ? (
         <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-neutral-500">
           {eyebrow}
@@ -120,9 +122,9 @@ const TitleDeedCard = ({
       ) : null}
       {header}
       {subheader}
-      {rentSection}
+      {rentSection ? <div className="mt-2 min-h-0 flex-1 overflow-auto pr-1">{rentSection}</div> : null}
       {footer ? (
-        <div className="mt-4 border-t border-neutral-200 pt-3">{footer}</div>
+        <div className={`${size === "compact" ? "mt-3 pt-2" : "mt-4 pt-3"} border-t border-neutral-200`}>{footer}</div>
       ) : null}
     </div>
   </div>
@@ -438,6 +440,7 @@ export type TitleDeedPreviewProps = {
   ownerPlayerId?: string | null;
   ownershipByTile?: OwnershipByTile;
   boardTiles?: BoardTile[];
+  size?: "default" | "compact";
 };
 
 export const TitleDeedPreview = ({
@@ -456,6 +459,7 @@ export const TitleDeedPreview = ({
   ownerPlayerId = null,
   ownershipByTile = {},
   boardTiles = [],
+  size = "default",
 }: TitleDeedPreviewProps) => {
   if (!tile || !isOwnableTileType(tile.type)) {
     return null;
@@ -494,61 +498,62 @@ export const TitleDeedPreview = ({
   return (
     <TitleDeedCard
       bandColor={bandColor}
+      size={size}
       eyebrow={resolvedEyebrow}
       header={
         isRailTileType(tile.type) ? (
-          <div className="mt-2 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-3 text-center">
-            <div className="mx-auto flex h-12 w-24 items-center justify-center rounded-md border border-dashed border-neutral-300 text-[10px] font-semibold text-neutral-500">
+          <div className={`${size === "compact" ? "mt-1 rounded-lg px-2.5 py-2" : "mt-2 rounded-xl px-3 py-3"} border border-neutral-200 bg-neutral-50 text-center`}>
+            <div className={`${size === "compact" ? "h-10 w-20" : "h-12 w-24"} mx-auto flex items-center justify-center rounded-md border border-dashed border-neutral-300 text-[10px] font-semibold text-neutral-500`}>
               <TileIcon
                 src={tileIconSrc}
                 alt=""
                 width={48}
                 height={48}
-                className="h-10 w-10 object-contain"
+                className={`${size === "compact" ? "h-8 w-8" : "h-10 w-10"} object-contain`}
                 ariaHidden
               />
               {!tileIconSrc ? tileIconFallbackLabel : null}
             </div>
-            <p className="mt-2 text-lg font-black uppercase tracking-wide text-neutral-900">
+            <p className={`${size === "compact" ? "mt-1 text-base" : "mt-2 text-lg"} font-black uppercase tracking-wide text-neutral-900`}>
               {tileName}
             </p>
             {priceValue !== null ? (
-              <p className="text-xs font-medium text-neutral-500">
+              <p className={`${size === "compact" ? "text-[11px]" : "text-xs"} font-medium text-neutral-500`}>
                 Price {formatMoney(priceValue, currencySymbol)}
               </p>
             ) : null}
           </div>
         ) : tile.type === "UTILITY" ? (
-          <div className="mt-2 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-3 text-center">
-            <div className="mx-auto flex h-12 w-24 items-center justify-center rounded-md border border-dashed border-neutral-300 text-[10px] font-semibold text-neutral-500">
+          <div className={`${size === "compact" ? "mt-1 rounded-lg px-2.5 py-2" : "mt-2 rounded-xl px-3 py-3"} border border-neutral-200 bg-neutral-50 text-center`}>
+            <div className={`${size === "compact" ? "h-10 w-20" : "h-12 w-24"} mx-auto flex items-center justify-center rounded-md border border-dashed border-neutral-300 text-[10px] font-semibold text-neutral-500`}>
               <TileIcon
                 src={tileIconSrc}
                 alt=""
                 width={48}
                 height={48}
-                className="h-10 w-10 object-contain"
+                className={`${size === "compact" ? "h-8 w-8" : "h-10 w-10"} object-contain`}
                 ariaHidden
               />
               {!tileIconSrc ? tileIconFallbackLabel : null}
             </div>
-            <p className="mt-2 text-lg font-black uppercase tracking-wide text-neutral-900">
+            <p className={`${size === "compact" ? "mt-1 text-base" : "mt-2 text-lg"} font-black uppercase tracking-wide text-neutral-900`}>
               {tileName}
             </p>
             {priceValue !== null ? (
-              <p className="text-xs font-medium text-neutral-500">
+              <p className={`${size === "compact" ? "text-[11px]" : "text-xs"} font-medium text-neutral-500`}>
                 Price {formatMoney(priceValue, currencySymbol)}
               </p>
             ) : null}
           </div>
         ) : (
-          <p className="mt-1 text-lg font-black uppercase tracking-wide text-neutral-900">
+          <p className={`${size === "compact" ? "mt-0.5 text-base" : "mt-1 text-lg"} font-black uppercase tracking-wide text-neutral-900`}>
             {tileName}
           </p>
         )
       }
       subheader={
         tile.type === "PROPERTY" && priceValue !== null ? (
-          <p className="text-xs font-medium text-neutral-500">
+          <p className={`${size === "compact" ? "text-[11px]" : "text-xs"} font-medium text-neutral-500`}>
             Price {formatMoney(priceValue, currencySymbol)}
           </p>
         ) : null
@@ -556,7 +561,7 @@ export const TitleDeedPreview = ({
       rentSection={
         isRailTileType(tile.type) ? (
           <RailRentTable
-            className="mt-3"
+            className={size === "compact" ? "" : "mt-1"}
             rentRows={railRentRows}
             ownedCount={ownedRailCount}
             currentRent={null}
@@ -564,7 +569,7 @@ export const TitleDeedPreview = ({
           />
         ) : tile.type === "UTILITY" ? (
           <UtilityRentTable
-            className="mt-3"
+            className={size === "compact" ? "" : "mt-1"}
             ownedCount={ownedUtilityCount}
             lastRoll={null}
             currentRent={null}
@@ -572,7 +577,7 @@ export const TitleDeedPreview = ({
             currencySymbol={currencySymbol}
           />
         ) : (
-          <div className="mt-3 space-y-2">
+          <div className={size === "compact" ? "space-y-1.5" : "mt-1 space-y-2"}>
             {showDevelopment && resolvedDevelopment !== null ? (
               <div className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-xs text-neutral-600">
                 <div className="flex items-center justify-between gap-2">
