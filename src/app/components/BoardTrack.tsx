@@ -285,7 +285,7 @@ export default function BoardTrack({
                   className="relative h-full w-full"
                   style={{
                     "--token-size": isMapTileFace
-                      ? "clamp(10px, 25%, 22px)"
+                      ? "clamp(14px, 25%, 22px)"
                       : "clamp(26px, 100%, 70px)",
                     "--token-step": "24%",
                   } as CSSProperties}
