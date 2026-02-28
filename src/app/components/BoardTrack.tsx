@@ -62,6 +62,7 @@ const FOREST_VARIANTS = [
   "/assets/forest-2.png",
   "/assets/forest-3.png",
 ];
+const MAP_TILE_WARM_WHITE = "#f3f0e6";
 
 const getRowCol = (tileIndex: number, boardWidth: number, boardHeight: number) => {
   const topRowEndIndex = 2 * boardWidth + boardHeight - 3;
@@ -206,6 +207,23 @@ export default function BoardTrack({
             tile.index === topRightCorner;
           const tileIconSrc = getBoardTileIconSrc(tile);
           const isIconOnlyTile = isIconOnlySpecialTile(tile) && !ownership;
+          const isPropertyTile = tile.type === "PROPERTY";
+          const isRailOrUtilityTile = tile.type === "RAIL" || tile.type === "UTILITY";
+          const isOwned = Boolean(ownership);
+          const mapTileBaseColor = isMapTileFace
+            ? isPropertyTile
+              ? isOwned
+                ? "transparent"
+                : (getTileBandColor(tile) ?? MAP_TILE_WARM_WHITE)
+              : isRailOrUtilityTile
+                ? isOwned
+                  ? "transparent"
+                  : MAP_TILE_WARM_WHITE
+                : MAP_TILE_WARM_WHITE
+            : MAP_TILE_WARM_WHITE;
+          const showMapCenteredIcon = isMapTileFace
+            ? !isPropertyTile && (!isRailOrUtilityTile || !isOwned)
+            : Boolean(tileIconSrc);
           const currentRent = getCurrentTileRent({
             tile,
             ownershipByTile,
@@ -259,6 +277,7 @@ export default function BoardTrack({
                 gridRowStart: position.row + 1,
                 gridColumnStart: position.col + 1,
                 zIndex: 2000,
+                backgroundColor: mapTileBaseColor,
               }}
             >
               <div className="pointer-events-none absolute inset-x-1.5 top-2 z-20 h-[calc(100%-0.75rem)]">
@@ -281,7 +300,7 @@ export default function BoardTrack({
                 </div>
               </div>
 
-              {tileIconSrc ? (
+              {tileIconSrc && showMapCenteredIcon ? (
                 <div className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center">
                   <Image
                     src={tileIconSrc}
@@ -294,7 +313,7 @@ export default function BoardTrack({
                 </div>
               ) : null}
 
-              {ownership ? (
+              {ownership && !isMapTileFace ? (
                 <div className="pointer-events-none absolute right-1 top-1 z-10">
                   <span
                     className="relative block h-3.5 w-3.5 rounded-full border border-black/30 shadow-[0_1px_1px_rgba(0,0,0,0.35),inset_0_1px_1px_rgba(255,255,255,0.6)]"
@@ -316,11 +335,14 @@ export default function BoardTrack({
                 </div>
               ) : null}
 
-              <div
-                className="relative z-2 h-3 w-full"
-                style={{ backgroundColor: getTileBandColor(tile) }}
-              />
-              <div className="relative z-2 flex h-full flex-col p-1">
+              {!isMapTileFace ? (
+                <div
+                  className="relative z-2 h-3 w-full"
+                  style={{ backgroundColor: getTileBandColor(tile) }}
+                />
+              ) : null}
+              {!isMapTileFace ? (
+                <div className="relative z-2 flex h-full flex-col p-1">
                 <div className="flex items-start justify-between gap-1">
                   <p className="text-[10px] font-bold leading-none">
                     {tile.index}
@@ -363,7 +385,8 @@ export default function BoardTrack({
                     <span />
                   </div>
                 ) : null}
-              </div>
+                </div>
+              ) : null}
             </article>
           );
         })}
