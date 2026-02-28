@@ -319,6 +319,7 @@ export default function BoardViewport({
               <BoardSquare variant="viewport">
                 <BoardTrack
                   density="compact"
+                  tileFace="map"
                   tiles={boardTiles}
                   economy={boardEconomy}
                   players={boardPlayers}

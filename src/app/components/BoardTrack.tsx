@@ -25,6 +25,7 @@ type OwnershipByTile = Record<
 >;
 
 type BoardTrackDensity = "default" | "compact";
+type BoardTrackTileFace = "default" | "map";
 type InteriorCellState = "FOREST" | "CLEARED";
 
 type BoardTrackProps = {
@@ -42,6 +43,7 @@ type BoardTrackProps = {
   onTilePointerDown?: (tileIndex: number, tileRect: DOMRect) => void;
   onTilePointerRelease?: () => void;
   density?: BoardTrackDensity;
+  tileFace?: BoardTrackTileFace;
 };
 
 const fallbackTiles: BoardTile[] = Array.from({ length: 40 }, (_, index) => ({
@@ -109,6 +111,7 @@ export default function BoardTrack({
   economy,
   lastRoll,
   density = "default",
+  tileFace = "default",
 }: BoardTrackProps) {
   const boardTiles = tiles && tiles.length > 0 ? tiles : fallbackTiles;
   const boardEconomy = economy ?? {
@@ -119,6 +122,7 @@ export default function BoardTrack({
     utilityRentMultipliers: { single: 4, double: 10 },
   };
   const isCompact = density === "compact";
+  const isMapTileFace = tileFace === "map";
   const boardWidth = isCompact ? COMPACT_BOARD_WIDTH : DEFAULT_BOARD_WIDTH;
   const boardHeight = isCompact ? COMPACT_BOARD_HEIGHT : DEFAULT_BOARD_HEIGHT;
   const bottomLen = boardWidth;
@@ -227,6 +231,7 @@ export default function BoardTrack({
           return (
             <article
               key={tile.tile_id}
+              data-tile-face={isMapTileFace ? "map" : "default"}
               role={onTileClick ? "button" : undefined}
               tabIndex={onTileClick ? 0 : undefined}
               onClick={() => onTileClick?.(tile.index)}
