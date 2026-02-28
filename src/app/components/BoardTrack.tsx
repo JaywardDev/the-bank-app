@@ -368,8 +368,8 @@ export default function BoardTrack({
                             <Image
                               src={
                                 isHotelSlot
-                                  ? "/assets/ph-boardpack/ph-hotel.svg"
-                                  : "/assets/ph-boardpack/ph-house.svg"
+                                  ? "/assets/ph-boardpack/ph-hotel.png"
+                                  : "/assets/ph-boardpack/ph-house.png"
                               }
                               alt=""
                               width={18}
