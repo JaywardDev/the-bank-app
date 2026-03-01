@@ -97,6 +97,15 @@ const getForestVariantIndex = (row: number, col: number) => {
   return Math.abs(hash) % FOREST_VARIANTS.length;
 };
 
+const getMapBuildingSprite = (houses: number) => {
+  if (houses <= 0) return null;
+  if (houses === 1) return "/assets/house-1.png";
+  if (houses === 2) return "/assets/house-2.png";
+  if (houses === 3) return "/assets/house-3.png";
+  if (houses === 4) return "/assets/house-4.png";
+  return "/assets/house-5.png";
+};
+
 export default function BoardTrack({
   tiles,
   players,
@@ -213,7 +222,7 @@ export default function BoardTrack({
           const isOwned = Boolean(ownership);
           const isOwnedByPlayer = Boolean(ownership?.owner_player_id);
           const housesCount = ownershipByTile[tile.index]?.houses ?? 0;
-          const buildingCount = Math.min(housesCount, 6);
+          const mapBuildingSpriteSrc = getMapBuildingSprite(housesCount);
           const mapTileBaseColor = isMapTileFace
             ? isPropertyTile
               ? isOwned
@@ -270,7 +279,7 @@ export default function BoardTrack({
                   onTileClick(tile.index);
                 }
               }}
-              className={`group relative ${isMapTileFace ? "overflow-visible" : "overflow-hidden"} border border-transparent text-neutral-800 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.2)] ${
+              className={`group relative overflow-hidden border border-transparent text-neutral-800 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.2)] ${
                 isCorner ? "rounded-[6px]" : "rounded-sm"
               } ${lastMovedTileIndex === tile.index ? "ring-2 ring-amber-400" : ""} ${
                 selectedTileIndex === tile.index
@@ -306,7 +315,7 @@ export default function BoardTrack({
               </div>
 
               <div
-                className={`relative h-full w-full ${isMapTileFace ? "overflow-visible" : "overflow-hidden"} ${
+                className={`relative h-full w-full overflow-hidden ${
                   isCorner ? "rounded-[6px]" : "rounded-sm"
                 } bg-[#f3f0e6] ${onTileClick ? "transition group-hover:bg-[#f8f4eb]" : ""}`}
                 style={{ backgroundColor: mapTileBaseColor }}
@@ -353,36 +362,16 @@ export default function BoardTrack({
                   />
                 ) : null}
 
-                {isMapTileFace && isOwnableTile && isOwnedByPlayer && buildingCount > 0 ? (
-                  <div className="pointer-events-none absolute inset-x-0.5 bottom-0 z-10">
-                    <div className="grid grid-cols-3 grid-rows-2 gap-0">
-                      {Array.from({ length: buildingCount }, (_, slotIndex) => {
-                        const isHotelSlot = housesCount >= 5 && slotIndex === 5;
-                        const isBackRow = slotIndex < 3;
-
-                        return (
-                          <div
-                            key={`${tile.tile_id}-building-${slotIndex}`}
-                            className="flex aspect-square items-center justify-center"
-                          >
-                            <Image
-                              src={
-                                isHotelSlot
-                                  ? "/assets/ph-boardpack/ph-hotel.png"
-                                  : "/assets/ph-boardpack/ph-house.png"
-                              }
-                              alt=""
-                              width={18}
-                              height={18}
-                              aria-hidden
-                              className={`h-full w-full object-cover ${
-                                isBackRow ? "-translate-y-[1px]" : "translate-y-0"
-                              }`}
-                            />
-                          </div>
-                        );
-                      })}
-                    </div>
+                {isMapTileFace && isOwnableTile && isOwnedByPlayer && mapBuildingSpriteSrc ? (
+                  <div className="pointer-events-none absolute inset-[2px] z-10">
+                    <Image
+                      src={mapBuildingSpriteSrc}
+                      alt=""
+                      width={96}
+                      height={96}
+                      aria-hidden
+                      className="h-full w-full object-contain"
+                    />
                   </div>
                 ) : null}
 
