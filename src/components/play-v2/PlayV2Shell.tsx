@@ -27,9 +27,24 @@ function WalletButton({ open, onClick }: WalletButtonProps) {
 type WalletPanelProps = {
   open: boolean;
   onClose: () => void;
+  ownedCount: number;
+  loanCount: number;
+  mortgageCount: number;
+  ownedContent: ReactNode;
+  loansContent?: ReactNode;
+  mortgagesContent?: ReactNode;
 };
 
-function WalletPanel({ open, onClose }: WalletPanelProps) {
+function WalletPanel({
+  open,
+  onClose,
+  ownedCount,
+  loanCount,
+  mortgageCount,
+  ownedContent,
+  loansContent,
+  mortgagesContent,
+}: WalletPanelProps) {
   const [activeTab, setActiveTab] = useState<WalletTab>("owned");
 
   useEffect(() => {
@@ -47,10 +62,10 @@ function WalletPanel({ open, onClose }: WalletPanelProps) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open, onClose]);
 
-  const tabs: { id: WalletTab; label: string }[] = [
-    { id: "owned", label: "Owned" },
-    { id: "loans", label: "Loans" },
-    { id: "mortgages", label: "Mortgages" },
+  const tabs: { id: WalletTab; label: string; count: number }[] = [
+    { id: "owned", label: "Owned", count: ownedCount },
+    { id: "loans", label: "Loans", count: loanCount },
+    { id: "mortgages", label: "Mortgages", count: mortgageCount },
   ];
 
   return (
@@ -83,13 +98,23 @@ function WalletPanel({ open, onClose }: WalletPanelProps) {
                 activeTab === tab.id ? "bg-white/20 text-white" : "bg-transparent text-white/60 hover:bg-white/10"
               }`}
             >
-              {tab.label}
+              {tab.label} ({tab.count})
             </button>
           ))}
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
-        <div className="rounded-lg border border-white/10 bg-white/5 p-3 text-sm text-white/80">Coming soon</div>
+        {activeTab === "owned" ? ownedContent : null}
+        {activeTab === "loans"
+          ? loansContent ?? (
+              <div className="rounded-lg border border-white/10 bg-white/5 p-3 text-sm text-white/80">Coming soon</div>
+            )
+          : null}
+        {activeTab === "mortgages"
+          ? mortgagesContent ?? (
+              <div className="rounded-lg border border-white/10 bg-white/5 p-3 text-sm text-white/80">Coming soon</div>
+            )
+          : null}
       </div>
     </aside>
   );
@@ -114,6 +139,12 @@ type PlayV2ShellProps = {
   rollDiceDisabledReason?: string | null;
   onRollDice?: () => void;
   onEndTurn?: () => void;
+  walletOwnedCount?: number;
+  walletLoanCount?: number;
+  walletMortgageCount?: number;
+  walletOwnedContent?: ReactNode;
+  walletLoansContent?: ReactNode;
+  walletMortgagesContent?: ReactNode;
 };
 
 export default function PlayV2Shell({
@@ -134,6 +165,12 @@ export default function PlayV2Shell({
   rollDiceDisabledReason = null,
   onRollDice,
   onEndTurn,
+  walletOwnedCount = 0,
+  walletLoanCount = 0,
+  walletMortgageCount = 0,
+  walletOwnedContent,
+  walletLoansContent,
+  walletMortgagesContent,
 }: PlayV2ShellProps) {
   const [uncontrolledLeftOpen, setUncontrolledLeftOpen] = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
@@ -270,7 +307,18 @@ export default function PlayV2Shell({
         </aside>
 
         <WalletButton open={walletOpen} onClick={() => setWalletOpen((value) => !value)} />
-        <WalletPanel open={walletOpen} onClose={() => setWalletOpen(false)} />
+        <WalletPanel
+          open={walletOpen}
+          onClose={() => setWalletOpen(false)}
+          ownedCount={walletOwnedCount}
+          loanCount={walletLoanCount}
+          mortgageCount={walletMortgageCount}
+          ownedContent={walletOwnedContent ?? (
+            <div className="rounded-lg border border-white/10 bg-white/5 p-3 text-sm text-white/80">Coming soon</div>
+          )}
+          loansContent={walletLoansContent}
+          mortgagesContent={walletMortgagesContent}
+        />
       </div>
 
       <section className="play-v2-shell-overlay absolute inset-0 z-50 hidden items-center justify-center bg-neutral-950/95 p-6 text-center">

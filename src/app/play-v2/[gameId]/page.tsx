@@ -117,7 +117,12 @@ type BankAction =
   | "BUY_PROPERTY"
   | "DECLINE_PROPERTY"
   | "AUCTION_BID"
-  | "AUCTION_PASS";
+  | "AUCTION_PASS"
+  | "BUILD_HOUSE"
+  | "SELL_HOUSE"
+  | "SELL_HOTEL"
+  | "SELL_TO_MARKET"
+  | "TAKE_COLLATERAL_LOAN";
 
 type OwnershipRow = {
   tile_index: number;
@@ -206,6 +211,7 @@ export default function PlayV2Page() {
   const [selectedTileIndex, setSelectedTileIndex] = useState<number | null>(null);
   const [isLeftDrawerOpen, setIsLeftDrawerOpen] = useState(false);
   const [pendingGoToJailAckVersion, setPendingGoToJailAckVersion] = useState<number | null>(null);
+  const [sellToMarketTileIndex, setSellToMarketTileIndex] = useState<number | null>(null);
   const [auctionNow, setAuctionNow] = useState<Date>(() => new Date());
 
   const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
@@ -922,6 +928,273 @@ export default function PlayV2Page() {
     ).length;
   }, [ownershipByTile, selectedBoardPack, selectedOwnerId]);
 
+  const ownedProperties = useMemo(() => {
+    if (!selectedBoardPack?.tiles || !currentUserPlayer) {
+      return [];
+    }
+
+    return selectedBoardPack.tiles
+      .filter(
+        (tile) =>
+          ["PROPERTY", "RAIL", "UTILITY"].includes(tile.type) &&
+          ownershipByTile[tile.index]?.owner_player_id === currentUserPlayer.id,
+      )
+      .map((tile) => {
+        const ownership = ownershipByTile[tile.index];
+        const isCollateralized = Boolean(ownership?.collateral_loan_id);
+        const isPurchaseMortgaged = Boolean(ownership?.purchase_mortgage_id);
+        const colorGroup = tile.colorGroup ?? null;
+        const groupTiles = colorGroup
+          ? selectedBoardPack.tiles.filter(
+              (entry) =>
+                entry.type === "PROPERTY" && entry.colorGroup === colorGroup,
+            )
+          : [];
+        const hasFullSet =
+          colorGroup &&
+          groupTiles.length > 0 &&
+          groupTiles.every(
+            (entry) =>
+              ownershipByTile[entry.index]?.owner_player_id === currentUserPlayer.id,
+          );
+        const houses = ownership?.houses ?? 0;
+        const houseCost = tile.houseCost ?? 0;
+        const houseBuildMacroBlocked = houseBuildBlockedByMacro !== null;
+        const canBuildHouse =
+          canAct &&
+          tile.type === "PROPERTY" &&
+          hasFullSet &&
+          !isCollateralized &&
+          !isPurchaseMortgaged &&
+          houseCost > 0 &&
+          (currentUserCash ?? 0) >= houseCost &&
+          !houseBuildMacroBlocked;
+        const canSellHouse =
+          canAct &&
+          tile.type === "PROPERTY" &&
+          hasFullSet &&
+          !isCollateralized &&
+          !isPurchaseMortgaged &&
+          houseCost > 0 &&
+          houses > 0;
+        const isHotelBoundary = houses >= 5 && houses % 5 === 0;
+        const canSellHotel = canSellHouse && isHotelBoundary;
+        const sellToMarketDisabledReason = !canAct
+          ? "Not your turn"
+          : houses > 0
+            ? "Sell houses first"
+            : isCollateralized
+              ? "Collateralized properties cannot be sold"
+              : isPurchaseMortgaged
+                ? "Mortgaged properties cannot be sold"
+                : null;
+        const canSellToMarket = sellToMarketDisabledReason === null;
+        const collateralDisabledReason = !canAct
+          ? "Not your turn"
+          : !rules.loanCollateralEnabled
+            ? "Collateral loans disabled"
+            : isCollateralized
+              ? "Already collateralized"
+              : isPurchaseMortgaged
+                ? "Mortgaged properties cannot be collateralized"
+                : loanBlockedByMacro
+                  ? `Blocked by macro: ${loanBlockedByMacro.name ?? "Macroeconomic event"}`
+                  : null;
+
+        return {
+          tile,
+          houses,
+          hasFullSet,
+          isCollateralEligible: !isCollateralized && !isPurchaseMortgaged,
+          canBuildHouse,
+          canSellHouse,
+          canSellHotel,
+          canSellToMarket,
+          houseBuildMacroBlocked,
+          sellToMarketDisabledReason,
+          collateralDisabledReason,
+        };
+      });
+  }, [
+    canAct,
+    currentUserCash,
+    currentUserPlayer,
+    houseBuildBlockedByMacro,
+    loanBlockedByMacro,
+    ownershipByTile,
+    rules.loanCollateralEnabled,
+    selectedBoardPack?.tiles,
+  ]);
+
+  const walletOwnedContent = useMemo(() => {
+    if (!selectedBoardPack) {
+      return null;
+    }
+
+    if (ownedProperties.length === 0) {
+      return <p className="text-sm text-white/70">No owned properties available.</p>;
+    }
+
+    return (
+      <div className="space-y-3">
+        {ownedProperties.map((entry) => {
+          const {
+            tile,
+            houses,
+            hasFullSet,
+            isCollateralEligible,
+            canBuildHouse,
+            canSellHouse,
+            canSellHotel,
+            canSellToMarket,
+            houseBuildMacroBlocked,
+            sellToMarketDisabledReason,
+            collateralDisabledReason,
+          } = entry;
+          const showSellHouse = houses > 0;
+          const showSellHotel = houses >= 5;
+          const buildHouseDisabledReason = !canAct
+            ? "Not your turn"
+            : !hasFullSet
+              ? "Requires full color set"
+              : houseBuildMacroBlocked
+                ? `Blocked by macro: ${houseBuildBlockedByMacro?.name ?? "Macroeconomic event"}`
+                : null;
+          const sellHouseDisabledReason = !canAct
+            ? "Not your turn"
+            : !hasFullSet
+              ? "Requires full color set"
+              : null;
+          const sellHotelDisabledReason = !canAct
+            ? "Not your turn"
+            : houses % 5 !== 0
+              ? "Sell houses first to reach a hotel boundary."
+              : !hasFullSet
+                ? "Requires full color set"
+                : null;
+
+          return (
+            <div key={tile.index} className="space-y-2 rounded-xl border border-white/15 bg-white/5 p-2">
+              <TitleDeedPreview
+                tile={tile}
+                bandColor={getTileBandColor(tile)}
+                boardPackEconomy={selectedBoardPack.economy ?? DEFAULT_BOARD_PACK_ECONOMY}
+                mode="readonly"
+                size="compact"
+                showDevelopment={tile.type === "PROPERTY"}
+                developmentCount={houses}
+                ownerPlayerId={currentUserPlayer?.id ?? null}
+                ownershipByTile={ownershipByTile}
+                boardTiles={selectedBoardPack.tiles}
+                ownedRailCount={selectedBoardPack.tiles.filter((boardTile) => boardTile.type === "RAIL" && ownershipByTile[boardTile.index]?.owner_player_id === currentUserPlayer?.id).length}
+                ownedUtilityCount={selectedBoardPack.tiles.filter((boardTile) => boardTile.type === "UTILITY" && ownershipByTile[boardTile.index]?.owner_player_id === currentUserPlayer?.id).length}
+              />
+              <div className="space-y-2 px-1 pb-1">
+                {tile.type === "PROPERTY" ? (
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="rounded-md bg-emerald-600 px-2 py-1 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:bg-emerald-900/50"
+                      disabled={!canBuildHouse || actionLoading === "BUILD_HOUSE"}
+                      title={buildHouseDisabledReason ?? undefined}
+                      onClick={() => void handleBankAction("BUILD_HOUSE", { tileIndex: tile.index })}
+                    >
+                      {actionLoading === "BUILD_HOUSE" ? "Building…" : "Build House"}
+                    </button>
+                    {showSellHouse ? (
+                      <button
+                        type="button"
+                        className="rounded-md border border-white/30 px-2 py-1 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:border-white/10 disabled:text-white/40"
+                        disabled={!canSellHouse || actionLoading === "SELL_HOUSE"}
+                        title={sellHouseDisabledReason ?? undefined}
+                        onClick={() => void handleBankAction("SELL_HOUSE", { tileIndex: tile.index })}
+                      >
+                        {actionLoading === "SELL_HOUSE" ? "Selling…" : "Sell House"}
+                      </button>
+                    ) : null}
+                    {showSellHotel ? (
+                      <button
+                        type="button"
+                        className="rounded-md border border-white/30 px-2 py-1 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:border-white/10 disabled:text-white/40"
+                        disabled={!canSellHotel || actionLoading === "SELL_HOTEL"}
+                        title={sellHotelDisabledReason ?? undefined}
+                        onClick={() => void handleBankAction("SELL_HOTEL", { tileIndex: tile.index })}
+                      >
+                        {actionLoading === "SELL_HOTEL" ? "Selling…" : "Sell Hotel"}
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="rounded-md border border-white/30 px-2 py-1 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:border-white/10 disabled:text-white/40"
+                    disabled={!canSellToMarket || actionLoading === "SELL_TO_MARKET"}
+                    title={sellToMarketDisabledReason ?? undefined}
+                    onClick={() => setSellToMarketTileIndex(tile.index)}
+                  >
+                    {actionLoading === "SELL_TO_MARKET" ? "Selling…" : "Sell to Market"}
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-md bg-white/90 px-2 py-1 text-[11px] font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:bg-white/20 disabled:text-white/50"
+                    disabled={!isCollateralEligible || collateralDisabledReason !== null || actionLoading === "TAKE_COLLATERAL_LOAN"}
+                    title={collateralDisabledReason ?? undefined}
+                    onClick={() => void handleBankAction("TAKE_COLLATERAL_LOAN", { tileIndex: tile.index })}
+                  >
+                    {actionLoading === "TAKE_COLLATERAL_LOAN" ? "Collateralizing…" : "Collateralize"}
+                  </button>
+                </div>
+                {sellToMarketDisabledReason ? <p className="text-[11px] text-white/50">{sellToMarketDisabledReason}</p> : null}
+                {buildHouseDisabledReason && tile.type === "PROPERTY" ? (
+                  <p className="text-[11px] text-white/50">{buildHouseDisabledReason}</p>
+                ) : null}
+                {collateralDisabledReason ? <p className="text-[11px] text-white/50">{collateralDisabledReason}</p> : null}
+              </div>
+            </div>
+          );
+        })}
+
+        {sellToMarketTileIndex !== null ? (
+          <div className="rounded-lg border border-amber-300/50 bg-amber-100/10 p-3 text-xs text-white">
+            <p className="font-semibold">Confirm sell to market?</p>
+            <p className="mt-1 text-white/75">You will receive 70% of listed price.</p>
+            <div className="mt-2 flex gap-2">
+              <button
+                type="button"
+                className="rounded bg-red-500 px-2 py-1 font-semibold text-white"
+                disabled={actionLoading === "SELL_TO_MARKET"}
+                onClick={() => {
+                  void handleBankAction("SELL_TO_MARKET", { tileIndex: sellToMarketTileIndex });
+                  setSellToMarketTileIndex(null);
+                }}
+              >
+                Confirm
+              </button>
+              <button
+                type="button"
+                className="rounded border border-white/30 px-2 py-1 font-semibold"
+                onClick={() => setSellToMarketTileIndex(null)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    );
+  }, [
+    actionLoading,
+    canAct,
+    currentUserPlayer?.id,
+    handleBankAction,
+    houseBuildBlockedByMacro?.name,
+    ownedProperties,
+    ownershipByTile,
+    selectedBoardPack,
+    sellToMarketTileIndex,
+  ]);
+
   const onRefetch = useCallback(async () => {
     if (!routeGameId || !session?.access_token) return;
     await loadAllSlices(routeGameId, session.access_token);
@@ -1063,6 +1336,10 @@ export default function PlayV2Page() {
       rollDiceDisabledReason={rollDiceDisabledReason}
       onRollDice={() => void handleBankAction("ROLL_DICE")}
       onEndTurn={() => void handleBankAction("END_TURN")}
+      walletOwnedCount={ownedProperties.length}
+      walletLoanCount={activeLoans.length}
+      walletMortgageCount={activePurchaseMortgages.length}
+      walletOwnedContent={walletOwnedContent}
       leftDrawerContent={selectedTile ? (
         <div className="h-full space-y-2">
           <TitleDeedPreview
