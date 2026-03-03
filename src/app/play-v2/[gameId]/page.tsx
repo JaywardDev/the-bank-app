@@ -9,6 +9,7 @@ import BoardViewport from "@/components/play-v2/BoardViewport";
 import { TitleDeedPreview } from "@/app/components/TitleDeedPreview";
 import { DEFAULT_BOARD_PACK_ECONOMY, getBoardPackById } from "@/lib/boardPacks";
 import { getTileBandColor } from "@/lib/boardTileStyles";
+import { getRules } from "@/lib/rules";
 import { getCurrentTileRent } from "@/lib/rent";
 
 type GameMeta = {
@@ -24,6 +25,20 @@ type Player = {
   display_name: string;
   created_at: string;
   position: number | null;
+  is_in_jail: boolean;
+  jail_turns_remaining: number;
+  get_out_of_jail_free_count: number;
+  is_eliminated: boolean;
+  eliminated_at: string | null;
+};
+
+type ActiveMacroEffectV1 = {
+  id?: string;
+  name?: string;
+  effects?: {
+    house_build_blocked?: boolean;
+    loan_mortgage_new_blocked?: boolean;
+  };
 };
 
 type GameState = {
@@ -32,13 +47,49 @@ type GameState = {
   current_player_id: string | null;
   balances: Record<string, number> | null;
   last_roll: number | null;
+  doubles_count: number | null;
+  turn_phase: string | null;
+  pending_action: Record<string, unknown> | null;
+  pending_card_active: boolean | null;
+  pending_card_deck: "CHANCE" | "COMMUNITY" | null;
+  pending_card_id: string | null;
+  pending_card_title: string | null;
+  pending_card_kind: string | null;
+  pending_card_payload: Record<string, unknown> | null;
+  pending_card_drawn_by_player_id: string | null;
+  pending_card_drawn_at: string | null;
+  pending_card_source_tile_index: number | null;
+  chance_index: number | null;
+  community_index: number | null;
+  free_parking_pot: number | null;
+  rules: Partial<ReturnType<typeof getRules>> | null;
+  auction_active: boolean | null;
+  auction_tile_index: number | null;
+  auction_initiator_player_id: string | null;
+  auction_current_bid: number | null;
+  auction_current_winner_player_id: string | null;
+  auction_turn_player_id: string | null;
+  auction_turn_ends_at: string | null;
+  auction_eligible_player_ids: string[] | null;
+  auction_passed_player_ids: string[] | null;
+  auction_min_increment: number | null;
+  active_macro_effects_v1: ActiveMacroEffectV1[] | null;
+  skip_next_roll_by_player: Record<string, boolean> | null;
 };
 
 type GameEvent = {
   id: string;
   event_type: string;
+  payload: Record<string, unknown> | null;
   created_at: string;
   version: number;
+};
+
+type PendingPurchaseAction = {
+  type: "BUY_PROPERTY";
+  player_id: string | null;
+  tile_index: number;
+  price: number;
 };
 
 type OwnershipRow = {
@@ -125,7 +176,7 @@ export default function PlayV2Page() {
 
   const loadPlayers = useCallback(async (gameId: string, accessToken?: string) => {
     const rows = await supabaseClient.fetchFromSupabase<Player[]>(
-      `players?select=id,user_id,display_name,created_at,position&game_id=eq.${gameId}&order=created_at.asc`,
+      `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,is_eliminated,eliminated_at&game_id=eq.${gameId}&order=created_at.asc`,
       { method: "GET" },
       accessToken,
     );
@@ -134,7 +185,7 @@ export default function PlayV2Page() {
 
   const loadGameState = useCallback(async (gameId: string, accessToken?: string) => {
     const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
-      `game_state?select=game_id,version,current_player_id,balances,last_roll&game_id=eq.${gameId}&limit=1`,
+      `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,active_macro_effects_v1,skip_next_roll_by_player,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
       { method: "GET" },
       accessToken,
     );
@@ -143,7 +194,7 @@ export default function PlayV2Page() {
 
   const loadEvents = useCallback(async (gameId: string, accessToken?: string) => {
     const rows = await supabaseClient.fetchFromSupabase<GameEvent[]>(
-      `game_events?select=id,event_type,created_at,version&game_id=eq.${gameId}&order=version.desc&limit=100`,
+      `game_events?select=id,event_type,payload,created_at,version&game_id=eq.${gameId}&order=version.desc&limit=100`,
       { method: "GET" },
       accessToken,
     );
@@ -320,9 +371,127 @@ export default function PlayV2Page() {
     return gameState?.balances?.[currentUserPlayer.id] ?? null;
   }, [currentUserPlayer, gameState?.balances]);
 
-  const isMyTurn = Boolean(currentUserPlayer?.id) && currentUserPlayer?.id === turnPlayerId;
-  const canRoll = isMyTurn && gameState?.last_roll == null;
-  const canEndTurn = isMyTurn && gameState?.last_roll != null;
+  const isInProgress = gameMeta?.status === "IN_PROGRESS";
+  const isEliminated = Boolean(currentUserPlayer?.is_eliminated);
+  const auctionActive = Boolean(gameState?.auction_active);
+  const isMyTurn = Boolean(
+    isInProgress &&
+      session &&
+      currentUserPlayer &&
+      gameState?.current_player_id === currentUserPlayer.id &&
+      !currentUserPlayer.is_eliminated,
+  );
+  const pendingPurchase = useMemo<PendingPurchaseAction | null>(() => {
+    const pendingAction = gameState?.pending_action;
+    if (!pendingAction || typeof pendingAction !== "object") {
+      return null;
+    }
+
+    const candidate = pendingAction as {
+      type?: unknown;
+      player_id?: unknown;
+      tile_index?: unknown;
+      price?: unknown;
+    };
+
+    if (candidate.type !== "BUY_PROPERTY") {
+      return null;
+    }
+
+    const pendingPlayerId =
+      typeof candidate.player_id === "string" ? candidate.player_id : null;
+    if (
+      pendingPlayerId &&
+      gameState?.current_player_id &&
+      pendingPlayerId !== gameState.current_player_id
+    ) {
+      return null;
+    }
+
+    if (
+      typeof candidate.tile_index !== "number" ||
+      typeof candidate.price !== "number"
+    ) {
+      return null;
+    }
+
+    return {
+      type: "BUY_PROPERTY",
+      player_id: pendingPlayerId,
+      tile_index: candidate.tile_index,
+      price: candidate.price,
+    };
+  }, [gameState?.current_player_id, gameState?.pending_action]);
+  const pendingMacroEvent = useMemo(() => {
+    const pendingAction = gameState?.pending_action;
+    if (!pendingAction || typeof pendingAction !== "object") {
+      return null;
+    }
+
+    const candidate = pendingAction as { type?: unknown };
+    if (candidate.type !== "MACRO_EVENT") {
+      return null;
+    }
+
+    return candidate;
+  }, [gameState?.pending_action]);
+  const pendingCard = useMemo(() => {
+    if (!gameState?.pending_card_active) {
+      return null;
+    }
+    return {
+      id: gameState.pending_card_id ?? null,
+      deck: gameState.pending_card_deck ?? null,
+      title: gameState.pending_card_title ?? "Card",
+      kind: gameState.pending_card_kind ?? null,
+      payload: gameState.pending_card_payload ?? null,
+      drawnBy: gameState.pending_card_drawn_by_player_id ?? null,
+    };
+  }, [
+    gameState?.pending_card_active,
+    gameState?.pending_card_deck,
+    gameState?.pending_card_drawn_by_player_id,
+    gameState?.pending_card_id,
+    gameState?.pending_card_kind,
+    gameState?.pending_card_payload,
+    gameState?.pending_card_title,
+  ]);
+  const pendingGoToJail = useMemo(() => {
+    if (!currentUserPlayer) {
+      return null;
+    }
+    for (const event of events) {
+      if (event.event_type !== "LAND_GO_TO_JAIL") {
+        continue;
+      }
+      const payload = event.payload;
+      const playerId =
+        payload && typeof payload.player_id === "string"
+          ? payload.player_id
+          : null;
+      if (playerId === currentUserPlayer.id) {
+        return {
+          eventId: event.id,
+          eventVersion: event.version,
+        };
+      }
+    }
+    return null;
+  }, [currentUserPlayer, events]);
+  const hasBlockingPendingAction =
+    pendingGoToJail !== null ||
+    pendingCard !== null ||
+    pendingMacroEvent !== null ||
+    pendingPurchase !== null;
+  const isAwaitingJailDecision =
+    isMyTurn && gameState?.turn_phase === "AWAITING_JAIL_DECISION";
+  const canAct = isMyTurn && !isEliminated && !auctionActive && !hasBlockingPendingAction;
+  const canRoll =
+    canAct &&
+    !isAwaitingJailDecision &&
+    (gameState?.last_roll == null || (gameState?.doubles_count ?? 0) > 0);
+  const canEndTurn = canAct && gameState?.last_roll != null;
+
   const rollDiceDisabledReason = useMemo(() => {
     if (!(actionLoading === "ROLL_DICE" || !canRoll)) {
       return null;
@@ -333,11 +502,29 @@ export default function PlayV2Page() {
     if (!isMyTurn) {
       return `Waiting for ${currentTurnPlayer?.display_name ?? "another player"}…`;
     }
+    if (auctionActive) {
+      return "Auction in progress";
+    }
+    if (hasBlockingPendingAction) {
+      return "Resolve pending action to continue";
+    }
+    if (isAwaitingJailDecision) {
+      return "You are in jail – choose an option";
+    }
     if (gameState?.last_roll != null) {
       return "End your turn";
     }
     return null;
-  }, [actionLoading, canRoll, currentTurnPlayer?.display_name, gameState?.last_roll, isMyTurn]);
+  }, [
+    actionLoading,
+    auctionActive,
+    canRoll,
+    currentTurnPlayer?.display_name,
+    gameState?.last_roll,
+    hasBlockingPendingAction,
+    isAwaitingJailDecision,
+    isMyTurn,
+  ]);
 
   const handleBankAction = useCallback(async (action: "ROLL_DICE" | "END_TURN") => {
     if (!routeGameId || !session?.access_token) {
