@@ -1541,6 +1541,8 @@ export default function PlayV2Page() {
       walletOwnedContent={walletOwnedContent}
       walletLoansContent={walletLoansContent}
       walletMortgagesContent={walletMortgagesContent}
+      decisionActive={activeDecisionType !== null}
+      auctionActive={auctionActive}
       leftDrawerContent={selectedTile ? (
         <div className="h-full space-y-2">
           <TitleDeedPreview

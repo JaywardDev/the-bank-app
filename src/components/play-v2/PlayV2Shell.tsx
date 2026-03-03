@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import Image from "next/image";
 
 type WalletTab = "owned" | "loans" | "mortgages";
@@ -112,6 +112,8 @@ type PlayV2ShellProps = {
   walletOwnedContent?: ReactNode;
   walletLoansContent?: ReactNode;
   walletMortgagesContent?: ReactNode;
+  decisionActive?: boolean;
+  auctionActive?: boolean;
 };
 
 export default function PlayV2Shell({
@@ -138,11 +140,27 @@ export default function PlayV2Shell({
   walletOwnedContent,
   walletLoansContent,
   walletMortgagesContent,
+  decisionActive = false,
+  auctionActive = false,
 }: PlayV2ShellProps) {
   const [uncontrolledLeftOpen, setUncontrolledLeftOpen] = useState(false);
   const [leftDrawerMode, setLeftDrawerMode] = useState<"info" | "wallet">("info");
   const [rightOpen, setRightOpen] = useState(false);
+  const wasDecisionActive = useRef(decisionActive);
   const leftOpen = controlledLeftOpen ?? uncontrolledLeftOpen;
+
+  useEffect(() => {
+    if (!wasDecisionActive.current && decisionActive && !auctionActive) {
+      const timer = window.setTimeout(() => {
+        setRightOpen(true);
+      }, 0);
+      wasDecisionActive.current = decisionActive;
+      return () => window.clearTimeout(timer);
+    }
+
+    wasDecisionActive.current = decisionActive;
+    return undefined;
+  }, [auctionActive, decisionActive]);
 
   const setLeftOpen = (nextOpen: boolean) => {
     if (controlledLeftOpen === undefined) {
@@ -189,6 +207,7 @@ export default function PlayV2Shell({
   const rollEmphasized = canRoll && !isRolling;
   const endEmphasized = canEndTurn && !isEnding;
   const shouldPulse = rollEmphasized && showTurnActions && actionLoading === null;
+  const decisionNeedsAttention = decisionActive && !rightOpen;
 
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-neutral-950 text-white">
@@ -241,9 +260,16 @@ export default function PlayV2Shell({
           <button
             type="button"
             onClick={() => setRightOpen((value) => !value)}
-            className="absolute right-0 top-1/2 z-30 -translate-y-1/2 rounded-l-lg border border-white/20 bg-neutral-900 px-2 py-3 text-xs font-semibold uppercase tracking-wide"
+            className={`absolute top-1/2 z-30 -translate-y-1/2 rounded-l-lg border border-white/20 bg-neutral-900 px-2 py-3 text-xs font-semibold uppercase tracking-wide transition-[right] duration-200 ${
+              rightOpen ? "right-72" : "right-0"
+            }`}
           >
             Right
+            {decisionNeedsAttention ? (
+              <span className="absolute -left-1 -top-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-none text-white">
+                !
+              </span>
+            ) : null}
           </button>
 
           {showTurnActions ? (
@@ -316,9 +342,6 @@ export default function PlayV2Shell({
             rightOpen ? "translate-x-0" : "translate-x-full"
           }`}
         >
-          <div className="border-b border-white/10 p-4">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-white/80">Right Drawer</h2>
-          </div>
           <div className="min-h-0 flex-1 overflow-auto p-4">{rightDrawerContent}</div>
         </aside>
       </div>
