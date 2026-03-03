@@ -13,8 +13,14 @@ type PendingPurchaseModalV2Props = {
   actorName: string | null;
   isActor: boolean;
   actionLoading: string | null;
+  canAffordPurchase: boolean;
+  canAffordMortgage: boolean;
+  mortgageDownPaymentLabel: string;
+  mortgageLtvPercent: number;
+  mortgageDownPaymentPercent: number;
   onBuy: () => void;
-  onDecline: () => void;
+  onBuyWithMortgage: () => void;
+  onAuction: () => void;
 };
 
 export default function PendingPurchaseModalV2({
@@ -23,8 +29,14 @@ export default function PendingPurchaseModalV2({
   actorName,
   isActor,
   actionLoading,
+  canAffordPurchase,
+  canAffordMortgage,
+  mortgageDownPaymentLabel,
+  mortgageLtvPercent,
+  mortgageDownPaymentPercent,
   onBuy,
-  onDecline,
+  onBuyWithMortgage,
+  onAuction,
 }: PendingPurchaseModalV2Props) {
   if (!pendingPurchase) {
     return null;
@@ -43,26 +55,35 @@ export default function PendingPurchaseModalV2({
           <button
             type="button"
             onClick={onBuy}
-            disabled={actionLoading === "BUY_PROPERTY"}
+            disabled={actionLoading === "BUY_PROPERTY" || !canAffordPurchase}
             className="rounded-2xl bg-neutral-900 px-4 py-2 text-sm font-semibold text-white disabled:bg-neutral-300"
+            title={canAffordPurchase ? "Buy this property" : "Not enough cash to buy"}
           >
             {actionLoading === "BUY_PROPERTY" ? "Buying…" : "Buy"}
           </button>
           <button
             type="button"
-            disabled
-            className="cursor-not-allowed rounded-2xl border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-400"
-            title="Auction is not implemented in V2 yet"
+            onClick={onBuyWithMortgage}
+            disabled={actionLoading === "BUY_PROPERTY" || !canAffordMortgage}
+            className="rounded-2xl border border-neutral-300 px-4 py-2 text-sm font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-400"
+            title={
+              canAffordMortgage
+                ? `Financing: ${mortgageLtvPercent}% (Down: ${mortgageDownPaymentPercent}%)`
+                : "Not enough cash for down payment"
+            }
           >
-            Auction (soon)
+            {actionLoading === "BUY_PROPERTY"
+              ? "Buying…"
+              : `Buy with Mortgage (${mortgageDownPaymentLabel} down)`}
           </button>
           <button
             type="button"
-            onClick={onDecline}
+            onClick={onAuction}
             disabled={actionLoading === "DECLINE_PROPERTY"}
             className="rounded-2xl border border-neutral-300 px-4 py-2 text-sm font-semibold text-neutral-900 disabled:border-neutral-200 disabled:text-neutral-400"
+            title="Start auction for this property"
           >
-            {actionLoading === "DECLINE_PROPERTY" ? "Declining…" : "Decline"}
+            {actionLoading === "DECLINE_PROPERTY" ? "Auctioning…" : "Auction"}
           </button>
         </div>
       ) : (

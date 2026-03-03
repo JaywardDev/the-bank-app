@@ -538,6 +538,26 @@ export default function PlayV2Page() {
   }, [isAwaitingJailDecision, pendingCard, pendingGoToJail, pendingMacroEvent, pendingPurchase]);
 
   const hasBlockingPendingAction = activeDecisionType !== null;
+  const rules = getRules(gameState?.rules ?? null);
+  const mortgageLtv =
+    typeof rules.mortgageLtv === "number" && Number.isFinite(rules.mortgageLtv)
+      ? rules.mortgageLtv
+      : 0.5;
+  const mortgageDownPaymentRate = 1 - mortgageLtv;
+  const mortgageLtvPercent = Math.round(mortgageLtv * 100);
+  const mortgageDownPaymentPercent = Math.round(mortgageDownPaymentRate * 100);
+  const pendingMortgagePrincipal = pendingPurchase
+    ? Math.round(pendingPurchase.price * mortgageLtv)
+    : 0;
+  const pendingMortgageDownPayment = pendingPurchase
+    ? pendingPurchase.price - pendingMortgagePrincipal
+    : 0;
+  const canAffordPendingPurchase = pendingPurchase
+    ? (currentUserCash ?? 0) >= pendingPurchase.price
+    : false;
+  const canAffordPendingMortgage = pendingPurchase
+    ? (currentUserCash ?? 0) >= pendingMortgageDownPayment
+    : false;
   const canAct = isMyTurn && !isEliminated && !auctionActive && !hasBlockingPendingAction;
   const canRoll =
     canAct &&
@@ -639,7 +659,7 @@ export default function PlayV2Page() {
 
   const handleBankAction = useCallback(async (
     action: BankAction,
-    options?: { tileIndex?: number; amount?: number },
+    options?: { tileIndex?: number; amount?: number; financing?: "MORTGAGE" },
   ) => {
     if (!routeGameId || !session?.access_token) {
       return;
@@ -660,6 +680,7 @@ export default function PlayV2Page() {
           expectedVersion: gameState?.version ?? 0,
           ...(options?.tileIndex !== undefined ? { tileIndex: options.tileIndex } : {}),
           ...(options?.amount !== undefined ? { amount: options.amount } : {}),
+          ...(options?.financing ? { financing: options.financing } : {}),
         }),
       });
 
@@ -690,6 +711,16 @@ export default function PlayV2Page() {
       return;
     }
     void handleBankAction("BUY_PROPERTY", { tileIndex: pendingPurchase.tile_index });
+  }, [handleBankAction, pendingPurchase]);
+
+  const handleBuyPropertyWithMortgage = useCallback(() => {
+    if (!pendingPurchase) {
+      return;
+    }
+    void handleBankAction("BUY_PROPERTY", {
+      tileIndex: pendingPurchase.tile_index,
+      financing: "MORTGAGE",
+    });
   }, [handleBankAction, pendingPurchase]);
 
   const handleDeclineProperty = useCallback(() => {
@@ -880,8 +911,14 @@ export default function PlayV2Page() {
             actorName={currentTurnPlayer?.display_name ?? null}
             isActor={Boolean(currentUserPlayer && currentTurnPlayer && currentUserPlayer.id === currentTurnPlayer.id)}
             actionLoading={actionLoading}
+            canAffordPurchase={canAffordPendingPurchase}
+            canAffordMortgage={canAffordPendingMortgage}
+            mortgageDownPaymentLabel={formatMoney(pendingMortgageDownPayment)}
+            mortgageLtvPercent={mortgageLtvPercent}
+            mortgageDownPaymentPercent={mortgageDownPaymentPercent}
             onBuy={handleBuyProperty}
-            onDecline={handleDeclineProperty}
+            onBuyWithMortgage={handleBuyPropertyWithMortgage}
+            onAuction={handleDeclineProperty}
           />
         );
       default:
@@ -896,6 +933,7 @@ export default function PlayV2Page() {
     currentUserPlayer,
     handleAcknowledgeGoToJail,
     handleBuyProperty,
+    handleBuyPropertyWithMortgage,
     handleConfirmMacroEvent,
     handleConfirmPendingCard,
     handleDeclineProperty,
@@ -912,6 +950,11 @@ export default function PlayV2Page() {
     pendingGoToJailPlayerName,
     pendingMacroEvent,
     pendingPurchase,
+    pendingMortgageDownPayment,
+    canAffordPendingMortgage,
+    canAffordPendingPurchase,
+    mortgageDownPaymentPercent,
+    mortgageLtvPercent,
     players,
     selectedBoardPack?.tiles,
   ]);
