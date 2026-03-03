@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import Image from "next/image";
 
 type WalletTab = "owned" | "loans" | "mortgages";
@@ -17,7 +17,7 @@ function WalletButton({ open, onClick }: WalletButtonProps) {
       onClick={onClick}
       className="rounded border border-white/30 bg-neutral-900 px-2 py-1 text-xs font-semibold"
       aria-expanded={open}
-      aria-controls="wallet-panel"
+      aria-controls="left-drawer"
     >
       WALLET
     </button>
@@ -25,8 +25,6 @@ function WalletButton({ open, onClick }: WalletButtonProps) {
 }
 
 type WalletPanelProps = {
-  open: boolean;
-  onClose: () => void;
   ownedCount: number;
   loanCount: number;
   mortgageCount: number;
@@ -36,8 +34,6 @@ type WalletPanelProps = {
 };
 
 function WalletPanel({
-  open,
-  onClose,
   ownedCount,
   loanCount,
   mortgageCount,
@@ -47,21 +43,6 @@ function WalletPanel({
 }: WalletPanelProps) {
   const [activeTab, setActiveTab] = useState<WalletTab>("owned");
 
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [open, onClose]);
-
   const tabs: { id: WalletTab; label: string; count: number }[] = [
     { id: "owned", label: "Owned", count: ownedCount },
     { id: "loans", label: "Loans", count: loanCount },
@@ -69,23 +50,9 @@ function WalletPanel({
   ];
 
   return (
-    <aside
-      id="wallet-panel"
-      className={`absolute bottom-0 left-0 top-9 z-20 flex w-[min(92vw,22rem)] flex-col border-r border-white/15 bg-neutral-900 transition-transform duration-200 md:top-10 ${
-        open ? "translate-x-0" : "-translate-x-full"
-      }`}
-      aria-hidden={!open}
-    >
-      <div className="flex h-11 items-center justify-between gap-2 border-b border-white/10 px-3">
+    <>
+      <div className="flex h-11 items-center gap-2 border-b border-white/10 px-3">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-white/80">Wallet</h2>
-        <button
-          type="button"
-          aria-label="Close wallet"
-          onClick={onClose}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-lg leading-none text-white/80 transition hover:bg-white/10 hover:text-white"
-        >
-          ×
-        </button>
       </div>
       <div className="border-b border-white/10 px-2 py-2">
         <div className="flex gap-1">
@@ -116,7 +83,7 @@ function WalletPanel({
             )
           : null}
       </div>
-    </aside>
+    </>
   );
 }
 
@@ -173,8 +140,8 @@ export default function PlayV2Shell({
   walletMortgagesContent,
 }: PlayV2ShellProps) {
   const [uncontrolledLeftOpen, setUncontrolledLeftOpen] = useState(false);
+  const [leftDrawerMode, setLeftDrawerMode] = useState<"info" | "wallet">("info");
   const [rightOpen, setRightOpen] = useState(false);
-  const [walletOpen, setWalletOpen] = useState(false);
   const leftOpen = controlledLeftOpen ?? uncontrolledLeftOpen;
 
   const setLeftOpen = (nextOpen: boolean) => {
@@ -221,18 +188,37 @@ export default function PlayV2Shell({
           {boardViewport}
 
           <div
-            className={`absolute top-1/2 flex -translate-y-1/2 flex-col gap-2 transition-[left] duration-200 ${
-              walletOpen ? "z-10" : "z-30"
-            } ${leftOpen ? "left-72" : "left-0"}`}
+            className={`absolute top-1/2 z-30 flex -translate-y-1/2 flex-col gap-2 transition-[left] duration-200 ${
+              leftOpen ? "left-72" : "left-0"
+            }`}
           >
             <button
               type="button"
-              onClick={() => setLeftOpen(!leftOpen)}
+              onClick={() => {
+                if (leftOpen) {
+                  setLeftOpen(false);
+                  return;
+                }
+
+                setLeftDrawerMode("info");
+                setLeftOpen(true);
+              }}
               className="rounded-r-lg border border-white/20 bg-neutral-900 px-2 py-3 text-xs font-semibold uppercase tracking-wide"
             >
               Left
             </button>
-            <WalletButton open={walletOpen} onClick={() => setWalletOpen((value) => !value)} />
+            <WalletButton
+              open={leftOpen && leftDrawerMode === "wallet"}
+              onClick={() => {
+                if (!leftOpen) {
+                  setLeftDrawerMode("wallet");
+                  setLeftOpen(true);
+                  return;
+                }
+
+                setLeftDrawerMode((mode) => (mode === "wallet" ? "info" : "wallet"));
+              }}
+            />
           </div>
 
           <button
@@ -285,11 +271,27 @@ export default function PlayV2Shell({
         </section>
 
         <aside
+          id="left-drawer"
           className={`absolute bottom-0 left-0 top-9 z-20 flex w-72 flex-col border-r border-white/15 bg-neutral-900 transition-transform duration-200 md:top-10 ${
             leftOpen ? "translate-x-0" : "-translate-x-full"
           }`}
         >
-          <div className="min-h-0 flex-1 overflow-auto p-3">{leftDrawerContent}</div>
+          {leftDrawerMode === "info" ? (
+            <div className="min-h-0 flex-1 overflow-auto p-3">{leftDrawerContent}</div>
+          ) : (
+            <WalletPanel
+              ownedCount={walletOwnedCount}
+              loanCount={walletLoanCount}
+              mortgageCount={walletMortgageCount}
+              ownedContent={
+                walletOwnedContent ?? (
+                  <div className="rounded-lg border border-white/10 bg-white/5 p-3 text-sm text-white/80">Coming soon</div>
+                )
+              }
+              loansContent={walletLoansContent}
+              mortgagesContent={walletMortgagesContent}
+            />
+          )}
         </aside>
 
         <aside
@@ -302,19 +304,6 @@ export default function PlayV2Shell({
           </div>
           <div className="min-h-0 flex-1 overflow-auto p-4">{rightDrawerContent}</div>
         </aside>
-
-        <WalletPanel
-          open={walletOpen}
-          onClose={() => setWalletOpen(false)}
-          ownedCount={walletOwnedCount}
-          loanCount={walletLoanCount}
-          mortgageCount={walletMortgageCount}
-          ownedContent={walletOwnedContent ?? (
-            <div className="rounded-lg border border-white/10 bg-white/5 p-3 text-sm text-white/80">Coming soon</div>
-          )}
-          loansContent={walletLoansContent}
-          mortgagesContent={walletMortgagesContent}
-        />
       </div>
 
       <section className="play-v2-shell-overlay absolute inset-0 z-50 hidden items-center justify-center bg-neutral-950/95 p-6 text-center">
