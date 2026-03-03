@@ -122,7 +122,10 @@ type BankAction =
   | "SELL_HOUSE"
   | "SELL_HOTEL"
   | "SELL_TO_MARKET"
-  | "TAKE_COLLATERAL_LOAN";
+  | "TAKE_COLLATERAL_LOAN"
+  | "PAYOFF_COLLATERAL_LOAN"
+  | "DEFAULT_PROPERTY"
+  | "PAYOFF_PURCHASE_MORTGAGE";
 
 type OwnershipRow = {
   tile_index: number;
@@ -212,6 +215,9 @@ export default function PlayV2Page() {
   const [isLeftDrawerOpen, setIsLeftDrawerOpen] = useState(false);
   const [pendingGoToJailAckVersion, setPendingGoToJailAckVersion] = useState<number | null>(null);
   const [sellToMarketTileIndex, setSellToMarketTileIndex] = useState<number | null>(null);
+  const [payoffLoanId, setPayoffLoanId] = useState<string | null>(null);
+  const [defaultLoanTileIndex, setDefaultLoanTileIndex] = useState<number | null>(null);
+  const [payoffMortgageId, setPayoffMortgageId] = useState<string | null>(null);
   const [auctionNow, setAuctionNow] = useState<Date>(() => new Date());
 
   const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
@@ -453,6 +459,11 @@ export default function PlayV2Page() {
     () => purchaseMortgages.filter((mortgage) => mortgage.status === "active"),
     [purchaseMortgages],
   );
+
+  const boardTilesByIndex = useMemo(() => {
+    const tiles = getBoardPackById(gameMeta?.board_pack_id ?? null)?.tiles ?? [];
+    return new Map(tiles.map((tile) => [tile.index, tile]));
+  }, [gameMeta?.board_pack_id]);
 
   void activeLoans;
   void activePurchaseMortgages;
@@ -741,7 +752,13 @@ export default function PlayV2Page() {
 
   const handleBankAction = useCallback(async (
     action: BankAction,
-    options?: { tileIndex?: number; amount?: number; financing?: "MORTGAGE" },
+    options?: {
+      tileIndex?: number;
+      amount?: number;
+      financing?: "MORTGAGE";
+      loanId?: string;
+      mortgageId?: string;
+    },
   ) => {
     if (!routeGameId || !session?.access_token) {
       return;
@@ -763,6 +780,8 @@ export default function PlayV2Page() {
           ...(options?.tileIndex !== undefined ? { tileIndex: options.tileIndex } : {}),
           ...(options?.amount !== undefined ? { amount: options.amount } : {}),
           ...(options?.financing ? { financing: options.financing } : {}),
+          ...(options?.loanId ? { loanId: options.loanId } : {}),
+          ...(options?.mortgageId ? { mortgageId: options.mortgageId } : {}),
         }),
       });
 
@@ -1195,6 +1214,186 @@ export default function PlayV2Page() {
     sellToMarketTileIndex,
   ]);
 
+  const walletLoansContent = useMemo(() => {
+    if (activeLoans.length === 0) {
+      return <p className="text-sm text-white/70">No active loans.</p>;
+    }
+
+    return (
+      <div className="space-y-3">
+        {activeLoans.map((loan) => {
+          const tile = boardTilesByIndex.get(loan.collateral_tile_index) ?? null;
+          const houses = ownershipByTile[loan.collateral_tile_index]?.houses ?? 0;
+          const canDefault = canAct && houses === 0;
+          const defaultDisabledReason = houses > 0 ? "Sell houses first" : !canAct ? "Not your turn" : null;
+          const isPayoffLoading = actionLoading === "PAYOFF_COLLATERAL_LOAN";
+          const isDefaultLoading = actionLoading === "DEFAULT_PROPERTY";
+
+          return (
+            <div key={loan.id} className="space-y-2 rounded-xl border border-white/15 bg-white/5 p-2">
+              {tile ? (
+                <TitleDeedPreview
+                  tile={tile}
+                  bandColor={getTileBandColor(tile)}
+                  boardPackEconomy={selectedBoardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY}
+                  mode="readonly"
+                  size="compact"
+                  showDevelopment={tile.type === "PROPERTY"}
+                  developmentCount={houses}
+                  ownerPlayerId={currentUserPlayer?.id ?? null}
+                  ownershipByTile={ownershipByTile}
+                  boardTiles={selectedBoardPack?.tiles ?? []}
+                  ownedRailCount={selectedBoardPack?.tiles.filter((boardTile) => boardTile.type === "RAIL" && ownershipByTile[boardTile.index]?.owner_player_id === currentUserPlayer?.id).length ?? 0}
+                  ownedUtilityCount={selectedBoardPack?.tiles.filter((boardTile) => boardTile.type === "UTILITY" && ownershipByTile[boardTile.index]?.owner_player_id === currentUserPlayer?.id).length ?? 0}
+                />
+              ) : null}
+              <div className="space-y-1 px-1 text-xs text-white/80">
+                <p className="text-sm font-semibold text-white">{tile?.name ?? `Tile ${loan.collateral_tile_index}`}</p>
+                <p>Remaining principal: {formatMoney(loan.remaining_principal ?? loan.principal)}</p>
+                <p>Payment / turn: {formatMoney(loan.payment_per_turn)}</p>
+                <p>Turns remaining: {loan.turns_remaining}</p>
+                <p>Rate / turn: {((loan.rate_per_turn ?? 0) * 100).toFixed(2)}%</p>
+              </div>
+              <div className="flex flex-wrap gap-2 px-1 pb-1">
+                <button
+                  type="button"
+                  className="rounded-md border border-white/30 px-2 py-1 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:border-white/10 disabled:text-white/40"
+                  disabled={!canAct || isPayoffLoading}
+                  title={!canAct ? "Not your turn" : undefined}
+                  onClick={() => setPayoffLoanId(loan.id)}
+                >
+                  {isPayoffLoading ? "Paying…" : "Pay off"}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-md border border-rose-400/60 px-2 py-1 text-[11px] font-semibold text-rose-200 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-white/40"
+                  disabled={!canDefault || isDefaultLoading}
+                  title={defaultDisabledReason ?? undefined}
+                  onClick={() => setDefaultLoanTileIndex(loan.collateral_tile_index)}
+                >
+                  {isDefaultLoading ? "Defaulting…" : "Default"}
+                </button>
+              </div>
+              {defaultDisabledReason ? <p className="px-1 pb-1 text-[11px] text-white/50">{defaultDisabledReason}</p> : null}
+              {payoffLoanId === loan.id ? (
+                <div className="mx-1 rounded-lg border border-amber-300/50 bg-amber-100/10 p-2 text-xs text-white">
+                  <p className="font-semibold">Pay off collateral loan?</p>
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      type="button"
+                      className="rounded bg-emerald-600 px-2 py-1 font-semibold text-white"
+                      disabled={isPayoffLoading}
+                      onClick={() => {
+                        void handleBankAction("PAYOFF_COLLATERAL_LOAN", { loanId: loan.id });
+                        setPayoffLoanId(null);
+                      }}
+                    >
+                      Confirm
+                    </button>
+                    <button type="button" className="rounded border border-white/30 px-2 py-1" onClick={() => setPayoffLoanId(null)}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+              {defaultLoanTileIndex === loan.collateral_tile_index ? (
+                <div className="mx-1 rounded-lg border border-rose-300/50 bg-rose-100/10 p-2 text-xs text-white">
+                  <p className="font-semibold">Default this property?</p>
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      type="button"
+                      className="rounded bg-rose-500 px-2 py-1 font-semibold text-white"
+                      disabled={isDefaultLoading}
+                      onClick={() => {
+                        void handleBankAction("DEFAULT_PROPERTY", { tileIndex: loan.collateral_tile_index });
+                        setDefaultLoanTileIndex(null);
+                      }}
+                    >
+                      Confirm
+                    </button>
+                    <button type="button" className="rounded border border-white/30 px-2 py-1" onClick={() => setDefaultLoanTileIndex(null)}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }, [actionLoading, activeLoans, boardTilesByIndex, canAct, currentUserPlayer?.id, handleBankAction, ownershipByTile, payoffLoanId, defaultLoanTileIndex, selectedBoardPack]);
+
+  const walletMortgagesContent = useMemo(() => {
+    if (activePurchaseMortgages.length === 0) {
+      return <p className="text-sm text-white/70">No active mortgages.</p>;
+    }
+
+    return (
+      <div className="space-y-3">
+        {activePurchaseMortgages.map((mortgage) => {
+          const tile = boardTilesByIndex.get(mortgage.tile_index) ?? null;
+          const payoffAmount = (mortgage.principal_remaining ?? 0) + (mortgage.accrued_interest_unpaid ?? 0);
+          const canPayoff = canAct && payoffAmount > 0 && (currentUserCash ?? 0) >= payoffAmount;
+          const payoffDisabledReason = !canAct
+            ? "Not your turn"
+            : payoffAmount <= 0
+              ? "Already paid"
+              : (currentUserCash ?? 0) < payoffAmount
+                ? "Not enough cash"
+                : null;
+          const isPayoffLoading = actionLoading === "PAYOFF_PURCHASE_MORTGAGE";
+
+          return (
+            <div key={mortgage.id} className="space-y-2 rounded-xl border border-white/15 bg-white/5 p-2">
+              <div className="space-y-1 px-1 text-xs text-white/80">
+                <p className="text-sm font-semibold text-white">{tile?.name ?? `Tile ${mortgage.tile_index}`}</p>
+                <p>Principal remaining: {formatMoney(mortgage.principal_remaining)}</p>
+                <p>Accrued interest: {formatMoney(mortgage.accrued_interest_unpaid)}</p>
+                <p>Payment / turn: {formatMoney(mortgage.payment_per_turn)}</p>
+                <p>Turns remaining: {mortgage.turns_remaining}</p>
+                <p>Payoff amount: {formatMoney(payoffAmount)}</p>
+              </div>
+              <div className="flex flex-wrap gap-2 px-1 pb-1">
+                <button
+                  type="button"
+                  className="rounded-md border border-white/30 px-2 py-1 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:border-white/10 disabled:text-white/40"
+                  disabled={!canPayoff || isPayoffLoading}
+                  title={payoffDisabledReason ?? undefined}
+                  onClick={() => setPayoffMortgageId(mortgage.id)}
+                >
+                  {isPayoffLoading ? "Paying…" : "Pay off"}
+                </button>
+              </div>
+              {payoffDisabledReason ? <p className="px-1 pb-1 text-[11px] text-white/50">{payoffDisabledReason}</p> : null}
+              {payoffMortgageId === mortgage.id ? (
+                <div className="mx-1 rounded-lg border border-amber-300/50 bg-amber-100/10 p-2 text-xs text-white">
+                  <p className="font-semibold">Pay off purchase mortgage?</p>
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      type="button"
+                      className="rounded bg-emerald-600 px-2 py-1 font-semibold text-white"
+                      disabled={isPayoffLoading}
+                      onClick={() => {
+                        void handleBankAction("PAYOFF_PURCHASE_MORTGAGE", { mortgageId: mortgage.id });
+                        setPayoffMortgageId(null);
+                      }}
+                    >
+                      Confirm
+                    </button>
+                    <button type="button" className="rounded border border-white/30 px-2 py-1" onClick={() => setPayoffMortgageId(null)}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }, [actionLoading, activePurchaseMortgages, boardTilesByIndex, canAct, currentUserCash, handleBankAction, payoffMortgageId]);
+
   const onRefetch = useCallback(async () => {
     if (!routeGameId || !session?.access_token) return;
     await loadAllSlices(routeGameId, session.access_token);
@@ -1340,6 +1539,8 @@ export default function PlayV2Page() {
       walletLoanCount={activeLoans.length}
       walletMortgageCount={activePurchaseMortgages.length}
       walletOwnedContent={walletOwnedContent}
+      walletLoansContent={walletLoansContent}
+      walletMortgagesContent={walletMortgagesContent}
       leftDrawerContent={selectedTile ? (
         <div className="h-full space-y-2">
           <TitleDeedPreview
