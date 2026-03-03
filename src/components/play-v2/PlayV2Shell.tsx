@@ -151,6 +151,39 @@ export default function PlayV2Shell({
     onLeftOpenChange?.(nextOpen);
   };
 
+  const setLeftDrawerState = (nextState: { isOpen: boolean; mode: "info" | "wallet" }) => {
+    setLeftDrawerMode(nextState.mode);
+    setLeftOpen(nextState.isOpen);
+  };
+
+  const handleLeftToggle = () => {
+    if (!leftOpen) {
+      setLeftDrawerState({ isOpen: true, mode: "info" });
+      return;
+    }
+
+    if (leftDrawerMode === "info") {
+      setLeftDrawerState({ isOpen: false, mode: "info" });
+      return;
+    }
+
+    setLeftDrawerState({ isOpen: true, mode: "info" });
+  };
+
+  const handleWalletToggle = () => {
+    if (!leftOpen) {
+      setLeftDrawerState({ isOpen: true, mode: "wallet" });
+      return;
+    }
+
+    if (leftDrawerMode === "wallet") {
+      setLeftDrawerState({ isOpen: false, mode: "wallet" });
+      return;
+    }
+
+    setLeftDrawerState({ isOpen: true, mode: "wallet" });
+  };
+
   const isRolling = actionLoading === "ROLL_DICE";
   const isEnding = actionLoading === "END_TURN";
   const rollEmphasized = canRoll && !isRolling;
@@ -194,30 +227,14 @@ export default function PlayV2Shell({
           >
             <button
               type="button"
-              onClick={() => {
-                if (leftOpen) {
-                  setLeftOpen(false);
-                  return;
-                }
-
-                setLeftDrawerMode("info");
-                setLeftOpen(true);
-              }}
+              onClick={handleLeftToggle}
               className="rounded-r-lg border border-white/20 bg-neutral-900 px-2 py-3 text-xs font-semibold uppercase tracking-wide"
             >
               Left
             </button>
             <WalletButton
               open={leftOpen && leftDrawerMode === "wallet"}
-              onClick={() => {
-                if (!leftOpen) {
-                  setLeftDrawerMode("wallet");
-                  setLeftOpen(true);
-                  return;
-                }
-
-                setLeftDrawerMode((mode) => (mode === "wallet" ? "info" : "wallet"));
-              }}
+              onClick={handleWalletToggle}
             />
           </div>
 
