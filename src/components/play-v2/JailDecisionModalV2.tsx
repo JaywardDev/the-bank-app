@@ -30,10 +30,7 @@ export default function JailDecisionModalV2({
   }
 
   return (
-    <>
-      <div className="fixed inset-0 z-20 bg-black/45 backdrop-blur-[2px]" />
-      <div className="fixed inset-0 z-30 flex items-center justify-center p-4">
-        <div className="w-full max-w-md rounded-3xl border border-rose-200 bg-white/95 p-5 shadow-2xl ring-1 ring-black/10 backdrop-blur">
+    <div className="w-full rounded-3xl border border-rose-200 bg-white/95 p-5 shadow-2xl ring-1 ring-black/10 backdrop-blur">
           <p className="text-xs font-semibold uppercase tracking-wide text-rose-500">Jail decision</p>
           <p className="mt-1 text-lg font-semibold text-neutral-900">You are in jail.</p>
           <p className="text-sm text-neutral-600">Turns remaining: {jailTurnsRemaining}</p>
@@ -70,8 +67,6 @@ export default function JailDecisionModalV2({
           ) : (
             <p className="mt-4 text-sm text-neutral-500">Waiting for {actorName ?? "player"}…</p>
           )}
-        </div>
-      </div>
-    </>
+    </div>
   );
 }

@@ -12,6 +12,7 @@ type PlayV2ShellProps = {
   debugPanel: ReactNode;
   boardViewport: ReactNode;
   leftDrawerContent?: ReactNode;
+  rightDrawerContent?: ReactNode;
   leftOpen?: boolean;
   onLeftOpenChange?: (open: boolean) => void;
   showTurnActions?: boolean;
@@ -32,6 +33,7 @@ export default function PlayV2Shell({
   debugPanel,
   boardViewport,
   leftDrawerContent,
+  rightDrawerContent,
   leftOpen: controlledLeftOpen,
   onLeftOpenChange,
   showTurnActions = true,
@@ -166,11 +168,14 @@ export default function PlayV2Shell({
         </aside>
 
         <aside
-          className={`absolute bottom-0 right-0 top-9 z-20 w-72 border-l border-white/15 bg-neutral-900 p-4 transition-transform duration-200 md:top-10 ${
+          className={`absolute bottom-0 right-0 top-9 z-20 flex w-72 flex-col border-l border-white/15 bg-neutral-900 transition-transform duration-200 md:top-10 ${
             rightOpen ? "translate-x-0" : "translate-x-full"
           }`}
         >
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-white/80">Right Drawer</h2>
+          <div className="border-b border-white/10 p-4">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-white/80">Right Drawer</h2>
+          </div>
+          <div className="min-h-0 flex-1 overflow-auto p-4">{rightDrawerContent}</div>
         </aside>
 
         <button

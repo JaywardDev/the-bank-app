@@ -27,10 +27,7 @@ export default function PendingCardModalV2({
   }
 
   return (
-    <>
-      <div className="fixed inset-0 z-20 bg-black/45 backdrop-blur-[2px]" />
-      <div className="fixed inset-0 z-30 flex items-center justify-center p-4">
-        <div className="w-full max-w-md rounded-3xl border border-emerald-200 bg-white/95 p-5 shadow-2xl ring-1 ring-black/10 backdrop-blur">
+    <div className="w-full rounded-3xl border border-emerald-200 bg-white/95 p-5 shadow-2xl ring-1 ring-black/10 backdrop-blur">
           <p className="text-xs font-semibold uppercase tracking-wide text-emerald-500">Card revealed</p>
           <p className="text-lg font-semibold text-neutral-900">{pendingCard.deck ?? "CARD"}</p>
           <p className="mt-2 text-base font-semibold text-neutral-900">{pendingCard.title}</p>
@@ -46,8 +43,6 @@ export default function PendingCardModalV2({
           ) : (
             <p className="mt-4 text-sm text-neutral-500">Waiting for {actorName ?? "player"}…</p>
           )}
-        </div>
-      </div>
-    </>
+    </div>
   );
 }

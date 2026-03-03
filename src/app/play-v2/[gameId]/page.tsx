@@ -98,6 +98,14 @@ type PendingPurchaseAction = {
   price: number;
 };
 
+type ActiveDecisionType =
+  | "GO_TO_JAIL"
+  | "JAIL_DECISION"
+  | "PENDING_CARD"
+  | "MACRO_EVENT"
+  | "BUY_PROPERTY";
+
+
 type BankAction =
   | "ROLL_DICE"
   | "END_TURN"
@@ -513,17 +521,23 @@ export default function PlayV2Page() {
     );
   }, [pendingGoToJail?.playerId, players]);
   const isGoToJailActor = Boolean(currentUserPlayer && pendingGoToJail?.playerId === currentUserPlayer.id);
-  const hasBlockingPendingAction =
-    pendingGoToJail !== null ||
-    pendingCard !== null ||
-    pendingMacroEvent !== null ||
-    pendingPurchase !== null;
   const isAwaitingJailDecision =
     gameState?.turn_phase === "AWAITING_JAIL_DECISION";
   const isJailDecisionActor = Boolean(isMyTurn && isAwaitingJailDecision);
   const canRollForDoubles = Boolean(isJailDecisionActor && currentUserPlayer?.is_in_jail);
   const hasGetOutOfJailFree = (currentUserPlayer?.get_out_of_jail_free_count ?? 0) > 0;
   const jailFineAmount = getBoardPackById(gameMeta?.board_pack_id ?? null)?.economy?.jailFineAmount ?? 50;
+
+  const activeDecisionType: ActiveDecisionType | null = useMemo(() => {
+    if (pendingGoToJail) return "GO_TO_JAIL";
+    if (isAwaitingJailDecision) return "JAIL_DECISION";
+    if (pendingCard) return "PENDING_CARD";
+    if (pendingMacroEvent) return "MACRO_EVENT";
+    if (pendingPurchase) return "BUY_PROPERTY";
+    return null;
+  }, [isAwaitingJailDecision, pendingCard, pendingGoToJail, pendingMacroEvent, pendingPurchase]);
+
+  const hasBlockingPendingAction = activeDecisionType !== null;
   const canAct = isMyTurn && !isEliminated && !auctionActive && !hasBlockingPendingAction;
   const canRoll =
     canAct &&
@@ -807,6 +821,101 @@ export default function PlayV2Page() {
     await loadAllSlices(routeGameId, session.access_token);
   }, [loadAllSlices, routeGameId, session]);
 
+  const activeDecisionNode = useMemo(() => {
+    if (auctionActive || !activeDecisionType) {
+      return null;
+    }
+
+    switch (activeDecisionType) {
+      case "GO_TO_JAIL":
+        return (
+          <GoToJailModalV2
+            pendingGoToJail={pendingGoToJail}
+            isActor={isGoToJailActor}
+            actorName={pendingGoToJailPlayerName}
+            onAcknowledge={handleAcknowledgeGoToJail}
+          />
+        );
+      case "JAIL_DECISION":
+        return (
+          <JailDecisionModalV2
+            open={isAwaitingJailDecision}
+            isActor={isJailDecisionActor}
+            actorName={currentTurnPlayer?.display_name ?? null}
+            jailTurnsRemaining={currentUserPlayer?.jail_turns_remaining ?? 0}
+            jailFineAmount={jailFineAmount}
+            hasGetOutOfJailFree={hasGetOutOfJailFree}
+            canRollForDoubles={canRollForDoubles}
+            actionLoading={actionLoading}
+            onPayFine={handlePayJailFine}
+            onUseGetOutOfJailFree={handleUseGetOutOfJailFree}
+            onRollForDoubles={handleRollForDoubles}
+          />
+        );
+      case "PENDING_CARD":
+        return (
+          <PendingCardModalV2
+            pendingCard={pendingCard}
+            actorName={players.find((player) => player.id === pendingCard?.drawnBy)?.display_name ?? null}
+            isActor={Boolean(currentUserPlayer && pendingCard?.drawnBy === currentUserPlayer.id)}
+            actionLoading={actionLoading}
+            onConfirm={handleConfirmPendingCard}
+          />
+        );
+      case "MACRO_EVENT":
+        return (
+          <PendingMacroModalV2
+            pendingMacroEvent={pendingMacroEvent}
+            actorName={currentTurnPlayer?.display_name ?? null}
+            isActor={Boolean(currentUserPlayer && currentTurnPlayer && currentUserPlayer.id === currentTurnPlayer.id)}
+            actionLoading={actionLoading}
+            onConfirm={handleConfirmMacroEvent}
+          />
+        );
+      case "BUY_PROPERTY":
+        return (
+          <PendingPurchaseModalV2
+            pendingPurchase={pendingPurchase}
+            pendingTile={selectedBoardPack?.tiles.find((tile) => tile.index === pendingPurchase?.tile_index) ?? null}
+            actorName={currentTurnPlayer?.display_name ?? null}
+            isActor={Boolean(currentUserPlayer && currentTurnPlayer && currentUserPlayer.id === currentTurnPlayer.id)}
+            actionLoading={actionLoading}
+            onBuy={handleBuyProperty}
+            onDecline={handleDeclineProperty}
+          />
+        );
+      default:
+        return null;
+    }
+  }, [
+    actionLoading,
+    activeDecisionType,
+    auctionActive,
+    canRollForDoubles,
+    currentTurnPlayer,
+    currentUserPlayer,
+    handleAcknowledgeGoToJail,
+    handleBuyProperty,
+    handleConfirmMacroEvent,
+    handleConfirmPendingCard,
+    handleDeclineProperty,
+    handlePayJailFine,
+    handleRollForDoubles,
+    handleUseGetOutOfJailFree,
+    hasGetOutOfJailFree,
+    isAwaitingJailDecision,
+    isGoToJailActor,
+    isJailDecisionActor,
+    jailFineAmount,
+    pendingCard,
+    pendingGoToJail,
+    pendingGoToJailPlayerName,
+    pendingMacroEvent,
+    pendingPurchase,
+    players,
+    selectedBoardPack?.tiles,
+  ]);
+
   if (needsAuth) {
     return (
       <main className="mx-auto max-w-3xl p-6">
@@ -857,6 +966,13 @@ export default function PlayV2Page() {
       ) : (
         <p className="text-sm text-white/70">Select a tile to view the title deed</p>
       )}
+      rightDrawerContent={
+        !auctionActive && activeDecisionType !== null ? (
+          <div className="space-y-3">{activeDecisionNode}</div>
+        ) : (
+          <p className="text-sm text-white/70">No active decision</p>
+        )
+      }
       boardViewport={(
         <BoardViewport
           boardPackId={gameMeta?.board_pack_id ?? null}
@@ -919,35 +1035,6 @@ export default function PlayV2Page() {
         </div>
       )}
     />
-    <GoToJailModalV2
-      pendingGoToJail={pendingGoToJail}
-      isActor={isGoToJailActor}
-      actorName={pendingGoToJailPlayerName}
-      onAcknowledge={handleAcknowledgeGoToJail}
-    />
-    <PendingPurchaseModalV2
-      pendingPurchase={pendingPurchase}
-      pendingTile={selectedBoardPack?.tiles.find((tile) => tile.index === pendingPurchase?.tile_index) ?? null}
-      actorName={currentTurnPlayer?.display_name ?? null}
-      isActor={Boolean(currentUserPlayer && currentTurnPlayer && currentUserPlayer.id === currentTurnPlayer.id)}
-      actionLoading={actionLoading}
-      onBuy={handleBuyProperty}
-      onDecline={handleDeclineProperty}
-    />
-    <PendingMacroModalV2
-      pendingMacroEvent={pendingMacroEvent}
-      actorName={currentTurnPlayer?.display_name ?? null}
-      isActor={Boolean(currentUserPlayer && currentTurnPlayer && currentUserPlayer.id === currentTurnPlayer.id)}
-      actionLoading={actionLoading}
-      onConfirm={handleConfirmMacroEvent}
-    />
-    <PendingCardModalV2
-      pendingCard={pendingCard}
-      actorName={players.find((player) => player.id === pendingCard?.drawnBy)?.display_name ?? null}
-      isActor={Boolean(currentUserPlayer && pendingCard?.drawnBy === currentUserPlayer.id)}
-      actionLoading={actionLoading}
-      onConfirm={handleConfirmPendingCard}
-    />
     <AuctionOverlayV2
       auctionActive={auctionActive}
       auctionTile={auctionTile}
@@ -960,20 +1047,6 @@ export default function PlayV2Page() {
       onBid={handleAuctionBid}
       onPass={handleAuctionPass}
     />
-    <JailDecisionModalV2
-      open={isAwaitingJailDecision}
-      isActor={isJailDecisionActor}
-      actorName={currentTurnPlayer?.display_name ?? null}
-      jailTurnsRemaining={currentUserPlayer?.jail_turns_remaining ?? 0}
-      jailFineAmount={jailFineAmount}
-      hasGetOutOfJailFree={hasGetOutOfJailFree}
-      canRollForDoubles={canRollForDoubles}
-      actionLoading={actionLoading}
-      onPayFine={handlePayJailFine}
-      onUseGetOutOfJailFree={handleUseGetOutOfJailFree}
-      onRollForDoubles={handleRollForDoubles}
-    />
-
       {/*
         Verification checklist:
         - Landing on property shows decision modal.
