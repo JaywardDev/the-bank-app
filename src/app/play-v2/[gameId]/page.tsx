@@ -31,6 +31,7 @@ type GameState = {
   version: number;
   current_player_id: string | null;
   balances: Record<string, number> | null;
+  last_roll: number | null;
 };
 
 type GameEvent = {
@@ -106,6 +107,7 @@ export default function PlayV2Page() {
   const [purchaseMortgages, setPurchaseMortgages] = useState<PurchaseMortgage[]>([]);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [needsAuth, setNeedsAuth] = useState(false);
   const [selectedTileIndex, setSelectedTileIndex] = useState<number | null>(null);
   const [isLeftDrawerOpen, setIsLeftDrawerOpen] = useState(false);
@@ -132,7 +134,7 @@ export default function PlayV2Page() {
 
   const loadGameState = useCallback(async (gameId: string, accessToken?: string) => {
     const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
-      `game_state?select=game_id,version,current_player_id,balances&game_id=eq.${gameId}&limit=1`,
+      `game_state?select=game_id,version,current_player_id,balances,last_roll&game_id=eq.${gameId}&limit=1`,
       { method: "GET" },
       accessToken,
     );
@@ -318,6 +320,60 @@ export default function PlayV2Page() {
     return gameState?.balances?.[currentUserPlayer.id] ?? null;
   }, [currentUserPlayer, gameState?.balances]);
 
+  const isMyTurn = Boolean(currentUserPlayer?.id) && currentUserPlayer?.id === turnPlayerId;
+  const canRoll = isMyTurn && gameState?.last_roll == null;
+  const canEndTurn = isMyTurn && gameState?.last_roll != null;
+  const rollDiceDisabledReason = useMemo(() => {
+    if (!(actionLoading === "ROLL_DICE" || !canRoll)) {
+      return null;
+    }
+    if (actionLoading === "ROLL_DICE") {
+      return "Rolling…";
+    }
+    if (!isMyTurn) {
+      return `Waiting for ${currentTurnPlayer?.display_name ?? "another player"}…`;
+    }
+    if (gameState?.last_roll != null) {
+      return "End your turn";
+    }
+    return null;
+  }, [actionLoading, canRoll, currentTurnPlayer?.display_name, gameState?.last_roll, isMyTurn]);
+
+  const handleBankAction = useCallback(async (action: "ROLL_DICE" | "END_TURN") => {
+    if (!routeGameId || !session?.access_token) {
+      return;
+    }
+
+    setActionLoading(action);
+    setNotice(null);
+    try {
+      const response = await fetch("/api/bank/action", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          action,
+          gameId: routeGameId,
+          expectedVersion: gameState?.version ?? 0,
+        }),
+      });
+
+      const payload = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+
+      if (!response.ok) {
+        setNotice(payload?.error ?? `Action failed (${response.status})`);
+      }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Action failed");
+    } finally {
+      setActionLoading(null);
+    }
+  }, [gameState?.version, routeGameId, session?.access_token]);
+
   const turnPlayerMissingFromPlayers = Boolean(turnPlayerId) && !currentTurnPlayer;
 
   const lastFiveEvents = useMemo(() => events.slice(0, 5), [events]);
@@ -419,6 +475,12 @@ export default function PlayV2Page() {
       notice={notice}
       leftOpen={isLeftDrawerOpen}
       onLeftOpenChange={setIsLeftDrawerOpen}
+      canRoll={canRoll}
+      canEndTurn={canEndTurn}
+      actionLoading={actionLoading}
+      rollDiceDisabledReason={rollDiceDisabledReason}
+      onRollDice={() => void handleBankAction("ROLL_DICE")}
+      onEndTurn={() => void handleBankAction("END_TURN")}
       leftDrawerContent={selectedTile ? (
         <div className="h-full space-y-2">
           <TitleDeedPreview

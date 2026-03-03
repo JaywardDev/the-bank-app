@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import Image from "next/image";
 
 type PlayV2ShellProps = {
   cashLabel: string;
@@ -13,6 +14,13 @@ type PlayV2ShellProps = {
   leftDrawerContent?: ReactNode;
   leftOpen?: boolean;
   onLeftOpenChange?: (open: boolean) => void;
+  showTurnActions?: boolean;
+  canRoll?: boolean;
+  canEndTurn?: boolean;
+  actionLoading?: string | null;
+  rollDiceDisabledReason?: string | null;
+  onRollDice?: () => void;
+  onEndTurn?: () => void;
 };
 
 export default function PlayV2Shell({
@@ -26,6 +34,13 @@ export default function PlayV2Shell({
   leftDrawerContent,
   leftOpen: controlledLeftOpen,
   onLeftOpenChange,
+  showTurnActions = true,
+  canRoll = false,
+  canEndTurn = false,
+  actionLoading = null,
+  rollDiceDisabledReason = null,
+  onRollDice,
+  onEndTurn,
 }: PlayV2ShellProps) {
   const [uncontrolledLeftOpen, setUncontrolledLeftOpen] = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
@@ -38,6 +53,12 @@ export default function PlayV2Shell({
     }
     onLeftOpenChange?.(nextOpen);
   };
+
+  const isRolling = actionLoading === "ROLL_DICE";
+  const isEnding = actionLoading === "END_TURN";
+  const rollEmphasized = canRoll && !isRolling;
+  const endEmphasized = canEndTurn && !isEnding;
+  const shouldPulse = rollEmphasized && showTurnActions && actionLoading === null;
 
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-neutral-950 text-white">
@@ -85,22 +106,45 @@ export default function PlayV2Shell({
             {rightOpen ? "Close" : "Right"}
           </button>
 
-          <section className="absolute bottom-2 right-2 z-20 flex flex-col gap-2">
-            {[
-              { label: "Roll" },
-              { label: "End" },
-              { label: "Confirm" },
-            ].map((button) => (
+          {showTurnActions ? (
+            <section className="absolute bottom-2 right-2 z-20 flex flex-col items-center gap-3">
               <button
-                key={button.label}
                 type="button"
-                disabled
-                className="rounded-full border border-white/25 bg-neutral-900 px-4 py-2 text-sm font-semibold text-white/70 disabled:cursor-not-allowed"
+                className={`flex h-14 w-14 items-center justify-center rounded-full border shadow-lg transition ${
+                  rollEmphasized
+                    ? "border-emerald-600 bg-emerald-600 text-white shadow-emerald-600/30"
+                    : "border-emerald-200 bg-emerald-100 text-emerald-300 shadow-emerald-200/40 opacity-70"
+                } ${shouldPulse ? "player-ready-pulse" : ""}`}
+                onClick={onRollDice}
+                disabled={!canRoll || isRolling}
+                aria-label={isRolling ? "Rolling dice" : "Roll dice"}
+                title={rollDiceDisabledReason ?? "Roll dice"}
               >
-                {button.label}
+                <span className="sr-only">{isRolling ? "Rolling…" : "Roll dice"}</span>
+                <Image
+                  src="/icons/dice.svg"
+                  alt=""
+                  width={30}
+                  height={30}
+                  className="h-10 w-10 object-contain"
+                  aria-hidden
+                />
               </button>
-            ))}
-          </section>
+              <button
+                type="button"
+                className={`flex h-12 w-12 items-center justify-center rounded-full border text-xs font-semibold shadow-lg transition ${
+                  endEmphasized
+                    ? "border-rose-600 bg-rose-600 text-white shadow-rose-600/30"
+                    : "border-rose-200 bg-rose-100 text-rose-300 shadow-rose-200/40 opacity-70"
+                }`}
+                onClick={onEndTurn}
+                disabled={!canEndTurn || isEnding}
+                aria-label={isEnding ? "Ending turn" : "End turn"}
+              >
+                {isEnding ? "..." : "END"}
+              </button>
+            </section>
+          ) : null}
         </section>
 
         <aside
