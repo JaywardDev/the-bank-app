@@ -10,6 +10,7 @@ import GoToJailModalV2 from "@/components/play-v2/GoToJailModalV2";
 import PendingCardModalV2 from "@/components/play-v2/PendingCardModalV2";
 import PendingMacroModalV2 from "@/components/play-v2/PendingMacroModalV2";
 import PendingPurchaseModalV2 from "@/components/play-v2/PendingPurchaseModalV2";
+import AuctionOverlayV2 from "@/components/play-v2/AuctionOverlayV2";
 import { TitleDeedPreview } from "@/app/components/TitleDeedPreview";
 import { DEFAULT_BOARD_PACK_ECONOMY, getBoardPackById } from "@/lib/boardPacks";
 import { getTileBandColor } from "@/lib/boardTileStyles";
@@ -102,7 +103,9 @@ type BankAction =
   | "CONFIRM_PENDING_CARD"
   | "CONFIRM_MACRO_EVENT"
   | "BUY_PROPERTY"
-  | "DECLINE_PROPERTY";
+  | "DECLINE_PROPERTY"
+  | "AUCTION_BID"
+  | "AUCTION_PASS";
 
 type OwnershipRow = {
   tile_index: number;
@@ -175,6 +178,7 @@ export default function PlayV2Page() {
   const [selectedTileIndex, setSelectedTileIndex] = useState<number | null>(null);
   const [isLeftDrawerOpen, setIsLeftDrawerOpen] = useState(false);
   const [pendingGoToJailAckVersion, setPendingGoToJailAckVersion] = useState<number | null>(null);
+  const [auctionNow, setAuctionNow] = useState<Date>(() => new Date());
 
   const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
 
@@ -553,9 +557,67 @@ export default function PlayV2Page() {
     isMyTurn,
   ]);
 
+  const auctionTileIndex = gameState?.auction_tile_index ?? null;
+  const auctionTile = useMemo(() => {
+    if (auctionTileIndex === null) {
+      return null;
+    }
+    const boardTiles = getBoardPackById(gameMeta?.board_pack_id ?? null)?.tiles ?? [];
+    return boardTiles.find((tile) => tile.index === auctionTileIndex) ?? null;
+  }, [auctionTileIndex, gameMeta?.board_pack_id]);
+  const auctionHighestBid = gameState?.auction_current_bid ?? 0;
+  const auctionHighestBidderId = gameState?.auction_current_winner_player_id ?? null;
+  const auctionHighestBidderName =
+    players.find((player) => player.id === auctionHighestBidderId)?.display_name ??
+    (auctionHighestBidderId ? "Player" : null);
+  const auctionTurnPlayerId = gameState?.auction_turn_player_id ?? null;
+  const auctionTurnPlayerName =
+    players.find((player) => player.id === auctionTurnPlayerId)?.display_name ??
+    (auctionTurnPlayerId ? "Player" : null);
+  const auctionEligibleBidderIds = gameState?.auction_eligible_player_ids ?? [];
+  const auctionPassedBidderIds = gameState?.auction_passed_player_ids ?? [];
+  const auctionTurnEndsAt = gameState?.auction_turn_ends_at ?? null;
+  const isEligibleAuctionBidder = Boolean(
+    currentUserPlayer?.id &&
+    auctionEligibleBidderIds.includes(currentUserPlayer.id) &&
+    !auctionPassedBidderIds.includes(currentUserPlayer.id),
+  );
+  const isCurrentAuctionBidder = Boolean(
+    currentUserPlayer?.id && currentUserPlayer.id === auctionTurnPlayerId,
+  );
+  const canActInAuction = auctionActive && isEligibleAuctionBidder && isCurrentAuctionBidder;
+
+  const auctionRemainingSeconds = useMemo(() => {
+    if (!auctionTurnEndsAt) {
+      return null;
+    }
+    const endMs = Date.parse(auctionTurnEndsAt);
+    if (Number.isNaN(endMs)) {
+      return null;
+    }
+    const diffMs = endMs - auctionNow.getTime();
+    return Math.max(0, Math.ceil(diffMs / 1000));
+  }, [auctionNow, auctionTurnEndsAt]);
+  const auctionCountdownLabel =
+    typeof auctionRemainingSeconds === "number"
+      ? `Time left ${Math.floor(auctionRemainingSeconds / 60)}:${String(
+          auctionRemainingSeconds % 60,
+        ).padStart(2, "0")}`
+      : null;
+
+  useEffect(() => {
+    if (!auctionActive) {
+      return;
+    }
+    const tick = window.setInterval(() => {
+      setAuctionNow(new Date());
+    }, 1000);
+    return () => window.clearInterval(tick);
+  }, [auctionActive]);
+
   const handleBankAction = useCallback(async (
     action: BankAction,
-    options?: { tileIndex?: number },
+    options?: { tileIndex?: number; amount?: number },
   ) => {
     if (!routeGameId || !session?.access_token) {
       return;
@@ -575,6 +637,7 @@ export default function PlayV2Page() {
           gameId: routeGameId,
           expectedVersion: gameState?.version ?? 0,
           ...(options?.tileIndex !== undefined ? { tileIndex: options.tileIndex } : {}),
+          ...(options?.amount !== undefined ? { amount: options.amount } : {}),
         }),
       });
 
@@ -620,6 +683,21 @@ export default function PlayV2Page() {
     }
     setPendingGoToJailAckVersion(pendingGoToJail.eventVersion);
   }, [pendingGoToJail]);
+
+  const handleAuctionBid = useCallback(() => {
+    if (!canActInAuction) {
+      return;
+    }
+    const bidAmount = auctionHighestBid + (gameState?.auction_min_increment ?? 10);
+    void handleBankAction("AUCTION_BID", { amount: bidAmount });
+  }, [auctionHighestBid, canActInAuction, gameState?.auction_min_increment, handleBankAction]);
+
+  const handleAuctionPass = useCallback(() => {
+    if (!canActInAuction) {
+      return;
+    }
+    void handleBankAction("AUCTION_PASS");
+  }, [canActInAuction, handleBankAction]);
 
   const turnPlayerMissingFromPlayers = Boolean(turnPlayerId) && !currentTurnPlayer;
 
@@ -841,6 +919,18 @@ export default function PlayV2Page() {
       actionLoading={actionLoading}
       onConfirm={handleConfirmPendingCard}
     />
+    <AuctionOverlayV2
+      auctionActive={auctionActive}
+      auctionTile={auctionTile}
+      highestBid={auctionHighestBid}
+      highestBidderName={auctionHighestBidderName}
+      turnPlayerName={auctionTurnPlayerName}
+      auctionCountdownLabel={auctionCountdownLabel}
+      canAct={canActInAuction}
+      actionLoading={actionLoading}
+      onBid={handleAuctionBid}
+      onPass={handleAuctionPass}
+    />
 
       {/*
         Verification checklist:
@@ -848,6 +938,11 @@ export default function PlayV2Page() {
         - Card reveal blocks until confirmed.
         - Macro reveal blocks until confirmed.
         - Go To Jail blocks until acknowledged.
+        - Property decline triggers auction.
+        - Bidding works.
+        - Auction resolves.
+        - Turn proceeds correctly.
+        - No stuck state.
       */}
     </>
   );
