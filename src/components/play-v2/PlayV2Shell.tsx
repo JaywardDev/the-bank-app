@@ -223,9 +223,11 @@ export default function PlayV2Shell({
           <button
             type="button"
             onClick={() => setLeftOpen(!leftOpen)}
-            className="absolute left-0 top-1/2 z-30 -translate-y-1/2 rounded-r-lg border border-white/20 bg-neutral-900 px-2 py-3 text-xs font-semibold uppercase tracking-wide"
+            className={`absolute top-1/2 z-30 -translate-y-1/2 rounded-r-lg border border-white/20 bg-neutral-900 px-2 py-3 text-xs font-semibold uppercase tracking-wide transition-[left] duration-200 ${
+              leftOpen ? "left-72" : "left-0"
+            }`}
           >
-            {leftOpen ? "Close" : "Left"}
+            Left
           </button>
 
           <button
