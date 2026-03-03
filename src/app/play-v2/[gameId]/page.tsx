@@ -6,6 +6,10 @@ import type { RealtimeChannel } from "@supabase/supabase-js";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 import PlayV2Shell from "@/components/play-v2/PlayV2Shell";
 import BoardViewport from "@/components/play-v2/BoardViewport";
+import GoToJailModalV2 from "@/components/play-v2/GoToJailModalV2";
+import PendingCardModalV2 from "@/components/play-v2/PendingCardModalV2";
+import PendingMacroModalV2 from "@/components/play-v2/PendingMacroModalV2";
+import PendingPurchaseModalV2 from "@/components/play-v2/PendingPurchaseModalV2";
 import { TitleDeedPreview } from "@/app/components/TitleDeedPreview";
 import { DEFAULT_BOARD_PACK_ECONOMY, getBoardPackById } from "@/lib/boardPacks";
 import { getTileBandColor } from "@/lib/boardTileStyles";
@@ -92,6 +96,14 @@ type PendingPurchaseAction = {
   price: number;
 };
 
+type BankAction =
+  | "ROLL_DICE"
+  | "END_TURN"
+  | "CONFIRM_PENDING_CARD"
+  | "CONFIRM_MACRO_EVENT"
+  | "BUY_PROPERTY"
+  | "DECLINE_PROPERTY";
+
 type OwnershipRow = {
   tile_index: number;
   owner_player_id: string | null;
@@ -162,6 +174,7 @@ export default function PlayV2Page() {
   const [needsAuth, setNeedsAuth] = useState(false);
   const [selectedTileIndex, setSelectedTileIndex] = useState<number | null>(null);
   const [isLeftDrawerOpen, setIsLeftDrawerOpen] = useState(false);
+  const [pendingGoToJailAckVersion, setPendingGoToJailAckVersion] = useState<number | null>(null);
 
   const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
 
@@ -457,7 +470,7 @@ export default function PlayV2Page() {
     gameState?.pending_card_title,
   ]);
   const pendingGoToJail = useMemo(() => {
-    if (!currentUserPlayer) {
+    if (!gameState?.current_player_id) {
       return null;
     }
     for (const event of events) {
@@ -469,15 +482,29 @@ export default function PlayV2Page() {
         payload && typeof payload.player_id === "string"
           ? payload.player_id
           : null;
-      if (playerId === currentUserPlayer.id) {
+      if (playerId === gameState.current_player_id) {
+        if (pendingGoToJailAckVersion === event.version) {
+          return null;
+        }
         return {
           eventId: event.id,
           eventVersion: event.version,
+          playerId,
         };
       }
     }
     return null;
-  }, [currentUserPlayer, events]);
+  }, [events, gameState?.current_player_id, pendingGoToJailAckVersion]);
+  const pendingGoToJailPlayerName = useMemo(() => {
+    if (!pendingGoToJail?.playerId) {
+      return null;
+    }
+    return (
+      players.find((player) => player.id === pendingGoToJail.playerId)?.display_name ??
+      pendingGoToJail.playerId
+    );
+  }, [pendingGoToJail?.playerId, players]);
+  const isGoToJailActor = Boolean(currentUserPlayer && pendingGoToJail?.playerId === currentUserPlayer.id);
   const hasBlockingPendingAction =
     pendingGoToJail !== null ||
     pendingCard !== null ||
@@ -526,7 +553,10 @@ export default function PlayV2Page() {
     isMyTurn,
   ]);
 
-  const handleBankAction = useCallback(async (action: "ROLL_DICE" | "END_TURN") => {
+  const handleBankAction = useCallback(async (
+    action: BankAction,
+    options?: { tileIndex?: number },
+  ) => {
     if (!routeGameId || !session?.access_token) {
       return;
     }
@@ -544,6 +574,7 @@ export default function PlayV2Page() {
           action,
           gameId: routeGameId,
           expectedVersion: gameState?.version ?? 0,
+          ...(options?.tileIndex !== undefined ? { tileIndex: options.tileIndex } : {}),
         }),
       });
 
@@ -560,6 +591,35 @@ export default function PlayV2Page() {
       setActionLoading(null);
     }
   }, [gameState?.version, routeGameId, session?.access_token]);
+
+  const handleConfirmPendingCard = useCallback(() => {
+    void handleBankAction("CONFIRM_PENDING_CARD");
+  }, [handleBankAction]);
+
+  const handleConfirmMacroEvent = useCallback(() => {
+    void handleBankAction("CONFIRM_MACRO_EVENT");
+  }, [handleBankAction]);
+
+  const handleBuyProperty = useCallback(() => {
+    if (!pendingPurchase) {
+      return;
+    }
+    void handleBankAction("BUY_PROPERTY", { tileIndex: pendingPurchase.tile_index });
+  }, [handleBankAction, pendingPurchase]);
+
+  const handleDeclineProperty = useCallback(() => {
+    if (!pendingPurchase) {
+      return;
+    }
+    void handleBankAction("DECLINE_PROPERTY", { tileIndex: pendingPurchase.tile_index });
+  }, [handleBankAction, pendingPurchase]);
+
+  const handleAcknowledgeGoToJail = useCallback(() => {
+    if (!pendingGoToJail) {
+      return;
+    }
+    setPendingGoToJailAckVersion(pendingGoToJail.eventVersion);
+  }, [pendingGoToJail]);
 
   const turnPlayerMissingFromPlayers = Boolean(turnPlayerId) && !currentTurnPlayer;
 
@@ -654,7 +714,8 @@ export default function PlayV2Page() {
     : turnPlayerId ?? "—";
 
   return (
-    <PlayV2Shell
+    <>
+      <PlayV2Shell
       cashLabel={formatMoney(currentUserCash)}
       netWorthLabel={formatMoney(currentUserCash)}
       turnPlayerLabel={turnPlayerLabel}
@@ -751,5 +812,43 @@ export default function PlayV2Page() {
         </div>
       )}
     />
+    <GoToJailModalV2
+      pendingGoToJail={pendingGoToJail}
+      isActor={isGoToJailActor}
+      actorName={pendingGoToJailPlayerName}
+      onAcknowledge={handleAcknowledgeGoToJail}
+    />
+    <PendingPurchaseModalV2
+      pendingPurchase={pendingPurchase}
+      pendingTile={selectedBoardPack?.tiles.find((tile) => tile.index === pendingPurchase?.tile_index) ?? null}
+      actorName={currentTurnPlayer?.display_name ?? null}
+      isActor={Boolean(currentUserPlayer && currentTurnPlayer && currentUserPlayer.id === currentTurnPlayer.id)}
+      actionLoading={actionLoading}
+      onBuy={handleBuyProperty}
+      onDecline={handleDeclineProperty}
+    />
+    <PendingMacroModalV2
+      pendingMacroEvent={pendingMacroEvent}
+      actorName={currentTurnPlayer?.display_name ?? null}
+      isActor={Boolean(currentUserPlayer && currentTurnPlayer && currentUserPlayer.id === currentTurnPlayer.id)}
+      actionLoading={actionLoading}
+      onConfirm={handleConfirmMacroEvent}
+    />
+    <PendingCardModalV2
+      pendingCard={pendingCard}
+      actorName={players.find((player) => player.id === pendingCard?.drawnBy)?.display_name ?? null}
+      isActor={Boolean(currentUserPlayer && pendingCard?.drawnBy === currentUserPlayer.id)}
+      actionLoading={actionLoading}
+      onConfirm={handleConfirmPendingCard}
+    />
+
+      {/*
+        Verification checklist:
+        - Landing on property shows decision modal.
+        - Card reveal blocks until confirmed.
+        - Macro reveal blocks until confirmed.
+        - Go To Jail blocks until acknowledged.
+      */}
+    </>
   );
 }
