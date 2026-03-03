@@ -17,7 +17,7 @@ import { TitleDeedPreview } from "@/app/components/TitleDeedPreview";
 import { DEFAULT_BOARD_PACK_ECONOMY, getBoardPackById } from "@/lib/boardPacks";
 import { getTileBandColor } from "@/lib/boardTileStyles";
 import { getRules } from "@/lib/rules";
-import { getCurrentTileRent } from "@/lib/rent";
+import { getCurrentTileRent, ownsFullColorSet } from "@/lib/rent";
 
 type GameMeta = {
   id: string;
@@ -1093,86 +1093,80 @@ export default function PlayV2Page() {
       )
       .map((tile) => {
         const ownership = ownershipByTile[tile.index];
+        const isMyTurn = canAct;
         const isCollateralized = Boolean(ownership?.collateral_loan_id);
         const isPurchaseMortgaged = Boolean(ownership?.purchase_mortgage_id);
-        const colorGroup = tile.colorGroup ?? null;
-        const groupTiles = colorGroup
-          ? selectedBoardPack.tiles.filter(
-              (entry) =>
-                entry.type === "PROPERTY" && entry.colorGroup === colorGroup,
-            )
-          : [];
-        const hasFullSet =
-          colorGroup &&
-          groupTiles.length > 0 &&
-          groupTiles.every(
-            (entry) =>
-              ownershipByTile[entry.index]?.owner_player_id === currentUserPlayer.id,
-          );
-        const houses = ownership?.houses ?? 0;
-        const houseCost = tile.houseCost ?? 0;
-        const houseBuildMacroBlocked = houseBuildBlockedByMacro !== null;
-        const canBuildHouse =
-          canAct &&
-          tile.type === "PROPERTY" &&
-          hasFullSet &&
-          !isCollateralized &&
-          !isPurchaseMortgaged &&
-          houseCost > 0 &&
-          (currentUserCash ?? 0) >= houseCost &&
-          !houseBuildMacroBlocked;
-        const canSellHouse =
-          canAct &&
-          tile.type === "PROPERTY" &&
-          hasFullSet &&
-          !isCollateralized &&
-          !isPurchaseMortgaged &&
-          houseCost > 0 &&
-          houses > 0;
-        const isHotelBoundary = houses >= 5 && houses % 5 === 0;
-        const canSellHotel = canSellHouse && isHotelBoundary;
-        const sellToMarketDisabledReason = !canAct
+        const housesCount = ownership?.houses ?? 0;
+        const hasFullSet = ownsFullColorSet(
+          tile,
+          selectedBoardPack.tiles,
+          ownershipByTile,
+          currentUserPlayer.id,
+        );
+        const tilePrice = tile.price ?? 0;
+
+        const buildHouseDisabledReason = !isMyTurn
           ? "Not your turn"
-          : houses > 0
-            ? "Sell houses first"
-            : isCollateralized
-              ? "Collateralized properties cannot be sold"
-              : isPurchaseMortgaged
-                ? "Mortgaged properties cannot be sold"
-                : null;
-        const canSellToMarket = sellToMarketDisabledReason === null;
-        const collateralDisabledReason = !canAct
-          ? "Not your turn"
-          : !rules.loanCollateralEnabled
-            ? "Collateral loans disabled"
+          : !hasFullSet
+            ? "Need full set"
             : isCollateralized
               ? "Already collateralized"
               : isPurchaseMortgaged
-                ? "Mortgaged properties cannot be collateralized"
-                : loanBlockedByMacro
-                  ? `Blocked by macro: ${loanBlockedByMacro.name ?? "Macroeconomic event"}`
+                ? "Mortgaged at purchase"
+                : null;
+        const sellHouseDisabledReason = !isMyTurn
+          ? "Not your turn"
+          : housesCount === 0
+            ? "No houses to sell"
+            : null;
+        const sellHotelDisabledReason = !isMyTurn
+          ? "Not your turn"
+          : housesCount < 5
+            ? "Need a hotel first"
+            : null;
+        const collateralDisabledReason = !isMyTurn
+          ? "Not your turn"
+          : isCollateralized
+            ? "Already collateralized"
+            : isPurchaseMortgaged
+              ? "Mortgaged at purchase"
+              : housesCount > 0
+                ? "Remove houses first"
+                : !rules.loanCollateralEnabled
+                  ? "Collateral loans disabled"
                   : null;
+        const sellToMarketDisabledReason = !isMyTurn
+          ? "Not your turn"
+          : housesCount > 0
+            ? "Remove houses first"
+            : isCollateralized
+              ? "Already collateralized"
+              : isPurchaseMortgaged
+                ? "Mortgaged at purchase"
+                : null;
 
         return {
           tile,
-          houses,
+          isMyTurn,
+          isCollateralized,
+          isPurchaseMortgaged,
+          housesCount,
           hasFullSet,
-          isCollateralEligible: !isCollateralized && !isPurchaseMortgaged,
-          canBuildHouse,
-          canSellHouse,
-          canSellHotel,
-          canSellToMarket,
-          houseBuildMacroBlocked,
+          tilePrice,
+          canBuildHouse: tile.type === "PROPERTY" && buildHouseDisabledReason === null,
+          canSellHouse: tile.type === "PROPERTY" && sellHouseDisabledReason === null,
+          canSellHotel: tile.type === "PROPERTY" && sellHotelDisabledReason === null,
+          canSellToMarket: sellToMarketDisabledReason === null,
+          buildHouseDisabledReason,
+          sellHouseDisabledReason,
+          sellHotelDisabledReason,
           sellToMarketDisabledReason,
           collateralDisabledReason,
         };
       });
   }, [
     canAct,
-    currentUserCash,
     currentUserPlayer,
-    houseBuildBlockedByMacro,
-    loanBlockedByMacro,
     ownershipByTile,
     rules.loanCollateralEnabled,
     selectedBoardPack?.tiles,
@@ -1192,38 +1186,19 @@ export default function PlayV2Page() {
         {ownedProperties.map((entry) => {
           const {
             tile,
-            houses,
-            hasFullSet,
-            isCollateralEligible,
+            housesCount,
             canBuildHouse,
             canSellHouse,
             canSellHotel,
             canSellToMarket,
-            houseBuildMacroBlocked,
+            buildHouseDisabledReason,
+            sellHouseDisabledReason,
+            sellHotelDisabledReason,
             sellToMarketDisabledReason,
             collateralDisabledReason,
           } = entry;
-          const showSellHouse = houses > 0;
-          const showSellHotel = houses >= 5;
-          const buildHouseDisabledReason = !canAct
-            ? "Not your turn"
-            : !hasFullSet
-              ? "Requires full color set"
-              : houseBuildMacroBlocked
-                ? `Blocked by macro: ${houseBuildBlockedByMacro?.name ?? "Macroeconomic event"}`
-                : null;
-          const sellHouseDisabledReason = !canAct
-            ? "Not your turn"
-            : !hasFullSet
-              ? "Requires full color set"
-              : null;
-          const sellHotelDisabledReason = !canAct
-            ? "Not your turn"
-            : houses % 5 !== 0
-              ? "Sell houses first to reach a hotel boundary."
-              : !hasFullSet
-                ? "Requires full color set"
-                : null;
+          const showSellHouse = tile.type === "PROPERTY";
+          const showSellHotel = tile.type === "PROPERTY";
 
           return (
             <div key={tile.index} className="space-y-2 rounded-xl border border-white/15 bg-white/5 p-2">
@@ -1234,7 +1209,7 @@ export default function PlayV2Page() {
                 mode="readonly"
                 size="compact"
                 showDevelopment={tile.type === "PROPERTY"}
-                developmentCount={houses}
+                developmentCount={housesCount}
                 ownerPlayerId={currentUserPlayer?.id ?? null}
                 ownershipByTile={ownershipByTile}
                 boardTiles={selectedBoardPack.tiles}
@@ -1290,7 +1265,7 @@ export default function PlayV2Page() {
                   <button
                     type="button"
                     className="rounded-md bg-white/90 px-2 py-1 text-[11px] font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:bg-white/20 disabled:text-white/50"
-                    disabled={!isCollateralEligible || collateralDisabledReason !== null || actionLoading === "TAKE_COLLATERAL_LOAN"}
+                    disabled={collateralDisabledReason !== null || actionLoading === "TAKE_COLLATERAL_LOAN"}
                     title={collateralDisabledReason ?? undefined}
                     onClick={() => void handleBankAction({ action: "TAKE_COLLATERAL_LOAN", tileIndex: tile.index })}
                   >
@@ -1301,6 +1276,12 @@ export default function PlayV2Page() {
                 {buildHouseDisabledReason && tile.type === "PROPERTY" ? (
                   <p className="text-[11px] text-white/50">{buildHouseDisabledReason}</p>
                 ) : null}
+                {sellHouseDisabledReason && tile.type === "PROPERTY" ? (
+                  <p className="text-[11px] text-white/50">{sellHouseDisabledReason}</p>
+                ) : null}
+                {sellHotelDisabledReason && tile.type === "PROPERTY" ? (
+                  <p className="text-[11px] text-white/50">{sellHotelDisabledReason}</p>
+                ) : null}
                 {collateralDisabledReason ? <p className="text-[11px] text-white/50">{collateralDisabledReason}</p> : null}
               </div>
             </div>
@@ -1310,10 +1291,8 @@ export default function PlayV2Page() {
     );
   }, [
     actionLoading,
-    canAct,
     currentUserPlayer?.id,
     handleBankAction,
-    houseBuildBlockedByMacro?.name,
     ownedProperties,
     ownershipByTile,
     selectedBoardPack,
