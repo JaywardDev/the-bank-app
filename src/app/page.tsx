@@ -321,7 +321,9 @@ export default function Home() {
     }
 
     const href =
-      game.status === "lobby" ? `/lobby/${game.gameId}` : `/play/${game.gameId}`;
+      game.status === "lobby"
+        ? `/lobby/${game.gameId}`
+        : `/play-v2/${game.gameId}`;
     router.push(href);
   };
 

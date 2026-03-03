@@ -393,7 +393,7 @@ export default function LobbyPage() {
 
   useEffect(() => {
     if (activeGame?.status === "in_progress") {
-      router.replace(`/play/${gameId}`);
+      router.replace(`/play-v2/${gameId}`);
     }
   }, [activeGame?.status, gameId, router]);
 
@@ -515,7 +515,7 @@ export default function LobbyPage() {
         return;
       }
 
-      router.push(`/play/${activeGame.id}`);
+      router.push(`/play-v2/${activeGame.id}`);
     } catch (error) {
       if (error instanceof Error) {
         setNotice(error.message);
