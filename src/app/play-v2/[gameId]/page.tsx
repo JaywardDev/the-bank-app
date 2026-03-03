@@ -314,6 +314,11 @@ export default function PlayV2Page() {
     setPurchaseMortgages(rows);
   }, []);
 
+  const currentUserPlayerId = useMemo(
+    () => players.find((player) => player.user_id === session?.user.id)?.id ?? null,
+    [players, session?.user.id],
+  );
+
   const loadAllSlices = useCallback(async (gameId: string, accessToken?: string) => {
     const playerRows = await loadPlayers(gameId, accessToken);
     const currentPlayerId = playerRows.find((player) => player.user_id === session?.user.id)?.id ?? null;
@@ -337,6 +342,26 @@ export default function PlayV2Page() {
     loadTradeProposals,
     session?.user.id,
   ]);
+
+  const refetchActionSlices = useCallback(
+    async (gameId: string, accessToken?: string) => {
+      await Promise.all([
+        loadGameState(gameId, accessToken),
+        loadOwnership(gameId, accessToken),
+        loadLoans(gameId, accessToken, currentUserPlayerId),
+        loadPurchaseMortgages(gameId, accessToken, currentUserPlayerId),
+        loadEvents(gameId, accessToken),
+      ]);
+    },
+    [
+      currentUserPlayerId,
+      loadEvents,
+      loadGameState,
+      loadLoans,
+      loadOwnership,
+      loadPurchaseMortgages,
+    ],
+  );
 
   useEffect(() => {
     let isMounted = true;
@@ -378,11 +403,6 @@ export default function PlayV2Page() {
       isMounted = false;
     };
   }, [loadAllSlices, routeGameId, router]);
-
-  const currentUserPlayerId = useMemo(
-    () => players.find((player) => player.user_id === session?.user.id)?.id ?? null,
-    [players, session?.user.id],
-  );
 
   useEffect(() => {
     if (!routeGameId || !session?.access_token) {
@@ -813,37 +833,95 @@ export default function PlayV2Page() {
     setActionLoading(action);
     setNotice(null);
     try {
-      const response = await fetch("/api/bank/action", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          action,
-          gameId: routeGameId,
-          expectedVersion: gameState?.version ?? 0,
-          ...(options?.tileIndex !== undefined ? { tileIndex: options.tileIndex } : {}),
-          ...(options?.amount !== undefined ? { amount: options.amount } : {}),
-          ...(options?.financing ? { financing: options.financing } : {}),
-          ...(options?.loanId ? { loanId: options.loanId } : {}),
-          ...(options?.mortgageId ? { mortgageId: options.mortgageId } : {}),
-        }),
-      });
+      const requestBody = {
+        action,
+        gameId: routeGameId,
+        expectedVersion: gameState?.version ?? 0,
+        ...(options?.tileIndex !== undefined ? { tileIndex: options.tileIndex } : {}),
+        ...(options?.amount !== undefined ? { amount: options.amount } : {}),
+        ...(options?.financing ? { financing: options.financing } : {}),
+        ...(options?.loanId ? { loanId: options.loanId } : {}),
+        ...(options?.mortgageId ? { mortgageId: options.mortgageId } : {}),
+      };
 
-      const payload = (await response.json().catch(() => null)) as
-        | { error?: string }
-        | null;
+      const runActionRequest = async (accessToken: string) => {
+        const response = await fetch("/api/bank/action", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify(requestBody),
+        });
 
-      if (!response.ok) {
-        setNotice(payload?.error ?? `Action failed (${response.status})`);
+        const payload = (await response.json().catch(() => null)) as
+          | { error?: string; message?: string }
+          | null;
+
+        return { payload, response };
+      };
+
+      const getErrorMessage = (
+        status: number,
+        payload: { error?: string; message?: string } | null,
+      ) => {
+        if (status === 401) {
+          return SESSION_EXPIRED_MESSAGE;
+        }
+        if (status === 409) {
+          return "Game state updated. Please try again.";
+        }
+        if (typeof payload?.error === "string" && payload.error.trim().length > 0) {
+          return payload.error;
+        }
+        if (typeof payload?.message === "string" && payload.message.trim().length > 0) {
+          return payload.message;
+        }
+        return "Action failed. Please try again.";
+      };
+
+      let accessToken = session.access_token;
+      let result = await runActionRequest(accessToken);
+
+      if (result.response.status === 401) {
+        const refreshedSession = await supabaseClient.refreshSession();
+        if (!refreshedSession?.access_token) {
+          setNeedsAuth(true);
+          setNotice(SESSION_EXPIRED_MESSAGE);
+          return;
+        }
+        setSession(refreshedSession);
+        accessToken = refreshedSession.access_token;
+        result = await runActionRequest(accessToken);
       }
+
+      if (result.response.status === 409) {
+        await loadAllSlices(routeGameId, accessToken);
+        setNotice("Game state updated. Please try again.");
+        return;
+      }
+
+      if (!result.response.ok) {
+        if (result.response.status === 401) {
+          setNeedsAuth(true);
+        }
+        setNotice(getErrorMessage(result.response.status, result.payload));
+        return;
+      }
+
+      await refetchActionSlices(routeGameId, accessToken);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Action failed");
+      setNotice(error instanceof Error ? error.message : "Action failed. Please try again.");
     } finally {
       setActionLoading(null);
     }
-  }, [gameState?.version, routeGameId, session?.access_token]);
+  }, [
+    gameState?.version,
+    loadAllSlices,
+    refetchActionSlices,
+    routeGameId,
+    session,
+  ]);
 
   const handleConfirmPendingCard = useCallback(() => {
     void handleBankAction("CONFIRM_PENDING_CARD");
