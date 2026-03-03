@@ -146,12 +146,28 @@ type TradeProposal = {
 type PlayerLoan = {
   id: string;
   player_id: string;
+  collateral_tile_index: number;
+  principal: number;
+  remaining_principal: number;
+  rate_per_turn: number;
+  term_turns: number;
+  turns_remaining: number;
+  payment_per_turn: number;
   status: string;
 };
 
 type PurchaseMortgage = {
   id: string;
   player_id: string;
+  tile_index: number;
+  principal_original: number;
+  principal_remaining: number;
+  rate_per_turn: number;
+  term_turns: number;
+  turns_remaining: number;
+  payment_per_turn: number;
+  turns_elapsed: number;
+  accrued_interest_unpaid: number;
   status: string;
 };
 
@@ -210,6 +226,7 @@ export default function PlayV2Page() {
       accessToken,
     );
     setPlayers(rows);
+    return rows;
   }, []);
 
   const loadGameState = useCallback(async (gameId: string, accessToken?: string) => {
@@ -259,18 +276,26 @@ export default function PlayV2Page() {
     setTradeProposals(rows);
   }, []);
 
-  const loadLoans = useCallback(async (gameId: string, accessToken?: string) => {
+  const loadLoans = useCallback(async (gameId: string, accessToken?: string, playerId?: string | null) => {
+    if (!playerId) {
+      setPlayerLoans([]);
+      return;
+    }
     const rows = await supabaseClient.fetchFromSupabase<PlayerLoan[]>(
-      `player_loans?select=id,player_id,status&game_id=eq.${gameId}`,
+      `player_loans?select=id,player_id,collateral_tile_index,principal,remaining_principal,rate_per_turn,term_turns,turns_remaining,payment_per_turn,status&game_id=eq.${gameId}&player_id=eq.${playerId}`,
       { method: "GET" },
       accessToken,
     );
     setPlayerLoans(rows);
   }, []);
 
-  const loadPurchaseMortgages = useCallback(async (gameId: string, accessToken?: string) => {
+  const loadPurchaseMortgages = useCallback(async (gameId: string, accessToken?: string, playerId?: string | null) => {
+    if (!playerId) {
+      setPurchaseMortgages([]);
+      return;
+    }
     const rows = await supabaseClient.fetchFromSupabase<PurchaseMortgage[]>(
-      `purchase_mortgages?select=id,player_id,status&game_id=eq.${gameId}`,
+      `purchase_mortgages?select=id,player_id,tile_index,principal_original,principal_remaining,rate_per_turn,term_turns,turns_remaining,payment_per_turn,turns_elapsed,accrued_interest_unpaid,status&game_id=eq.${gameId}&player_id=eq.${playerId}`,
       { method: "GET" },
       accessToken,
     );
@@ -278,15 +303,16 @@ export default function PlayV2Page() {
   }, []);
 
   const loadAllSlices = useCallback(async (gameId: string, accessToken?: string) => {
+    const playerRows = await loadPlayers(gameId, accessToken);
+    const currentPlayerId = playerRows.find((player) => player.user_id === session?.user.id)?.id ?? null;
     await Promise.all([
       loadGameMeta(gameId, accessToken),
-      loadPlayers(gameId, accessToken),
       loadGameState(gameId, accessToken),
       loadEvents(gameId, accessToken),
       loadOwnership(gameId, accessToken),
       loadTradeProposals(gameId, accessToken),
-      loadLoans(gameId, accessToken),
-      loadPurchaseMortgages(gameId, accessToken),
+      loadLoans(gameId, accessToken, currentPlayerId),
+      loadPurchaseMortgages(gameId, accessToken, currentPlayerId),
     ]);
   }, [
     loadEvents,
@@ -297,6 +323,7 @@ export default function PlayV2Page() {
     loadPlayers,
     loadPurchaseMortgages,
     loadTradeProposals,
+    session?.user.id,
   ]);
 
   useEffect(() => {
@@ -340,6 +367,11 @@ export default function PlayV2Page() {
     };
   }, [loadAllSlices, routeGameId, router]);
 
+  const currentUserPlayerId = useMemo(
+    () => players.find((player) => player.user_id === session?.user.id)?.id ?? null,
+    [players, session?.user.id],
+  );
+
   useEffect(() => {
     if (!routeGameId || !session?.access_token) {
       return;
@@ -357,8 +389,8 @@ export default function PlayV2Page() {
       .on("postgres_changes", { event: "*", schema: "public", table: "game_events", filter: `game_id=eq.${routeGameId}` }, async () => loadEvents(routeGameId, session.access_token))
       .on("postgres_changes", { event: "*", schema: "public", table: "property_ownership", filter: `game_id=eq.${routeGameId}` }, async () => loadOwnership(routeGameId, session.access_token))
       .on("postgres_changes", { event: "*", schema: "public", table: "trade_proposals", filter: `game_id=eq.${routeGameId}` }, async () => loadTradeProposals(routeGameId, session.access_token))
-      .on("postgres_changes", { event: "*", schema: "public", table: "player_loans", filter: `game_id=eq.${routeGameId}` }, async () => loadLoans(routeGameId, session.access_token))
-      .on("postgres_changes", { event: "*", schema: "public", table: "purchase_mortgages", filter: `game_id=eq.${routeGameId}` }, async () => loadPurchaseMortgages(routeGameId, session.access_token))
+      .on("postgres_changes", { event: "*", schema: "public", table: "player_loans", filter: `game_id=eq.${routeGameId}` }, async () => loadLoans(routeGameId, session.access_token, currentUserPlayerId))
+      .on("postgres_changes", { event: "*", schema: "public", table: "purchase_mortgages", filter: `game_id=eq.${routeGameId}` }, async () => loadPurchaseMortgages(routeGameId, session.access_token, currentUserPlayerId))
       .on("postgres_changes", { event: "*", schema: "public", table: "games", filter: `id=eq.${routeGameId}` }, async () => loadGameMeta(routeGameId, session.access_token))
       .subscribe();
 
@@ -379,9 +411,47 @@ export default function PlayV2Page() {
     loadPlayers,
     loadPurchaseMortgages,
     loadTradeProposals,
+    currentUserPlayerId,
     routeGameId,
     session,
   ]);
+
+  const activeMacroEffectsV1 = useMemo(() => {
+    return (gameState?.active_macro_effects_v1 ?? []).filter(
+      (entry): entry is ActiveMacroEffectV1 => Boolean(entry),
+    );
+  }, [gameState?.active_macro_effects_v1]);
+
+  const houseBuildBlockedByMacro = useMemo(
+    () =>
+      activeMacroEffectsV1.find(
+        (entry) => entry?.effects?.house_build_blocked === true,
+      ) ?? null,
+    [activeMacroEffectsV1],
+  );
+
+  const loanBlockedByMacro = useMemo(
+    () =>
+      activeMacroEffectsV1.find(
+        (entry) => entry?.effects?.loan_mortgage_new_blocked === true,
+      ) ?? null,
+    [activeMacroEffectsV1],
+  );
+
+  const activeLoans = useMemo(
+    () => playerLoans.filter((loan) => loan.status === "active"),
+    [playerLoans],
+  );
+
+  const activePurchaseMortgages = useMemo(
+    () => purchaseMortgages.filter((mortgage) => mortgage.status === "active"),
+    [purchaseMortgages],
+  );
+
+  void activeLoans;
+  void activePurchaseMortgages;
+  void houseBuildBlockedByMacro;
+  void loanBlockedByMacro;
 
   const turnPlayerId = gameState?.current_player_id ?? null;
 
@@ -391,8 +461,8 @@ export default function PlayV2Page() {
   );
 
   const currentUserPlayer = useMemo(
-    () => players.find((player) => player.user_id === session?.user.id) ?? null,
-    [players, session?.user.id],
+    () => players.find((player) => player.id === currentUserPlayerId) ?? null,
+    [currentUserPlayerId, players],
   );
 
   const currentUserCash = useMemo(() => {
