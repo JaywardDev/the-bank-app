@@ -619,6 +619,12 @@ export default function PlayV2Page() {
   const auctionEligibleBidderIds = gameState?.auction_eligible_player_ids ?? [];
   const auctionPassedBidderIds = gameState?.auction_passed_player_ids ?? [];
   const auctionTurnEndsAt = gameState?.auction_turn_ends_at ?? null;
+  const auctionMinIncrement =
+    gameState?.auction_min_increment ?? DEFAULT_BOARD_PACK_ECONOMY.auctionMinIncrement ?? 10;
+  const currentBidderCash =
+    currentUserPlayer && gameState?.balances
+      ? gameState.balances[currentUserPlayer.id] ?? 0
+      : 0;
   const isEligibleAuctionBidder = Boolean(
     currentUserPlayer?.id &&
     auctionEligibleBidderIds.includes(currentUserPlayer.id) &&
@@ -737,13 +743,12 @@ export default function PlayV2Page() {
     setPendingGoToJailAckVersion(pendingGoToJail.eventVersion);
   }, [pendingGoToJail]);
 
-  const handleAuctionBid = useCallback(() => {
+  const handleAuctionBid = useCallback((amount: number) => {
     if (!canActInAuction) {
       return;
     }
-    const bidAmount = auctionHighestBid + (gameState?.auction_min_increment ?? 10);
-    void handleBankAction("AUCTION_BID", { amount: bidAmount });
-  }, [auctionHighestBid, canActInAuction, gameState?.auction_min_increment, handleBankAction]);
+    void handleBankAction("AUCTION_BID", { amount });
+  }, [canActInAuction, handleBankAction]);
 
   const handleAuctionPass = useCallback(() => {
     if (!canActInAuction) {
@@ -1083,9 +1088,12 @@ export default function PlayV2Page() {
       auctionTile={auctionTile}
       highestBid={auctionHighestBid}
       highestBidderName={auctionHighestBidderName}
+      turnPlayerId={auctionTurnPlayerId}
       turnPlayerName={auctionTurnPlayerName}
       auctionCountdownLabel={auctionCountdownLabel}
       canAct={canActInAuction}
+      minIncrement={auctionMinIncrement}
+      bidderCash={currentBidderCash}
       actionLoading={actionLoading}
       onBid={handleAuctionBid}
       onPass={handleAuctionPass}
