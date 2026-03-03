@@ -607,6 +607,52 @@ export default function PlayV2Page() {
       pendingGoToJail.playerId
     );
   }, [pendingGoToJail?.playerId, players]);
+  const latestRollEvent = useMemo(
+    () => events.find((event) => event.event_type === "ROLL_DICE"),
+    [events],
+  );
+  const latestRolledDoubleEvent = useMemo(
+    () => events.find((event) => event.event_type === "ROLLED_DOUBLE"),
+    [events],
+  );
+  const latestRollPayload = useMemo(() => {
+    const payload = latestRollEvent?.payload;
+    return payload && typeof payload === "object"
+      ? (payload as { dice?: unknown })
+      : null;
+  }, [latestRollEvent]);
+  const latestDiceValues = useMemo(() => {
+    if (!latestRollPayload) {
+      return null;
+    }
+    const dice = latestRollPayload.dice;
+    if (!Array.isArray(dice) || dice.length < 2) {
+      return null;
+    }
+    const [first, second] = dice;
+    if (typeof first !== "number" || typeof second !== "number") {
+      return null;
+    }
+    return [first, second] as const;
+  }, [latestRollPayload]);
+  const latestDiceDisplay = useMemo(() => {
+    if (!latestDiceValues) {
+      return null;
+    }
+    return `🎲 ${latestDiceValues[0]} + ${latestDiceValues[1]}`;
+  }, [latestDiceValues]);
+  const latestRolledDoubleConfirmed = useMemo(() => {
+    if (!latestRollEvent || !latestRolledDoubleEvent) {
+      return false;
+    }
+    return latestRolledDoubleEvent.version === latestRollEvent.version + 1;
+  }, [latestRollEvent, latestRolledDoubleEvent]);
+  const latestIsDouble = useMemo(() => {
+    if (!latestDiceValues) {
+      return false;
+    }
+    return latestRolledDoubleConfirmed || latestDiceValues[0] === latestDiceValues[1];
+  }, [latestDiceValues, latestRolledDoubleConfirmed]);
   const isGoToJailActor = Boolean(currentUserPlayer && pendingGoToJail?.playerId === currentUserPlayer.id);
   const isAwaitingJailDecision =
     gameState?.turn_phase === "AWAITING_JAIL_DECISION";
@@ -1518,6 +1564,7 @@ export default function PlayV2Page() {
   const turnPlayerLabel = currentTurnPlayer
     ? `${currentTurnPlayer.display_name}`
     : turnPlayerId ?? "—";
+  const lastRollLabel = gameState?.last_roll != null ? String(gameState.last_roll) : "—";
 
   return (
     <>
@@ -1525,6 +1572,9 @@ export default function PlayV2Page() {
       cashLabel={formatMoney(currentUserCash)}
       netWorthLabel={formatMoney(currentUserCash)}
       turnPlayerLabel={turnPlayerLabel}
+      lastRollLabel={lastRollLabel}
+      lastDiceLabel={latestDiceDisplay}
+      isDoubleRoll={latestIsDouble}
       loading={loading}
       notice={notice}
       leftOpen={isLeftDrawerOpen}

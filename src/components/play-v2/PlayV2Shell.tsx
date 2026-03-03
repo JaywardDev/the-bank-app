@@ -91,6 +91,9 @@ type PlayV2ShellProps = {
   cashLabel: string;
   netWorthLabel: string;
   turnPlayerLabel: string;
+  lastRollLabel: string;
+  lastDiceLabel?: string | null;
+  isDoubleRoll?: boolean;
   loading: boolean;
   notice: string | null;
   debugPanel?: ReactNode;
@@ -120,6 +123,9 @@ export default function PlayV2Shell({
   cashLabel,
   netWorthLabel,
   turnPlayerLabel,
+  lastRollLabel,
+  lastDiceLabel = null,
+  isDoubleRoll = false,
   loading,
   notice,
   boardViewport,
@@ -213,7 +219,7 @@ export default function PlayV2Shell({
     <main className="relative h-screen w-screen overflow-hidden bg-neutral-950 text-white">
       <div className="play-v2-shell-content">
         <section className="absolute inset-x-0 top-0 z-20 h-9 border-b border-white/10 bg-neutral-950 px-2.5 md:h-10 md:px-3">
-          <div className="grid h-full grid-cols-3 items-center gap-2 text-[11px] sm:text-xs">
+          <div className="grid h-full grid-cols-2 items-center gap-2 text-[11px] sm:grid-cols-4 sm:text-xs">
             <div>
               <p className="text-[10px] uppercase tracking-wide text-white/55">Cash</p>
               <p className="font-semibold leading-tight">{cashLabel}</p>
@@ -225,6 +231,18 @@ export default function PlayV2Shell({
             <div>
               <p className="text-[10px] uppercase tracking-wide text-white/55">Turn</p>
               <p className="font-semibold leading-tight">{turnPlayerLabel}</p>
+            </div>
+            <div className="min-w-0">
+              <p className="text-[10px] uppercase tracking-wide text-white/55">Last Roll</p>
+              <p className="flex flex-wrap items-center gap-1 font-semibold leading-tight">
+                <span>{lastRollLabel}</span>
+                {lastDiceLabel ? <span className="text-white/80">· {lastDiceLabel}</span> : null}
+                {isDoubleRoll ? (
+                  <span className="rounded-full bg-amber-200/20 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-200">
+                    DOUBLE!
+                  </span>
+                ) : null}
+              </p>
             </div>
           </div>
         </section>
