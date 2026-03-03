@@ -12,6 +12,7 @@ import PendingMacroModalV2 from "@/components/play-v2/PendingMacroModalV2";
 import PendingPurchaseModalV2 from "@/components/play-v2/PendingPurchaseModalV2";
 import AuctionOverlayV2 from "@/components/play-v2/AuctionOverlayV2";
 import JailDecisionModalV2 from "@/components/play-v2/JailDecisionModalV2";
+import ConfirmActionModalV2 from "@/components/play-v2/ConfirmActionModalV2";
 import { TitleDeedPreview } from "@/app/components/TitleDeedPreview";
 import { DEFAULT_BOARD_PACK_ECONOMY, getBoardPackById } from "@/lib/boardPacks";
 import { getTileBandColor } from "@/lib/boardTileStyles";
@@ -126,6 +127,15 @@ type BankAction =
   | "PAYOFF_COLLATERAL_LOAN"
   | "DEFAULT_PROPERTY"
   | "PAYOFF_PURCHASE_MORTGAGE";
+
+type BankActionRequest = {
+  action: BankAction;
+  tileIndex?: number;
+  amount?: number;
+  financing?: "MORTGAGE";
+  loanId?: string;
+  mortgageId?: string;
+};
 
 type OwnershipRow = {
   tile_index: number;
@@ -817,31 +827,30 @@ export default function PlayV2Page() {
   }, [auctionActive]);
 
   const handleBankAction = useCallback(async (
-    action: BankAction,
-    options?: {
-      tileIndex?: number;
-      amount?: number;
-      financing?: "MORTGAGE";
-      loanId?: string;
-      mortgageId?: string;
-    },
+    actionOrRequest: BankAction | BankActionRequest,
+    options?: Omit<BankActionRequest, "action">,
   ) => {
     if (!routeGameId || !session?.access_token) {
       return;
     }
 
-    setActionLoading(action);
+    const request =
+      typeof actionOrRequest === "string"
+        ? { action: actionOrRequest, ...options }
+        : actionOrRequest;
+
+    setActionLoading(request.action);
     setNotice(null);
     try {
       const requestBody = {
-        action,
+        action: request.action,
         gameId: routeGameId,
         expectedVersion: gameState?.version ?? 0,
-        ...(options?.tileIndex !== undefined ? { tileIndex: options.tileIndex } : {}),
-        ...(options?.amount !== undefined ? { amount: options.amount } : {}),
-        ...(options?.financing ? { financing: options.financing } : {}),
-        ...(options?.loanId ? { loanId: options.loanId } : {}),
-        ...(options?.mortgageId ? { mortgageId: options.mortgageId } : {}),
+        ...(request.tileIndex !== undefined ? { tileIndex: request.tileIndex } : {}),
+        ...(request.amount !== undefined ? { amount: request.amount } : {}),
+        ...(request.financing ? { financing: request.financing } : {}),
+        ...(request.loanId ? { loanId: request.loanId } : {}),
+        ...(request.mortgageId ? { mortgageId: request.mortgageId } : {}),
       };
 
       const runActionRequest = async (accessToken: string) => {
@@ -1240,7 +1249,7 @@ export default function PlayV2Page() {
                       className="rounded-md bg-emerald-600 px-2 py-1 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:bg-emerald-900/50"
                       disabled={!canBuildHouse || actionLoading === "BUILD_HOUSE"}
                       title={buildHouseDisabledReason ?? undefined}
-                      onClick={() => void handleBankAction("BUILD_HOUSE", { tileIndex: tile.index })}
+                      onClick={() => void handleBankAction({ action: "BUILD_HOUSE", tileIndex: tile.index })}
                     >
                       {actionLoading === "BUILD_HOUSE" ? "Building…" : "Build House"}
                     </button>
@@ -1250,7 +1259,7 @@ export default function PlayV2Page() {
                         className="rounded-md border border-white/30 px-2 py-1 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:border-white/10 disabled:text-white/40"
                         disabled={!canSellHouse || actionLoading === "SELL_HOUSE"}
                         title={sellHouseDisabledReason ?? undefined}
-                        onClick={() => void handleBankAction("SELL_HOUSE", { tileIndex: tile.index })}
+                        onClick={() => void handleBankAction({ action: "SELL_HOUSE", tileIndex: tile.index })}
                       >
                         {actionLoading === "SELL_HOUSE" ? "Selling…" : "Sell House"}
                       </button>
@@ -1261,7 +1270,7 @@ export default function PlayV2Page() {
                         className="rounded-md border border-white/30 px-2 py-1 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:border-white/10 disabled:text-white/40"
                         disabled={!canSellHotel || actionLoading === "SELL_HOTEL"}
                         title={sellHotelDisabledReason ?? undefined}
-                        onClick={() => void handleBankAction("SELL_HOTEL", { tileIndex: tile.index })}
+                        onClick={() => void handleBankAction({ action: "SELL_HOTEL", tileIndex: tile.index })}
                       >
                         {actionLoading === "SELL_HOTEL" ? "Selling…" : "Sell Hotel"}
                       </button>
@@ -1283,7 +1292,7 @@ export default function PlayV2Page() {
                     className="rounded-md bg-white/90 px-2 py-1 text-[11px] font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:bg-white/20 disabled:text-white/50"
                     disabled={!isCollateralEligible || collateralDisabledReason !== null || actionLoading === "TAKE_COLLATERAL_LOAN"}
                     title={collateralDisabledReason ?? undefined}
-                    onClick={() => void handleBankAction("TAKE_COLLATERAL_LOAN", { tileIndex: tile.index })}
+                    onClick={() => void handleBankAction({ action: "TAKE_COLLATERAL_LOAN", tileIndex: tile.index })}
                   >
                     {actionLoading === "TAKE_COLLATERAL_LOAN" ? "Collateralizing…" : "Collateralize"}
                   </button>
@@ -1297,33 +1306,6 @@ export default function PlayV2Page() {
             </div>
           );
         })}
-
-        {sellToMarketTileIndex !== null ? (
-          <div className="rounded-lg border border-amber-300/50 bg-amber-100/10 p-3 text-xs text-white">
-            <p className="font-semibold">Confirm sell to market?</p>
-            <p className="mt-1 text-white/75">You will receive 70% of listed price.</p>
-            <div className="mt-2 flex gap-2">
-              <button
-                type="button"
-                className="rounded bg-red-500 px-2 py-1 font-semibold text-white"
-                disabled={actionLoading === "SELL_TO_MARKET"}
-                onClick={() => {
-                  void handleBankAction("SELL_TO_MARKET", { tileIndex: sellToMarketTileIndex });
-                  setSellToMarketTileIndex(null);
-                }}
-              >
-                Confirm
-              </button>
-              <button
-                type="button"
-                className="rounded border border-white/30 px-2 py-1 font-semibold"
-                onClick={() => setSellToMarketTileIndex(null)}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        ) : null}
       </div>
     );
   }, [
@@ -1335,8 +1317,18 @@ export default function PlayV2Page() {
     ownedProperties,
     ownershipByTile,
     selectedBoardPack,
-    sellToMarketTileIndex,
   ]);
+
+
+
+  const handleConfirmSellToMarket = useCallback(() => {
+    if (sellToMarketTileIndex === null) {
+      return;
+    }
+
+    void handleBankAction({ action: "SELL_TO_MARKET", tileIndex: sellToMarketTileIndex });
+    setSellToMarketTileIndex(null);
+  }, [handleBankAction, sellToMarketTileIndex]);
 
   const walletLoansContent = useMemo(() => {
     if (activeLoans.length === 0) {
@@ -1760,6 +1752,15 @@ export default function PlayV2Page() {
           </button>
         </div>
       )}
+    />
+    <ConfirmActionModalV2
+      open={sellToMarketTileIndex !== null}
+      title="Sell property to market?"
+      description="You will receive 70% of listed price."
+      confirmLabel="Confirm"
+      isConfirming={actionLoading === "SELL_TO_MARKET"}
+      onConfirm={handleConfirmSellToMarket}
+      onCancel={() => setSellToMarketTileIndex(null)}
     />
     <AuctionOverlayV2
       auctionActive={auctionActive}
