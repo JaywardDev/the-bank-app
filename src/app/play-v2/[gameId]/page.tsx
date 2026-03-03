@@ -603,7 +603,7 @@ export default function PlayV2Page() {
     gameState?.pending_card_title,
   ]);
   const pendingGoToJail = useMemo(() => {
-    if (!gameState?.current_player_id) {
+    if (!currentUserPlayer?.id) {
       return null;
     }
     for (const event of events) {
@@ -615,7 +615,7 @@ export default function PlayV2Page() {
         payload && typeof payload.player_id === "string"
           ? payload.player_id
           : null;
-      if (playerId === gameState.current_player_id) {
+      if (playerId === currentUserPlayer.id) {
         if (pendingGoToJailAckVersion === event.version) {
           return null;
         }
@@ -627,16 +627,7 @@ export default function PlayV2Page() {
       }
     }
     return null;
-  }, [events, gameState?.current_player_id, pendingGoToJailAckVersion]);
-  const pendingGoToJailPlayerName = useMemo(() => {
-    if (!pendingGoToJail?.playerId) {
-      return null;
-    }
-    return (
-      players.find((player) => player.id === pendingGoToJail.playerId)?.display_name ??
-      pendingGoToJail.playerId
-    );
-  }, [pendingGoToJail?.playerId, players]);
+  }, [currentUserPlayer?.id, events, pendingGoToJailAckVersion]);
   const latestRollEvent = useMemo(
     () => events.find((event) => event.event_type === "ROLL_DICE"),
     [events],
@@ -683,7 +674,12 @@ export default function PlayV2Page() {
     }
     return latestRolledDoubleConfirmed || latestDiceValues[0] === latestDiceValues[1];
   }, [latestDiceValues, latestRolledDoubleConfirmed]);
-  const isGoToJailActor = Boolean(currentUserPlayer && pendingGoToJail?.playerId === currentUserPlayer.id);
+  const shouldShowGoToJailConfirm = Boolean(
+    isMyTurn &&
+      currentUserPlayer?.id &&
+      gameState?.current_player_id === currentUserPlayer.id &&
+      pendingGoToJail,
+  );
   const isAwaitingJailDecision =
     gameState?.turn_phase === "AWAITING_JAIL_DECISION";
   const isJailDecisionActor = Boolean(isMyTurn && isAwaitingJailDecision);
@@ -692,13 +688,13 @@ export default function PlayV2Page() {
   const jailFineAmount = getBoardPackById(gameMeta?.board_pack_id ?? null)?.economy?.jailFineAmount ?? 50;
 
   const activeDecisionType: ActiveDecisionType | null = useMemo(() => {
-    if (pendingGoToJail) return "GO_TO_JAIL";
+    if (shouldShowGoToJailConfirm) return "GO_TO_JAIL";
     if (isAwaitingJailDecision) return "JAIL_DECISION";
     if (pendingCard) return "PENDING_CARD";
     if (pendingMacroEvent) return "MACRO_EVENT";
     if (pendingPurchase) return "BUY_PROPERTY";
     return null;
-  }, [isAwaitingJailDecision, pendingCard, pendingGoToJail, pendingMacroEvent, pendingPurchase]);
+  }, [isAwaitingJailDecision, pendingCard, pendingMacroEvent, pendingPurchase, shouldShowGoToJailConfirm]);
 
   const hasBlockingPendingAction = activeDecisionType !== null;
   const rules = getRules(gameState?.rules ?? null);
@@ -1504,8 +1500,6 @@ export default function PlayV2Page() {
         return (
           <GoToJailModalV2
             pendingGoToJail={pendingGoToJail}
-            isActor={isGoToJailActor}
-            actorName={pendingGoToJailPlayerName}
             onAcknowledge={handleAcknowledgeGoToJail}
           />
         );
@@ -1584,12 +1578,10 @@ export default function PlayV2Page() {
     handleUseGetOutOfJailFree,
     hasGetOutOfJailFree,
     isAwaitingJailDecision,
-    isGoToJailActor,
     isJailDecisionActor,
     jailFineAmount,
     pendingCard,
     pendingGoToJail,
-    pendingGoToJailPlayerName,
     pendingMacroEvent,
     pendingPurchase,
     pendingMortgageDownPayment,
