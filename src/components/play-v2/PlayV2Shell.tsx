@@ -15,7 +15,7 @@ function WalletButton({ open, onClick }: WalletButtonProps) {
     <button
       type="button"
       onClick={onClick}
-      className="absolute bottom-2 left-2 z-20 rounded border border-white/30 bg-neutral-900 px-2 py-1 text-xs font-semibold"
+      className="rounded border border-white/30 bg-neutral-900 px-2 py-1 text-xs font-semibold"
       aria-expanded={open}
       aria-controls="wallet-panel"
     >
@@ -220,15 +220,20 @@ export default function PlayV2Shell({
         <section className="absolute inset-x-0 bottom-0 top-9 md:top-10">
           {boardViewport}
 
-          <button
-            type="button"
-            onClick={() => setLeftOpen(!leftOpen)}
-            className={`absolute top-1/2 z-30 -translate-y-1/2 rounded-r-lg border border-white/20 bg-neutral-900 px-2 py-3 text-xs font-semibold uppercase tracking-wide transition-[left] duration-200 ${
-              leftOpen ? "left-72" : "left-0"
-            }`}
+          <div
+            className={`absolute top-1/2 flex -translate-y-1/2 flex-col gap-2 transition-[left] duration-200 ${
+              walletOpen ? "z-10" : "z-30"
+            } ${leftOpen ? "left-72" : "left-0"}`}
           >
-            Left
-          </button>
+            <button
+              type="button"
+              onClick={() => setLeftOpen(!leftOpen)}
+              className="rounded-r-lg border border-white/20 bg-neutral-900 px-2 py-3 text-xs font-semibold uppercase tracking-wide"
+            >
+              Left
+            </button>
+            <WalletButton open={walletOpen} onClick={() => setWalletOpen((value) => !value)} />
+          </div>
 
           <button
             type="button"
@@ -284,16 +289,6 @@ export default function PlayV2Shell({
             leftOpen ? "translate-x-0" : "-translate-x-full"
           }`}
         >
-          <div className="flex h-11 items-center justify-end border-b border-white/10 px-2">
-            <button
-              type="button"
-              aria-label="Close"
-              onClick={() => setLeftOpen(false)}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-lg leading-none text-white/80 transition hover:bg-white/10 hover:text-white"
-            >
-              ×
-            </button>
-          </div>
           <div className="min-h-0 flex-1 overflow-auto p-3">{leftDrawerContent}</div>
         </aside>
 
@@ -308,7 +303,6 @@ export default function PlayV2Shell({
           <div className="min-h-0 flex-1 overflow-auto p-4">{rightDrawerContent}</div>
         </aside>
 
-        <WalletButton open={walletOpen} onClick={() => setWalletOpen((value) => !value)} />
         <WalletPanel
           open={walletOpen}
           onClose={() => setWalletOpen(false)}
