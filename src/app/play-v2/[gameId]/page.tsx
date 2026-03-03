@@ -11,6 +11,7 @@ import PendingCardModalV2 from "@/components/play-v2/PendingCardModalV2";
 import PendingMacroModalV2 from "@/components/play-v2/PendingMacroModalV2";
 import PendingPurchaseModalV2 from "@/components/play-v2/PendingPurchaseModalV2";
 import AuctionOverlayV2 from "@/components/play-v2/AuctionOverlayV2";
+import JailDecisionModalV2 from "@/components/play-v2/JailDecisionModalV2";
 import { TitleDeedPreview } from "@/app/components/TitleDeedPreview";
 import { DEFAULT_BOARD_PACK_ECONOMY, getBoardPackById } from "@/lib/boardPacks";
 import { getTileBandColor } from "@/lib/boardTileStyles";
@@ -100,6 +101,9 @@ type PendingPurchaseAction = {
 type BankAction =
   | "ROLL_DICE"
   | "END_TURN"
+  | "JAIL_PAY_FINE"
+  | "JAIL_ROLL_FOR_DOUBLES"
+  | "USE_GET_OUT_OF_JAIL_FREE"
   | "CONFIRM_PENDING_CARD"
   | "CONFIRM_MACRO_EVENT"
   | "BUY_PROPERTY"
@@ -515,11 +519,15 @@ export default function PlayV2Page() {
     pendingMacroEvent !== null ||
     pendingPurchase !== null;
   const isAwaitingJailDecision =
-    isMyTurn && gameState?.turn_phase === "AWAITING_JAIL_DECISION";
+    gameState?.turn_phase === "AWAITING_JAIL_DECISION";
+  const isJailDecisionActor = Boolean(isMyTurn && isAwaitingJailDecision);
+  const canRollForDoubles = Boolean(isJailDecisionActor && currentUserPlayer?.is_in_jail);
+  const hasGetOutOfJailFree = (currentUserPlayer?.get_out_of_jail_free_count ?? 0) > 0;
+  const jailFineAmount = getBoardPackById(gameMeta?.board_pack_id ?? null)?.economy?.jailFineAmount ?? 50;
   const canAct = isMyTurn && !isEliminated && !auctionActive && !hasBlockingPendingAction;
   const canRoll =
     canAct &&
-    !isAwaitingJailDecision &&
+    !isJailDecisionActor &&
     (gameState?.last_roll == null || (gameState?.doubles_count ?? 0) > 0);
   const canEndTurn = canAct && gameState?.last_roll != null;
 
@@ -539,7 +547,7 @@ export default function PlayV2Page() {
     if (hasBlockingPendingAction) {
       return "Resolve pending action to continue";
     }
-    if (isAwaitingJailDecision) {
+    if (isJailDecisionActor) {
       return "You are in jail – choose an option";
     }
     if (gameState?.last_roll != null) {
@@ -553,7 +561,7 @@ export default function PlayV2Page() {
     currentTurnPlayer?.display_name,
     gameState?.last_roll,
     hasBlockingPendingAction,
-    isAwaitingJailDecision,
+    isJailDecisionActor,
     isMyTurn,
   ]);
 
@@ -698,6 +706,27 @@ export default function PlayV2Page() {
     }
     void handleBankAction("AUCTION_PASS");
   }, [canActInAuction, handleBankAction]);
+
+  const handlePayJailFine = useCallback(() => {
+    if (!isJailDecisionActor) {
+      return;
+    }
+    void handleBankAction("JAIL_PAY_FINE");
+  }, [handleBankAction, isJailDecisionActor]);
+
+  const handleUseGetOutOfJailFree = useCallback(() => {
+    if (!isJailDecisionActor || !hasGetOutOfJailFree) {
+      return;
+    }
+    void handleBankAction("USE_GET_OUT_OF_JAIL_FREE");
+  }, [handleBankAction, hasGetOutOfJailFree, isJailDecisionActor]);
+
+  const handleRollForDoubles = useCallback(() => {
+    if (!canRollForDoubles) {
+      return;
+    }
+    void handleBankAction("JAIL_ROLL_FOR_DOUBLES");
+  }, [canRollForDoubles, handleBankAction]);
 
   const turnPlayerMissingFromPlayers = Boolean(turnPlayerId) && !currentTurnPlayer;
 
@@ -930,6 +959,19 @@ export default function PlayV2Page() {
       actionLoading={actionLoading}
       onBid={handleAuctionBid}
       onPass={handleAuctionPass}
+    />
+    <JailDecisionModalV2
+      open={isAwaitingJailDecision}
+      isActor={isJailDecisionActor}
+      actorName={currentTurnPlayer?.display_name ?? null}
+      jailTurnsRemaining={currentUserPlayer?.jail_turns_remaining ?? 0}
+      jailFineAmount={jailFineAmount}
+      hasGetOutOfJailFree={hasGetOutOfJailFree}
+      canRollForDoubles={canRollForDoubles}
+      actionLoading={actionLoading}
+      onPayFine={handlePayJailFine}
+      onUseGetOutOfJailFree={handleUseGetOutOfJailFree}
+      onRollForDoubles={handleRollForDoubles}
     />
 
       {/*
