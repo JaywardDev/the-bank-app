@@ -243,7 +243,7 @@ export default function PlayV2Shell({
             onClick={() => setRightOpen((value) => !value)}
             className="absolute right-0 top-1/2 z-30 -translate-y-1/2 rounded-l-lg border border-white/20 bg-neutral-900 px-2 py-3 text-xs font-semibold uppercase tracking-wide"
           >
-            {rightOpen ? "Close" : "Right"}
+            Right
           </button>
 
           {showTurnActions ? (
