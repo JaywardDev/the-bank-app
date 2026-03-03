@@ -153,15 +153,30 @@ export default function PlayV2Shell({
   const [leftDrawerMode, setLeftDrawerMode] = useState<"info" | "wallet">("info");
   const [rightOpen, setRightOpen] = useState(false);
   const wasDecisionActive = useRef(decisionActive);
+  const rightDrawerAutoOpenedForDecision = useRef(false);
   const leftOpen = controlledLeftOpen ?? uncontrolledLeftOpen;
 
   useEffect(() => {
     if (!wasDecisionActive.current && decisionActive && !auctionActive) {
       const timer = window.setTimeout(() => {
         setRightOpen(true);
+        rightDrawerAutoOpenedForDecision.current = true;
       }, 0);
       wasDecisionActive.current = decisionActive;
       return () => window.clearTimeout(timer);
+    }
+
+    if (wasDecisionActive.current && !decisionActive) {
+      const shouldAutoCloseRightDrawer = rightDrawerAutoOpenedForDecision.current;
+      rightDrawerAutoOpenedForDecision.current = false;
+
+      if (shouldAutoCloseRightDrawer) {
+        const timer = window.setTimeout(() => {
+          setRightOpen(false);
+        }, 0);
+        wasDecisionActive.current = decisionActive;
+        return () => window.clearTimeout(timer);
+      }
     }
 
     wasDecisionActive.current = decisionActive;
@@ -277,7 +292,10 @@ export default function PlayV2Shell({
 
           <button
             type="button"
-            onClick={() => setRightOpen((value) => !value)}
+            onClick={() => {
+              rightDrawerAutoOpenedForDecision.current = false;
+              setRightOpen((value) => !value);
+            }}
             className={`absolute top-1/2 z-30 -translate-y-1/2 rounded-l-lg border border-white/20 bg-neutral-900 px-2 py-3 text-xs font-semibold uppercase tracking-wide transition-[right] duration-200 ${
               rightOpen ? "right-72" : "right-0"
             }`}
