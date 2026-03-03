@@ -400,7 +400,7 @@ export default function PlayV2Page() {
     return gameState?.balances?.[currentUserPlayer.id] ?? null;
   }, [currentUserPlayer, gameState?.balances]);
 
-  const isInProgress = gameMeta?.status === "IN_PROGRESS";
+  const isInProgress = (gameMeta?.status ?? "").toLowerCase() === "in_progress";
   const isEliminated = Boolean(currentUserPlayer?.is_eliminated);
   const auctionActive = Boolean(gameState?.auction_active);
   const isMyTurn = Boolean(
