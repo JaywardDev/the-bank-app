@@ -776,6 +776,16 @@ export default function PlayV2Page() {
     return null;
   }, [isAwaitingJailDecision, pendingCard, pendingMacroEvent, pendingPurchase, shouldShowGoToJailConfirm]);
 
+  const isDrawerDecision = useCallback((type: ActiveDecisionType | null) => {
+    if (!type) return false;
+    return type === "BUY_PROPERTY" || type === "JAIL_DECISION";
+  }, []);
+
+  const isFullscreenEvent = useCallback((type: ActiveDecisionType | null) => {
+    if (!type) return false;
+    return type === "PENDING_CARD" || type === "MACRO_EVENT" || type === "GO_TO_JAIL";
+  }, []);
+
   const hasBlockingPendingAction = activeDecisionType !== null;
   const rules = getRules(gameState?.rules ?? null);
   const mortgageLtv =
@@ -1871,19 +1881,12 @@ export default function PlayV2Page() {
     await loadAllSlices(routeGameId, session.access_token);
   }, [loadAllSlices, routeGameId, session]);
 
-  const activeDecisionNode = useMemo(() => {
-    if (auctionActive || !activeDecisionType) {
+  const drawerDecisionNode = useMemo(() => {
+    if (auctionActive || !activeDecisionType || !isDrawerDecision(activeDecisionType)) {
       return null;
     }
 
     switch (activeDecisionType) {
-      case "GO_TO_JAIL":
-        return (
-          <GoToJailModalV2
-            pendingGoToJail={pendingGoToJail}
-            onAcknowledge={handleAcknowledgeGoToJail}
-          />
-        );
       case "JAIL_DECISION":
         return (
           <JailDecisionModalV2
@@ -1898,26 +1901,6 @@ export default function PlayV2Page() {
             onPayFine={handlePayJailFine}
             onUseGetOutOfJailFree={handleUseGetOutOfJailFree}
             onRollForDoubles={handleRollForDoubles}
-          />
-        );
-      case "PENDING_CARD":
-        return (
-          <PendingCardModalV2
-            pendingCard={pendingCard}
-            actorName={players.find((player) => player.id === pendingCard?.drawnBy)?.display_name ?? null}
-            isActor={Boolean(currentUserPlayer && pendingCard?.drawnBy === currentUserPlayer.id)}
-            actionLoading={actionLoading}
-            onConfirm={handleConfirmPendingCard}
-          />
-        );
-      case "MACRO_EVENT":
-        return (
-          <PendingMacroModalV2
-            pendingMacroEvent={pendingMacroEvent}
-            actorName={currentTurnPlayer?.display_name ?? null}
-            isActor={Boolean(currentUserPlayer && currentTurnPlayer && currentUserPlayer.id === currentTurnPlayer.id)}
-            actionLoading={actionLoading}
-            onConfirm={handleConfirmMacroEvent}
           />
         );
       case "BUY_PROPERTY":
@@ -1945,33 +1928,79 @@ export default function PlayV2Page() {
     actionLoading,
     activeDecisionType,
     auctionActive,
+    canAffordPendingMortgage,
+    canAffordPendingPurchase,
     canRollForDoubles,
     currentTurnPlayer,
     currentUserPlayer,
-    handleAcknowledgeGoToJail,
     handleBuyProperty,
     handleBuyPropertyWithMortgage,
-    handleConfirmMacroEvent,
-    handleConfirmPendingCard,
     handleDeclineProperty,
     handlePayJailFine,
     handleRollForDoubles,
     handleUseGetOutOfJailFree,
     hasGetOutOfJailFree,
     isAwaitingJailDecision,
+    isDrawerDecision,
     isJailDecisionActor,
     jailFineAmount,
+    mortgageDownPaymentPercent,
+    mortgageLtvPercent,
+    pendingMortgageDownPayment,
+    pendingPurchase,
+    selectedBoardPack?.tiles,
+  ]);
+
+  const fullscreenEventNode = useMemo(() => {
+    if (auctionActive || !activeDecisionType || !isFullscreenEvent(activeDecisionType)) {
+      return null;
+    }
+
+    switch (activeDecisionType) {
+      case "GO_TO_JAIL":
+        return (
+          <GoToJailModalV2
+            pendingGoToJail={pendingGoToJail}
+            onAcknowledge={handleAcknowledgeGoToJail}
+          />
+        );
+      case "PENDING_CARD":
+        return (
+          <PendingCardModalV2
+            pendingCard={pendingCard}
+            actorName={players.find((player) => player.id === pendingCard?.drawnBy)?.display_name ?? null}
+            isActor={Boolean(currentUserPlayer && pendingCard?.drawnBy === currentUserPlayer.id)}
+            actionLoading={actionLoading}
+            onConfirm={handleConfirmPendingCard}
+          />
+        );
+      case "MACRO_EVENT":
+        return (
+          <PendingMacroModalV2
+            pendingMacroEvent={pendingMacroEvent}
+            actorName={currentTurnPlayer?.display_name ?? null}
+            isActor={Boolean(currentUserPlayer && currentTurnPlayer && currentUserPlayer.id === currentTurnPlayer.id)}
+            actionLoading={actionLoading}
+            onConfirm={handleConfirmMacroEvent}
+          />
+        );
+      default:
+        return null;
+    }
+  }, [
+    actionLoading,
+    activeDecisionType,
+    auctionActive,
+    currentTurnPlayer,
+    currentUserPlayer,
+    handleAcknowledgeGoToJail,
+    handleConfirmMacroEvent,
+    handleConfirmPendingCard,
+    isFullscreenEvent,
     pendingCard,
     pendingGoToJail,
     pendingMacroEvent,
-    pendingPurchase,
-    pendingMortgageDownPayment,
-    canAffordPendingMortgage,
-    canAffordPendingPurchase,
-    mortgageDownPaymentPercent,
-    mortgageLtvPercent,
     players,
-    selectedBoardPack?.tiles,
   ]);
 
   useEffect(() => {
@@ -2129,7 +2158,8 @@ export default function PlayV2Page() {
       walletOwnedContent={walletOwnedContent}
       walletLoansContent={walletLoansContent}
       walletMortgagesContent={walletMortgagesContent}
-      decisionActive={activeDecisionType !== null}
+      decisionActive={drawerDecisionNode !== null}
+      rightDrawerLocked={fullscreenEventNode !== null}
       auctionActive={auctionActive}
       leftDrawerContent={selectedTile ? (
         <div className="h-full space-y-2">
@@ -2153,8 +2183,8 @@ export default function PlayV2Page() {
         <p className="text-sm text-white/70">Select a tile to view the title deed</p>
       )}
       rightDrawerContent={
-        !auctionActive && activeDecisionType !== null ? (
-          <div className="space-y-3">{activeDecisionNode}</div>
+        !auctionActive && drawerDecisionNode !== null ? (
+          <div className="space-y-3">{drawerDecisionNode}</div>
         ) : (
           <p className="text-sm text-white/70">No active decision</p>
         )
@@ -2222,6 +2252,16 @@ export default function PlayV2Page() {
         </div>
       )}
     />
+    {fullscreenEventNode ? (
+      <div className="fixed inset-0 z-[200]">
+        <div className="absolute inset-0 bg-black/60" />
+        <div className="relative flex h-full w-full items-center justify-center p-4">
+          <div className="w-full max-w-xl rounded-3xl border border-white/20 bg-neutral-900/95 p-4 shadow-2xl backdrop-blur">
+            {fullscreenEventNode}
+          </div>
+        </div>
+      </div>
+    ) : null}
     <button
       type="button"
       onClick={() => setShowMenuOverlay((open) => !open)}

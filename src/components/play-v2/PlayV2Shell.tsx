@@ -118,6 +118,7 @@ type PlayV2ShellProps = {
   walletLoansContent?: ReactNode;
   walletMortgagesContent?: ReactNode;
   decisionActive?: boolean;
+  rightDrawerLocked?: boolean;
   auctionActive?: boolean;
   headerActions?: ReactNode;
 };
@@ -152,6 +153,7 @@ export default function PlayV2Shell({
   walletLoansContent,
   walletMortgagesContent,
   decisionActive = false,
+  rightDrawerLocked = false,
   auctionActive = false,
   headerActions,
 }: PlayV2ShellProps) {
@@ -164,6 +166,14 @@ export default function PlayV2Shell({
   const leftDrawerMode = controlledLeftDrawerMode ?? uncontrolledLeftDrawerMode;
 
   useEffect(() => {
+    if (rightDrawerLocked) {
+      const timer = window.setTimeout(() => {
+        setRightOpen(false);
+        rightDrawerAutoOpenedForDecision.current = false;
+      }, 0);
+      return () => window.clearTimeout(timer);
+    }
+
     if (!wasDecisionActive.current && decisionActive && !auctionActive) {
       const timer = window.setTimeout(() => {
         setRightOpen(true);
@@ -188,7 +198,7 @@ export default function PlayV2Shell({
 
     wasDecisionActive.current = decisionActive;
     return undefined;
-  }, [auctionActive, decisionActive]);
+  }, [auctionActive, decisionActive, rightDrawerLocked]);
 
   const setLeftDrawerMode = (nextMode: "info" | "wallet") => {
     if (controlledLeftDrawerMode === undefined) {
@@ -313,6 +323,9 @@ export default function PlayV2Shell({
           <button
             type="button"
             onClick={() => {
+              if (rightDrawerLocked) {
+                return;
+              }
               rightDrawerAutoOpenedForDecision.current = false;
               setRightOpen((value) => !value);
             }}
@@ -320,6 +333,7 @@ export default function PlayV2Shell({
               rightOpen ? "right-72" : "right-0"
             }`}
             aria-label="Open right panel"
+            disabled={rightDrawerLocked}
           >
             <span className="chevron chevron-right" aria-hidden />
             {decisionNeedsAttention ? (
