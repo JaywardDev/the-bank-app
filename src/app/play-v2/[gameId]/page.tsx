@@ -1740,19 +1740,14 @@ export default function PlayV2Page() {
   ]);
 
   useEffect(() => {
-    if (isGameReady) {
-      setLoadingStartedAt(null);
-      setLoadingElapsedMs(0);
-      setLoadingMinElapsed(false);
+    // Keep loadingMinElapsed sticky: resetting it during ready transition can deadlock shouldShowLoadingScreen.
+    if (loadingStartedAt !== null || loadingMinElapsed) {
       return;
     }
 
-    if (loadingStartedAt === null) {
-      setLoadingStartedAt(Date.now());
-      setLoadingElapsedMs(0);
-      setLoadingMinElapsed(false);
-    }
-  }, [isGameReady, loadingStartedAt]);
+    setLoadingStartedAt(Date.now());
+    setLoadingElapsedMs(0);
+  }, [loadingMinElapsed, loadingStartedAt]);
 
   useEffect(() => {
     if (loadingStartedAt === null || loadingMinElapsed) {
