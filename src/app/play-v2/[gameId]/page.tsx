@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import type { RealtimeChannel } from "@supabase/supabase-js";
+import Image from "next/image";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 import PlayV2Shell from "@/components/play-v2/PlayV2Shell";
 import BoardViewport from "@/components/play-v2/BoardViewport";
@@ -190,6 +191,7 @@ type PurchaseMortgage = {
 };
 
 const SESSION_EXPIRED_MESSAGE = "Session expired — please sign in again";
+const MIN_LOADING_SCREEN_MS = 5000;
 
 const formatMoney = (value: number | null) => {
   if (value === null) return "—";
@@ -230,6 +232,9 @@ export default function PlayV2Page() {
   const [defaultLoanTileIndex, setDefaultLoanTileIndex] = useState<number | null>(null);
   const [payoffMortgageId, setPayoffMortgageId] = useState<string | null>(null);
   const [auctionNow, setAuctionNow] = useState<Date>(() => new Date());
+  const [loadingStartedAt, setLoadingStartedAt] = useState<number | null>(null);
+  const [loadingElapsedMs, setLoadingElapsedMs] = useState(0);
+  const [loadingMinElapsed, setLoadingMinElapsed] = useState(false);
   const [ownedActionReason, setOwnedActionReason] = useState<{
     tileIndex: number;
     actionKey: "BUILD_HOUSE" | "SELL_HOUSE" | "SELL_TO_MARKET" | "TAKE_COLLATERAL_LOAN";
@@ -1021,6 +1026,18 @@ export default function PlayV2Page() {
 
   const selectedBoardPack = useMemo(() => getBoardPackById(gameMeta?.board_pack_id ?? null), [gameMeta?.board_pack_id]);
 
+  const isGameReady =
+    !loading &&
+    !needsAuth &&
+    Boolean(session?.access_token) &&
+    Boolean(routeGameId) &&
+    Boolean(gameMeta) &&
+    Boolean(selectedBoardPack?.tiles?.length) &&
+    Boolean(gameState) &&
+    players.length > 0;
+  const shouldShowLoadingScreen = !needsAuth && (!isGameReady || !loadingMinElapsed);
+  const loadingProgress = Math.min((loadingElapsedMs / MIN_LOADING_SCREEN_MS) * 100, 100);
+
   const selectedTile = useMemo(() => {
     if (selectedTileIndex === null) {
       return null;
@@ -1702,11 +1719,92 @@ export default function PlayV2Page() {
     selectedBoardPack?.tiles,
   ]);
 
+  useEffect(() => {
+    if (isGameReady) {
+      setLoadingStartedAt(null);
+      setLoadingElapsedMs(0);
+      setLoadingMinElapsed(false);
+      return;
+    }
+
+    if (loadingStartedAt === null) {
+      setLoadingStartedAt(Date.now());
+      setLoadingElapsedMs(0);
+      setLoadingMinElapsed(false);
+    }
+  }, [isGameReady, loadingStartedAt]);
+
+  useEffect(() => {
+    if (loadingStartedAt === null || loadingMinElapsed) {
+      return;
+    }
+
+    let animationFrameId = 0;
+    const updateElapsed = () => {
+      const elapsed = Date.now() - loadingStartedAt;
+      setLoadingElapsedMs(elapsed);
+      if (elapsed >= MIN_LOADING_SCREEN_MS) {
+        setLoadingMinElapsed(true);
+      } else {
+        animationFrameId = window.requestAnimationFrame(updateElapsed);
+      }
+    };
+
+    animationFrameId = window.requestAnimationFrame(updateElapsed);
+
+    return () => {
+      window.cancelAnimationFrame(animationFrameId);
+    };
+  }, [loadingMinElapsed, loadingStartedAt]);
+
   if (needsAuth) {
     return (
       <main className="mx-auto max-w-3xl p-6">
         <h1 className="text-xl font-semibold">Play V2 Debug</h1>
         <p className="mt-3 text-sm text-neutral-700">Please sign in to view this game.</p>
+      </main>
+    );
+  }
+
+  if (shouldShowLoadingScreen) {
+    return (
+      <main className="fixed inset-0 z-40 overflow-hidden text-white">
+        <div className="absolute inset-0">
+          <Image
+            src="/icons/loading_screen.svg"
+            alt="Game boot background"
+            fill
+            sizes="100vw"
+            className="object-cover object-center transition-[filter,opacity] duration-700 ease-out"
+            style={{
+              filter: loadingMinElapsed
+                ? "saturate(1.02) contrast(1) brightness(1)"
+                : "saturate(0.7) contrast(0.92) brightness(0.88)",
+              opacity: loadingMinElapsed ? 1 : 0.95,
+            }}
+          />
+          <div
+            className="absolute inset-0 bg-neutral-900/35 transition-opacity duration-700 ease-out"
+            style={{ opacity: loadingMinElapsed ? 0.15 : 0.45 }}
+          />
+        </div>
+        <div className="relative flex h-full flex-col items-center justify-end gap-6 px-6 py-12 text-center">
+          <div className="flex w-full max-w-md flex-col items-center gap-4">
+            <div
+              className={`h-2 w-full overflow-hidden rounded-full bg-white/20 transition-opacity duration-500 ${
+                loadingMinElapsed ? "opacity-60" : "opacity-100"
+              }`}
+            >
+              <div
+                className="h-full rounded-full bg-emerald-300 transition-[width] duration-100 ease-linear"
+                style={{ width: `${loadingProgress}%` }}
+              />
+            </div>
+            <p className="text-xs text-white/75">
+              {isGameReady ? "Finalizing board…" : "Loading game…"}
+            </p>
+          </div>
+        </div>
       </main>
     );
   }
