@@ -237,6 +237,7 @@ export default function PlayV2Page() {
   const [loadingStartedAt, setLoadingStartedAt] = useState<number | null>(null);
   const [loadingElapsedMs, setLoadingElapsedMs] = useState(0);
   const [loadingMinElapsed, setLoadingMinElapsed] = useState(false);
+  const [introDismissed, setIntroDismissed] = useState(false);
   const [ownedActionReason, setOwnedActionReason] = useState<{
     tileIndex: number;
     actionKey: "BUILD_HOUSE" | "SELL_HOUSE" | "SELL_TO_MARKET" | "TAKE_COLLATERAL_LOAN";
@@ -1055,7 +1056,9 @@ export default function PlayV2Page() {
     Boolean(selectedBoardPack?.tiles?.length) &&
     Boolean(gameState) &&
     playersLoaded;
-  const shouldShowLoadingScreen = !needsAuth && !gameMetaError && (!isGameReady || !loadingMinElapsed);
+  const isConfigured = Boolean(session?.access_token);
+  const canShowIntro = isConfigured && Boolean(routeGameId) && !needsAuth && !gameMetaError;
+  const shouldShowIntro = canShowIntro && !introDismissed;
   const loadingProgress = Math.min((loadingElapsedMs / MIN_LOADING_SCREEN_MS) * 100, 100);
 
   const selectedTile = useMemo(() => {
@@ -1741,13 +1744,13 @@ export default function PlayV2Page() {
 
   useEffect(() => {
     // Keep loadingMinElapsed sticky: resetting it during ready transition can deadlock shouldShowLoadingScreen.
-    if (loadingStartedAt !== null || loadingMinElapsed) {
+    if (!canShowIntro || loadingStartedAt !== null || loadingMinElapsed) {
       return;
     }
 
     setLoadingStartedAt(Date.now());
     setLoadingElapsedMs(0);
-  }, [loadingMinElapsed, loadingStartedAt]);
+  }, [canShowIntro, loadingMinElapsed, loadingStartedAt]);
 
   useEffect(() => {
     if (loadingStartedAt === null || loadingMinElapsed) {
@@ -1792,7 +1795,14 @@ export default function PlayV2Page() {
     );
   }
 
-  if (shouldShowLoadingScreen) {
+  if (shouldShowIntro) {
+    const startButtonDisabled = !isGameReady || !loadingMinElapsed;
+    const startButtonLabel = !isGameReady
+      ? "Loading…"
+      : !loadingMinElapsed
+        ? "Preparing…"
+        : "Start";
+
     return (
       <main className="fixed inset-0 z-40 overflow-hidden text-white">
         <div className="absolute inset-0">
@@ -1829,6 +1839,14 @@ export default function PlayV2Page() {
             <p className="text-xs text-white/75">
               {isGameReady ? "Finalizing board…" : "Loading game…"}
             </p>
+            <button
+              type="button"
+              disabled={startButtonDisabled}
+              onClick={() => setIntroDismissed(true)}
+              className="inline-flex min-w-28 items-center justify-center rounded-full border border-white/30 bg-white/20 px-5 py-2 text-sm font-semibold text-white transition enabled:hover:bg-white/30 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {startButtonLabel}
+            </button>
           </div>
         </div>
       </main>
