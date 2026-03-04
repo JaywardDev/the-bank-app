@@ -213,6 +213,7 @@ export default function PlayV2Page() {
   const [session, setSession] = useState<SupabaseSession | null>(null);
   const [gameMeta, setGameMeta] = useState<GameMeta | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
+  const [playersLoaded, setPlayersLoaded] = useState(false);
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [events, setEvents] = useState<GameEvent[]>([]);
   const [ownershipByTile, setOwnershipByTile] = useState<OwnershipByTile>({});
@@ -223,6 +224,7 @@ export default function PlayV2Page() {
   const [notice, setNotice] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [needsAuth, setNeedsAuth] = useState(false);
+  const [gameMetaError, setGameMetaError] = useState<string | null>(null);
   const [selectedTileIndex, setSelectedTileIndex] = useState<number | null>(null);
   const [isLeftDrawerOpen, setIsLeftDrawerOpen] = useState(false);
   const [leftDrawerMode, setLeftDrawerMode] = useState<"info" | "wallet">("info");
@@ -250,7 +252,9 @@ export default function PlayV2Page() {
       { method: "GET" },
       accessToken,
     );
-    setGameMeta(game ?? null);
+    const resolvedGameMeta = game ?? null;
+    setGameMeta(resolvedGameMeta);
+    return resolvedGameMeta;
   }, []);
 
   const loadPlayers = useCallback(async (gameId: string, accessToken?: string) => {
@@ -260,6 +264,7 @@ export default function PlayV2Page() {
       accessToken,
     );
     setPlayers(rows);
+    setPlayersLoaded(true);
     return rows;
   }, []);
 
@@ -344,7 +349,7 @@ export default function PlayV2Page() {
   const loadAllSlices = useCallback(async (gameId: string, accessToken?: string) => {
     const playerRows = await loadPlayers(gameId, accessToken);
     const currentPlayerId = playerRows.find((player) => player.user_id === session?.user.id)?.id ?? null;
-    await Promise.all([
+    const [loadedGameMeta] = await Promise.all([
       loadGameMeta(gameId, accessToken),
       loadGameState(gameId, accessToken),
       loadEvents(gameId, accessToken),
@@ -353,6 +358,7 @@ export default function PlayV2Page() {
       loadLoans(gameId, accessToken, currentPlayerId),
       loadPurchaseMortgages(gameId, accessToken, currentPlayerId),
     ]);
+    return loadedGameMeta;
   }, [
     loadEvents,
     loadGameMeta,
@@ -392,6 +398,8 @@ export default function PlayV2Page() {
       const currentSession = await supabaseClient.getSession();
       if (!isMounted) return;
       setSession(currentSession);
+      setGameMetaError(null);
+      setPlayersLoaded(false);
 
       if (!routeGameId) {
         router.replace("/");
@@ -407,11 +415,16 @@ export default function PlayV2Page() {
       }
 
       try {
-        await loadAllSlices(routeGameId, accessToken);
+        const loadedGameMeta = await loadAllSlices(routeGameId, accessToken);
+        if (!loadedGameMeta) {
+          setGameMetaError("No active game.");
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unable to load game";
         if (message === SESSION_EXPIRED_MESSAGE) {
           setNeedsAuth(true);
+        } else {
+          setGameMetaError(message);
         }
         setNotice(message);
       }
@@ -425,6 +438,12 @@ export default function PlayV2Page() {
       isMounted = false;
     };
   }, [loadAllSlices, routeGameId, router]);
+
+  useEffect(() => {
+    if (!loading && !needsAuth && gameMeta && !getBoardPackById(gameMeta.board_pack_id ?? null)) {
+      setGameMetaError("Unable to resolve board pack for this game.");
+    }
+  }, [gameMeta, loading, needsAuth]);
 
   useEffect(() => {
     if (!routeGameId || !session?.access_token) {
@@ -1029,13 +1048,14 @@ export default function PlayV2Page() {
   const isGameReady =
     !loading &&
     !needsAuth &&
+    !gameMetaError &&
     Boolean(session?.access_token) &&
     Boolean(routeGameId) &&
     Boolean(gameMeta) &&
     Boolean(selectedBoardPack?.tiles?.length) &&
     Boolean(gameState) &&
-    players.length > 0;
-  const shouldShowLoadingScreen = !needsAuth && (!isGameReady || !loadingMinElapsed);
+    playersLoaded;
+  const shouldShowLoadingScreen = !needsAuth && !gameMetaError && (!isGameReady || !loadingMinElapsed);
   const loadingProgress = Math.min((loadingElapsedMs / MIN_LOADING_SCREEN_MS) * 100, 100);
 
   const selectedTile = useMemo(() => {
@@ -1762,6 +1782,17 @@ export default function PlayV2Page() {
       <main className="mx-auto max-w-3xl p-6">
         <h1 className="text-xl font-semibold">Play V2 Debug</h1>
         <p className="mt-3 text-sm text-neutral-700">Please sign in to view this game.</p>
+      </main>
+    );
+  }
+
+  if (gameMetaError) {
+    return (
+      <main className="mx-auto max-w-3xl p-6">
+        <h1 className="text-xl font-semibold">Play V2 Debug</h1>
+        <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-900">
+          {gameMetaError}
+        </div>
       </main>
     );
   }
