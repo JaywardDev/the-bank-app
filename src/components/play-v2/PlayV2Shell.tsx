@@ -15,11 +15,14 @@ function WalletButton({ open, onClick }: WalletButtonProps) {
     <button
       type="button"
       onClick={onClick}
-      className="rounded border border-white/30 bg-neutral-900 px-2 py-1 text-xs font-semibold"
+      className="inline-flex items-center justify-center rounded border border-white/30 bg-neutral-900 px-2 py-1 text-xs font-semibold"
       aria-expanded={open}
       aria-controls="left-drawer"
+      aria-label="Open bank panel"
     >
-      WALLET
+      <span className="bank-icon" aria-hidden>
+        🏦
+      </span>
     </button>
   );
 }
@@ -296,9 +299,10 @@ export default function PlayV2Shell({
             <button
               type="button"
               onClick={handleLeftToggle}
-              className="rounded-r-lg border border-white/20 bg-neutral-900 px-2 py-3 text-xs font-semibold uppercase tracking-wide"
+              className="inline-flex items-center justify-center rounded-r-lg border border-white/20 bg-neutral-900 px-2 py-3 text-xs font-semibold uppercase tracking-wide"
+              aria-label="Open left panel"
             >
-              Left
+              <span className="chevron chevron-left" aria-hidden />
             </button>
             <WalletButton
               open={leftOpen && leftDrawerMode === "wallet"}
@@ -312,11 +316,12 @@ export default function PlayV2Shell({
               rightDrawerAutoOpenedForDecision.current = false;
               setRightOpen((value) => !value);
             }}
-            className={`absolute top-1/2 z-[70] -translate-y-1/2 rounded-l-lg border border-white/20 bg-neutral-900 px-2 py-3 text-xs font-semibold uppercase tracking-wide transition-[right] duration-200 ${
+            className={`absolute top-1/2 z-[70] inline-flex -translate-y-1/2 items-center justify-center rounded-l-lg border border-white/20 bg-neutral-900 px-2 py-3 text-xs font-semibold uppercase tracking-wide transition-[right] duration-200 ${
               rightOpen ? "right-72" : "right-0"
             }`}
+            aria-label="Open right panel"
           >
-            Right
+            <span className="chevron chevron-right" aria-hidden />
             {decisionNeedsAttention ? (
               <span className="absolute -left-1 -top-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-none text-white">
                 !
@@ -436,6 +441,27 @@ export default function PlayV2Shell({
           .play-v2-shell-overlay {
             display: none;
           }
+        }
+
+        .chevron {
+          display: inline-block;
+          width: 10px;
+          height: 10px;
+          border-right: 2px solid white;
+          border-bottom: 2px solid white;
+        }
+
+        .chevron-left {
+          transform: rotate(135deg);
+        }
+
+        .chevron-right {
+          transform: rotate(-45deg);
+        }
+
+        .bank-icon {
+          font-size: 16px;
+          line-height: 1;
         }
       `}</style>
     </main>
