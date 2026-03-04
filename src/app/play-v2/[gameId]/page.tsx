@@ -2236,7 +2236,7 @@ export default function PlayV2Page() {
         onClick={closeMenuOverlay}
       >
         <div
-          className="w-full max-w-sm rounded-2xl border border-white/15 bg-neutral-900/95 p-4 shadow-2xl backdrop-blur"
+          className="relative z-[41] w-full max-w-sm rounded-2xl border border-white/15 bg-neutral-900/95 p-4 shadow-2xl backdrop-blur"
           onClick={(event) => event.stopPropagation()}
         >
           <p className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-white/60">Menu</p>

@@ -312,7 +312,7 @@ export default function PlayV2Shell({
               rightDrawerAutoOpenedForDecision.current = false;
               setRightOpen((value) => !value);
             }}
-            className={`absolute top-1/2 z-30 -translate-y-1/2 rounded-l-lg border border-white/20 bg-neutral-900 px-2 py-3 text-xs font-semibold uppercase tracking-wide transition-[right] duration-200 ${
+            className={`absolute top-1/2 z-[70] -translate-y-1/2 rounded-l-lg border border-white/20 bg-neutral-900 px-2 py-3 text-xs font-semibold uppercase tracking-wide transition-[right] duration-200 ${
               rightOpen ? "right-72" : "right-0"
             }`}
           >
@@ -390,7 +390,7 @@ export default function PlayV2Shell({
         </aside>
 
         <aside
-          className={`absolute bottom-0 right-0 top-9 z-20 flex w-72 flex-col border-l border-white/15 bg-neutral-900 transition-transform duration-200 md:top-10 ${
+          className={`absolute bottom-0 right-0 top-9 z-[70] flex w-72 flex-col border-l border-white/15 bg-neutral-900 transition-transform duration-200 md:top-10 ${
             rightOpen ? "translate-x-0" : "translate-x-full"
           }`}
         >

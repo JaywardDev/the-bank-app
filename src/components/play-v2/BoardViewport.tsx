@@ -342,9 +342,17 @@ export default function BoardViewport({
         <button
           type="button"
           onClick={handleRecenter}
-          className="absolute right-2 top-2 z-20 rounded-full border border-white/20 bg-black/70 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-white shadow-lg transition hover:bg-black/80"
+          aria-label="Recenter"
+          title="Recenter"
+          className="absolute left-2 top-2 z-20 inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/20 bg-black/70 text-white shadow-lg transition hover:bg-black/80"
         >
-          Recenter
+          <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="3.5" />
+            <path d="M12 2v3" />
+            <path d="M12 19v3" />
+            <path d="M2 12h3" />
+            <path d="M19 12h3" />
+          </svg>
         </button>
       </div>
     </div>
