@@ -229,8 +229,14 @@ export default function PlayV2Page() {
   const [defaultLoanTileIndex, setDefaultLoanTileIndex] = useState<number | null>(null);
   const [payoffMortgageId, setPayoffMortgageId] = useState<string | null>(null);
   const [auctionNow, setAuctionNow] = useState<Date>(() => new Date());
+  const [ownedActionReason, setOwnedActionReason] = useState<{
+    tileIndex: number;
+    actionKey: "BUILD_HOUSE" | "SELL_HOUSE" | "SELL_TO_MARKET" | "TAKE_COLLATERAL_LOAN";
+    reason: string;
+  } | null>(null);
 
   const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
+  const ownedReasonTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadGameMeta = useCallback(async (gameId: string, accessToken?: string) => {
     const [game] = await supabaseClient.fetchFromSupabase<GameMeta[]>(
@@ -822,6 +828,12 @@ export default function PlayV2Page() {
     return () => window.clearInterval(tick);
   }, [auctionActive]);
 
+  useEffect(() => () => {
+    if (ownedReasonTimeoutRef.current) {
+      clearTimeout(ownedReasonTimeoutRef.current);
+    }
+  }, []);
+
   const handleBankAction = useCallback(async (
     actionOrRequest: BankAction | BankActionRequest,
     options?: Omit<BankActionRequest, "action">,
@@ -1100,6 +1112,12 @@ export default function PlayV2Page() {
           currentUserPlayer.id,
         );
         const tilePrice = tile.price ?? 0;
+        const currentRent = getCurrentTileRent({
+          tile,
+          ownershipByTile,
+          boardTiles: selectedBoardPack.tiles,
+          economy: selectedBoardPack.economy,
+        });
 
         const buildHouseDisabledReason = !isMyTurn
           ? "Not your turn"
@@ -1149,6 +1167,7 @@ export default function PlayV2Page() {
           housesCount,
           hasFullSet,
           tilePrice,
+          currentRent,
           canBuildHouse: tile.type === "PROPERTY" && buildHouseDisabledReason === null,
           canSellHouse: tile.type === "PROPERTY" && sellHouseDisabledReason === null,
           canSellHotel: tile.type === "PROPERTY" && sellHotelDisabledReason === null,
@@ -1165,8 +1184,54 @@ export default function PlayV2Page() {
     currentUserPlayer,
     ownershipByTile,
     rules.loanCollateralEnabled,
+    selectedBoardPack?.economy,
     selectedBoardPack?.tiles,
   ]);
+
+  const handleOwnedActionClick = useCallback((args: {
+    tileIndex: number;
+    actionKey: "BUILD_HOUSE" | "SELL_HOUSE" | "SELL_TO_MARKET" | "TAKE_COLLATERAL_LOAN";
+    allowed: boolean;
+    reason: string | null;
+    run: () => void;
+  }) => {
+    const { tileIndex, actionKey, allowed, reason, run } = args;
+
+    if (allowed) {
+      setOwnedActionReason(null);
+      if (ownedReasonTimeoutRef.current) {
+        clearTimeout(ownedReasonTimeoutRef.current);
+        ownedReasonTimeoutRef.current = null;
+      }
+      run();
+      return;
+    }
+
+    const isSameReason =
+      ownedActionReason?.tileIndex === tileIndex &&
+      ownedActionReason?.actionKey === actionKey;
+
+    if (isSameReason) {
+      setOwnedActionReason(null);
+      if (ownedReasonTimeoutRef.current) {
+        clearTimeout(ownedReasonTimeoutRef.current);
+        ownedReasonTimeoutRef.current = null;
+      }
+      return;
+    }
+
+    if (reason) {
+      setOwnedActionReason({ tileIndex, actionKey, reason });
+      if (ownedReasonTimeoutRef.current) {
+        clearTimeout(ownedReasonTimeoutRef.current);
+      }
+      ownedReasonTimeoutRef.current = setTimeout(() => {
+        setOwnedActionReason((prev) =>
+          prev?.tileIndex === tileIndex && prev.actionKey === actionKey ? null : prev,
+        );
+      }, 4000);
+    }
+  }, [ownedActionReason]);
 
   const walletOwnedContent = useMemo(() => {
     if (!selectedBoardPack) {
@@ -1178,107 +1243,151 @@ export default function PlayV2Page() {
     }
 
     return (
-      <div className="space-y-3">
+      <div className="space-y-2">
         {ownedProperties.map((entry) => {
           const {
             tile,
             housesCount,
+            isCollateralized,
+            isPurchaseMortgaged,
+            currentRent,
             canBuildHouse,
             canSellHouse,
-            canSellHotel,
             canSellToMarket,
             buildHouseDisabledReason,
             sellHouseDisabledReason,
-            sellHotelDisabledReason,
             sellToMarketDisabledReason,
             collateralDisabledReason,
           } = entry;
-          const showSellHouse = tile.type === "PROPERTY";
-          const showSellHotel = tile.type === "PROPERTY";
+          const activeReasonForTile =
+            ownedActionReason?.tileIndex === tile.index ? ownedActionReason : null;
 
           return (
-            <div key={tile.index} className="space-y-2 rounded-xl border border-white/15 bg-white/5 p-2">
-              <TitleDeedPreview
-                tile={tile}
-                bandColor={getTileBandColor(tile)}
-                boardPackEconomy={selectedBoardPack.economy ?? DEFAULT_BOARD_PACK_ECONOMY}
-                mode="readonly"
-                size="compact"
-                showDevelopment={tile.type === "PROPERTY"}
-                developmentCount={housesCount}
-                ownerPlayerId={currentUserPlayer?.id ?? null}
-                ownershipByTile={ownershipByTile}
-                boardTiles={selectedBoardPack.tiles}
-                ownedRailCount={selectedBoardPack.tiles.filter((boardTile) => boardTile.type === "RAIL" && ownershipByTile[boardTile.index]?.owner_player_id === currentUserPlayer?.id).length}
-                ownedUtilityCount={selectedBoardPack.tiles.filter((boardTile) => boardTile.type === "UTILITY" && ownershipByTile[boardTile.index]?.owner_player_id === currentUserPlayer?.id).length}
-              />
-              <div className="space-y-2 px-1 pb-1">
-                {tile.type === "PROPERTY" ? (
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      className="rounded-md bg-emerald-600 px-2 py-1 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:bg-emerald-900/50"
-                      disabled={!canBuildHouse || actionLoading === "BUILD_HOUSE"}
-                      title={buildHouseDisabledReason ?? undefined}
-                      onClick={() => void handleBankAction({ action: "BUILD_HOUSE", tileIndex: tile.index })}
-                    >
-                      {actionLoading === "BUILD_HOUSE" ? "Building…" : "Build House"}
-                    </button>
-                    {showSellHouse ? (
-                      <button
-                        type="button"
-                        className="rounded-md border border-white/30 px-2 py-1 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:border-white/10 disabled:text-white/40"
-                        disabled={!canSellHouse || actionLoading === "SELL_HOUSE"}
-                        title={sellHouseDisabledReason ?? undefined}
-                        onClick={() => void handleBankAction({ action: "SELL_HOUSE", tileIndex: tile.index })}
-                      >
-                        {actionLoading === "SELL_HOUSE" ? "Selling…" : "Sell House"}
-                      </button>
-                    ) : null}
-                    {showSellHotel ? (
-                      <button
-                        type="button"
-                        className="rounded-md border border-white/30 px-2 py-1 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:border-white/10 disabled:text-white/40"
-                        disabled={!canSellHotel || actionLoading === "SELL_HOTEL"}
-                        title={sellHotelDisabledReason ?? undefined}
-                        onClick={() => void handleBankAction({ action: "SELL_HOTEL", tileIndex: tile.index })}
-                      >
-                        {actionLoading === "SELL_HOTEL" ? "Selling…" : "Sell Hotel"}
-                      </button>
-                    ) : null}
-                  </div>
-                ) : null}
-                <div className="flex flex-wrap gap-2">
+            <div key={tile.index} className="space-y-2 rounded-lg border border-white/15 bg-white/5 p-2.5">
+              <div className="flex items-start justify-between gap-2 text-xs">
+                <p className="font-semibold text-white">{tile.label}</p>
+                <p className="text-white/80">Rent {formatMoney(currentRent)}</p>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                <div className="space-y-1">
                   <button
                     type="button"
-                    className="rounded-md border border-white/30 px-2 py-1 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:border-white/10 disabled:text-white/40"
-                    disabled={!canSellToMarket || actionLoading === "SELL_TO_MARKET"}
+                    className={`w-full rounded-md px-2 py-1 text-[11px] font-semibold text-white ${
+                      canBuildHouse
+                        ? "bg-emerald-600"
+                        : "cursor-pointer bg-emerald-900/40 text-white/60"
+                    }`}
+                    title={buildHouseDisabledReason ?? undefined}
+                    onClick={() =>
+                      handleOwnedActionClick({
+                        tileIndex: tile.index,
+                        actionKey: "BUILD_HOUSE",
+                        allowed: canBuildHouse && actionLoading !== "BUILD_HOUSE",
+                        reason: actionLoading === "BUILD_HOUSE" ? null : buildHouseDisabledReason,
+                        run: () => void handleBankAction({ action: "BUILD_HOUSE", tileIndex: tile.index }),
+                      })
+                    }
+                  >
+                    {actionLoading === "BUILD_HOUSE" ? "Building…" : "Build House"}
+                  </button>
+                  {activeReasonForTile?.actionKey === "BUILD_HOUSE" ? (
+                    <p className="text-[10px] text-red-300">{activeReasonForTile.reason}</p>
+                  ) : null}
+                </div>
+
+                <div className="space-y-1">
+                  <button
+                    type="button"
+                    className={`w-full rounded-md border px-2 py-1 text-[11px] font-semibold ${
+                      canSellHouse
+                        ? "border-white/30 text-white"
+                        : "cursor-pointer border-white/10 text-white/40"
+                    }`}
+                    title={sellHouseDisabledReason ?? undefined}
+                    onClick={() =>
+                      handleOwnedActionClick({
+                        tileIndex: tile.index,
+                        actionKey: "SELL_HOUSE",
+                        allowed: canSellHouse && actionLoading !== "SELL_HOUSE",
+                        reason: actionLoading === "SELL_HOUSE" ? null : sellHouseDisabledReason,
+                        run: () => void handleBankAction({ action: "SELL_HOUSE", tileIndex: tile.index }),
+                      })
+                    }
+                  >
+                    {actionLoading === "SELL_HOUSE" ? "Selling…" : "Sell House"}
+                  </button>
+                  {activeReasonForTile?.actionKey === "SELL_HOUSE" ? (
+                    <p className="text-[10px] text-red-300">{activeReasonForTile.reason}</p>
+                  ) : null}
+                </div>
+
+                <div className="space-y-1">
+                  <button
+                    type="button"
+                    className={`w-full rounded-md border px-2 py-1 text-[11px] font-semibold ${
+                      canSellToMarket
+                        ? "border-white/30 text-white"
+                        : "cursor-pointer border-white/10 text-white/40"
+                    }`}
                     title={sellToMarketDisabledReason ?? undefined}
-                    onClick={() => setSellToMarketTileIndex(tile.index)}
+                    onClick={() =>
+                      handleOwnedActionClick({
+                        tileIndex: tile.index,
+                        actionKey: "SELL_TO_MARKET",
+                        allowed: canSellToMarket && actionLoading !== "SELL_TO_MARKET",
+                        reason: actionLoading === "SELL_TO_MARKET" ? null : sellToMarketDisabledReason,
+                        run: () => setSellToMarketTileIndex(tile.index),
+                      })
+                    }
                   >
                     {actionLoading === "SELL_TO_MARKET" ? "Selling…" : "Sell to Market"}
                   </button>
+                  {activeReasonForTile?.actionKey === "SELL_TO_MARKET" ? (
+                    <p className="text-[10px] text-red-300">{activeReasonForTile.reason}</p>
+                  ) : null}
+                </div>
+
+                <div className="space-y-1">
                   <button
                     type="button"
-                    className="rounded-md bg-white/90 px-2 py-1 text-[11px] font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:bg-white/20 disabled:text-white/50"
-                    disabled={collateralDisabledReason !== null || actionLoading === "TAKE_COLLATERAL_LOAN"}
+                    className={`w-full rounded-md px-2 py-1 text-[11px] font-semibold ${
+                      collateralDisabledReason === null
+                        ? "bg-white/90 text-neutral-900"
+                        : "cursor-pointer bg-white/20 text-white/50"
+                    }`}
                     title={collateralDisabledReason ?? undefined}
-                    onClick={() => void handleBankAction({ action: "TAKE_COLLATERAL_LOAN", tileIndex: tile.index })}
+                    onClick={() =>
+                      handleOwnedActionClick({
+                        tileIndex: tile.index,
+                        actionKey: "TAKE_COLLATERAL_LOAN",
+                        allowed: collateralDisabledReason === null && actionLoading !== "TAKE_COLLATERAL_LOAN",
+                        reason:
+                          actionLoading === "TAKE_COLLATERAL_LOAN"
+                            ? null
+                            : collateralDisabledReason,
+                        run: () =>
+                          void handleBankAction({
+                            action: "TAKE_COLLATERAL_LOAN",
+                            tileIndex: tile.index,
+                          }),
+                      })
+                    }
                   >
                     {actionLoading === "TAKE_COLLATERAL_LOAN" ? "Collateralizing…" : "Collateralize"}
                   </button>
+                  {activeReasonForTile?.actionKey === "TAKE_COLLATERAL_LOAN" ? (
+                    <p className="text-[10px] text-red-300">{activeReasonForTile.reason}</p>
+                  ) : null}
                 </div>
-                {sellToMarketDisabledReason ? <p className="text-[11px] text-white/50">{sellToMarketDisabledReason}</p> : null}
-                {buildHouseDisabledReason && tile.type === "PROPERTY" ? (
-                  <p className="text-[11px] text-white/50">{buildHouseDisabledReason}</p>
+              </div>
+              <div className="flex items-center gap-1.5 text-[10px] text-white/65">
+                <span>Dev {housesCount}</span>
+                {isPurchaseMortgaged ? (
+                  <span className="rounded-full border border-amber-400/50 px-1.5 py-0.5 text-amber-200">Mortgaged</span>
                 ) : null}
-                {sellHouseDisabledReason && tile.type === "PROPERTY" ? (
-                  <p className="text-[11px] text-white/50">{sellHouseDisabledReason}</p>
+                {isCollateralized ? (
+                  <span className="rounded-full border border-orange-400/50 px-1.5 py-0.5 text-orange-200">Collateralized</span>
                 ) : null}
-                {sellHotelDisabledReason && tile.type === "PROPERTY" ? (
-                  <p className="text-[11px] text-white/50">{sellHotelDisabledReason}</p>
-                ) : null}
-                {collateralDisabledReason ? <p className="text-[11px] text-white/50">{collateralDisabledReason}</p> : null}
               </div>
             </div>
           );
@@ -1287,13 +1396,12 @@ export default function PlayV2Page() {
     );
   }, [
     actionLoading,
-    currentUserPlayer?.id,
     handleBankAction,
+    handleOwnedActionClick,
+    ownedActionReason,
     ownedProperties,
-    ownershipByTile,
     selectedBoardPack,
   ]);
-
 
 
   const handleConfirmSellToMarket = useCallback(() => {
