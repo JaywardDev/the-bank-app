@@ -247,6 +247,7 @@ export default function PlayV2Page() {
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [showEndSessionConfirm, setShowEndSessionConfirm] = useState(false);
   const [showHostLeaveGuard, setShowHostLeaveGuard] = useState(false);
+  const [showMenuOverlay, setShowMenuOverlay] = useState(false);
 
   const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
   const ownedReasonTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -803,8 +804,58 @@ export default function PlayV2Page() {
     (gameState?.last_roll == null || (gameState?.doubles_count ?? 0) > 0);
   const canEndTurn = canAct && gameState?.last_roll != null;
   const isHost = Boolean(session?.user.id && gameMeta?.created_by === session.user.id);
-  const hasActiveGame = Boolean(routeGameId && gameMeta);
   const isActionInFlight = actionLoading !== null;
+
+  const closeMenuOverlay = useCallback(() => {
+    setShowMenuOverlay(false);
+  }, []);
+
+  const handleLeaveIntent = useCallback(() => {
+    closeMenuOverlay();
+    if (isHost) {
+      setShowHostLeaveGuard(true);
+      return;
+    }
+    setShowLeaveConfirm(true);
+  }, [closeMenuOverlay, isHost]);
+
+  const handleBackToHomeIntent = useCallback(() => {
+    closeMenuOverlay();
+    if (!routeGameId) {
+      router.push("/");
+      return;
+    }
+
+    if (isHost) {
+      setShowHostLeaveGuard(true);
+      return;
+    }
+
+    setShowLeaveConfirm(true);
+  }, [closeMenuOverlay, isHost, routeGameId, router]);
+
+  useEffect(() => {
+    if (!showMenuOverlay) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeMenuOverlay();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [closeMenuOverlay, showMenuOverlay]);
+
+  useEffect(() => {
+    if (showLeaveConfirm || showEndSessionConfirm || showHostLeaveGuard) {
+      setShowMenuOverlay(false);
+    }
+  }, [showEndSessionConfirm, showHostLeaveGuard, showLeaveConfirm]);
 
   const rollDiceDisabledReason = useMemo(() => {
     if (!(actionLoading === "ROLL_DICE" || !canRoll)) {
@@ -2046,50 +2097,10 @@ export default function PlayV2Page() {
     : turnPlayerId ?? "—";
   const lastRollLabel = gameState?.last_roll != null ? String(gameState.last_roll) : "—";
 
-  const headerActions = hasActiveGame ? (
-    <>
-      {isHost ? (
-        <button
-          type="button"
-          onClick={() => {
-            if (isActionInFlight) {
-              return;
-            }
-            setShowEndSessionConfirm(true);
-          }}
-          disabled={isActionInFlight}
-          className="rounded border border-red-300/60 bg-red-500/20 px-2 py-1 text-[10px] font-semibold text-red-100 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {actionLoading === "END_GAME" ? "Ending…" : "End Session"}
-        </button>
-      ) : null}
-      <button
-        type="button"
-        onClick={() => {
-          if (isActionInFlight) {
-            return;
-          }
-          if (isHost) {
-            setShowHostLeaveGuard(true);
-            return;
-          }
-          setShowLeaveConfirm(true);
-        }}
-        disabled={isActionInFlight}
-        className="rounded border border-white/40 bg-white/10 px-2 py-1 text-[10px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {actionLoading === "LEAVE_GAME" ? "Leaving…" : "Leave Table"}
-      </button>
-    </>
-  ) : (
-    <button
-      type="button"
-      onClick={() => router.push("/")}
-      className="rounded border border-white/40 bg-white/10 px-2 py-1 text-[10px] font-semibold text-white"
-    >
-      Back to Home
-    </button>
-  );
+  const inGame = Boolean(routeGameId);
+  const leaveMenuDisabled = actionLoading === "LEAVE_GAME";
+  const endMenuDisabled = actionLoading === "END_GAME";
+  const backHomeDisabled = leaveMenuDisabled || endMenuDisabled;
 
   return (
     <>
@@ -2102,7 +2113,6 @@ export default function PlayV2Page() {
       isDoubleRoll={latestIsDouble}
       loading={loading}
       notice={notice}
-      headerActions={headerActions}
       leftOpen={isLeftDrawerOpen}
       onLeftOpenChange={setIsLeftDrawerOpen}
       leftDrawerMode={leftDrawerMode}
@@ -2212,6 +2222,64 @@ export default function PlayV2Page() {
         </div>
       )}
     />
+    <button
+      type="button"
+      onClick={() => setShowMenuOverlay((open) => !open)}
+      className="fixed right-3 top-14 z-30 inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/20 bg-neutral-900/90 text-xl leading-none text-white shadow-lg backdrop-blur transition hover:bg-neutral-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+      aria-label="Menu"
+    >
+      ≡
+    </button>
+    {showMenuOverlay ? (
+      <div
+        className="fixed inset-0 z-40 flex items-center justify-center bg-black/55 p-4"
+        onClick={closeMenuOverlay}
+      >
+        <div
+          className="w-full max-w-sm rounded-2xl border border-white/15 bg-neutral-900/95 p-4 shadow-2xl backdrop-blur"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <p className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-white/60">Menu</p>
+          <div className="space-y-2">
+            <button
+              type="button"
+              onClick={handleBackToHomeIntent}
+              disabled={backHomeDisabled}
+              className="w-full rounded-xl border border-white/15 bg-white/5 px-4 py-2.5 text-left text-sm font-semibold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {backHomeDisabled
+                ? actionLoading === "END_GAME"
+                  ? "Ending…"
+                  : "Leaving…"
+                : "Back to Home"}
+            </button>
+            {inGame ? (
+              <button
+                type="button"
+                onClick={handleLeaveIntent}
+                disabled={leaveMenuDisabled}
+                className="w-full rounded-xl border border-white/15 bg-white/5 px-4 py-2.5 text-left text-sm font-semibold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {leaveMenuDisabled ? "Leaving…" : "Leave Table"}
+              </button>
+            ) : null}
+            {isHost && inGame ? (
+              <button
+                type="button"
+                onClick={() => {
+                  closeMenuOverlay();
+                  setShowEndSessionConfirm(true);
+                }}
+                disabled={endMenuDisabled}
+                className="w-full rounded-xl border border-red-300/50 bg-red-500/20 px-4 py-2.5 text-left text-sm font-semibold text-red-100 transition hover:bg-red-500/30 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {endMenuDisabled ? "Ending…" : "End Session"}
+              </button>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    ) : null}
     <ConfirmActionModalV2
       open={showEndSessionConfirm}
       title="End session for everyone?"
