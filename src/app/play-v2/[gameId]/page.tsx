@@ -1265,7 +1265,7 @@ export default function PlayV2Page() {
           return (
             <div key={tile.index} className="space-y-2 rounded-lg border border-white/15 bg-white/5 p-2.5">
               <div className="flex items-start justify-between gap-2 text-xs">
-                <p className="font-semibold text-white">{tile.label}</p>
+                <p className="font-semibold text-white">{tile.name}</p>
                 <p className="text-white/80">Rent {formatMoney(currentRent)}</p>
               </div>
               <div className="grid grid-cols-2 gap-1.5">
