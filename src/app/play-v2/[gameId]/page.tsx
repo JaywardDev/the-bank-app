@@ -223,6 +223,7 @@ export default function PlayV2Page() {
   const [needsAuth, setNeedsAuth] = useState(false);
   const [selectedTileIndex, setSelectedTileIndex] = useState<number | null>(null);
   const [isLeftDrawerOpen, setIsLeftDrawerOpen] = useState(false);
+  const [leftDrawerMode, setLeftDrawerMode] = useState<"info" | "wallet">("info");
   const [pendingGoToJailAckVersion, setPendingGoToJailAckVersion] = useState<number | null>(null);
   const [sellToMarketTileIndex, setSellToMarketTileIndex] = useState<number | null>(null);
   const [payoffLoanId, setPayoffLoanId] = useState<string | null>(null);
@@ -1728,6 +1729,8 @@ export default function PlayV2Page() {
       notice={notice}
       leftOpen={isLeftDrawerOpen}
       onLeftOpenChange={setIsLeftDrawerOpen}
+      leftDrawerMode={leftDrawerMode}
+      onLeftDrawerModeChange={setLeftDrawerMode}
       canRoll={canRoll}
       canEndTurn={canEndTurn}
       actionLoading={actionLoading}
@@ -1779,6 +1782,7 @@ export default function PlayV2Page() {
           selectedTileIndex={selectedTileIndex}
           onSelectTileIndex={(tileIndex) => {
             setSelectedTileIndex(tileIndex);
+            setLeftDrawerMode("info");
             setIsLeftDrawerOpen(true);
           }}
         />

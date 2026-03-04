@@ -51,9 +51,6 @@ function WalletPanel({
 
   return (
     <>
-      <div className="flex h-11 items-center gap-2 border-b border-white/10 px-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-white/80">Wallet</h2>
-      </div>
       <div className="border-b border-white/10 px-2 py-2">
         <div className="flex gap-1">
           {tabs.map((tab) => (
@@ -102,6 +99,8 @@ type PlayV2ShellProps = {
   rightDrawerContent?: ReactNode;
   leftOpen?: boolean;
   onLeftOpenChange?: (open: boolean) => void;
+  leftDrawerMode?: "info" | "wallet";
+  onLeftDrawerModeChange?: (mode: "info" | "wallet") => void;
   showTurnActions?: boolean;
   canRoll?: boolean;
   canEndTurn?: boolean;
@@ -133,6 +132,8 @@ export default function PlayV2Shell({
   rightDrawerContent,
   leftOpen: controlledLeftOpen,
   onLeftOpenChange,
+  leftDrawerMode: controlledLeftDrawerMode,
+  onLeftDrawerModeChange,
   showTurnActions = true,
   canRoll = false,
   canEndTurn = false,
@@ -150,11 +151,12 @@ export default function PlayV2Shell({
   auctionActive = false,
 }: PlayV2ShellProps) {
   const [uncontrolledLeftOpen, setUncontrolledLeftOpen] = useState(false);
-  const [leftDrawerMode, setLeftDrawerMode] = useState<"info" | "wallet">("info");
+  const [uncontrolledLeftDrawerMode, setUncontrolledLeftDrawerMode] = useState<"info" | "wallet">("info");
   const [rightOpen, setRightOpen] = useState(false);
   const wasDecisionActive = useRef(decisionActive);
   const rightDrawerAutoOpenedForDecision = useRef(false);
   const leftOpen = controlledLeftOpen ?? uncontrolledLeftOpen;
+  const leftDrawerMode = controlledLeftDrawerMode ?? uncontrolledLeftDrawerMode;
 
   useEffect(() => {
     if (!wasDecisionActive.current && decisionActive && !auctionActive) {
@@ -182,6 +184,13 @@ export default function PlayV2Shell({
     wasDecisionActive.current = decisionActive;
     return undefined;
   }, [auctionActive, decisionActive]);
+
+  const setLeftDrawerMode = (nextMode: "info" | "wallet") => {
+    if (controlledLeftDrawerMode === undefined) {
+      setUncontrolledLeftDrawerMode(nextMode);
+    }
+    onLeftDrawerModeChange?.(nextMode);
+  };
 
   const setLeftOpen = (nextOpen: boolean) => {
     if (controlledLeftOpen === undefined) {
