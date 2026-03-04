@@ -192,6 +192,7 @@ type PurchaseMortgage = {
 
 const SESSION_EXPIRED_MESSAGE = "Session expired — please sign in again";
 const MIN_LOADING_SCREEN_MS = 5000;
+const lastGameKey = "bank.lastGameId";
 
 const formatMoney = (value: number | null) => {
   if (value === null) return "—";
@@ -243,9 +244,46 @@ export default function PlayV2Page() {
     actionKey: "BUILD_HOUSE" | "SELL_HOUSE" | "SELL_TO_MARKET" | "TAKE_COLLATERAL_LOAN";
     reason: string;
   } | null>(null);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+  const [showEndSessionConfirm, setShowEndSessionConfirm] = useState(false);
+  const [showHostLeaveGuard, setShowHostLeaveGuard] = useState(false);
 
   const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
   const ownedReasonTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearLastOpenedIfMatches = useCallback((targetGameId: string | null) => {
+    if (!targetGameId || typeof window === "undefined") {
+      return;
+    }
+
+    if (window.localStorage.getItem(lastGameKey) === targetGameId) {
+      window.localStorage.removeItem(lastGameKey);
+    }
+  }, []);
+
+  const clearPlayV2State = useCallback((targetGameId: string | null) => {
+    clearLastOpenedIfMatches(targetGameId);
+    setGameMeta(null);
+    setGameMetaError(null);
+    setPlayers([]);
+    setPlayersLoaded(false);
+    setGameState(null);
+    setEvents([]);
+    setOwnershipByTile({});
+    setTradeProposals([]);
+    setPlayerLoans([]);
+    setPurchaseMortgages([]);
+    setNotice(null);
+    setSelectedTileIndex(null);
+    setPendingGoToJailAckVersion(null);
+    setSellToMarketTileIndex(null);
+    setPayoffLoanId(null);
+    setDefaultLoanTileIndex(null);
+    setPayoffMortgageId(null);
+    setShowLeaveConfirm(false);
+    setShowEndSessionConfirm(false);
+    setShowHostLeaveGuard(false);
+  }, [clearLastOpenedIfMatches]);
 
   const loadGameMeta = useCallback(async (gameId: string, accessToken?: string) => {
     const [game] = await supabaseClient.fetchFromSupabase<GameMeta[]>(
@@ -489,6 +527,15 @@ export default function PlayV2Page() {
     routeGameId,
     session,
   ]);
+
+  useEffect(() => {
+    if (gameMeta?.status !== "ended") {
+      return;
+    }
+
+    clearPlayV2State(routeGameId ?? null);
+    router.replace("/");
+  }, [clearPlayV2State, gameMeta?.status, routeGameId, router]);
 
   const activeMacroEffectsV1 = useMemo(() => {
     return (gameState?.active_macro_effects_v1 ?? []).filter(
@@ -755,6 +802,9 @@ export default function PlayV2Page() {
     !isJailDecisionActor &&
     (gameState?.last_roll == null || (gameState?.doubles_count ?? 0) > 0);
   const canEndTurn = canAct && gameState?.last_roll != null;
+  const isHost = Boolean(session?.user.id && gameMeta?.created_by === session.user.id);
+  const hasActiveGame = Boolean(routeGameId && gameMeta);
+  const isActionInFlight = actionLoading !== null;
 
   const rollDiceDisabledReason = useMemo(() => {
     if (!(actionLoading === "ROLL_DICE" || !canRoll)) {
@@ -1039,6 +1089,137 @@ export default function PlayV2Page() {
     }
     void handleBankAction("JAIL_ROLL_FOR_DOUBLES");
   }, [canRollForDoubles, handleBankAction]);
+
+  const handleLeaveTableV2 = useCallback(async () => {
+    if (actionLoading !== null) {
+      return;
+    }
+
+    if (!session || !routeGameId) {
+      clearPlayV2State(routeGameId ?? null);
+      router.push("/");
+      return;
+    }
+
+    setActionLoading("LEAVE_GAME");
+    setNotice(null);
+
+    const requestBody = {
+      gameId: routeGameId,
+      action: "LEAVE_GAME",
+    };
+
+    try {
+      const performLeave = (accessToken: string) =>
+        fetch("/api/bank/action", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify(requestBody),
+        });
+
+      let response = await performLeave(session.access_token);
+      if (response.status === 401) {
+        const refreshedSession = await supabaseClient.refreshSession();
+        setSession(refreshedSession);
+        if (!refreshedSession?.access_token) {
+          setNeedsAuth(true);
+          setNotice(SESSION_EXPIRED_MESSAGE);
+          return;
+        }
+        response = await performLeave(refreshedSession.access_token);
+      }
+
+      if (response.status === 401) {
+        setNeedsAuth(true);
+        setNotice(SESSION_EXPIRED_MESSAGE);
+        return;
+      }
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error ?? "Unable to leave this table.");
+      }
+
+      clearPlayV2State(routeGameId);
+      router.push("/");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to leave this table.");
+    } finally {
+      setActionLoading(null);
+    }
+  }, [actionLoading, clearPlayV2State, routeGameId, router, session]);
+
+  const handleEndSessionV2 = useCallback(async () => {
+    if (actionLoading !== null) {
+      return;
+    }
+
+    if (!session || !routeGameId) {
+      clearPlayV2State(routeGameId ?? null);
+      router.push("/");
+      return;
+    }
+
+    setActionLoading("END_GAME");
+    setNotice(null);
+
+    const requestBody = {
+      gameId: routeGameId,
+      action: "END_GAME",
+      expectedVersion: gameState?.version ?? 0,
+    };
+
+    try {
+      const performEnd = (accessToken: string) =>
+        fetch("/api/bank/action", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify(requestBody),
+        });
+
+      let response = await performEnd(session.access_token);
+      let activeAccessToken = session.access_token;
+      if (response.status === 401) {
+        const refreshedSession = await supabaseClient.refreshSession();
+        setSession(refreshedSession);
+        if (!refreshedSession?.access_token) {
+          setNeedsAuth(true);
+          setNotice(SESSION_EXPIRED_MESSAGE);
+          return;
+        }
+        activeAccessToken = refreshedSession.access_token;
+        response = await performEnd(activeAccessToken);
+      }
+
+      if (response.status === 401) {
+        setNeedsAuth(true);
+        setNotice(SESSION_EXPIRED_MESSAGE);
+        return;
+      }
+
+      if (response.status === 409) {
+        await loadAllSlices(routeGameId, activeAccessToken);
+      }
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error ?? "Unable to end the session.");
+      }
+
+      clearPlayV2State(routeGameId);
+      router.push("/");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to end the session.");
+    } finally {
+      setActionLoading(null);
+    }
+  }, [actionLoading, clearPlayV2State, gameState?.version, loadAllSlices, routeGameId, router, session]);
 
   const turnPlayerMissingFromPlayers = Boolean(turnPlayerId) && !currentTurnPlayer;
 
@@ -1791,6 +1972,13 @@ export default function PlayV2Page() {
         <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-900">
           {gameMetaError}
         </div>
+        <button
+          type="button"
+          className="mt-4 rounded border border-neutral-300 px-3 py-2 text-sm font-semibold text-neutral-800"
+          onClick={() => router.push("/")}
+        >
+          Back to Home
+        </button>
       </main>
     );
   }
@@ -1858,6 +2046,51 @@ export default function PlayV2Page() {
     : turnPlayerId ?? "—";
   const lastRollLabel = gameState?.last_roll != null ? String(gameState.last_roll) : "—";
 
+  const headerActions = hasActiveGame ? (
+    <>
+      {isHost ? (
+        <button
+          type="button"
+          onClick={() => {
+            if (isActionInFlight) {
+              return;
+            }
+            setShowEndSessionConfirm(true);
+          }}
+          disabled={isActionInFlight}
+          className="rounded border border-red-300/60 bg-red-500/20 px-2 py-1 text-[10px] font-semibold text-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {actionLoading === "END_GAME" ? "Ending…" : "End Session"}
+        </button>
+      ) : null}
+      <button
+        type="button"
+        onClick={() => {
+          if (isActionInFlight) {
+            return;
+          }
+          if (isHost) {
+            setShowHostLeaveGuard(true);
+            return;
+          }
+          setShowLeaveConfirm(true);
+        }}
+        disabled={isActionInFlight}
+        className="rounded border border-white/40 bg-white/10 px-2 py-1 text-[10px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {actionLoading === "LEAVE_GAME" ? "Leaving…" : "Leave Table"}
+      </button>
+    </>
+  ) : (
+    <button
+      type="button"
+      onClick={() => router.push("/")}
+      className="rounded border border-white/40 bg-white/10 px-2 py-1 text-[10px] font-semibold text-white"
+    >
+      Back to Home
+    </button>
+  );
+
   return (
     <>
       <PlayV2Shell
@@ -1869,6 +2102,7 @@ export default function PlayV2Page() {
       isDoubleRoll={latestIsDouble}
       loading={loading}
       notice={notice}
+      headerActions={headerActions}
       leftOpen={isLeftDrawerOpen}
       onLeftOpenChange={setIsLeftDrawerOpen}
       leftDrawerMode={leftDrawerMode}
@@ -1978,6 +2212,86 @@ export default function PlayV2Page() {
         </div>
       )}
     />
+    <ConfirmActionModalV2
+      open={showEndSessionConfirm}
+      title="End session for everyone?"
+      description="This will end the game and send all players back to Home."
+      confirmLabel={actionLoading === "END_GAME" ? "Ending…" : "End Session"}
+      cancelLabel="Cancel"
+      isConfirming={isActionInFlight}
+      onConfirm={() => {
+        if (isActionInFlight) {
+          return;
+        }
+        setShowEndSessionConfirm(false);
+        void handleEndSessionV2();
+      }}
+      onCancel={() => {
+        if (isActionInFlight) {
+          return;
+        }
+        setShowEndSessionConfirm(false);
+      }}
+    />
+    <ConfirmActionModalV2
+      open={showLeaveConfirm}
+      title="Leave table?"
+      description="You will leave the game and return Home."
+      confirmLabel={actionLoading === "LEAVE_GAME" ? "Leaving…" : "Leave"}
+      cancelLabel="Cancel"
+      isConfirming={isActionInFlight}
+      onConfirm={() => {
+        if (isActionInFlight) {
+          return;
+        }
+        setShowLeaveConfirm(false);
+        void handleLeaveTableV2();
+      }}
+      onCancel={() => {
+        if (isActionInFlight) {
+          return;
+        }
+        setShowLeaveConfirm(false);
+      }}
+    />
+    {showHostLeaveGuard ? (
+      <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
+        <div className="w-full max-w-md rounded-3xl border border-amber-200 bg-white/95 p-5 shadow-2xl ring-1 ring-black/10 backdrop-blur">
+          <p className="text-xs font-semibold uppercase tracking-wide text-amber-600">Host action required</p>
+          <p className="mt-1 text-lg font-semibold text-neutral-900">You’re the host</p>
+          <p className="mt-2 text-sm text-neutral-700">Leaving without ending can orphan the table. What do you want to do?</p>
+          <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <button
+              type="button"
+              className="rounded-2xl border border-neutral-300 px-4 py-2 text-sm font-semibold text-neutral-700 disabled:opacity-50"
+              onClick={() => {
+                if (isActionInFlight) {
+                  return;
+                }
+                setShowHostLeaveGuard(false);
+              }}
+              disabled={isActionInFlight}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="rounded-2xl bg-red-600 px-4 py-2 text-sm font-semibold text-white disabled:bg-red-200"
+              onClick={() => {
+                if (isActionInFlight) {
+                  return;
+                }
+                setShowHostLeaveGuard(false);
+                void handleEndSessionV2();
+              }}
+              disabled={isActionInFlight}
+            >
+              {actionLoading === "END_GAME" ? "Ending…" : "End Session"}
+            </button>
+          </div>
+        </div>
+      </div>
+    ) : null}
     <ConfirmActionModalV2
       open={sellToMarketTileIndex !== null}
       title="Sell property to market?"

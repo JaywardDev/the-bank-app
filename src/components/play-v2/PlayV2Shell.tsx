@@ -116,6 +116,7 @@ type PlayV2ShellProps = {
   walletMortgagesContent?: ReactNode;
   decisionActive?: boolean;
   auctionActive?: boolean;
+  headerActions?: ReactNode;
 };
 
 export default function PlayV2Shell({
@@ -149,6 +150,7 @@ export default function PlayV2Shell({
   walletMortgagesContent,
   decisionActive = false,
   auctionActive = false,
+  headerActions,
 }: PlayV2ShellProps) {
   const [uncontrolledLeftOpen, setUncontrolledLeftOpen] = useState(false);
   const [uncontrolledLeftDrawerMode, setUncontrolledLeftDrawerMode] = useState<"info" | "wallet">("info");
@@ -243,7 +245,7 @@ export default function PlayV2Shell({
     <main className="relative h-screen w-screen overflow-hidden bg-neutral-950 text-white">
       <div className="play-v2-shell-content">
         <section className="absolute inset-x-0 top-0 z-20 h-9 border-b border-white/10 bg-neutral-950 px-2.5 md:h-10 md:px-3">
-          <div className="grid h-full grid-cols-2 items-center gap-2 text-[11px] sm:grid-cols-4 sm:text-xs">
+          <div className="grid h-full grid-cols-2 items-center gap-2 pr-28 text-[11px] sm:grid-cols-4 sm:pr-64 sm:text-xs">
             <div>
               <p className="text-[10px] uppercase tracking-wide text-white/55">Cash</p>
               <p className="font-semibold leading-tight">{cashLabel}</p>
@@ -269,6 +271,11 @@ export default function PlayV2Shell({
               </p>
             </div>
           </div>
+          {headerActions ? (
+            <div className="absolute right-2 top-1/2 z-10 flex -translate-y-1/2 items-center gap-1.5 md:right-3">
+              {headerActions}
+            </div>
+          ) : null}
         </section>
 
         {loading ? (

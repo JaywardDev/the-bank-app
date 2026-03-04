@@ -3670,12 +3670,147 @@ export async function POST(request: Request) {
     const gameId = body.gameId;
 
     if (body.action === "LEAVE_GAME") {
-      await fetchFromSupabaseWithService(
-        `players?game_id=eq.${gameId}&user_id=eq.${user.id}`,
-        {
-          method: "DELETE",
-        },
-      );
+      const [game] = (await fetchFromSupabaseWithService<GameRow[]>(
+        `games?select=id,status,created_by&id=eq.${gameId}&limit=1`,
+        { method: "GET" },
+      )) ?? [];
+
+      if (!game) {
+        return NextResponse.json({ error: "Game not found." }, { status: 404 });
+      }
+
+      const [leavingPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
+        `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,is_eliminated,eliminated_at&game_id=eq.${gameId}&user_id=eq.${user.id}&limit=1`,
+        { method: "GET" },
+      )) ?? [];
+
+      const [gameState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?select=version&game_id=eq.${gameId}&limit=1`,
+        { method: "GET" },
+      )) ?? [];
+
+      const [latestEvent] = (await fetchFromSupabaseWithService<Array<{ version: number }>>(
+        `game_events?select=version&game_id=eq.${gameId}&order=version.desc&limit=1`,
+        { method: "GET" },
+      )) ?? [];
+
+      let eventVersionCursor =
+        Math.max(gameState?.version ?? 0, latestEvent?.version ?? 0) + 1;
+      const activeGameStatus = (game.status ?? "").toLowerCase();
+
+      const logEventSafely = async (
+        eventType: string,
+        payload: Record<string, unknown>,
+      ) => {
+        try {
+          await fetchFromSupabaseWithService(
+            "game_events",
+            {
+              method: "POST",
+              headers: {
+                Prefer: "return=representation",
+              },
+              body: JSON.stringify({
+                game_id: gameId,
+                version: eventVersionCursor,
+                event_type: eventType,
+                payload,
+                created_by: user.id,
+              }),
+            },
+          );
+          eventVersionCursor += 1;
+        } catch {
+          // best-effort audit logging only
+        }
+      };
+
+      if (game.created_by && game.created_by === user.id) {
+        const [endedGame] = (await fetchFromSupabaseWithService<GameRow[]>(
+          `games?select=id,status&id=eq.${gameId}&status=in.(lobby,in_progress)`,
+          {
+            method: "PATCH",
+            headers: {
+              Prefer: "return=representation",
+            },
+            body: JSON.stringify({
+              status: "ended",
+            }),
+          },
+        )) ?? [];
+
+        if (leavingPlayer) {
+          await fetchFromSupabaseWithService(
+            `players?game_id=eq.${gameId}&user_id=eq.${user.id}`,
+            { method: "DELETE" },
+          );
+        }
+
+        if (leavingPlayer) {
+          await logEventSafely("PLAYER_LEFT", {
+            user_id: user.id,
+            player_id: leavingPlayer.id,
+            reason: "host_leave",
+          });
+        }
+
+        if (endedGame) {
+          await logEventSafely("END_GAME", {
+            previous_status: game.status,
+            reason: "host_leave",
+          });
+        }
+
+        return NextResponse.json({ ok: true, status: "ended", endedBy: "host_leave" });
+      }
+
+      const playersBeforeDelete = (await fetchFromSupabaseWithService<Array<{ id: string }>>(
+        `players?select=id&game_id=eq.${gameId}`,
+        { method: "GET" },
+      )) ?? [];
+
+      if (leavingPlayer) {
+        await fetchFromSupabaseWithService(
+          `players?game_id=eq.${gameId}&user_id=eq.${user.id}`,
+          { method: "DELETE" },
+        );
+      }
+
+      if (leavingPlayer) {
+        await logEventSafely("PLAYER_LEFT", {
+          user_id: user.id,
+          player_id: leavingPlayer.id,
+          player_count_before_leave: playersBeforeDelete.length,
+        });
+      }
+
+      const remainingPlayers = (await fetchFromSupabaseWithService<Array<{ id: string }>>(
+        `players?select=id&game_id=eq.${gameId}`,
+        { method: "GET" },
+      )) ?? [];
+
+      if (remainingPlayers.length === 0 && ["lobby", "in_progress"].includes(activeGameStatus)) {
+        const [endedGame] = (await fetchFromSupabaseWithService<GameRow[]>(
+          `games?select=id,status&id=eq.${gameId}&status=in.(lobby,in_progress)`,
+          {
+            method: "PATCH",
+            headers: {
+              Prefer: "return=representation",
+            },
+            body: JSON.stringify({
+              status: "ended",
+            }),
+          },
+        )) ?? [];
+
+        if (endedGame) {
+          await logEventSafely("AUTO_END_EMPTY", {
+            previous_status: game.status,
+            reason: "empty_table",
+          });
+          return NextResponse.json({ ok: true, status: "ended", endedBy: "empty_table" });
+        }
+      }
 
       return NextResponse.json({ ok: true });
     }
