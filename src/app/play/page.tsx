@@ -4947,6 +4947,8 @@ export default function PlayPage() {
     (mortgage) => mortgage.status === "active",
   );
   const netWorth = useMemo(() => {
+    // NOTE: legacy /play intentionally uses a conservative net worth estimate and
+    // excludes collateralized/purchase-mortgaged property value; /play-v2 now uses equity accounting.
     const propertyValue = ownedProperties.reduce((total, entry) => {
       if (entry.isCollateralized || entry.isPurchaseMortgaged) {
         return total;

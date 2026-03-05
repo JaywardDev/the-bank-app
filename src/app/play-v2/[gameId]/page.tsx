@@ -17,6 +17,10 @@ import ConfirmActionModalV2 from "@/components/play-v2/ConfirmActionModalV2";
 import { TitleDeedPreview } from "@/app/components/TitleDeedPreview";
 import { DEFAULT_BOARD_PACK_ECONOMY, getBoardPackById } from "@/lib/boardPacks";
 import { getTileBandColor } from "@/lib/boardTileStyles";
+import {
+  computeOwnedAssetValue,
+  computeTaxableAssetValueForLuxuryTax,
+} from "@/lib/assetValue";
 import { getRules } from "@/lib/rules";
 import { getCurrentTileRent, ownsFullColorSet } from "@/lib/rent";
 
@@ -575,11 +579,8 @@ export default function PlayV2Page() {
     return new Map(tiles.map((tile) => [tile.index, tile]));
   }, [gameMeta?.board_pack_id]);
 
-  void activeLoans;
-  void activePurchaseMortgages;
   void houseBuildBlockedByMacro;
   void loanBlockedByMacro;
-
   const turnPlayerId = gameState?.current_player_id ?? null;
 
   const currentTurnPlayer = useMemo(
@@ -1287,6 +1288,77 @@ export default function PlayV2Page() {
   const lastFiveEvents = useMemo(() => events.slice(0, 5), [events]);
 
   const selectedBoardPack = useMemo(() => getBoardPackById(gameMeta?.board_pack_id ?? null), [gameMeta?.board_pack_id]);
+
+  const currentUserOwnedTiles = useMemo(() => {
+    if (!selectedBoardPack?.tiles || !currentUserPlayer) {
+      return [];
+    }
+
+    return selectedBoardPack.tiles.filter(
+      (tile) =>
+        ["PROPERTY", "RAIL", "UTILITY"].includes(tile.type) &&
+        ownershipByTile[tile.index]?.owner_player_id === currentUserPlayer.id,
+    );
+  }, [currentUserPlayer, ownershipByTile, selectedBoardPack?.tiles]);
+
+  const ownedTileValue = useMemo(
+    () => computeOwnedAssetValue(currentUserOwnedTiles),
+    [currentUserOwnedTiles],
+  );
+
+  const collateralLoanLiability = useMemo(
+    () =>
+      activeLoans.reduce((total, loan) => {
+        if (typeof loan.remaining_principal === "number") {
+          return total + loan.remaining_principal;
+        }
+        return total + loan.principal;
+      }, 0),
+    [activeLoans],
+  );
+
+  const purchaseMortgageLiability = useMemo(
+    () =>
+      activePurchaseMortgages.reduce((total, mortgage) => {
+        const principal = mortgage.principal_remaining ?? 0;
+        const interest = mortgage.accrued_interest_unpaid ?? 0;
+        return total + principal + interest;
+      }, 0),
+    [activePurchaseMortgages],
+  );
+
+  const netWorth = useMemo(() => {
+    const cash = currentUserCash ?? 0;
+    return cash + ownedTileValue - collateralLoanLiability - purchaseMortgageLiability;
+  }, [collateralLoanLiability, currentUserCash, ownedTileValue, purchaseMortgageLiability]);
+
+  const collateralizedTileIndexes = useMemo(
+    () =>
+      activeLoans
+        .map((loan) => {
+          if (typeof loan.collateral_tile_index === "number") {
+            return loan.collateral_tile_index;
+          }
+          const loanWithTileIndex = loan as PlayerLoan & { tile_index?: number };
+          return typeof loanWithTileIndex.tile_index === "number"
+            ? loanWithTileIndex.tile_index
+            : null;
+        })
+        .filter((tileIndex): tileIndex is number => tileIndex !== null),
+    [activeLoans],
+  );
+
+  const taxableAssetValueForLuxuryTax = useMemo(
+    () =>
+      computeTaxableAssetValueForLuxuryTax(
+        currentUserOwnedTiles,
+        collateralizedTileIndexes,
+      ),
+    [collateralizedTileIndexes, currentUserOwnedTiles],
+  );
+
+  // Reserved for upcoming Luxury Tax rule wiring on tax tiles.
+  void taxableAssetValueForLuxuryTax;
 
   const isGameReady =
     !loading &&
@@ -2135,7 +2207,7 @@ export default function PlayV2Page() {
     <>
       <PlayV2Shell
       cashLabel={formatMoney(currentUserCash)}
-      netWorthLabel={formatMoney(currentUserCash)}
+      netWorthLabel={formatMoney(netWorth)}
       turnPlayerLabel={turnPlayerLabel}
       lastRollLabel={lastRollLabel}
       lastDiceLabel={latestDiceDisplay}
