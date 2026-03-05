@@ -14,6 +14,7 @@ import PendingPurchaseModalV2 from "@/components/play-v2/PendingPurchaseModalV2"
 import AuctionOverlayV2 from "@/components/play-v2/AuctionOverlayV2";
 import JailDecisionModalV2 from "@/components/play-v2/JailDecisionModalV2";
 import ConfirmActionModalV2 from "@/components/play-v2/ConfirmActionModalV2";
+import RotateToLandscapeOverlay from "@/components/play-v2/RotateToLandscapeOverlay";
 import { TitleDeedPreview } from "@/app/components/TitleDeedPreview";
 import { getDevelopmentLevelLabel } from "@/components/play-v2/utils/developmentLabels";
 import { DEFAULT_BOARD_PACK_ECONOMY, getBoardPackById } from "@/lib/boardPacks";
@@ -2156,52 +2157,55 @@ export default function PlayV2Page() {
         : "Start";
 
     return (
-      <main className="fixed inset-0 z-40 overflow-hidden text-white">
-        <div className="absolute inset-0">
-          <Image
-            src="/icons/loading_screen.svg"
-            alt="Game boot background"
-            fill
-            sizes="100vw"
-            className="object-cover object-center transition-[filter,opacity] duration-700 ease-out"
-            style={{
-              filter: loadingMinElapsed
-                ? "saturate(1.02) contrast(1) brightness(1)"
-                : "saturate(0.7) contrast(0.92) brightness(0.88)",
-              opacity: loadingMinElapsed ? 1 : 0.95,
-            }}
-          />
-          <div
-            className="absolute inset-0 bg-neutral-900/35 transition-opacity duration-700 ease-out"
-            style={{ opacity: loadingMinElapsed ? 0.15 : 0.45 }}
-          />
-        </div>
-        <div className="relative flex h-full flex-col items-center justify-end gap-6 px-6 py-12 text-center">
-          <div className="flex w-full max-w-md flex-col items-center gap-4">
+      <>
+        <RotateToLandscapeOverlay />
+        <main className="fixed inset-0 z-40 overflow-hidden text-white">
+          <div className="absolute inset-0">
+            <Image
+              src="/icons/loading_screen.svg"
+              alt="Game boot background"
+              fill
+              sizes="100vw"
+              className="object-cover object-center transition-[filter,opacity] duration-700 ease-out"
+              style={{
+                filter: loadingMinElapsed
+                  ? "saturate(1.02) contrast(1) brightness(1)"
+                  : "saturate(0.7) contrast(0.92) brightness(0.88)",
+                opacity: loadingMinElapsed ? 1 : 0.95,
+              }}
+            />
             <div
-              className={`h-2 w-full overflow-hidden rounded-full bg-white/20 transition-opacity duration-500 ${
-                loadingMinElapsed ? "opacity-60" : "opacity-100"
-              }`}
-            >
-              <div
-                className="h-full rounded-full bg-emerald-300 transition-[width] duration-100 ease-linear"
-                style={{ width: `${loadingProgress}%` }}
-              />
-            </div>
-            <p className="text-xs text-white/75">
-              {isGameReady ? "Finalizing board…" : "Loading game…"}
-            </p>
-            <button
-              type="button"
-              disabled={startButtonDisabled}
-              onClick={() => setIntroDismissed(true)}
-              className="inline-flex min-w-28 items-center justify-center rounded-full border border-white/30 bg-white/20 px-5 py-2 text-sm font-semibold text-white transition enabled:hover:bg-white/30 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {startButtonLabel}
-            </button>
+              className="absolute inset-0 bg-neutral-900/35 transition-opacity duration-700 ease-out"
+              style={{ opacity: loadingMinElapsed ? 0.15 : 0.45 }}
+            />
           </div>
-        </div>
-      </main>
+          <div className="relative flex h-full flex-col items-center justify-end gap-6 px-6 py-12 text-center">
+            <div className="flex w-full max-w-md flex-col items-center gap-4">
+              <div
+                className={`h-2 w-full overflow-hidden rounded-full bg-white/20 transition-opacity duration-500 ${
+                  loadingMinElapsed ? "opacity-60" : "opacity-100"
+                }`}
+              >
+                <div
+                  className="h-full rounded-full bg-emerald-300 transition-[width] duration-100 ease-linear"
+                  style={{ width: `${loadingProgress}%` }}
+                />
+              </div>
+              <p className="text-xs text-white/75">
+                {isGameReady ? "Finalizing board…" : "Loading game…"}
+              </p>
+              <button
+                type="button"
+                disabled={startButtonDisabled}
+                onClick={() => setIntroDismissed(true)}
+                className="inline-flex min-w-28 items-center justify-center rounded-full border border-white/30 bg-white/20 px-5 py-2 text-sm font-semibold text-white transition enabled:hover:bg-white/30 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {startButtonLabel}
+              </button>
+            </div>
+          </div>
+        </main>
+      </>
     );
   }
 
@@ -2217,6 +2221,7 @@ export default function PlayV2Page() {
 
   return (
     <>
+      <RotateToLandscapeOverlay />
       <PlayV2Shell
       cashLabel={formatMoney(currentUserCash)}
       netWorthLabel={formatMoney(netWorth)}
