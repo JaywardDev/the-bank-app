@@ -1290,6 +1290,17 @@ export default function PlayV2Page() {
   const lastFiveEvents = useMemo(() => events.slice(0, 5), [events]);
 
   const selectedBoardPack = useMemo(() => getBoardPackById(gameMeta?.board_pack_id ?? null), [gameMeta?.board_pack_id]);
+  const currencySymbol = selectedBoardPack?.economy.currency.symbol ?? "$";
+  const macroTooltipById = useMemo(() => {
+    const lookup = new Map<string, string>();
+    const cards = selectedBoardPack?.macroDeck?.cards ?? [];
+    cards.forEach((card) => {
+      if (card.tooltip) {
+        lookup.set(card.id, card.tooltip);
+      }
+    });
+    return lookup;
+  }, [selectedBoardPack?.macroDeck?.cards]);
 
   const currentUserOwnedTiles = useMemo(() => {
     if (!selectedBoardPack?.tiles || !currentUserPlayer) {
@@ -2056,6 +2067,8 @@ export default function PlayV2Page() {
             actorName={players.find((player) => player.id === pendingCard?.drawnBy)?.display_name ?? null}
             isActor={Boolean(currentUserPlayer && pendingCard?.drawnBy === currentUserPlayer.id)}
             actionLoading={actionLoading}
+            boardPack={selectedBoardPack}
+            currencySymbol={currencySymbol}
             onConfirm={handleConfirmPendingCard}
           />
         );
@@ -2063,6 +2076,7 @@ export default function PlayV2Page() {
         return (
           <PendingMacroModalV2
             pendingMacroEvent={pendingMacroEvent}
+            macroTooltipById={macroTooltipById}
             actorName={currentTurnPlayer?.display_name ?? null}
             isActor={Boolean(currentUserPlayer && currentTurnPlayer && currentUserPlayer.id === currentTurnPlayer.id)}
             actionLoading={actionLoading}
@@ -2086,6 +2100,9 @@ export default function PlayV2Page() {
     pendingGoToJail,
     pendingMacroEvent,
     players,
+    selectedBoardPack,
+    currencySymbol,
+    macroTooltipById,
   ]);
 
   useEffect(() => {
