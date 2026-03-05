@@ -15,6 +15,7 @@ import AuctionOverlayV2 from "@/components/play-v2/AuctionOverlayV2";
 import JailDecisionModalV2 from "@/components/play-v2/JailDecisionModalV2";
 import ConfirmActionModalV2 from "@/components/play-v2/ConfirmActionModalV2";
 import RotateToLandscapeOverlay from "@/components/play-v2/RotateToLandscapeOverlay";
+import ActivityPopupV2 from "@/components/play-v2/ActivityPopupV2";
 import { TitleDeedPreview } from "@/app/components/TitleDeedPreview";
 import { getDevelopmentLevelLabel } from "@/components/play-v2/utils/developmentLabels";
 import { DEFAULT_BOARD_PACK_ECONOMY, getBoardPackById } from "@/lib/boardPacks";
@@ -254,6 +255,7 @@ export default function PlayV2Page() {
   const [showEndSessionConfirm, setShowEndSessionConfirm] = useState(false);
   const [showHostLeaveGuard, setShowHostLeaveGuard] = useState(false);
   const [showMenuOverlay, setShowMenuOverlay] = useState(false);
+  const [showActivityPopup, setShowActivityPopup] = useState(false);
 
   const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
   const ownedReasonTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2374,6 +2376,23 @@ export default function PlayV2Page() {
         </div>
       </div>
     ) : null}
+    <button
+      type="button"
+      onClick={() => setShowActivityPopup((open) => !open)}
+      className="fixed bottom-3 left-16 z-30 inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/20 bg-neutral-900/90 text-lg leading-none text-white shadow-lg backdrop-blur transition hover:bg-neutral-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+      aria-label="Open activity and wallet transactions"
+      aria-expanded={showActivityPopup}
+    >
+      ☰
+    </button>
+    <ActivityPopupV2
+      isOpen={showActivityPopup}
+      onClose={() => setShowActivityPopup(false)}
+      events={events}
+      players={players}
+      boardPack={selectedBoardPack}
+      currencySymbol="$"
+    />
     <button
       type="button"
       onClick={() => setShowMenuOverlay((open) => !open)}
