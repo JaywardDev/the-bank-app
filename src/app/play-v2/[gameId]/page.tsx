@@ -15,6 +15,7 @@ import AuctionOverlayV2 from "@/components/play-v2/AuctionOverlayV2";
 import JailDecisionModalV2 from "@/components/play-v2/JailDecisionModalV2";
 import ConfirmActionModalV2 from "@/components/play-v2/ConfirmActionModalV2";
 import { TitleDeedPreview } from "@/app/components/TitleDeedPreview";
+import { getDevelopmentLevelLabel } from "@/components/play-v2/utils/developmentLabels";
 import { DEFAULT_BOARD_PACK_ECONOMY, getBoardPackById } from "@/lib/boardPacks";
 import { getTileBandColor } from "@/lib/boardTileStyles";
 import {
@@ -1470,6 +1471,7 @@ export default function PlayV2Page() {
         const isCollateralized = Boolean(ownership?.collateral_loan_id);
         const isPurchaseMortgaged = Boolean(ownership?.purchase_mortgage_id);
         const housesCount = ownership?.houses ?? 0;
+        const developmentLabel = getDevelopmentLevelLabel(housesCount, tile.rentByHouses);
         const hasFullSet = ownsFullColorSet(
           tile,
           selectedBoardPack.tiles,
@@ -1490,18 +1492,16 @@ export default function PlayV2Page() {
             ? "Need full set"
             : isCollateralized
               ? "Already collateralized"
-              : isPurchaseMortgaged
-                ? "Mortgaged at purchase"
-                : null;
+              : null;
         const sellHouseDisabledReason = !isMyTurn
           ? "Not your turn"
           : housesCount === 0
-            ? "No houses to sell"
+            ? "No upgrades to downgrade"
             : null;
         const sellHotelDisabledReason = !isMyTurn
           ? "Not your turn"
           : housesCount < 5
-            ? "Need a hotel first"
+            ? "Need top level first"
             : null;
         const collateralDisabledReason = !isMyTurn
           ? "Not your turn"
@@ -1510,14 +1510,14 @@ export default function PlayV2Page() {
             : isPurchaseMortgaged
               ? "Mortgaged at purchase"
               : housesCount > 0
-                ? "Remove houses first"
+                ? "Remove upgrades first"
                 : !rules.loanCollateralEnabled
                   ? "Collateral loans disabled"
                   : null;
         const sellToMarketDisabledReason = !isMyTurn
           ? "Not your turn"
           : housesCount > 0
-            ? "Remove houses first"
+            ? "Remove upgrades first"
             : isCollateralized
               ? "Already collateralized"
               : isPurchaseMortgaged
@@ -1530,6 +1530,7 @@ export default function PlayV2Page() {
           isCollateralized,
           isPurchaseMortgaged,
           housesCount,
+          developmentLabel,
           hasFullSet,
           tilePrice,
           currentRent,
@@ -1653,7 +1654,7 @@ export default function PlayV2Page() {
                       })
                     }
                   >
-                    {actionLoading === "BUILD_HOUSE" ? "Building…" : "Build House"}
+                    {actionLoading === "BUILD_HOUSE" ? "Upgrading…" : "Upgrade"}
                   </button>
                   {activeReasonForTile?.actionKey === "BUILD_HOUSE" ? (
                     <p className="text-[10px] text-red-300">{activeReasonForTile.reason}</p>
@@ -1679,7 +1680,7 @@ export default function PlayV2Page() {
                       })
                     }
                   >
-                    {actionLoading === "SELL_HOUSE" ? "Selling…" : "Sell House"}
+                    {actionLoading === "SELL_HOUSE" ? "Downgrading…" : "Downgrade"}
                   </button>
                   {activeReasonForTile?.actionKey === "SELL_HOUSE" ? (
                     <p className="text-[10px] text-red-300">{activeReasonForTile.reason}</p>
@@ -1746,7 +1747,7 @@ export default function PlayV2Page() {
                 </div>
               </div>
               <div className="flex items-center gap-1.5 text-[10px] text-white/65">
-                <span>Dev {housesCount}</span>
+                <span>Upgrade: Lv {housesCount} • {developmentLabel}</span>
                 {isPurchaseMortgaged ? (
                   <span className="rounded-full border border-amber-400/50 px-1.5 py-0.5 text-amber-200">Mortgaged</span>
                 ) : null}
@@ -1789,7 +1790,7 @@ export default function PlayV2Page() {
           const tile = boardTilesByIndex.get(loan.collateral_tile_index) ?? null;
           const houses = ownershipByTile[loan.collateral_tile_index]?.houses ?? 0;
           const canDefault = canAct && houses === 0;
-          const defaultDisabledReason = houses > 0 ? "Sell houses first" : !canAct ? "Not your turn" : null;
+          const defaultDisabledReason = houses > 0 ? "Downgrade first" : !canAct ? "Not your turn" : null;
           const isPayoffLoading = actionLoading === "PAYOFF_COLLATERAL_LOAN";
           const isDefaultLoading = actionLoading === "DEFAULT_PROPERTY";
 

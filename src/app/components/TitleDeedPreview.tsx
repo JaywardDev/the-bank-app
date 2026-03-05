@@ -9,6 +9,7 @@ import {
   ownsFullColorSet,
 } from "@/lib/rent";
 import { getBoardTileIconSrc } from "@/lib/tileIcons";
+import { getDevelopmentLevelLabel } from "@/components/play-v2/utils/developmentLabels";
 
 const getCanonicalTileType = (tileType: string) => {
   const normalized = tileType.toUpperCase();
@@ -416,10 +417,13 @@ const getPropertyRentDetails = ({
         label: hasMonopolyNoDevelopment ? "Base rent (Monopoly ×2)" : "Base rent",
         value: baseRentDisplay,
       },
-      { label: "Rent with 1 house", value: rentByHouses?.[1] ?? null },
-      { label: "Rent with 2 houses", value: rentByHouses?.[2] ?? null },
-      { label: "Rent with 3 houses", value: rentByHouses?.[3] ?? null },
-      { label: "Rent with 4 houses", value: rentByHouses?.[4] ?? null },
+      ...Array.from({ length: Math.max((rentByHouses?.length ?? 1) - 1, 0) }, (_, index) => {
+        const level = index + 1;
+        return {
+          label: `Rent at Lv ${level} (${getDevelopmentLevelLabel(level, rentByHouses)})`,
+          value: rentByHouses?.[level] ?? null,
+        };
+      }),
     ],
   };
 };
@@ -582,7 +586,7 @@ export const TitleDeedPreview = ({
               <div className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-xs text-neutral-600">
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-medium text-neutral-700">
-                    Development
+                    Upgrade: Lv {resolvedDevelopment} • {getDevelopmentLevelLabel(resolvedDevelopment, tile.rentByHouses)}
                   </span>
                   <DevelopmentIcons dev={resolvedDevelopment} />
                 </div>
