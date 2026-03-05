@@ -1614,6 +1614,7 @@ export default function PlayV2Page() {
           const {
             tile,
             housesCount,
+            developmentLabel,
             isCollateralized,
             isPurchaseMortgaged,
             currentRent,
