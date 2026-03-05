@@ -90,6 +90,12 @@ function WalletPanel({
 type PlayV2ShellProps = {
   cashLabel: string;
   netWorthLabel: string;
+  netWorthBreakdown?: {
+    cash: number;
+    assets: number;
+    liabilities: number;
+    netWorth: number;
+  };
   turnPlayerLabel: string;
   lastRollLabel: string;
   lastDiceLabel?: string | null;
@@ -126,6 +132,7 @@ type PlayV2ShellProps = {
 export default function PlayV2Shell({
   cashLabel,
   netWorthLabel,
+  netWorthBreakdown,
   turnPlayerLabel,
   lastRollLabel,
   lastDiceLabel = null,
@@ -160,10 +167,37 @@ export default function PlayV2Shell({
   const [uncontrolledLeftOpen, setUncontrolledLeftOpen] = useState(false);
   const [uncontrolledLeftDrawerMode, setUncontrolledLeftDrawerMode] = useState<"info" | "wallet">("info");
   const [rightOpen, setRightOpen] = useState(false);
+  const [showNetWorthPopover, setShowNetWorthPopover] = useState(false);
   const wasDecisionActive = useRef(decisionActive);
   const rightDrawerAutoOpenedForDecision = useRef(false);
+  const netWorthPopoverRef = useRef<HTMLDivElement | null>(null);
   const leftOpen = controlledLeftOpen ?? uncontrolledLeftOpen;
   const leftDrawerMode = controlledLeftDrawerMode ?? uncontrolledLeftDrawerMode;
+
+  useEffect(() => {
+    if (!showNetWorthPopover) {
+      return undefined;
+    }
+
+    const handlePointerDownOutside = (event: MouseEvent) => {
+      if (!netWorthPopoverRef.current?.contains(event.target as Node)) {
+        setShowNetWorthPopover(false);
+      }
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setShowNetWorthPopover(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDownOutside);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDownOutside);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [showNetWorthPopover]);
 
   useEffect(() => {
     if (rightDrawerLocked) {
@@ -253,6 +287,13 @@ export default function PlayV2Shell({
   const endEmphasized = canEndTurn && !isEnding;
   const shouldPulse = rollEmphasized && showTurnActions && actionLoading === null;
   const decisionNeedsAttention = decisionActive && !rightOpen;
+  const netWorthPopoverId = "net-worth-breakdown-popover";
+  const formatMoney = (value: number) =>
+    new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+      maximumFractionDigits: 0,
+    }).format(value);
 
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-neutral-950 text-white">
@@ -263,9 +304,45 @@ export default function PlayV2Shell({
               <p className="text-[10px] uppercase tracking-wide text-white/55">Cash</p>
               <p className="font-semibold leading-tight">{cashLabel}</p>
             </div>
-            <div>
-              <p className="text-[10px] uppercase tracking-wide text-white/55">Net Worth</p>
-              <p className="font-semibold leading-tight">{netWorthLabel}</p>
+            <div className="relative" ref={netWorthPopoverRef}>
+              <button
+                type="button"
+                className="rounded px-1 py-0.5 -mx-1 -my-0.5 text-left transition hover:bg-white/10"
+                onClick={() => setShowNetWorthPopover((current) => !current)}
+                aria-expanded={showNetWorthPopover}
+                aria-controls={netWorthPopoverId}
+              >
+                <p className="text-[10px] uppercase tracking-wide text-white/55">Net Worth</p>
+                <p className="font-semibold leading-tight">{netWorthLabel}</p>
+              </button>
+              {showNetWorthPopover && netWorthBreakdown ? (
+                <div
+                  id={netWorthPopoverId}
+                  className="absolute left-0 top-full z-[60] mt-1.5 min-w-52 rounded-lg border border-white/15 bg-neutral-950/95 p-2.5 text-xs shadow-xl shadow-black/40 backdrop-blur"
+                  role="dialog"
+                  aria-label="Net worth breakdown"
+                >
+                  <div className="space-y-1">
+                    <p className="flex items-center justify-between gap-4 text-white/85">
+                      <span>Cash</span>
+                      <span className="tabular-nums">{formatMoney(netWorthBreakdown.cash)}</span>
+                    </p>
+                    <p className="flex items-center justify-between gap-4 text-white/85">
+                      <span>Assets</span>
+                      <span className="tabular-nums">{formatMoney(netWorthBreakdown.assets)}</span>
+                    </p>
+                    <p className="flex items-center justify-between gap-4 text-white/85">
+                      <span>Liabilities</span>
+                      <span className="tabular-nums">{formatMoney(netWorthBreakdown.liabilities)}</span>
+                    </p>
+                  </div>
+                  <div className="my-2 h-px bg-white/10" />
+                  <p className="flex items-center justify-between gap-4 font-semibold text-white">
+                    <span>Net Worth</span>
+                    <span className="tabular-nums">{formatMoney(netWorthBreakdown.netWorth)}</span>
+                  </p>
+                </div>
+              ) : null}
             </div>
             <div>
               <p className="text-[10px] uppercase tracking-wide text-white/55">Turn</p>

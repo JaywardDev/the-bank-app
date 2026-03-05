@@ -1327,6 +1327,16 @@ export default function PlayV2Page() {
     [activePurchaseMortgages],
   );
 
+  const totalLiabilities = useMemo(
+    () => collateralLoanLiability + purchaseMortgageLiability,
+    [collateralLoanLiability, purchaseMortgageLiability],
+  );
+
+  const totalAssets = useMemo(() => {
+    // later: assets += stockPortfolioValue
+    return ownedTileValue;
+  }, [ownedTileValue]);
+
   const netWorth = useMemo(() => {
     const cash = currentUserCash ?? 0;
     return cash + ownedTileValue - collateralLoanLiability - purchaseMortgageLiability;
@@ -2208,6 +2218,12 @@ export default function PlayV2Page() {
       <PlayV2Shell
       cashLabel={formatMoney(currentUserCash)}
       netWorthLabel={formatMoney(netWorth)}
+      netWorthBreakdown={{
+        cash: currentUserCash ?? 0,
+        assets: totalAssets,
+        liabilities: totalLiabilities,
+        netWorth,
+      }}
       turnPlayerLabel={turnPlayerLabel}
       lastRollLabel={lastRollLabel}
       lastDiceLabel={latestDiceDisplay}
