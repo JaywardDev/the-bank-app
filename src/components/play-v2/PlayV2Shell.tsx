@@ -379,7 +379,7 @@ export default function PlayV2Shell({
           {boardViewport}
 
           <div
-            className={`absolute top-1/2 z-30 flex -translate-y-1/2 flex-col gap-2 transition-[left] duration-200 ${
+            className={`absolute top-1/2 z-70 flex -translate-y-1/2 flex-col gap-2 transition-[left] duration-200 ${
               leftOpen ? "left-72" : "left-0"
             }`}
           >
