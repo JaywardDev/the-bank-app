@@ -235,7 +235,7 @@ export default function BoardTrack({
                 : MAP_TILE_WARM_WHITE
             : MAP_TILE_WARM_WHITE;
           const showMapCenteredIcon = isMapTileFace
-            ? !isPropertyTile && (!isRailOrUtilityTile || !isOwned)
+            ? !isPropertyTile
             : Boolean(tileIconSrc);
           const currentRent = getCurrentTileRent({
             tile,
