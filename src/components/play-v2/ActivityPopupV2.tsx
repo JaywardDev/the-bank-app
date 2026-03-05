@@ -17,6 +17,7 @@ type ActivityPopupV2Props = {
   players: PlayerRow[];
   boardPack: BoardPack | null;
   currencySymbol: string;
+  currentPlayerId: string | null;
 };
 
 const formatAmount = (amount: number, currencySymbol: string) =>
@@ -29,6 +30,7 @@ export default function ActivityPopupV2({
   players,
   boardPack,
   currencySymbol,
+  currentPlayerId,
 }: ActivityPopupV2Props) {
   const [tab, setTab] = useState<"activity" | "transactions">("activity");
 
@@ -41,19 +43,38 @@ export default function ActivityPopupV2({
     return () => window.removeEventListener("keydown", onKey);
   }, [isOpen, onClose]);
 
+  const hiddenActivityEventTypes = useMemo(() => {
+    const hiddenTypes = new Set<string>();
+    for (const event of events) {
+      const description = formatEventDescription(event, { players, boardPack, currencySymbol });
+      if (description === "Update received") {
+        hiddenTypes.add(event.event_type);
+      }
+    }
+    return hiddenTypes;
+  }, [boardPack, currencySymbol, events, players]);
+
+  const activityEvents = useMemo(
+    () => events.filter((event) => !hiddenActivityEventTypes.has(event.event_type)).slice(0, 15),
+    [events, hiddenActivityEventTypes],
+  );
+
   const transactions = useMemo(
     () =>
       deriveWalletTransactions(events, {
         players,
         boardPack,
+        currentPlayerId,
       }),
-    [boardPack, events, players],
+    [boardPack, currentPlayerId, events, players],
   );
+
+  const visibleTransactions = useMemo(() => transactions.slice(0, 15), [transactions]);
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[80]" onClick={onClose} aria-hidden={!isOpen}>
+    <div className="fixed inset-0 z-[60]" onClick={onClose} aria-hidden={!isOpen}>
       <div className="absolute inset-0 bg-black/25" />
       <section
         role="dialog"
@@ -87,29 +108,29 @@ export default function ActivityPopupV2({
           </div>
         </div>
 
-        <div className="max-h-[calc(70vh-54px)] overflow-y-auto p-2">
+        <div className="max-h-[55vh] overflow-y-auto p-2">
           {tab === "activity" ? (
-            <ul className="space-y-1.5">
-              {events.map((event) => (
-                <li key={event.id} className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-2 text-xs">
-                  <p className="text-[10px] uppercase tracking-wide text-white/60">v{event.version}</p>
-                  <p className="mt-1 text-white/95">
+            <ul className="divide-y divide-white/10">
+              {activityEvents.map((event) => (
+                <li key={event.id} className="px-2 py-1.5 text-[12px]">
+                  <p className="overflow-hidden text-ellipsis whitespace-nowrap text-white/95">
                     {formatEventDescription(event, { players, boardPack, currencySymbol })}
                   </p>
                 </li>
               ))}
             </ul>
           ) : (
-            <ul className="space-y-1.5">
-              {transactions.map((txn) => (
-                <li key={txn.id} className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-2 text-xs">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="font-semibold text-white/95">{txn.title}</p>
+            <ul className="divide-y divide-white/10">
+              {visibleTransactions.map((txn) => (
+                <li key={txn.id} className="px-2 py-1.5 text-[12px]">
+                  <div className="flex items-center justify-between gap-2 text-xs">
+                    <p className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-white/95">
+                      {txn.subtitle ?? txn.title}
+                    </p>
                     <p className={txn.amount >= 0 ? "text-emerald-300" : "text-rose-300"}>
                       {formatAmount(txn.amount, currencySymbol)}
                     </p>
                   </div>
-                  {txn.subtitle ? <p className="mt-1 text-white/70">{txn.subtitle}</p> : null}
                 </li>
               ))}
             </ul>
