@@ -2,19 +2,15 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { MARKET_CONFIG } from "@/lib/marketConfig";
+import type {
+  InvestHolding,
+  InvestPrice,
+  InvestSymbol,
+  ManualMarketRefreshResult,
+  TradeSide,
+} from "@/features/market-invest/types";
 
-export type InvestSymbol = "SPY" | "BTC" | "AAPL" | "MSFT" | "AMZN" | "NVDA" | "GOOGL" | "META" | "TSLA";
-export type TradeSide = "BUY" | "SELL";
-
-export type InvestPrice = {
-  price: number | null;
-  asOfDate: string | null;
-};
-
-export type InvestHolding = {
-  qty: number;
-  avgCostLocal: number;
-};
+export type { InvestHolding, InvestPrice, InvestSymbol, TradeSide };
 
 type InvestPanelProps = {
   currencySymbol: string;
@@ -28,7 +24,7 @@ type InvestPanelProps = {
   isTrading: boolean;
   tradeError: string | null;
   isRefreshingMarket: boolean;
-  onRefreshMarket: () => Promise<{ message: string | null; minutesRemaining?: number }>;
+  onRefreshMarket: () => Promise<ManualMarketRefreshResult>;
   onTrade: (symbol: InvestSymbol, side: TradeSide, qty: number) => Promise<void>;
 };
 

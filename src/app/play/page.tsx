@@ -12,12 +12,7 @@ import { useParams, useRouter } from "next/navigation";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import PageShell from "../components/PageShell";
 import BoardMiniMap from "../components/BoardMiniMap";
-import InvestPanel, {
-  type InvestHolding,
-  type InvestPrice,
-  type InvestSymbol,
-  type TradeSide,
-} from "../components/InvestPanel";
+import InvestPanel from "../components/InvestPanel";
 import InfoTooltip from "@/app/components/InfoTooltip";
 import HousesDots from "../components/HousesDots";
 import { TitleDeedPreview } from "../components/TitleDeedPreview";
@@ -49,6 +44,7 @@ import {
   resolvePendingCardText,
 } from "@/lib/gameNarrativeHelpers";
 import { deriveWalletTransactions, formatEventDescription as formatEventDescriptionShared } from "@/lib/eventFeedFormatters";
+import { useMarketInvestController } from "@/features/market-invest/useMarketInvestController";
 
 const lastGameKey = "bank.lastGameId";
 const DEBUG = process.env.NEXT_PUBLIC_DEBUG === "true";
@@ -726,23 +722,6 @@ type PurchaseMortgage = {
   status: string;
 };
 
-type MarketPriceRow = {
-  symbol: InvestSymbol;
-  price: number | string | null;
-  as_of_date: string | null;
-};
-
-type PlayerHoldingRow = {
-  symbol: InvestSymbol;
-  qty: number | string | null;
-  avg_cost_local: number | string | null;
-};
-
-type FxRateRow = {
-  pair: string;
-  rate: number | string;
-};
-
 type TradeSnapshotTile = {
   tile_index: number;
   collateral_loan_id: string | null;
@@ -937,17 +916,6 @@ const TileDetailsPanel = ({
   );
 };
 
-const parseDecimal = (value: unknown): number | null => {
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : null;
-  }
-  if (typeof value === "string") {
-    const parsed = Number.parseFloat(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
-};
-
 const calculateMortgageInterestPerTurn = (
   principalRemaining: number | null | undefined,
   ratePerTurn: number | null | undefined,
@@ -1064,34 +1032,6 @@ export default function PlayPage() {
   const [isBoardExpanded, setIsBoardExpanded] = useState(false);
   const [miniBoardCollapsed, setMiniBoardCollapsed] = useState(false);
   const [investPanelCollapsed, setInvestPanelCollapsed] = useState(true);
-  const [marketPrices, setMarketPrices] = useState<Record<InvestSymbol, InvestPrice>>({
-    SPY: { price: null, asOfDate: null },
-    BTC: { price: null, asOfDate: null },
-    AAPL: { price: null, asOfDate: null },
-    MSFT: { price: null, asOfDate: null },
-    AMZN: { price: null, asOfDate: null },
-    NVDA: { price: null, asOfDate: null },
-    GOOGL: { price: null, asOfDate: null },
-    META: { price: null, asOfDate: null },
-    TSLA: { price: null, asOfDate: null },
-  });
-  const [investFxRate, setInvestFxRate] = useState(1);
-  const [playerHoldings, setPlayerHoldings] = useState<
-    Record<InvestSymbol, InvestHolding>
-  >({
-    SPY: { qty: 0, avgCostLocal: 0 },
-    BTC: { qty: 0, avgCostLocal: 0 },
-    AAPL: { qty: 0, avgCostLocal: 0 },
-    MSFT: { qty: 0, avgCostLocal: 0 },
-    AMZN: { qty: 0, avgCostLocal: 0 },
-    NVDA: { qty: 0, avgCostLocal: 0 },
-    GOOGL: { qty: 0, avgCostLocal: 0 },
-    META: { qty: 0, avgCostLocal: 0 },
-    TSLA: { qty: 0, avgCostLocal: 0 },
-  });
-  const [isTradeSubmitting, setIsTradeSubmitting] = useState(false);
-  const [isMarketRefreshSubmitting, setIsMarketRefreshSubmitting] = useState(false);
-  const [tradeError, setTradeError] = useState<string | null>(null);
   const [walletPanelView, setWalletPanelView] = useState<
     "owned" | "loans" | "mortgages"
   >("owned");
@@ -1743,106 +1683,6 @@ export default function PlayPage() {
     [],
   );
 
-  const loadMarketPrices = useCallback(async (accessToken?: string) => {
-    const priceRows = await supabaseClient.fetchFromSupabase<MarketPriceRow[]>(
-      "market_prices?select=symbol,price,as_of_date&symbol=in.(SPY,BTC,AAPL,MSFT,AMZN,NVDA,GOOGL,META,TSLA)",
-      { method: "GET" },
-      accessToken,
-    );
-    const nextPrices: Record<InvestSymbol, InvestPrice> = {
-      SPY: { price: null, asOfDate: null },
-      BTC: { price: null, asOfDate: null },
-      AAPL: { price: null, asOfDate: null },
-      MSFT: { price: null, asOfDate: null },
-      AMZN: { price: null, asOfDate: null },
-      NVDA: { price: null, asOfDate: null },
-      GOOGL: { price: null, asOfDate: null },
-      META: { price: null, asOfDate: null },
-      TSLA: { price: null, asOfDate: null },
-    };
-    for (const row of priceRows) {
-      if (!(row.symbol in nextPrices)) {
-        continue;
-      }
-      nextPrices[row.symbol] = {
-        price: parseDecimal(row.price),
-        asOfDate: row.as_of_date,
-      };
-    }
-    setMarketPrices(nextPrices);
-  }, []);
-
-  const loadPlayerHoldings = useCallback(
-    async (playerId?: string | null, accessToken?: string) => {
-      if (!playerId) {
-        setPlayerHoldings({
-          SPY: { qty: 0, avgCostLocal: 0 },
-          BTC: { qty: 0, avgCostLocal: 0 },
-          AAPL: { qty: 0, avgCostLocal: 0 },
-          MSFT: { qty: 0, avgCostLocal: 0 },
-          AMZN: { qty: 0, avgCostLocal: 0 },
-          NVDA: { qty: 0, avgCostLocal: 0 },
-          GOOGL: { qty: 0, avgCostLocal: 0 },
-          META: { qty: 0, avgCostLocal: 0 },
-          TSLA: { qty: 0, avgCostLocal: 0 },
-        });
-        return;
-      }
-      const holdingRows = await supabaseClient.fetchFromSupabase<PlayerHoldingRow[]>(
-        `player_holdings?select=symbol,qty,avg_cost_local&player_id=eq.${playerId}&symbol=in.(SPY,BTC,AAPL,MSFT,AMZN,NVDA,GOOGL,META,TSLA)`,
-        { method: "GET" },
-        accessToken,
-      );
-      const nextHoldings: Record<InvestSymbol, InvestHolding> = {
-        SPY: { qty: 0, avgCostLocal: 0 },
-        BTC: { qty: 0, avgCostLocal: 0 },
-        AAPL: { qty: 0, avgCostLocal: 0 },
-        MSFT: { qty: 0, avgCostLocal: 0 },
-        AMZN: { qty: 0, avgCostLocal: 0 },
-        NVDA: { qty: 0, avgCostLocal: 0 },
-        GOOGL: { qty: 0, avgCostLocal: 0 },
-        META: { qty: 0, avgCostLocal: 0 },
-        TSLA: { qty: 0, avgCostLocal: 0 },
-      };
-      for (const row of holdingRows) {
-        if (!(row.symbol in nextHoldings)) {
-          continue;
-        }
-        nextHoldings[row.symbol] = {
-          qty: parseDecimal(row.qty) ?? 0,
-          avgCostLocal: parseDecimal(row.avg_cost_local) ?? 0,
-        };
-      }
-      setPlayerHoldings(nextHoldings);
-    },
-    [],
-  );
-
-  const loadInvestFxRate = useCallback(
-    async (boardPackId: string | null | undefined, accessToken?: string) => {
-      if (boardPackId === "new-zealand") {
-        const [fxRow] = await supabaseClient.fetchFromSupabase<FxRateRow[]>(
-          "fx_rates?select=pair,rate&pair=eq.NZDUSD&limit=1",
-          { method: "GET" },
-          accessToken,
-        );
-        setInvestFxRate(parseDecimal(fxRow?.rate) ?? 1);
-        return;
-      }
-      if (boardPackId === "classic-ph" || boardPackId === "philippines-hard") {
-        const [fxRow] = await supabaseClient.fetchFromSupabase<FxRateRow[]>(
-          "fx_rates?select=pair,rate&pair=eq.USDPHP&limit=1",
-          { method: "GET" },
-          accessToken,
-        );
-        setInvestFxRate(parseDecimal(fxRow?.rate) ?? 1);
-        return;
-      }
-      setInvestFxRate(1);
-    },
-    [],
-  );
-
   const loadTradeLiabilities = useCallback(
     async (
       activeGameId: string,
@@ -1922,6 +1762,37 @@ export default function PlayPage() {
     },
     [],
   );
+
+  const {
+    marketPrices,
+    investFxRate,
+    playerHoldings,
+    isTradeSubmitting,
+    tradeError,
+    isMarketRefreshSubmitting,
+    loadMarketPrices,
+    loadInvestFxRate,
+    loadPlayerHoldings,
+    handleMarketTrade,
+    handleManualMarketRefresh,
+  } = useMarketInvestController({
+    gameId,
+    boardPackId: gameMeta?.board_pack_id,
+    playerId: currentUserPlayer?.id,
+    accessToken: session?.access_token,
+    onSessionUpdated: setSession,
+    onReloadGameData: async (activeGameId, nextAccessToken) => {
+      await Promise.all([
+        loadPlayers(activeGameId, nextAccessToken),
+        loadGameState(activeGameId, nextAccessToken),
+        loadEvents(activeGameId, nextAccessToken),
+        loadOwnership(activeGameId, nextAccessToken),
+        loadTradeProposals(activeGameId, nextAccessToken),
+        loadMarketPrices(nextAccessToken),
+        loadInvestFxRate(gameMeta?.board_pack_id, nextAccessToken),
+      ]);
+    },
+  });
 
   const loadGameData = useCallback(
     async (activeGameId: string, accessToken?: string) => {
@@ -2262,121 +2133,6 @@ export default function PlayPage() {
     session?.access_token,
     sessionInvalid,
     setupRealtimeChannel,
-  ]);
-
-  const handleMarketTrade = useCallback(
-    async (symbol: InvestSymbol, side: TradeSide, qty: number) => {
-      if (!gameId || !session?.access_token) {
-        setTradeError("Missing session. Please refresh and sign in again.");
-        return;
-      }
-      setIsTradeSubmitting(true);
-      setTradeError(null);
-      try {
-        const payload = {
-          symbol,
-          side: side.toUpperCase() as TradeSide,
-          qty: Number(qty),
-        };
-
-        if (process.env.NODE_ENV !== "production") {
-          console.debug("market trade payload", payload);
-        }
-
-        const response = await fetch("/api/market/trade", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify(payload),
-        });
-        const responseBody = (await response.json()) as { error?: string };
-        if (!response.ok) {
-          throw new Error(responseBody.error ?? "Trade failed.");
-        }
-        await Promise.all([
-          loadGameData(gameId, session.access_token),
-          loadPlayerHoldings(currentUserPlayer?.id, session.access_token),
-        ]);
-      } catch (error) {
-        setTradeError(error instanceof Error ? error.message : "Trade failed.");
-      } finally {
-        setIsTradeSubmitting(false);
-      }
-    },
-    [
-      currentUserPlayer?.id,
-      gameId,
-      loadGameData,
-      loadPlayerHoldings,
-      session?.access_token,
-    ],
-  );
-
-  const handleManualMarketRefresh = useCallback(async () => {
-    if (isMarketRefreshSubmitting) {
-      return { message: null };
-    }
-
-    let accessToken = session?.access_token ?? null;
-    if (!accessToken) {
-      const refreshedSession = await supabaseClient.refreshSession();
-      setSession(refreshedSession);
-      if (!refreshedSession?.access_token) {
-        throw new Error("Missing session. Please refresh and sign in again.");
-      }
-      accessToken = refreshedSession.access_token;
-    }
-
-    setIsMarketRefreshSubmitting(true);
-
-    try {
-      const response = await fetch("/api/market/refresh-manual", {
-        method: "POST",
-        cache: "no-store",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      });
-
-      const responseBody = (await response.json()) as {
-        error?: string;
-        minutesRemaining?: number;
-      };
-      if (response.status === 429 && responseBody.error === "REFRESH_COOLDOWN") {
-        const minutesRemaining = Math.min(10, Math.max(responseBody.minutesRemaining ?? 1, 1));
-        return {
-          message: `Market was refreshed recently. Try again in ${minutesRemaining} minutes.`,
-          minutesRemaining,
-        };
-      }
-
-      if (!response.ok) {
-        throw new Error(responseBody.error ?? "Failed to refresh market prices.");
-      }
-
-      if (gameId) {
-        await loadGameData(gameId, accessToken);
-      } else {
-        await Promise.all([
-          loadMarketPrices(accessToken),
-          loadInvestFxRate(gameMeta?.board_pack_id, accessToken),
-        ]);
-      }
-
-      return { message: null };
-    } finally {
-      setIsMarketRefreshSubmitting(false);
-    }
-  }, [
-    gameId,
-    gameMeta?.board_pack_id,
-    isMarketRefreshSubmitting,
-    loadGameData,
-    loadInvestFxRate,
-    loadMarketPrices,
-    session?.access_token,
   ]);
 
   const requestFirstRoundResync = useCallback(
