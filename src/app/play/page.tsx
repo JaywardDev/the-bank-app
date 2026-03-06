@@ -483,11 +483,14 @@ const formatMoney = (amount: number, currencySymbol = "$") =>
   formatCurrencyAmount(amount, { symbol: currencySymbol });
 
 const formatMoneyRounded = (amount: number, currencySymbol = "$") =>
-  formatCurrencyAmount(amount, {
-    symbol: currencySymbol,
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  });
+  formatCurrencyAmount(
+    amount,
+    { symbol: currencySymbol },
+    {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    },
+  );
 
 const formatSignedMoney = (amount: number, currencySymbol = "$") =>
   formatSignedCurrencyAmount(amount, { symbol: currencySymbol });
