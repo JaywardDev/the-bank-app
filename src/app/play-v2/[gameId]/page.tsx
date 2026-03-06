@@ -26,6 +26,7 @@ import {
 } from "@/lib/assetValue";
 import { getRules } from "@/lib/rules";
 import { getCurrentTileRent, ownsFullColorSet } from "@/lib/rent";
+import { formatCurrency, getCurrencyMetaFromBoardPack } from "@/lib/currency";
 
 type GameMeta = {
   id: string;
@@ -201,14 +202,6 @@ const SESSION_EXPIRED_MESSAGE = "Session expired — please sign in again";
 const MIN_LOADING_SCREEN_MS = 5000;
 const lastGameKey = "bank.lastGameId";
 
-const formatMoney = (value: number | null) => {
-  if (value === null) return "—";
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  }).format(value);
-};
 
 export default function PlayV2Page() {
   const router = useRouter();
@@ -1292,7 +1285,13 @@ export default function PlayV2Page() {
   const lastFiveEvents = useMemo(() => events.slice(0, 5), [events]);
 
   const selectedBoardPack = useMemo(() => getBoardPackById(gameMeta?.board_pack_id ?? null), [gameMeta?.board_pack_id]);
-  const currencySymbol = selectedBoardPack?.economy.currency.symbol ?? "$";
+  const currency = getCurrencyMetaFromBoardPack(selectedBoardPack);
+  const currencySymbol = currency.symbol ?? "$";
+  const formatMoney = useCallback((value: number | null) => {
+    if (value === null) return "—";
+    return formatCurrency(value, currency);
+  }, [currency]);
+
   const macroTooltipById = useMemo(() => {
     const lookup = new Map<string, string>();
     const cards = selectedBoardPack?.macroDeck?.cards ?? [];
@@ -1782,6 +1781,7 @@ export default function PlayV2Page() {
     ownedActionReason,
     ownedProperties,
     selectedBoardPack,
+    formatMoney,
   ]);
 
 
@@ -1902,7 +1902,7 @@ export default function PlayV2Page() {
         })}
       </div>
     );
-  }, [actionLoading, activeLoans, boardTilesByIndex, canAct, currentUserPlayer?.id, handleBankAction, ownershipByTile, payoffLoanId, defaultLoanTileIndex, selectedBoardPack]);
+  }, [actionLoading, activeLoans, boardTilesByIndex, canAct, currentUserPlayer?.id, handleBankAction, ownershipByTile, payoffLoanId, defaultLoanTileIndex, selectedBoardPack, formatMoney]);
 
   const walletMortgagesContent = useMemo(() => {
     if (activePurchaseMortgages.length === 0) {
@@ -1972,7 +1972,7 @@ export default function PlayV2Page() {
         })}
       </div>
     );
-  }, [actionLoading, activePurchaseMortgages, boardTilesByIndex, canAct, currentUserCash, handleBankAction, payoffMortgageId]);
+  }, [actionLoading, activePurchaseMortgages, boardTilesByIndex, canAct, currentUserCash, handleBankAction, payoffMortgageId, formatMoney]);
 
   const onRefetch = useCallback(async () => {
     if (!routeGameId || !session?.access_token) return;
@@ -2047,6 +2047,7 @@ export default function PlayV2Page() {
     pendingMortgageDownPayment,
     pendingPurchase,
     selectedBoardPack?.tiles,
+    formatMoney,
   ]);
 
   const fullscreenEventNode = useMemo(() => {
@@ -2243,6 +2244,7 @@ export default function PlayV2Page() {
       <RotateToLandscapeOverlay />
       <PlayV2Shell
       cashLabel={formatMoney(currentUserCash)}
+      boardPackEconomy={selectedBoardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY}
       netWorthLabel={formatMoney(netWorth)}
       netWorthBreakdown={{
         cash: currentUserCash ?? 0,
@@ -2391,7 +2393,7 @@ export default function PlayV2Page() {
       events={events}
       players={players}
       boardPack={selectedBoardPack}
-      currencySymbol="$"
+      currencySymbol={currencySymbol}
       currentPlayerId={currentUserPlayerId}
     />
     <button
@@ -2553,6 +2555,7 @@ export default function PlayV2Page() {
       minIncrement={auctionMinIncrement}
       bidderCash={currentBidderCash}
       actionLoading={actionLoading}
+      boardPackEconomy={selectedBoardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY}
       onBid={handleAuctionBid}
       onPass={handleAuctionPass}
     />

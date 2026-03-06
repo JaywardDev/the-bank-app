@@ -7,6 +7,7 @@ import {
   formatEventDescription,
   type GameEventRow,
 } from "@/lib/eventFeedFormatters";
+import { formatSignedCurrency, getCurrencyMetaFromBoardPack } from "@/lib/currency";
 
 type PlayerRow = { id: string; display_name: string | null };
 
@@ -20,8 +21,17 @@ type ActivityPopupV2Props = {
   currentPlayerId: string | null;
 };
 
-const formatAmount = (amount: number, currencySymbol: string) =>
-  `${amount >= 0 ? "+" : "-"}${currencySymbol}${Math.abs(Math.round(amount)).toLocaleString()}`;
+const formatAmount = (
+  amount: number,
+  currencySymbol: string,
+  boardPack: BoardPack | null,
+) => {
+  const currency = getCurrencyMetaFromBoardPack(boardPack);
+  return formatSignedCurrency(amount, {
+    code: currency.code ?? undefined,
+    symbol: currencySymbol || currency.symbol || "$",
+  });
+};
 
 export default function ActivityPopupV2({
   isOpen,
@@ -128,7 +138,7 @@ export default function ActivityPopupV2({
                       {txn.subtitle ?? txn.title}
                     </p>
                     <p className={txn.amount >= 0 ? "text-emerald-300" : "text-rose-300"}>
-                      {formatAmount(txn.amount, currencySymbol)}
+                      {formatAmount(txn.amount, currencySymbol, boardPack)}
                     </p>
                   </div>
                 </li>

@@ -38,6 +38,10 @@ import {
   ownsFullColorSet,
 } from "@/lib/rent";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
+import {
+  formatCurrency as formatCurrencyAmount,
+  formatSignedCurrency as formatSignedCurrencyAmount,
+} from "@/lib/currency";
 import Image from "next/image";
 import { getBoardTileIconSrc } from "@/lib/tileIcons";
 import {
@@ -476,16 +480,17 @@ const formatSignedPercent = (value: number) =>
 const formatMultiplier = (value: number) => `${value.toFixed(2)}×`;
 
 const formatMoney = (amount: number, currencySymbol = "$") =>
-  `${currencySymbol}${amount.toLocaleString()}`;
+  formatCurrencyAmount(amount, { symbol: currencySymbol });
 
 const formatMoneyRounded = (amount: number, currencySymbol = "$") =>
-  `${currencySymbol}${amount.toLocaleString(undefined, {
+  formatCurrencyAmount(amount, {
+    symbol: currencySymbol,
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
-  })}`;
+  });
 
 const formatSignedMoney = (amount: number, currencySymbol = "$") =>
-  `${amount < 0 ? "-" : "+"}${formatMoney(Math.abs(amount), currencySymbol)}`;
+  formatSignedCurrencyAmount(amount, { symbol: currencySymbol });
 
 const getDevBreakdown = (dev: number) => {
   const normalizedDev = Number.isFinite(dev) ? Math.max(0, Math.floor(dev)) : 0;

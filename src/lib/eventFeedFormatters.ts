@@ -1,4 +1,5 @@
 import type { BoardPack } from "@/lib/boardPacks";
+import { formatCurrency, formatSignedCurrency, getCurrencyMetaFromBoardPack } from "@/lib/currency";
 export type EventFeedPlayer = { id: string; display_name: string | null };
 
 export type GameEventRow = {
@@ -19,11 +20,11 @@ export type TransactionRow = {
   sourceEventId: string;
 };
 
-const formatMoney = (amount: number, currencySymbol = "$") =>
-  `${currencySymbol}${amount.toLocaleString()}`;
+const formatMoney = (amount: number, currencyCode?: string, currencySymbol = "$") =>
+  formatCurrency(amount, { code: currencyCode, symbol: currencySymbol });
 
-const formatSignedMoney = (amount: number, currencySymbol = "$") =>
-  `${amount < 0 ? "-" : "+"}${formatMoney(Math.abs(amount), currencySymbol)}`;
+const formatSignedMoney = (amount: number, currencyCode?: string, currencySymbol = "$") =>
+  formatSignedCurrency(amount, { code: currencyCode, symbol: currencySymbol });
 
 const parseNumber = (value: unknown): number | null => {
   if (typeof value === "number") {
@@ -61,7 +62,9 @@ export const formatEventDescription = (
 ) => {
   const players = ctx.players;
   const boardPack = ctx.boardPack;
-  const currencySymbol = ctx.currencySymbol ?? "$";
+  const boardPackCurrency = getCurrencyMetaFromBoardPack(boardPack);
+  const currencyCode = boardPackCurrency.code ?? undefined;
+  const currencySymbol = ctx.currencySymbol ?? boardPackCurrency.symbol ?? "$";
   const getTileNameByIndex = (tileIndex: number | null) => {
     if (tileIndex === null || Number.isNaN(tileIndex)) {
       return "Tile";
@@ -277,7 +280,7 @@ export const formatEventDescription = (
           ? payload.event_name
           : "Macro maintenance";
       return perHouse !== null
-        ? `${eventName} maintenance charged (${formatMoney(perHouse, currencySymbol)} per house)`
+        ? `${eventName} maintenance charged (${formatMoney(perHouse, currencyCode, currencySymbol)} per house)`
         : `${eventName} maintenance charged`;
     }
 
@@ -302,7 +305,7 @@ export const formatEventDescription = (
       const tileLabel =
         tileNameFromBoard ?? (tileIndex !== null ? `Tile ${tileIndex}` : "tile");
       return amount !== null
-        ? `Macro interest surcharge: ${formatMoney(amount, currencySymbol)} (${tileLabel})`
+        ? `Macro interest surcharge: ${formatMoney(amount, currencyCode, currencySymbol)} (${tileLabel})`
         : `Macro interest surcharge (${tileLabel})`;
     }
 
@@ -321,7 +324,7 @@ export const formatEventDescription = (
         typeof payload?.reason === "string" ? payload.reason : "PASS_START";
       const reasonLabel = reason === "LAND_GO" ? "for landing on GO" : "for passing GO";
       return amount !== null
-        ? `${playerName} collected ${formatMoney(amount, currencySymbol)} ${reasonLabel}`
+        ? `${playerName} collected ${formatMoney(amount, currencyCode, currencySymbol)} ${reasonLabel}`
         : `${playerName} collected GO salary`;
     }
 
@@ -379,7 +382,7 @@ export const formatEventDescription = (
           ? payload.player_name
           : "Player";
       return amount !== null
-        ? `${playerName} paid ${formatMoney(amount, currencySymbol)} (${cardTitle})`
+        ? `${playerName} paid ${formatMoney(amount, currencyCode, currencySymbol)} (${cardTitle})`
         : `${playerName} paid (${cardTitle})`;
     }
 
@@ -397,7 +400,7 @@ export const formatEventDescription = (
           ? payload.player_name
           : "Player";
       return amount !== null
-        ? `${playerName} received ${formatMoney(amount, currencySymbol)} (${cardTitle})`
+        ? `${playerName} received ${formatMoney(amount, currencyCode, currencySymbol)} (${cardTitle})`
         : `${playerName} received (${cardTitle})`;
     }
 
@@ -499,7 +502,7 @@ export const formatEventDescription = (
             : null;
 
       return price !== null
-        ? `Offer: Buy ${tileLabel} for ${formatMoney(price, currencySymbol)}`
+        ? `Offer: Buy ${tileLabel} for ${formatMoney(price, currencyCode, currencySymbol)}`
         : `Offer: Buy ${tileLabel}`;
     }
 
@@ -541,7 +544,7 @@ export const formatEventDescription = (
             ? Number.parseInt(payload.min_increment, 10)
             : null;
       return minIncrement !== null
-        ? `Auction started for ${tileLabel} (min ${formatSignedMoney(minIncrement, currencySymbol)})`
+        ? `Auction started for ${tileLabel} (min ${formatSignedMoney(minIncrement, currencyCode, currencySymbol)})`
         : `Auction started for ${tileLabel}`;
     }
 
@@ -571,7 +574,7 @@ export const formatEventDescription = (
       const tileLabel =
         tileNameFromBoard ?? (tileIndex !== null ? `Tile ${tileIndex}` : "tile");
       return amount !== null
-        ? `${playerName} bid ${formatMoney(amount, currencySymbol)} on ${tileLabel}`
+        ? `${playerName} bid ${formatMoney(amount, currencyCode, currencySymbol)} on ${tileLabel}`
         : `${playerName} bid on ${tileLabel}`;
     }
 
@@ -626,7 +629,7 @@ export const formatEventDescription = (
       const tileLabel =
         tileNameFromBoard ?? (tileIndex !== null ? `Tile ${tileIndex}` : "tile");
       return amount !== null
-        ? `${winnerName} won ${tileLabel} for ${formatMoney(amount, currencySymbol)}`
+        ? `${winnerName} won ${tileLabel} for ${formatMoney(amount, currencyCode, currencySymbol)}`
         : `${winnerName} won ${tileLabel}`;
     }
 
@@ -697,7 +700,7 @@ export const formatEventDescription = (
           : "";
 
       return rentAmount !== null
-        ? `Paid ${formatMoney(rentAmount, currencySymbol)} rent to ${ownerName} (${tileLabel})${detailLabel}${macroLabel}`
+        ? `Paid ${formatMoney(rentAmount, currencyCode, currencySymbol)} rent to ${ownerName} (${tileLabel})${detailLabel}${macroLabel}`
         : `Paid rent to ${ownerName} (${tileLabel})${macroLabel}`;
     }
 
@@ -751,10 +754,10 @@ export const formatEventDescription = (
             ? Number.parseInt(payload.term_turns, 10)
             : null;
       const principalLabel =
-        principal !== null ? ` for ${formatMoney(principal, currencySymbol)}` : "";
+        principal !== null ? ` for ${formatMoney(principal, currencyCode, currencySymbol)}` : "";
       const paymentLabel =
         payment !== null && termTurns !== null
-          ? ` · ${formatMoney(payment, currencySymbol)}/turn × ${termTurns}`
+          ? ` · ${formatMoney(payment, currencyCode, currencySymbol)}/turn × ${termTurns}`
           : "";
       return `Collateral loan on ${tileLabel}${principalLabel}${paymentLabel}`;
     }
@@ -781,10 +784,10 @@ export const formatEventDescription = (
             : null;
       const turnsRemaining = getTurnsRemainingFromPayload(payload);
       if (payment !== null && turnsRemaining !== null) {
-        return `Loan payment ${formatMoney(payment, currencySymbol)} on ${tileLabel} · ${turnsRemaining} turns left`;
+        return `Loan payment ${formatMoney(payment, currencyCode, currencySymbol)} on ${tileLabel} · ${turnsRemaining} turns left`;
       }
       if (payment !== null) {
-        return `Loan payment ${formatMoney(payment, currencySymbol)} on ${tileLabel}`;
+        return `Loan payment ${formatMoney(payment, currencyCode, currencySymbol)} on ${tileLabel}`;
       }
       return `Loan payment on ${tileLabel}`;
     }
@@ -827,7 +830,7 @@ export const formatEventDescription = (
             ? Number.parseInt(payload.amount, 10)
             : null;
       if (amount !== null) {
-        return `Loan paid off early on ${tileLabel} for ${formatMoney(amount, currencySymbol)}`;
+        return `Loan paid off early on ${tileLabel} for ${formatMoney(amount, currencyCode, currencySymbol)}`;
       }
       return `Loan paid off early on ${tileLabel}`;
     }
@@ -858,7 +861,7 @@ export const formatEventDescription = (
             ? Number.parseInt(payload.payout, 10)
             : null;
       return payout !== null
-        ? `${playerName} sold ${tileLabel} to market for ${formatMoney(payout, currencySymbol)}`
+        ? `${playerName} sold ${tileLabel} to market for ${formatMoney(payout, currencyCode, currencySymbol)}`
         : `${playerName} sold ${tileLabel} to market`;
     }
 
@@ -910,7 +913,7 @@ export const formatEventDescription = (
           : "Player";
 
       return taxAmount !== null
-        ? `${payerName} paid ${formatMoney(taxAmount, currencySymbol)} tax (${tileLabel})`
+        ? `${payerName} paid ${formatMoney(taxAmount, currencyCode, currencySymbol)} tax (${tileLabel})`
         : `${payerName} paid tax (${tileLabel})`;
     }
 
@@ -942,7 +945,7 @@ export const formatEventDescription = (
           ? payload.player_name
           : "Player";
       return fineAmount !== null
-        ? `${playerName} paid ${formatMoney(fineAmount, currencySymbol)} to get out of jail`
+        ? `${playerName} paid ${formatMoney(fineAmount, currencyCode, currencySymbol)} to get out of jail`
         : `${playerName} paid a jail fine`;
     }
 

@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import Image from "next/image";
+import type { BoardPackEconomy } from "@/lib/boardPacks";
+import { formatCurrency, getCurrencyMetaFromEconomy } from "@/lib/currency";
 
 type WalletTab = "owned" | "loans" | "mortgages";
 
@@ -87,6 +89,7 @@ function WalletPanel({
   );
 }
 
+
 type PlayV2ShellProps = {
   cashLabel: string;
   netWorthLabel: string;
@@ -127,6 +130,7 @@ type PlayV2ShellProps = {
   rightDrawerLocked?: boolean;
   auctionActive?: boolean;
   headerActions?: ReactNode;
+  boardPackEconomy: BoardPackEconomy;
 };
 
 export default function PlayV2Shell({
@@ -163,6 +167,7 @@ export default function PlayV2Shell({
   rightDrawerLocked = false,
   auctionActive = false,
   headerActions,
+  boardPackEconomy,
 }: PlayV2ShellProps) {
   const [uncontrolledLeftOpen, setUncontrolledLeftOpen] = useState(false);
   const [uncontrolledLeftDrawerMode, setUncontrolledLeftDrawerMode] = useState<"info" | "wallet">("info");
@@ -288,12 +293,8 @@ export default function PlayV2Shell({
   const shouldPulse = rollEmphasized && showTurnActions && actionLoading === null;
   const decisionNeedsAttention = decisionActive && !rightOpen;
   const netWorthPopoverId = "net-worth-breakdown-popover";
-  const formatMoney = (value: number) =>
-    new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-      maximumFractionDigits: 0,
-    }).format(value);
+  const currency = getCurrencyMetaFromEconomy(boardPackEconomy);
+  const formatMoney = (value: number) => formatCurrency(value, currency);
 
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-neutral-950 text-white">

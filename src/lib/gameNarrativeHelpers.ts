@@ -1,12 +1,13 @@
 import type { BoardPack } from "@/lib/boardPacks";
+import { formatCurrency, getCurrencyMetaFromBoardPack } from "@/lib/currency";
 
 type PendingCardInput = {
   id: string | null;
   deck: "CHANCE" | "COMMUNITY" | null;
 };
 
-const formatMoney = (amount: number, currencySymbol = "$") =>
-  `${currencySymbol}${Math.round(amount).toLocaleString()}`;
+const formatMoney = (amount: number, currencyCode: string | null | undefined, currencySymbol = "$") =>
+  formatCurrency(Math.round(amount), { code: currencyCode, symbol: currencySymbol });
 
 export const resolvePendingCardText = (
   pendingCard: PendingCardInput | null,
@@ -37,6 +38,9 @@ export const getPendingCardDescription = (
     return "Card effect pending.";
   }
   const data = payload ?? {};
+  const boardPackCurrency = getCurrencyMetaFromBoardPack(boardPack);
+  const currencyCode = boardPackCurrency.code ?? undefined;
+  const activeCurrencySymbol = currencySymbol ?? boardPackCurrency.symbol ?? "$";
   if (kind === "PAY" || kind === "RECEIVE") {
     const amount =
       typeof data.amount === "number"
@@ -46,8 +50,8 @@ export const getPendingCardDescription = (
           : null;
     if (amount !== null) {
       return kind === "PAY"
-        ? `Pay ${formatMoney(amount, currencySymbol)}.`
-        : `Receive ${formatMoney(amount, currencySymbol)}.`;
+        ? `Pay ${formatMoney(amount, currencyCode, activeCurrencySymbol)}.`
+        : `Receive ${formatMoney(amount, currencyCode, activeCurrencySymbol)}.`;
     }
     return kind === "PAY" ? "Pay the bank." : "Receive money from the bank.";
   }

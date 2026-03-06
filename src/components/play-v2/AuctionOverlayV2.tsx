@@ -1,13 +1,7 @@
 import { useMemo, useState } from "react";
 
-import type { BoardTile } from "@/lib/boardPacks";
-
-const formatMoney = (value: number) =>
-  new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  }).format(value);
+import type { BoardPackEconomy, BoardTile } from "@/lib/boardPacks";
+import { formatCurrency, getCurrencyMetaFromEconomy } from "@/lib/currency";
 
 type AuctionOverlayV2Props = {
   auctionActive: boolean;
@@ -21,6 +15,7 @@ type AuctionOverlayV2Props = {
   minIncrement: number;
   bidderCash: number;
   actionLoading: string | null;
+  boardPackEconomy: BoardPackEconomy;
   onBid: (amount: number) => void;
   onPass: () => void;
 };
@@ -30,6 +25,7 @@ type AuctionBidControlsProps = {
   minIncrement: number;
   bidderCash: number;
   actionLoading: string | null;
+  boardPackEconomy: BoardPackEconomy;
   onBid: (amount: number) => void;
   onPass: () => void;
 };
@@ -39,9 +35,11 @@ function AuctionBidControls({
   minIncrement,
   bidderCash,
   actionLoading,
+  boardPackEconomy,
   onBid,
   onPass,
 }: AuctionBidControlsProps) {
+  const currency = useMemo(() => getCurrencyMetaFromEconomy(boardPackEconomy), [boardPackEconomy]);
   const [bidAmount, setBidAmount] = useState<number>(minNextBid);
   const canIncreaseBid = bidAmount + minIncrement <= bidderCash;
   const canDecreaseBid = bidAmount - minIncrement >= minNextBid;
@@ -51,7 +49,7 @@ function AuctionBidControls({
     <div className="mt-4 grid gap-2">
       <div className="space-y-2">
         <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
-          Your bid: {formatMoney(bidAmount)}
+          Your bid: {formatCurrency(bidAmount, currency)}
         </p>
         <div className="flex items-center justify-between gap-3 rounded-2xl border border-neutral-200 bg-white px-3 py-2">
           <button
@@ -63,7 +61,7 @@ function AuctionBidControls({
             –
           </button>
           <div className="text-lg font-semibold text-neutral-900">
-            {formatMoney(bidAmount)}
+            {formatCurrency(bidAmount, currency)}
           </div>
           <button
             className="rounded-full border border-neutral-200 px-3 py-1 text-sm font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:text-neutral-300"
@@ -75,7 +73,7 @@ function AuctionBidControls({
           </button>
         </div>
         <p className="text-xs text-neutral-500">
-          Minimum bid: {formatMoney(minNextBid)} · Cash: {formatMoney(bidderCash)}
+          Minimum bid: {formatCurrency(minNextBid, currency)} · Cash: {formatCurrency(bidderCash, currency)}
         </p>
       </div>
       <button
@@ -110,9 +108,11 @@ export default function AuctionOverlayV2({
   minIncrement,
   bidderCash,
   actionLoading,
+  boardPackEconomy,
   onBid,
   onPass,
 }: AuctionOverlayV2Props) {
+  const currency = useMemo(() => getCurrencyMetaFromEconomy(boardPackEconomy), [boardPackEconomy]);
   const minNextBid = useMemo(
     () => (highestBid > 0 ? highestBid + minIncrement : minIncrement),
     [highestBid, minIncrement],
@@ -134,7 +134,7 @@ export default function AuctionOverlayV2({
             {auctionTile?.name ?? "Unowned tile"}
           </p>
           <p className="mt-1 text-sm text-neutral-600">
-            Highest bid: {formatMoney(highestBid)}
+            Highest bid: {formatCurrency(highestBid, currency)}
           </p>
           <p className="mt-1 text-sm text-neutral-600">
             Current leader: {highestBidderName ?? "No bids yet"}
@@ -151,6 +151,7 @@ export default function AuctionOverlayV2({
               minIncrement={minIncrement}
               bidderCash={bidderCash}
               actionLoading={actionLoading}
+              boardPackEconomy={boardPackEconomy}
               onBid={onBid}
               onPass={onPass}
             />
