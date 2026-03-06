@@ -45,6 +45,21 @@ import {
 } from "@/lib/gameNarrativeHelpers";
 import { deriveWalletTransactions, formatEventDescription as formatEventDescriptionShared } from "@/lib/eventFeedFormatters";
 import { useMarketInvestController } from "@/features/market-invest/useMarketInvestController";
+import {
+  IncomingTradeModal,
+} from "@/features/trade/components/IncomingTradeModal";
+import { TradeProposalModal } from "@/features/trade/components/TradeProposalModal";
+import type {
+  TradeExecutionSummary,
+  TradeProposal,
+} from "@/features/trade/types";
+import {
+  deriveTradeExecutionPerspective,
+  hasTradeValue,
+  normalizeTradeSnapshot,
+  toOptionalPositiveCash,
+  toOptionalTileIndices,
+} from "@/features/trade/utils";
 
 const lastGameKey = "bank.lastGameId";
 const DEBUG = process.env.NEXT_PUBLIC_DEBUG === "true";
@@ -722,38 +737,6 @@ type PurchaseMortgage = {
   status: string;
 };
 
-type TradeSnapshotTile = {
-  tile_index: number;
-  collateral_loan_id: string | null;
-  purchase_mortgage_id: string | null;
-  houses: number;
-};
-
-type TradeProposal = {
-  id: string;
-  game_id: string;
-  proposer_player_id: string;
-  counterparty_player_id: string;
-  offer_cash: number;
-  offer_tile_indices: number[];
-  request_cash: number;
-  request_tile_indices: number[];
-  snapshot: TradeSnapshotTile[] | { tiles: TradeSnapshotTile[] } | null;
-  status: string;
-  created_at: string | null;
-};
-
-type TradeExecutionSummary = {
-  tradeId: string;
-  proposerPlayerId: string;
-  counterpartyPlayerId: string;
-  offerCash: number;
-  offerTiles: number[];
-  requestCash: number;
-  requestTiles: number[];
-  snapshotTiles: TradeSnapshotTile[];
-};
-
 type PendingPurchaseAction = {
   type: "BUY_PROPERTY";
   player_id: string | null;
@@ -924,25 +907,6 @@ const calculateMortgageInterestPerTurn = (
     return 0;
   }
   return Math.round(principalRemaining * ratePerTurn);
-};
-
-const normalizeTradeSnapshot = (
-  snapshot: TradeProposal["snapshot"],
-): TradeSnapshotTile[] => {
-  if (!snapshot) {
-    return [];
-  }
-  if (Array.isArray(snapshot)) {
-    return snapshot;
-  }
-  if (
-    typeof snapshot === "object" &&
-    "tiles" in snapshot &&
-    Array.isArray(snapshot.tiles)
-  ) {
-    return snapshot.tiles;
-  }
-  return [];
 };
 
 const getTileGroupLabel = (tile: BoardTile | null | undefined) => {
@@ -3297,31 +3261,11 @@ export default function PlayPage() {
     if (!tradeExecutionSummary || !currentUserPlayer) {
       return null;
     }
-    const isProposer =
-      currentUserPlayer.id === tradeExecutionSummary.proposerPlayerId;
-    const giveTiles = isProposer
-      ? tradeExecutionSummary.offerTiles
-      : tradeExecutionSummary.requestTiles;
-    const receiveTiles = isProposer
-      ? tradeExecutionSummary.requestTiles
-      : tradeExecutionSummary.offerTiles;
-    const giveCash = isProposer
-      ? tradeExecutionSummary.offerCash
-      : tradeExecutionSummary.requestCash;
-    const receiveCash = isProposer
-      ? tradeExecutionSummary.requestCash
-      : tradeExecutionSummary.offerCash;
-    const counterpartyName = isProposer
-      ? getPlayerNameById(tradeExecutionSummary.counterpartyPlayerId)
-      : getPlayerNameById(tradeExecutionSummary.proposerPlayerId);
-    return {
-      giveTiles,
-      receiveTiles,
-      giveCash,
-      receiveCash,
-      counterpartyName,
-      snapshotTiles: tradeExecutionSummary.snapshotTiles,
-    };
+    return deriveTradeExecutionPerspective({
+      tradeExecutionSummary,
+      currentUserPlayerId: currentUserPlayer.id,
+      getPlayerNameById,
+    });
   }, [currentUserPlayer, getPlayerNameById, tradeExecutionSummary]);
   const updateExpandedBoardScale = useCallback(() => {
     const container = expandedBoardContainerRef.current;
@@ -4068,22 +4012,24 @@ export default function PlayPage() {
     // Trade contract: offer_* is what the proposer gives; request_* is what they receive.
     const offerCash = tradeOfferCash;
     const requestCash = tradeRequestCash;
-    const hasTradeValue =
-      offerCash > 0 ||
-      tradeOfferTiles.length > 0 ||
-      requestCash > 0 ||
-      tradeRequestTiles.length > 0;
-    if (!hasTradeValue) {
+    if (
+      !hasTradeValue({
+        offerCash,
+        offerTiles: tradeOfferTiles,
+        requestCash,
+        requestTiles: tradeRequestTiles,
+      })
+    ) {
       setNotice("Add cash or properties to the trade.");
       return;
     }
     const success = await handleBankAction({
       action: "PROPOSE_TRADE",
       counterpartyPlayerId: tradeCounterpartyId,
-      offerCash: offerCash > 0 ? offerCash : undefined,
-      offerTiles: tradeOfferTiles.length > 0 ? tradeOfferTiles : undefined,
-      requestCash: requestCash > 0 ? requestCash : undefined,
-      requestTiles: tradeRequestTiles.length > 0 ? tradeRequestTiles : undefined,
+      offerCash: toOptionalPositiveCash(offerCash),
+      offerTiles: toOptionalTileIndices(tradeOfferTiles),
+      requestCash: toOptionalPositiveCash(requestCash),
+      requestTiles: toOptionalTileIndices(tradeRequestTiles),
     });
     if (success) {
       setNotice("Trade sent.");
@@ -5072,365 +5018,80 @@ export default function PlayPage() {
             </div>
           </>
         ) : null}
-        {isProposeTradeOpen ? (
-          <>
-            <div className="fixed inset-0 z-20 bg-black/45 backdrop-blur-[2px]" />
-            <div className="fixed inset-0 z-30 flex items-center justify-center p-4">
-              <div className="w-full max-w-2xl rounded-3xl border border-indigo-200 bg-white/95 p-5 shadow-2xl ring-1 ring-black/10 backdrop-blur">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-indigo-500">
-                      Propose trade
-                    </p>
-                    <p className="text-lg font-semibold text-neutral-900">
-                      Craft a trade offer
-                    </p>
-                  </div>
-                  <button
-                    className="rounded-full border border-neutral-200 px-2.5 py-1.5 text-xs font-semibold text-neutral-500 transition hover:border-neutral-300 hover:text-neutral-700"
-                    type="button"
-                    onClick={() => setIsProposeTradeOpen(false)}
-                    aria-label="Close trade proposal"
-                  >
-                    ✕
-                  </button>
-                </div>
-                <div className="mt-4 space-y-4">
-                  <div className="space-y-2">
-                    <label className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
-                      Counterparty
-                    </label>
-                    <select
-                      className="w-full rounded-2xl border border-neutral-200 px-3 py-2 text-sm text-neutral-700"
-                      value={tradeCounterpartyId}
-                      onChange={(event) =>
-                        setTradeCounterpartyId(event.target.value)
-                      }
-                    >
-                      {availableTradeCounterparties.map((player) => (
-                        <option key={player.id} value={player.id}>
-                          {player.display_name ?? "Player"}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-2 rounded-2xl border border-neutral-200 bg-white p-4">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
-                        Offer
-                      </p>
-                      <label className="text-xs text-neutral-500">
-                        Cash
-                        <input
-                          className="mt-1 w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm text-neutral-700"
-                          type="number"
-                          min={0}
-                          max={myPlayerBalance}
-                          value={tradeOfferCash}
-                          onChange={(event) =>
-                            setTradeOfferCash(
-                              Math.max(0, Number(event.target.value)),
-                            )
-                          }
-                        />
-                      </label>
-                      <div className="space-y-1">
-                        <p className="text-xs text-neutral-500">Properties</p>
-                        {ownedProperties.length === 0 ? (
-                          <p className="text-xs text-neutral-400">
-                            No owned properties to offer.
-                          </p>
-                        ) : (
-                          <div className="max-h-40 space-y-2 overflow-y-auto pr-2 text-sm text-neutral-700">
-                            {ownedProperties.map(({ tile, houses }) => (
-                              <label
-                                key={`offer-${tile.index}`}
-                                className="flex items-center gap-2"
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={tradeOfferTiles.includes(tile.index)}
-                                  onChange={(event) => {
-                                    setTradeOfferTiles((prev) =>
-                                      event.target.checked
-                                        ? [...prev, tile.index]
-                                        : prev.filter(
-                                            (entry) => entry !== tile.index,
-                                          ),
-                                    );
-                                  }}
-                                />
-                                <span>
-                                  {tile.name}
-                                  {houses > 0
-                                    ? ` · ${houses} ${
-                                        houses === 1 ? "house" : "houses"
-                                      }`
-                                    : ""}
-                                </span>
-                              </label>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    <div className="space-y-2 rounded-2xl border border-neutral-200 bg-white p-4">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
-                        Request
-                      </p>
-                      <label className="text-xs text-neutral-500">
-                        Cash
-                        <input
-                          className="mt-1 w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm text-neutral-700"
-                          type="number"
-                          min={0}
-                          value={tradeRequestCash}
-                          onChange={(event) =>
-                            setTradeRequestCash(
-                              Math.max(0, Number(event.target.value)),
-                            )
-                          }
-                        />
-                      </label>
-                      <div className="space-y-1">
-                        <p className="text-xs text-neutral-500">Properties</p>
-                        {tradeCounterpartyId ? (
-                          counterpartyOwnedProperties.length === 0 ? (
-                            <p className="text-xs text-neutral-400">
-                              No properties owned by the selected player.
-                            </p>
-                          ) : (
-                            <div className="max-h-40 space-y-2 overflow-y-auto pr-2 text-sm text-neutral-700">
-                              {counterpartyOwnedProperties.map(
-                                ({ tile, houses }) => (
-                                  <label
-                                    key={`request-${tile.index}`}
-                                    className="flex items-center gap-2"
-                                  >
-                                    <input
-                                      type="checkbox"
-                                      checked={tradeRequestTiles.includes(
-                                        tile.index,
-                                      )}
-                                      onChange={(event) => {
-                                        setTradeRequestTiles((prev) =>
-                                          event.target.checked
-                                            ? [...prev, tile.index]
-                                            : prev.filter(
-                                                (entry) =>
-                                                  entry !== tile.index,
-                                              ),
-                                        );
-                                      }}
-                                    />
-                                    <span>
-                                      {tile.name}
-                                      {houses > 0
-                                        ? ` · ${houses} ${
-                                            houses === 1 ? "house" : "houses"
-                                          }`
-                                        : ""}
-                                    </span>
-                                  </label>
-                                ),
-                              )}
-                            </div>
-                          )
-                        ) : (
-                          <p className="text-xs text-neutral-400">
-                            Select a player to see their properties.
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <p className="text-xs text-neutral-400">
-                      Trades are sent to the bank for review before delivery.
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <button
-                        className="rounded-2xl border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700"
-                        type="button"
-                        onClick={() => setIsProposeTradeOpen(false)}
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        className="rounded-2xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-indigo-200"
-                        type="button"
-                        onClick={handleSubmitTradeProposal}
-                        disabled={
-                          actionLoading === "PROPOSE_TRADE" ||
-                          !canSubmitTradeProposal
-                        }
-                      >
-                        {actionLoading === "PROPOSE_TRADE"
-                          ? "Sending…"
-                          : "Send trade"}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </>
-        ) : null}
-        {incomingTradeProposal && isIncomingTradeOpen ? (
-          <>
-            <div className="fixed inset-0 z-20 bg-black/45 backdrop-blur-[2px]" />
-            <div className="fixed inset-0 z-30 flex items-center justify-center p-4">
-              <div className="w-full max-w-lg rounded-3xl border border-indigo-200 bg-white/95 p-5 shadow-2xl ring-1 ring-black/10 backdrop-blur">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-indigo-500">
-                      Incoming trade offer
-                    </p>
-                    <p className="text-lg font-semibold text-neutral-900">
-                      {incomingTradeCounterpartyName} wants to trade
-                    </p>
-                  </div>
-                  <button
-                    className="rounded-full border border-neutral-200 px-2.5 py-1.5 text-xs font-semibold text-neutral-500 transition hover:border-neutral-300 hover:text-neutral-700"
-                    type="button"
-                    onClick={() => setIsIncomingTradeOpen(false)}
-                    aria-label="Close incoming trade"
-                  >
-                    ✕
-                  </button>
-                </div>
-                <div className="mt-4 grid gap-3">
-                  <div className="rounded-2xl border border-neutral-200 bg-white p-3">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
-                      You give
-                    </p>
-                    <ul className="mt-2 space-y-1 text-sm text-neutral-700">
-                      {incomingTradeRequestCash > 0 ? (
-                        <li>Cash: {formatMoney(incomingTradeRequestCash, currencySymbol)}</li>
-                      ) : null}
-                      {incomingTradeRequestTiles.length > 0 ? (
-                        incomingTradeRequestTiles.map((tileIndex) => {
-                          const snapshot = incomingTradeSnapshotTiles.find(
-                            (entry) => entry.tile_index === tileIndex,
-                          );
-                          const houses = snapshot?.houses ?? 0;
-                          return (
-                            <li key={`give-${tileIndex}`}>
-                              {getTileNameByIndex(tileIndex)}
-                              {houses > 0
-                                ? ` · ${houses} ${houses === 1 ? "house" : "houses"}`
-                                : ""}
-                            </li>
-                          );
-                        })
-                      ) : incomingTradeRequestCash === 0 ? (
-                        <li className="text-neutral-400">No properties</li>
-                      ) : null}
-                    </ul>
-                  </div>
-                  <div className="rounded-2xl border border-neutral-200 bg-white p-3">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
-                      You receive
-                    </p>
-                    <ul className="mt-2 space-y-1 text-sm text-neutral-700">
-                      {incomingTradeOfferCash > 0 ? (
-                        <li>Cash: {formatMoney(incomingTradeOfferCash, currencySymbol)}</li>
-                      ) : null}
-                      {incomingTradeOfferTiles.length > 0 ? (
-                        incomingTradeOfferTiles.map((tileIndex) => {
-                          const snapshot = incomingTradeSnapshotTiles.find(
-                            (entry) => entry.tile_index === tileIndex,
-                          );
-                          const houses = snapshot?.houses ?? 0;
-                          return (
-                            <li key={`receive-${tileIndex}`}>
-                              {getTileNameByIndex(tileIndex)}
-                              {houses > 0
-                                ? ` · ${houses} ${houses === 1 ? "house" : "houses"}`
-                                : ""}
-                            </li>
-                          );
-                        })
-                      ) : incomingTradeOfferCash === 0 ? (
-                        <li className="text-neutral-400">No properties</li>
-                      ) : null}
-                    </ul>
-                  </div>
-                  <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-3">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
-                      Liabilities assumed
-                    </p>
-                    {incomingTradeLiabilities.some(
-                      (entry) =>
-                        entry.collateralPayment !== null ||
-                        entry.mortgageInterest !== null,
-                    ) ? (
-                      <ul className="mt-2 space-y-2 text-sm text-neutral-700">
-                        {incomingTradeLiabilities.map((entry) => {
-                          const details = [];
-                          if (entry.collateralPayment !== null) {
-                            details.push(
-                              `Collateral: ${formatMoney(entry.collateralPayment, currencySymbol)}/turn`,
-                            );
-                          }
-                          if (entry.mortgageInterest !== null) {
-                            details.push(
-                              `Mortgage interest: ${formatMoney(entry.mortgageInterest, currencySymbol)}/turn`,
-                            );
-                          }
-                          if (details.length === 0) {
-                            return null;
-                          }
-                          return (
-                            <li
-                              key={`liability-${entry.tileIndex}`}
-                              className="rounded-xl bg-white px-3 py-2"
-                            >
-                              <p className="text-xs font-semibold text-neutral-500">
-                                {getTileNameByIndex(entry.tileIndex)}
-                              </p>
-                              <p className="text-sm text-neutral-800">
-                                {details.join(" · ")}
-                              </p>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    ) : (
-                      <p className="mt-2 text-sm text-neutral-500">
-                        No liabilities on incoming properties.
-                      </p>
-                    )}
-                  </div>
-                </div>
-                <div className="mt-4 grid gap-2 sm:grid-cols-2">
-                  <button
-                    className="rounded-2xl border border-neutral-200 px-4 py-2 text-sm font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:border-neutral-100 disabled:text-neutral-400"
-                    type="button"
-                    onClick={() => {
-                      setIsIncomingTradeOpen(false);
-                      handleRejectTrade(incomingTradeProposal.id);
-                    }}
-                    disabled={actionLoading === "REJECT_TRADE"}
-                  >
-                    {actionLoading === "REJECT_TRADE" ? "Rejecting…" : "Reject"}
-                  </button>
-                  <button
-                    className="rounded-2xl bg-neutral-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-300"
-                    type="button"
-                    onClick={() => {
-                      setIsIncomingTradeOpen(false);
-                      handleAcceptTrade(incomingTradeProposal.id);
-                    }}
-                    disabled={actionLoading === "ACCEPT_TRADE"}
-                  >
-                    {actionLoading === "ACCEPT_TRADE" ? "Accepting…" : "Accept"}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </>
-        ) : null}
+        <TradeProposalModal
+          isOpen={isProposeTradeOpen}
+          counterparties={availableTradeCounterparties.map((player) => ({
+            id: player.id,
+            displayName: player.display_name ?? "Player",
+          }))}
+          selectedCounterpartyId={tradeCounterpartyId}
+          onSelectedCounterpartyChange={setTradeCounterpartyId}
+          offerCash={tradeOfferCash}
+          maxOfferCash={myPlayerBalance}
+          onOfferCashChange={setTradeOfferCash}
+          offerProperties={ownedProperties.map(({ tile, houses }) => ({
+            tileIndex: tile.index,
+            tileName: tile.name,
+            houses,
+          }))}
+          selectedOfferTileIndices={tradeOfferTiles}
+          onOfferTileToggle={(tileIndex, checked) => {
+            setTradeOfferTiles((prev) =>
+              checked
+                ? [...prev, tileIndex]
+                : prev.filter((entry) => entry !== tileIndex),
+            );
+          }}
+          requestCash={tradeRequestCash}
+          onRequestCashChange={setTradeRequestCash}
+          requestProperties={counterpartyOwnedProperties.map(({ tile, houses }) => ({
+            tileIndex: tile.index,
+            tileName: tile.name,
+            houses,
+          }))}
+          selectedRequestTileIndices={tradeRequestTiles}
+          onRequestTileToggle={(tileIndex, checked) => {
+            setTradeRequestTiles((prev) =>
+              checked
+                ? [...prev, tileIndex]
+                : prev.filter((entry) => entry !== tileIndex),
+            );
+          }}
+          canSubmitTradeProposal={canSubmitTradeProposal}
+          isSubmitting={actionLoading === "PROPOSE_TRADE"}
+          onClose={() => setIsProposeTradeOpen(false)}
+          onSubmit={handleSubmitTradeProposal}
+        />
+        <IncomingTradeModal
+          isOpen={Boolean(incomingTradeProposal && isIncomingTradeOpen)}
+          counterpartyName={incomingTradeCounterpartyName}
+          requestCash={incomingTradeRequestCash}
+          requestTileIndices={incomingTradeRequestTiles}
+          offerCash={incomingTradeOfferCash}
+          offerTileIndices={incomingTradeOfferTiles}
+          snapshotTiles={incomingTradeSnapshotTiles}
+          liabilities={incomingTradeLiabilities}
+          currencySymbol={currencySymbol}
+          getTileNameByIndex={getTileNameByIndex}
+          formatMoney={formatMoney}
+          isRejecting={actionLoading === "REJECT_TRADE"}
+          isAccepting={actionLoading === "ACCEPT_TRADE"}
+          onClose={() => setIsIncomingTradeOpen(false)}
+          onReject={() => {
+            if (!incomingTradeProposal) {
+              return;
+            }
+            setIsIncomingTradeOpen(false);
+            handleRejectTrade(incomingTradeProposal.id);
+          }}
+          onAccept={() => {
+            if (!incomingTradeProposal) {
+              return;
+            }
+            setIsIncomingTradeOpen(false);
+            handleAcceptTrade(incomingTradeProposal.id);
+          }}
+        />
         {tradeExecutionSummary && tradeExecutionPerspective ? (
           <>
             <div className="fixed inset-0 z-20 bg-black/45 backdrop-blur-[2px]" />
