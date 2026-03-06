@@ -2451,9 +2451,11 @@ const finalizeMoveResolution = async ({
     const [activeLoans, activeMortgages] = await Promise.all([
       fetchFromSupabaseWithService(
         `player_loans?select=principal,remaining_principal&game_id=eq.${gameId}&player_id=eq.${currentPlayer.id}&status=eq.active`,
+        { method: "GET" },
       ),
       fetchFromSupabaseWithService(
         `purchase_mortgages?select=principal_remaining,accrued_interest_unpaid&game_id=eq.${gameId}&player_id=eq.${currentPlayer.id}&status=eq.active`,
+        { method: "GET" },
       ),
     ]);
 
