@@ -29,6 +29,15 @@ import { getRules } from "@/lib/rules";
 import { getCurrentTileRent, ownsFullColorSet } from "@/lib/rent";
 import { formatCurrency, getCurrencyMetaFromBoardPack } from "@/lib/currency";
 import { useMarketInvestController } from "@/features/market-invest/useMarketInvestController";
+import { IncomingTradeModal } from "@/features/trade/components/IncomingTradeModal";
+import { TradeProposalModal } from "@/features/trade/components/TradeProposalModal";
+import {
+  hasTradeValue,
+  normalizeTradeSnapshot,
+  toOptionalPositiveCash,
+  toOptionalTileIndices,
+} from "@/features/trade/utils";
+import type { TradeProposal } from "@/features/trade/types";
 
 type GameMeta = {
   id: string;
@@ -137,7 +146,11 @@ type BankAction =
   | "TAKE_COLLATERAL_LOAN"
   | "PAYOFF_COLLATERAL_LOAN"
   | "DEFAULT_PROPERTY"
-  | "PAYOFF_PURCHASE_MORTGAGE";
+  | "PAYOFF_PURCHASE_MORTGAGE"
+  | "PROPOSE_TRADE"
+  | "ACCEPT_TRADE"
+  | "REJECT_TRADE"
+  | "CANCEL_TRADE";
 
 type BankActionRequest = {
   action: BankAction;
@@ -146,6 +159,12 @@ type BankActionRequest = {
   financing?: "MORTGAGE";
   loanId?: string;
   mortgageId?: string;
+  tradeId?: string;
+  counterpartyPlayerId?: string;
+  offerCash?: number;
+  offerTiles?: number[];
+  requestCash?: number;
+  requestTiles?: number[];
 };
 
 type OwnershipRow = {
@@ -165,12 +184,6 @@ type OwnershipByTile = Record<
     houses: number;
   }
 >;
-
-type TradeProposal = {
-  id: string;
-  status: string;
-  created_at: string;
-};
 
 type PlayerLoan = {
   id: string;
@@ -221,6 +234,13 @@ export default function PlayV2Page() {
   const [events, setEvents] = useState<GameEvent[]>([]);
   const [ownershipByTile, setOwnershipByTile] = useState<OwnershipByTile>({});
   const [tradeProposals, setTradeProposals] = useState<TradeProposal[]>([]);
+  const [isProposeTradeOpen, setIsProposeTradeOpen] = useState(false);
+  const [isIncomingTradeOpen, setIsIncomingTradeOpen] = useState(false);
+  const [tradeCounterpartyId, setTradeCounterpartyId] = useState<string>("");
+  const [tradeOfferCash, setTradeOfferCash] = useState<number>(0);
+  const [tradeOfferTiles, setTradeOfferTiles] = useState<number[]>([]);
+  const [tradeRequestCash, setTradeRequestCash] = useState<number>(0);
+  const [tradeRequestTiles, setTradeRequestTiles] = useState<number[]>([]);
   const [playerLoans, setPlayerLoans] = useState<PlayerLoan[]>([]);
   const [purchaseMortgages, setPurchaseMortgages] = useState<PurchaseMortgage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -278,6 +298,13 @@ export default function PlayV2Page() {
     setEvents([]);
     setOwnershipByTile({});
     setTradeProposals([]);
+    setIsProposeTradeOpen(false);
+    setIsIncomingTradeOpen(false);
+    setTradeCounterpartyId("");
+    setTradeOfferCash(0);
+    setTradeOfferTiles([]);
+    setTradeRequestCash(0);
+    setTradeRequestTiles([]);
     setPlayerLoans([]);
     setPurchaseMortgages([]);
     setNotice(null);
@@ -354,7 +381,7 @@ export default function PlayV2Page() {
 
   const loadTradeProposals = useCallback(async (gameId: string, accessToken?: string) => {
     const rows = await supabaseClient.fetchFromSupabase<TradeProposal[]>(
-      `trade_proposals?select=id,status,created_at&game_id=eq.${gameId}&order=created_at.desc`,
+      `trade_proposals?select=id,game_id,proposer_player_id,counterparty_player_id,offer_cash,offer_tile_indices,request_cash,request_tile_indices,snapshot,status,created_at&game_id=eq.${gameId}&order=created_at.desc`,
       { method: "GET" },
       accessToken,
     );
@@ -421,9 +448,11 @@ export default function PlayV2Page() {
     async (gameId: string, accessToken?: string) => {
       await Promise.all([
         loadGameState(gameId, accessToken),
+        loadPlayers(gameId, accessToken),
         loadOwnership(gameId, accessToken),
         loadLoans(gameId, accessToken, currentUserPlayerId),
         loadPurchaseMortgages(gameId, accessToken, currentUserPlayerId),
+        loadTradeProposals(gameId, accessToken),
         loadEvents(gameId, accessToken),
       ]);
     },
@@ -433,7 +462,9 @@ export default function PlayV2Page() {
       loadGameState,
       loadLoans,
       loadOwnership,
+      loadPlayers,
       loadPurchaseMortgages,
+      loadTradeProposals,
     ],
   );
 
@@ -999,6 +1030,12 @@ export default function PlayV2Page() {
         ...(request.financing ? { financing: request.financing } : {}),
         ...(request.loanId ? { loanId: request.loanId } : {}),
         ...(request.mortgageId ? { mortgageId: request.mortgageId } : {}),
+        ...(request.tradeId ? { tradeId: request.tradeId } : {}),
+        ...(request.counterpartyPlayerId ? { counterpartyPlayerId: request.counterpartyPlayerId } : {}),
+        ...(request.offerCash !== undefined ? { offerCash: request.offerCash } : {}),
+        ...(request.offerTiles ? { offerTiles: request.offerTiles } : {}),
+        ...(request.requestCash !== undefined ? { requestCash: request.requestCash } : {}),
+        ...(request.requestTiles ? { requestTiles: request.requestTiles } : {}),
       };
 
       const runActionRequest = async (accessToken: string) => {
@@ -1573,6 +1610,167 @@ export default function PlayV2Page() {
     selectedBoardPack?.economy,
     selectedBoardPack?.tiles,
   ]);
+
+
+
+  const availableTradeCounterparties = useMemo(() => {
+    if (!currentUserPlayer) {
+      return [];
+    }
+    return players
+      .filter((player) => player.id !== currentUserPlayer.id && !player.is_eliminated)
+      .map((player) => ({ id: player.id, displayName: player.display_name }));
+  }, [currentUserPlayer, players]);
+
+  const counterpartyOwnedProperties = useMemo(() => {
+    if (!tradeCounterpartyId || !selectedBoardPack?.tiles) {
+      return [];
+    }
+
+    return selectedBoardPack.tiles
+      .filter(
+        (tile) =>
+          ["PROPERTY", "RAIL", "UTILITY"].includes(tile.type) &&
+          ownershipByTile[tile.index]?.owner_player_id === tradeCounterpartyId,
+      )
+      .map((tile) => ({
+        tileIndex: tile.index,
+        tileName: tile.name,
+        houses: ownershipByTile[tile.index]?.houses ?? 0,
+      }));
+  }, [ownershipByTile, selectedBoardPack?.tiles, tradeCounterpartyId]);
+
+  const canSubmitTradeProposal = useMemo(() => {
+    return Boolean(tradeCounterpartyId) &&
+      hasTradeValue({
+        offerCash: tradeOfferCash,
+        offerTiles: tradeOfferTiles,
+        requestCash: tradeRequestCash,
+        requestTiles: tradeRequestTiles,
+      });
+  }, [tradeCounterpartyId, tradeOfferCash, tradeOfferTiles, tradeRequestCash, tradeRequestTiles]);
+
+  const incomingTradeProposal = useMemo(() => {
+    if (!currentUserPlayer) {
+      return null;
+    }
+    return tradeProposals.find((proposal) =>
+      proposal.status === "PENDING" && proposal.counterparty_player_id === currentUserPlayer.id,
+    ) ?? null;
+  }, [currentUserPlayer, tradeProposals]);
+
+  const incomingTradeSnapshotTiles = useMemo(
+    () => normalizeTradeSnapshot(incomingTradeProposal?.snapshot ?? null),
+    [incomingTradeProposal?.snapshot],
+  );
+
+  const getPlayerNameById = useCallback((playerId: string | null | undefined) => {
+    if (!playerId) {
+      return "Player";
+    }
+    return players.find((player) => player.id === playerId)?.display_name ?? "Player";
+  }, [players]);
+
+  const getTileNameByIndex = useCallback((tileIndex: number) => {
+    return boardTilesByIndex.get(tileIndex)?.name ?? `Tile ${tileIndex}`;
+  }, [boardTilesByIndex]);
+
+  const incomingTradeCounterpartyName = incomingTradeProposal
+    ? getPlayerNameById(incomingTradeProposal.proposer_player_id)
+    : "";
+  const formatTradeMoney = useCallback((amount: number) => {
+    return formatMoney(amount);
+  }, [formatMoney]);
+
+
+  const openProposeTrade = useCallback(() => {
+    if (!currentUserPlayer) {
+      setNotice("Join a game lobby first.");
+      return;
+    }
+
+    if (availableTradeCounterparties.length === 0) {
+      setNotice("No other players are available to trade.");
+      return;
+    }
+
+    const defaultCounterparty = availableTradeCounterparties[0]?.id ?? "";
+    setTradeCounterpartyId(defaultCounterparty);
+    setTradeOfferCash(0);
+    setTradeOfferTiles([]);
+    setTradeRequestCash(0);
+    setTradeRequestTiles([]);
+    setIsProposeTradeOpen(true);
+  }, [availableTradeCounterparties, currentUserPlayer]);
+
+  const handleSubmitTradeProposal = useCallback(async () => {
+    if (!tradeCounterpartyId) {
+      setNotice("Select a player to trade with.");
+      return;
+    }
+
+    if (!hasTradeValue({
+      offerCash: tradeOfferCash,
+      offerTiles: tradeOfferTiles,
+      requestCash: tradeRequestCash,
+      requestTiles: tradeRequestTiles,
+    })) {
+      setNotice("Add cash or properties to the trade.");
+      return;
+    }
+
+    await handleBankAction({
+      action: "PROPOSE_TRADE",
+      counterpartyPlayerId: tradeCounterpartyId,
+      offerCash: toOptionalPositiveCash(tradeOfferCash),
+      offerTiles: toOptionalTileIndices(tradeOfferTiles),
+      requestCash: toOptionalPositiveCash(tradeRequestCash),
+      requestTiles: toOptionalTileIndices(tradeRequestTiles),
+    });
+
+    setIsProposeTradeOpen(false);
+  }, [handleBankAction, tradeCounterpartyId, tradeOfferCash, tradeOfferTiles, tradeRequestCash, tradeRequestTiles]);
+
+  const toggleOfferTile = useCallback((tileIndex: number, checked: boolean) => {
+    setTradeOfferTiles((current) =>
+      checked ? Array.from(new Set([...current, tileIndex])) : current.filter((entry) => entry !== tileIndex),
+    );
+  }, []);
+
+  const toggleRequestTile = useCallback((tileIndex: number, checked: boolean) => {
+    setTradeRequestTiles((current) =>
+      checked ? Array.from(new Set([...current, tileIndex])) : current.filter((entry) => entry !== tileIndex),
+    );
+  }, []);
+
+  const handleAcceptTrade = useCallback((tradeId: string) => {
+    void handleBankAction({ action: "ACCEPT_TRADE", tradeId });
+    setIsIncomingTradeOpen(false);
+  }, [handleBankAction]);
+
+  const handleRejectTrade = useCallback((tradeId: string) => {
+    void handleBankAction({ action: "REJECT_TRADE", tradeId });
+    setIsIncomingTradeOpen(false);
+  }, [handleBankAction]);
+
+  const handleCancelOutgoingTrade = useCallback((tradeId: string) => {
+    void handleBankAction({ action: "CANCEL_TRADE", tradeId });
+  }, [handleBankAction]);
+
+  const outgoingPendingTrade = useMemo(() => {
+    if (!currentUserPlayer) {
+      return null;
+    }
+    return tradeProposals.find((proposal) => proposal.status === "PENDING" && proposal.proposer_player_id === currentUserPlayer.id) ?? null;
+  }, [currentUserPlayer, tradeProposals]);
+
+  const ownTradePropertyOptions = useMemo(() =>
+    ownedProperties.map((entry) => ({
+      tileIndex: entry.tile.index,
+      tileName: entry.tile.name,
+      houses: entry.housesCount,
+    })),
+  [ownedProperties]);
 
   const handleOwnedActionClick = useCallback((args: {
     tileIndex: number;
@@ -2392,9 +2590,57 @@ export default function PlayV2Page() {
         )
       }
       tradeDrawerContent={(
-        <div className="rounded-lg border border-white/10 bg-white/5 p-3 text-sm text-white/80">
-          Trade coming soon
-        </div>
+        <section className="space-y-3 text-sm text-white/85">
+          <div className="rounded-lg border border-white/10 bg-white/5 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-white/60">Trade</p>
+            <p className="mt-1 text-xs text-white/70">Send offers or respond to pending incoming trades.</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="rounded-md border border-indigo-300/40 bg-indigo-500/20 px-2.5 py-1.5 text-xs font-semibold text-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={actionLoading !== null || availableTradeCounterparties.length === 0}
+                onClick={openProposeTrade}
+              >
+                Propose trade
+              </button>
+              <button
+                type="button"
+                className="rounded-md border border-emerald-300/40 bg-emerald-500/20 px-2.5 py-1.5 text-xs font-semibold text-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!incomingTradeProposal}
+                onClick={() => setIsIncomingTradeOpen(true)}
+              >
+                Review incoming
+              </button>
+            </div>
+          </div>
+
+          {incomingTradeProposal ? (
+            <div className="rounded-lg border border-emerald-300/30 bg-emerald-500/10 p-3 text-xs text-emerald-100">
+              Incoming from {incomingTradeCounterpartyName}
+            </div>
+          ) : (
+            <div className="rounded-lg border border-white/10 bg-white/5 p-3 text-xs text-white/60">
+              No incoming trade offer right now.
+            </div>
+          )}
+
+          {outgoingPendingTrade ? (
+            <div className="rounded-lg border border-amber-300/35 bg-amber-500/10 p-3">
+              <p className="text-xs text-amber-100">Outgoing proposal pending</p>
+              <p className="mt-1 text-xs text-white/70">
+                Waiting on {getPlayerNameById(outgoingPendingTrade.counterparty_player_id)}
+              </p>
+              <button
+                type="button"
+                className="mt-2 rounded-md border border-amber-300/45 px-2.5 py-1 text-xs font-semibold text-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={actionLoading === "CANCEL_TRADE"}
+                onClick={() => handleCancelOutgoingTrade(outgoingPendingTrade.id)}
+              >
+                {actionLoading === "CANCEL_TRADE" ? "Cancelling…" : "Cancel proposal"}
+              </button>
+            </div>
+          ) : null}
+        </section>
       )}
       boardViewport={(
         <BoardViewport
@@ -2458,6 +2704,58 @@ export default function PlayV2Page() {
           </button>
         </div>
       )}
+    />
+    <TradeProposalModal
+      isOpen={isProposeTradeOpen}
+      counterparties={availableTradeCounterparties}
+      selectedCounterpartyId={tradeCounterpartyId}
+      onSelectedCounterpartyChange={(value) => {
+        setTradeCounterpartyId(value);
+        setTradeRequestTiles([]);
+      }}
+      offerCash={tradeOfferCash}
+      maxOfferCash={Math.max(0, currentUserCash ?? 0)}
+      onOfferCashChange={(value) => setTradeOfferCash(Math.min(Math.max(0, value), Math.max(0, currentUserCash ?? 0)))}
+      offerProperties={ownTradePropertyOptions}
+      selectedOfferTileIndices={tradeOfferTiles}
+      onOfferTileToggle={toggleOfferTile}
+      requestCash={tradeRequestCash}
+      onRequestCashChange={(value) => setTradeRequestCash(Math.max(0, value))}
+      requestProperties={counterpartyOwnedProperties}
+      selectedRequestTileIndices={tradeRequestTiles}
+      onRequestTileToggle={toggleRequestTile}
+      canSubmitTradeProposal={canSubmitTradeProposal}
+      isSubmitting={actionLoading === "PROPOSE_TRADE"}
+      onClose={() => setIsProposeTradeOpen(false)}
+      onSubmit={() => void handleSubmitTradeProposal()}
+    />
+    <IncomingTradeModal
+      isOpen={Boolean(incomingTradeProposal && isIncomingTradeOpen)}
+      counterpartyName={incomingTradeCounterpartyName}
+      requestCash={incomingTradeProposal?.request_cash ?? 0}
+      requestTileIndices={incomingTradeProposal?.request_tile_indices ?? []}
+      offerCash={incomingTradeProposal?.offer_cash ?? 0}
+      offerTileIndices={incomingTradeProposal?.offer_tile_indices ?? []}
+      snapshotTiles={incomingTradeSnapshotTiles}
+      liabilities={[]}
+      currencySymbol={currencySymbol}
+      getTileNameByIndex={getTileNameByIndex}
+      formatMoney={formatTradeMoney}
+      isRejecting={actionLoading === "REJECT_TRADE"}
+      isAccepting={actionLoading === "ACCEPT_TRADE"}
+      onClose={() => setIsIncomingTradeOpen(false)}
+      onReject={() => {
+        if (!incomingTradeProposal) {
+          return;
+        }
+        handleRejectTrade(incomingTradeProposal.id);
+      }}
+      onAccept={() => {
+        if (!incomingTradeProposal) {
+          return;
+        }
+        handleAcceptTrade(incomingTradeProposal.id);
+      }}
     />
     {fullscreenEventNode ? (
       <div className="fixed inset-0 z-[200]">
