@@ -12,6 +12,11 @@ type WalletButtonProps = {
   onClick: () => void;
 };
 
+type MarketButtonProps = {
+  open: boolean;
+  onClick: () => void;
+};
+
 function WalletButton({ open, onClick }: WalletButtonProps) {
   return (
     <button
@@ -24,6 +29,23 @@ function WalletButton({ open, onClick }: WalletButtonProps) {
     >
       <span className="bank-icon" aria-hidden>
         🏦
+      </span>
+    </button>
+  );
+}
+
+function MarketButton({ open, onClick }: MarketButtonProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center justify-center rounded border border-white/30 bg-neutral-900 px-2 py-1 text-xs font-semibold"
+      aria-expanded={open}
+      aria-controls="left-drawer"
+      aria-label="Open market panel"
+    >
+      <span className="market-icon" aria-hidden>
+        📈
       </span>
     </button>
   );
@@ -108,11 +130,12 @@ type PlayV2ShellProps = {
   debugPanel?: ReactNode;
   boardViewport: ReactNode;
   leftDrawerContent?: ReactNode;
+  marketDrawerContent?: ReactNode;
   rightDrawerContent?: ReactNode;
   leftOpen?: boolean;
   onLeftOpenChange?: (open: boolean) => void;
-  leftDrawerMode?: "info" | "wallet";
-  onLeftDrawerModeChange?: (mode: "info" | "wallet") => void;
+  leftDrawerMode?: "info" | "wallet" | "market";
+  onLeftDrawerModeChange?: (mode: "info" | "wallet" | "market") => void;
   showTurnActions?: boolean;
   canRoll?: boolean;
   canEndTurn?: boolean;
@@ -145,6 +168,7 @@ export default function PlayV2Shell({
   notice,
   boardViewport,
   leftDrawerContent,
+  marketDrawerContent,
   rightDrawerContent,
   leftOpen: controlledLeftOpen,
   onLeftOpenChange,
@@ -170,7 +194,7 @@ export default function PlayV2Shell({
   boardPackEconomy,
 }: PlayV2ShellProps) {
   const [uncontrolledLeftOpen, setUncontrolledLeftOpen] = useState(false);
-  const [uncontrolledLeftDrawerMode, setUncontrolledLeftDrawerMode] = useState<"info" | "wallet">("info");
+  const [uncontrolledLeftDrawerMode, setUncontrolledLeftDrawerMode] = useState<"info" | "wallet" | "market">("info");
   const [rightOpen, setRightOpen] = useState(false);
   const [showNetWorthPopover, setShowNetWorthPopover] = useState(false);
   const wasDecisionActive = useRef(decisionActive);
@@ -239,7 +263,7 @@ export default function PlayV2Shell({
     return undefined;
   }, [auctionActive, decisionActive, rightDrawerLocked]);
 
-  const setLeftDrawerMode = (nextMode: "info" | "wallet") => {
+  const setLeftDrawerMode = (nextMode: "info" | "wallet" | "market") => {
     if (controlledLeftDrawerMode === undefined) {
       setUncontrolledLeftDrawerMode(nextMode);
     }
@@ -253,7 +277,7 @@ export default function PlayV2Shell({
     onLeftOpenChange?.(nextOpen);
   };
 
-  const setLeftDrawerState = (nextState: { isOpen: boolean; mode: "info" | "wallet" }) => {
+  const setLeftDrawerState = (nextState: { isOpen: boolean; mode: "info" | "wallet" | "market" }) => {
     setLeftDrawerMode(nextState.mode);
     setLeftOpen(nextState.isOpen);
   };
@@ -284,6 +308,20 @@ export default function PlayV2Shell({
     }
 
     setLeftDrawerState({ isOpen: true, mode: "wallet" });
+  };
+
+  const handleMarketToggle = () => {
+    if (!leftOpen) {
+      setLeftDrawerState({ isOpen: true, mode: "market" });
+      return;
+    }
+
+    if (leftDrawerMode === "market") {
+      setLeftDrawerState({ isOpen: false, mode: "market" });
+      return;
+    }
+
+    setLeftDrawerState({ isOpen: true, mode: "market" });
   };
 
   const isRolling = actionLoading === "ROLL_DICE";
@@ -396,6 +434,10 @@ export default function PlayV2Shell({
               open={leftOpen && leftDrawerMode === "wallet"}
               onClick={handleWalletToggle}
             />
+            <MarketButton
+              open={leftOpen && leftDrawerMode === "market"}
+              onClick={handleMarketToggle}
+            />
           </div>
 
           <button
@@ -470,7 +512,7 @@ export default function PlayV2Shell({
         >
           {leftDrawerMode === "info" ? (
             <div className="min-h-0 flex-1 overflow-auto p-3">{leftDrawerContent}</div>
-          ) : (
+          ) : leftDrawerMode === "wallet" ? (
             <WalletPanel
               ownedCount={walletOwnedCount}
               loanCount={walletLoanCount}
@@ -483,6 +525,8 @@ export default function PlayV2Shell({
               loansContent={walletLoansContent}
               mortgagesContent={walletMortgagesContent}
             />
+          ) : (
+            <div className="min-h-0 flex-1 overflow-auto p-3">{marketDrawerContent}</div>
           )}
         </aside>
 
@@ -513,6 +557,11 @@ export default function PlayV2Shell({
         }
 
         .bank-icon {
+          font-size: 16px;
+          line-height: 1;
+        }
+
+        .market-icon {
           font-size: 16px;
           line-height: 1;
         }

@@ -230,7 +230,7 @@ export default function PlayV2Page() {
   const [gameMetaError, setGameMetaError] = useState<string | null>(null);
   const [selectedTileIndex, setSelectedTileIndex] = useState<number | null>(null);
   const [isLeftDrawerOpen, setIsLeftDrawerOpen] = useState(false);
-  const [leftDrawerMode, setLeftDrawerMode] = useState<"info" | "wallet">("info");
+  const [leftDrawerMode, setLeftDrawerMode] = useState<"info" | "wallet" | "market">("info");
   const [pendingGoToJailAckVersion, setPendingGoToJailAckVersion] = useState<number | null>(null);
   const [sellToMarketTileIndex, setSellToMarketTileIndex] = useState<number | null>(null);
   const [payoffLoanId, setPayoffLoanId] = useState<string | null>(null);
@@ -2326,6 +2326,28 @@ export default function PlayV2Page() {
       decisionActive={drawerDecisionNode !== null}
       rightDrawerLocked={fullscreenEventNode !== null}
       auctionActive={auctionActive}
+      marketDrawerContent={(
+        <section className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-white/60">Invest in Market</p>
+          <div className="rounded-xl border border-white/10 bg-white/95 p-2 text-neutral-900">
+            <InvestPanel
+              currencySymbol={investCurrencySymbol}
+              currencyCode={investCurrencyCode}
+              cashLocal={currentUserCash ?? 0}
+              fxRate={investFxRate}
+              prices={marketPrices}
+              holdings={playerHoldings}
+              collapsed={investPanelCollapsed}
+              onToggleCollapsed={() => setInvestPanelCollapsed((previous) => !previous)}
+              isTrading={isTradeSubmitting}
+              isRefreshingMarket={isMarketRefreshSubmitting}
+              tradeError={tradeError}
+              onRefreshMarket={handleManualMarketRefresh}
+              onTrade={handleMarketTrade}
+            />
+          </div>
+        </section>
+      )}
       leftDrawerContent={(
         <div className="h-full space-y-4">
           <section className="space-y-2">
@@ -2353,27 +2375,6 @@ export default function PlayV2Page() {
                 Select a tile to view the title deed
               </p>
             )}
-          </section>
-
-          <section className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-white/60">Invest in Market</p>
-            <div className="rounded-xl border border-white/10 bg-white/95 p-2 text-neutral-900">
-              <InvestPanel
-                currencySymbol={investCurrencySymbol}
-                currencyCode={investCurrencyCode}
-                cashLocal={currentUserCash ?? 0}
-                fxRate={investFxRate}
-                prices={marketPrices}
-                holdings={playerHoldings}
-                collapsed={investPanelCollapsed}
-                onToggleCollapsed={() => setInvestPanelCollapsed((previous) => !previous)}
-                isTrading={isTradeSubmitting}
-                isRefreshingMarket={isMarketRefreshSubmitting}
-                tradeError={tradeError}
-                onRefreshMarket={handleManualMarketRefresh}
-                onTrade={handleMarketTrade}
-              />
-            </div>
           </section>
         </div>
       )}
