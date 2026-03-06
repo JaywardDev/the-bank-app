@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import Image from "next/image";
 import type { BoardPackEconomy } from "@/lib/boardPacks";
 import { formatCurrency, getCurrencyMetaFromEconomy } from "@/lib/currency";
@@ -15,6 +15,18 @@ type WalletButtonProps = {
 type MarketButtonProps = {
   open: boolean;
   onClick: () => void;
+};
+
+type DecisionButtonProps = {
+  open: boolean;
+  onClick: () => void;
+  disabled?: boolean;
+};
+
+type TradeButtonProps = {
+  open: boolean;
+  onClick: () => void;
+  disabled?: boolean;
 };
 
 function WalletButton({ open, onClick }: WalletButtonProps) {
@@ -46,6 +58,42 @@ function MarketButton({ open, onClick }: MarketButtonProps) {
     >
       <span className="market-icon" aria-hidden>
         📈
+      </span>
+    </button>
+  );
+}
+
+function DecisionButton({ open, onClick, disabled = false }: DecisionButtonProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center justify-center rounded border border-white/30 bg-neutral-900 px-2 py-1 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40"
+      aria-expanded={open}
+      aria-controls="right-drawer"
+      aria-label="Open decisions panel"
+      disabled={disabled}
+    >
+      <span className="decision-icon" aria-hidden>
+        ⚖️
+      </span>
+    </button>
+  );
+}
+
+function TradeButton({ open, onClick, disabled = false }: TradeButtonProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center justify-center rounded border border-white/30 bg-neutral-900 px-2 py-1 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40"
+      aria-expanded={open}
+      aria-controls="right-drawer"
+      aria-label="Open trade panel"
+      disabled={disabled}
+    >
+      <span className="trade-icon" aria-hidden>
+        🤝
       </span>
     </button>
   );
@@ -131,11 +179,16 @@ type PlayV2ShellProps = {
   boardViewport: ReactNode;
   leftDrawerContent?: ReactNode;
   marketDrawerContent?: ReactNode;
-  rightDrawerContent?: ReactNode;
+  decisionDrawerContent?: ReactNode;
+  tradeDrawerContent?: ReactNode;
   leftOpen?: boolean;
   onLeftOpenChange?: (open: boolean) => void;
   leftDrawerMode?: "info" | "wallet" | "market";
   onLeftDrawerModeChange?: (mode: "info" | "wallet" | "market") => void;
+  rightOpen?: boolean;
+  onRightOpenChange?: (open: boolean) => void;
+  rightDrawerMode?: "decision" | "trade";
+  onRightDrawerModeChange?: (mode: "decision" | "trade") => void;
   showTurnActions?: boolean;
   canRoll?: boolean;
   canEndTurn?: boolean;
@@ -169,11 +222,16 @@ export default function PlayV2Shell({
   boardViewport,
   leftDrawerContent,
   marketDrawerContent,
-  rightDrawerContent,
+  decisionDrawerContent,
+  tradeDrawerContent,
   leftOpen: controlledLeftOpen,
   onLeftOpenChange,
   leftDrawerMode: controlledLeftDrawerMode,
   onLeftDrawerModeChange,
+  rightOpen: controlledRightOpen,
+  onRightOpenChange,
+  rightDrawerMode: controlledRightDrawerMode,
+  onRightDrawerModeChange,
   showTurnActions = true,
   canRoll = false,
   canEndTurn = false,
@@ -195,13 +253,17 @@ export default function PlayV2Shell({
 }: PlayV2ShellProps) {
   const [uncontrolledLeftOpen, setUncontrolledLeftOpen] = useState(false);
   const [uncontrolledLeftDrawerMode, setUncontrolledLeftDrawerMode] = useState<"info" | "wallet" | "market">("info");
-  const [rightOpen, setRightOpen] = useState(false);
+  const [uncontrolledRightOpen, setUncontrolledRightOpen] = useState(false);
+  const [uncontrolledRightDrawerMode, setUncontrolledRightDrawerMode] = useState<"decision" | "trade">("decision");
   const [showNetWorthPopover, setShowNetWorthPopover] = useState(false);
   const wasDecisionActive = useRef(decisionActive);
   const rightDrawerAutoOpenedForDecision = useRef(false);
+  const previousModeBeforeDecisionOverride = useRef<"decision" | "trade" | null>(null);
   const netWorthPopoverRef = useRef<HTMLDivElement | null>(null);
   const leftOpen = controlledLeftOpen ?? uncontrolledLeftOpen;
   const leftDrawerMode = controlledLeftDrawerMode ?? uncontrolledLeftDrawerMode;
+  const rightOpen = controlledRightOpen ?? uncontrolledRightOpen;
+  const rightDrawerMode = controlledRightDrawerMode ?? uncontrolledRightDrawerMode;
 
   useEffect(() => {
     if (!showNetWorthPopover) {
@@ -228,19 +290,47 @@ export default function PlayV2Shell({
     };
   }, [showNetWorthPopover]);
 
+
+  const setRightDrawerMode = useCallback((nextMode: "decision" | "trade") => {
+    if (controlledRightDrawerMode === undefined) {
+      setUncontrolledRightDrawerMode(nextMode);
+    }
+    onRightDrawerModeChange?.(nextMode);
+  }, [controlledRightDrawerMode, onRightDrawerModeChange]);
+
+  const setRightOpen = useCallback((nextOpen: boolean) => {
+    if (controlledRightOpen === undefined) {
+      setUncontrolledRightOpen(nextOpen);
+    }
+    onRightOpenChange?.(nextOpen);
+  }, [controlledRightOpen, onRightOpenChange]);
+
+  const setRightDrawerState = (nextState: { isOpen: boolean; mode: "decision" | "trade" }) => {
+    setRightDrawerMode(nextState.mode);
+    setRightOpen(nextState.isOpen);
+  };
+
+
   useEffect(() => {
     if (rightDrawerLocked) {
       const timer = window.setTimeout(() => {
         setRightOpen(false);
         rightDrawerAutoOpenedForDecision.current = false;
+        previousModeBeforeDecisionOverride.current = null;
       }, 0);
       return () => window.clearTimeout(timer);
     }
 
     if (!wasDecisionActive.current && decisionActive && !auctionActive) {
+      if (rightDrawerMode !== "decision") {
+        previousModeBeforeDecisionOverride.current = rightDrawerMode;
+      }
       const timer = window.setTimeout(() => {
+        setRightDrawerMode("decision");
         setRightOpen(true);
-        rightDrawerAutoOpenedForDecision.current = true;
+        if (!rightOpen) {
+          rightDrawerAutoOpenedForDecision.current = true;
+        }
       }, 0);
       wasDecisionActive.current = decisionActive;
       return () => window.clearTimeout(timer);
@@ -257,11 +347,23 @@ export default function PlayV2Shell({
         wasDecisionActive.current = decisionActive;
         return () => window.clearTimeout(timer);
       }
+
+      const modeToRestore = previousModeBeforeDecisionOverride.current;
+      if (modeToRestore && rightOpen) {
+        const timer = window.setTimeout(() => {
+          setRightDrawerMode(modeToRestore);
+        }, 0);
+        previousModeBeforeDecisionOverride.current = null;
+        wasDecisionActive.current = decisionActive;
+        return () => window.clearTimeout(timer);
+      }
+
+      previousModeBeforeDecisionOverride.current = null;
     }
 
     wasDecisionActive.current = decisionActive;
     return undefined;
-  }, [auctionActive, decisionActive, rightDrawerLocked]);
+  }, [auctionActive, decisionActive, rightDrawerLocked, rightDrawerMode, rightOpen, setRightDrawerMode, setRightOpen]);
 
   const setLeftDrawerMode = (nextMode: "info" | "wallet" | "market") => {
     if (controlledLeftDrawerMode === undefined) {
@@ -322,6 +424,48 @@ export default function PlayV2Shell({
     }
 
     setLeftDrawerState({ isOpen: true, mode: "market" });
+  };
+
+  const handleDecisionToggle = () => {
+    if (rightDrawerLocked) {
+      return;
+    }
+
+    rightDrawerAutoOpenedForDecision.current = false;
+    previousModeBeforeDecisionOverride.current = null;
+
+    if (!rightOpen) {
+      setRightDrawerState({ isOpen: true, mode: "decision" });
+      return;
+    }
+
+    if (rightDrawerMode === "decision") {
+      setRightDrawerState({ isOpen: false, mode: "decision" });
+      return;
+    }
+
+    setRightDrawerState({ isOpen: true, mode: "decision" });
+  };
+
+  const handleTradeToggle = () => {
+    if (rightDrawerLocked || decisionActive) {
+      return;
+    }
+
+    rightDrawerAutoOpenedForDecision.current = false;
+    previousModeBeforeDecisionOverride.current = null;
+
+    if (!rightOpen) {
+      setRightDrawerState({ isOpen: true, mode: "trade" });
+      return;
+    }
+
+    if (rightDrawerMode === "trade") {
+      setRightDrawerState({ isOpen: false, mode: "trade" });
+      return;
+    }
+
+    setRightDrawerState({ isOpen: true, mode: "trade" });
   };
 
   const isRolling = actionLoading === "ROLL_DICE";
@@ -440,28 +584,36 @@ export default function PlayV2Shell({
             />
           </div>
 
-          <button
-            type="button"
-            onClick={() => {
-              if (rightDrawerLocked) {
-                return;
-              }
-              rightDrawerAutoOpenedForDecision.current = false;
-              setRightOpen((value) => !value);
-            }}
-            className={`absolute top-1/2 z-[70] inline-flex -translate-y-1/2 items-center justify-center rounded-l-lg border border-white/20 bg-neutral-900 px-2 py-3 text-xs font-semibold uppercase tracking-wide transition-[right] duration-200 ${
+          <div
+            className={`absolute top-1/2 z-[70] flex -translate-y-1/2 flex-col gap-2 transition-[right] duration-200 ${
               rightOpen ? "right-72" : "right-0"
             }`}
-            aria-label="Open right panel"
-            disabled={rightDrawerLocked}
           >
-            <span className="chevron chevron-right" aria-hidden />
-            {decisionNeedsAttention ? (
-              <span className="absolute -left-1 -top-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-none text-white">
-                !
-              </span>
-            ) : null}
-          </button>
+            <button
+              type="button"
+              onClick={handleDecisionToggle}
+              className="inline-flex items-center justify-center rounded-l-lg border border-white/20 bg-neutral-900 px-2 py-3 text-xs font-semibold uppercase tracking-wide"
+              aria-label="Open right panel"
+              disabled={rightDrawerLocked}
+            >
+              <span className="chevron chevron-right" aria-hidden />
+              {decisionNeedsAttention ? (
+                <span className="absolute -left-1 -top-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-none text-white">
+                  !
+                </span>
+              ) : null}
+            </button>
+            <DecisionButton
+              open={rightOpen && rightDrawerMode === "decision"}
+              onClick={handleDecisionToggle}
+              disabled={rightDrawerLocked}
+            />
+            <TradeButton
+              open={rightOpen && rightDrawerMode === "trade"}
+              onClick={handleTradeToggle}
+              disabled={rightDrawerLocked || decisionActive}
+            />
+          </div>
 
           {showTurnActions ? (
             <section className="absolute bottom-2 right-2 z-20 flex flex-col items-center gap-3">
@@ -531,11 +683,14 @@ export default function PlayV2Shell({
         </aside>
 
         <aside
+          id="right-drawer"
           className={`absolute bottom-0 right-0 top-9 z-[70] flex w-72 flex-col border-l border-white/15 bg-neutral-900 transition-transform duration-200 md:top-10 ${
             rightOpen ? "translate-x-0" : "translate-x-full"
           }`}
         >
-          <div className="min-h-0 flex-1 overflow-auto p-4">{rightDrawerContent}</div>
+          <div className="min-h-0 flex-1 overflow-auto p-4">
+            {rightDrawerMode === "decision" ? decisionDrawerContent : tradeDrawerContent}
+          </div>
         </aside>
       </div>
 
@@ -562,6 +717,12 @@ export default function PlayV2Shell({
         }
 
         .market-icon {
+          font-size: 16px;
+          line-height: 1;
+        }
+
+        .decision-icon,
+        .trade-icon {
           font-size: 16px;
           line-height: 1;
         }

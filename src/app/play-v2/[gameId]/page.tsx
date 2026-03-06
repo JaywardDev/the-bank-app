@@ -231,6 +231,8 @@ export default function PlayV2Page() {
   const [selectedTileIndex, setSelectedTileIndex] = useState<number | null>(null);
   const [isLeftDrawerOpen, setIsLeftDrawerOpen] = useState(false);
   const [leftDrawerMode, setLeftDrawerMode] = useState<"info" | "wallet" | "market">("info");
+  const [isRightDrawerOpen, setIsRightDrawerOpen] = useState(false);
+  const [rightDrawerMode, setRightDrawerMode] = useState<"decision" | "trade">("decision");
   const [pendingGoToJailAckVersion, setPendingGoToJailAckVersion] = useState<number | null>(null);
   const [sellToMarketTileIndex, setSellToMarketTileIndex] = useState<number | null>(null);
   const [payoffLoanId, setPayoffLoanId] = useState<string | null>(null);
@@ -2311,6 +2313,10 @@ export default function PlayV2Page() {
       onLeftOpenChange={setIsLeftDrawerOpen}
       leftDrawerMode={leftDrawerMode}
       onLeftDrawerModeChange={setLeftDrawerMode}
+      rightOpen={isRightDrawerOpen}
+      onRightOpenChange={setIsRightDrawerOpen}
+      rightDrawerMode={rightDrawerMode}
+      onRightDrawerModeChange={setRightDrawerMode}
       canRoll={canRoll}
       canEndTurn={canEndTurn}
       actionLoading={actionLoading}
@@ -2378,13 +2384,18 @@ export default function PlayV2Page() {
           </section>
         </div>
       )}
-      rightDrawerContent={
+      decisionDrawerContent={
         !auctionActive && drawerDecisionNode !== null ? (
           <div className="space-y-3">{drawerDecisionNode}</div>
         ) : (
           <p className="text-sm text-white/70">No active decision</p>
         )
       }
+      tradeDrawerContent={(
+        <div className="rounded-lg border border-white/10 bg-white/5 p-3 text-sm text-white/80">
+          Trade coming soon
+        </div>
+      )}
       boardViewport={(
         <BoardViewport
           boardPackId={gameMeta?.board_pack_id ?? null}
