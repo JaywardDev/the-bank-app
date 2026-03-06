@@ -16,6 +16,7 @@ import JailDecisionModalV2 from "@/components/play-v2/JailDecisionModalV2";
 import ConfirmActionModalV2 from "@/components/play-v2/ConfirmActionModalV2";
 import RotateToLandscapeOverlay from "@/components/play-v2/RotateToLandscapeOverlay";
 import ActivityPopupV2 from "@/components/play-v2/ActivityPopupV2";
+import InvestPanel from "@/app/components/InvestPanel";
 import { TitleDeedPreview } from "@/app/components/TitleDeedPreview";
 import { getDevelopmentLevelLabel } from "@/components/play-v2/utils/developmentLabels";
 import { DEFAULT_BOARD_PACK_ECONOMY, getBoardPackById } from "@/lib/boardPacks";
@@ -27,6 +28,7 @@ import {
 import { getRules } from "@/lib/rules";
 import { getCurrentTileRent, ownsFullColorSet } from "@/lib/rent";
 import { formatCurrency, getCurrencyMetaFromBoardPack } from "@/lib/currency";
+import { useMarketInvestController } from "@/features/market-invest/useMarketInvestController";
 
 type GameMeta = {
   id: string;
@@ -249,6 +251,7 @@ export default function PlayV2Page() {
   const [showHostLeaveGuard, setShowHostLeaveGuard] = useState(false);
   const [showMenuOverlay, setShowMenuOverlay] = useState(false);
   const [showActivityPopup, setShowActivityPopup] = useState(false);
+  const [investPanelCollapsed, setInvestPanelCollapsed] = useState(true);
 
   const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
   const ownedReasonTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1979,6 +1982,50 @@ export default function PlayV2Page() {
     await loadAllSlices(routeGameId, session.access_token);
   }, [loadAllSlices, routeGameId, session]);
 
+  const {
+    marketPrices,
+    investFxRate,
+    playerHoldings,
+    isTradeSubmitting,
+    tradeError,
+    isMarketRefreshSubmitting,
+    loadMarketPrices,
+    loadInvestFxRate,
+    loadPlayerHoldings,
+    handleMarketTrade,
+    handleManualMarketRefresh,
+  } = useMarketInvestController({
+    gameId: routeGameId ?? null,
+    boardPackId: gameMeta?.board_pack_id,
+    playerId: currentUserPlayer?.id,
+    accessToken: session?.access_token,
+    onSessionUpdated: setSession,
+    onReloadGameData: async (activeGameId, nextAccessToken) => {
+      await Promise.all([
+        loadAllSlices(activeGameId, nextAccessToken),
+        loadMarketPrices(nextAccessToken),
+        loadInvestFxRate(gameMeta?.board_pack_id, nextAccessToken),
+      ]);
+    },
+  });
+
+  useEffect(() => {
+    if (!session?.access_token) {
+      return;
+    }
+
+    void loadMarketPrices(session.access_token);
+    void loadInvestFxRate(gameMeta?.board_pack_id, session.access_token);
+    void loadPlayerHoldings(currentUserPlayer?.id, session.access_token);
+  }, [
+    currentUserPlayer?.id,
+    gameMeta?.board_pack_id,
+    loadInvestFxRate,
+    loadMarketPrices,
+    loadPlayerHoldings,
+    session?.access_token,
+  ]);
+
   const drawerDecisionNode = useMemo(() => {
     if (auctionActive || !activeDecisionType || !isDrawerDecision(activeDecisionType)) {
       return null;
@@ -2277,26 +2324,56 @@ export default function PlayV2Page() {
       decisionActive={drawerDecisionNode !== null}
       rightDrawerLocked={fullscreenEventNode !== null}
       auctionActive={auctionActive}
-      leftDrawerContent={selectedTile ? (
-        <div className="h-full space-y-2">
-          <TitleDeedPreview
-            tile={selectedTile}
-            bandColor={getTileBandColor(selectedTile)}
-            boardPackEconomy={selectedBoardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY}
-            price={selectedTile.price}
-            ownedRailCount={selectedOwnerRailCount}
-            ownedUtilityCount={selectedOwnerUtilityCount}
-            mode="readonly"
-            size="compact"
-          />
-          <div className="rounded-lg border border-white/15 bg-white/10 px-3 py-2 text-xs text-white/90">
-            <p>Current Rent: {selectedTileCurrentRent !== null ? formatMoney(selectedTileCurrentRent) : "—"}</p>
-            <p>Owner: {selectedOwnerLabel}</p>
-            <p>Status: {selectedTileStatus}</p>
-          </div>          
+      leftDrawerContent={(
+        <div className="h-full space-y-4">
+          <section className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-white/60">Tile Info</p>
+            {selectedTile ? (
+              <>
+                <TitleDeedPreview
+                  tile={selectedTile}
+                  bandColor={getTileBandColor(selectedTile)}
+                  boardPackEconomy={selectedBoardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY}
+                  price={selectedTile.price}
+                  ownedRailCount={selectedOwnerRailCount}
+                  ownedUtilityCount={selectedOwnerUtilityCount}
+                  mode="readonly"
+                  size="compact"
+                />
+                <div className="rounded-lg border border-white/15 bg-white/10 px-3 py-2 text-xs text-white/90">
+                  <p>Current Rent: {selectedTileCurrentRent !== null ? formatMoney(selectedTileCurrentRent) : "—"}</p>
+                  <p>Owner: {selectedOwnerLabel}</p>
+                  <p>Status: {selectedTileStatus}</p>
+                </div>
+              </>
+            ) : (
+              <p className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/70">
+                Select a tile to view the title deed
+              </p>
+            )}
+          </section>
+
+          <section className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-white/60">Invest in Market</p>
+            <div className="rounded-xl border border-white/10 bg-white/95 p-2 text-neutral-900">
+              <InvestPanel
+                currencySymbol={currency.symbol}
+                currencyCode={currency.code}
+                cashLocal={currentUserCash ?? 0}
+                fxRate={investFxRate}
+                prices={marketPrices}
+                holdings={playerHoldings}
+                collapsed={investPanelCollapsed}
+                onToggleCollapsed={() => setInvestPanelCollapsed((previous) => !previous)}
+                isTrading={isTradeSubmitting}
+                isRefreshingMarket={isMarketRefreshSubmitting}
+                tradeError={tradeError}
+                onRefreshMarket={handleManualMarketRefresh}
+                onTrade={handleMarketTrade}
+              />
+            </div>
+          </section>
         </div>
-      ) : (
-        <p className="text-sm text-white/70">Select a tile to view the title deed</p>
       )}
       rightDrawerContent={
         !auctionActive && drawerDecisionNode !== null ? (
