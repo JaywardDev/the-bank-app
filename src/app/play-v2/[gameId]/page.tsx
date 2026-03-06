@@ -1290,6 +1290,8 @@ export default function PlayV2Page() {
   const selectedBoardPack = useMemo(() => getBoardPackById(gameMeta?.board_pack_id ?? null), [gameMeta?.board_pack_id]);
   const currency = getCurrencyMetaFromBoardPack(selectedBoardPack);
   const currencySymbol = currency.symbol ?? "$";
+  const investCurrencySymbol = currency.symbol ?? "$";
+  const investCurrencyCode = currency.code ?? "USD";
   const formatMoney = useCallback((value: number | null) => {
     if (value === null) return "—";
     return formatCurrency(value, currency);
@@ -2357,8 +2359,8 @@ export default function PlayV2Page() {
             <p className="text-xs font-semibold uppercase tracking-wide text-white/60">Invest in Market</p>
             <div className="rounded-xl border border-white/10 bg-white/95 p-2 text-neutral-900">
               <InvestPanel
-                currencySymbol={currency.symbol}
-                currencyCode={currency.code}
+                currencySymbol={investCurrencySymbol}
+                currencyCode={investCurrencyCode}
                 cashLocal={currentUserCash ?? 0}
                 fxRate={investFxRate}
                 prices={marketPrices}
