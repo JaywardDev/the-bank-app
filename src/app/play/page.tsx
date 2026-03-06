@@ -1518,8 +1518,15 @@ export default function PlayPage() {
     return false;
   }, [latestDiceValues, latestRolledDoubleConfirmed]);
   const getPlayerNameById = useCallback(
-    (playerId: string | null) =>
-      players.find((player) => player.id === playerId)?.display_name ?? "Player",
+    (playerId: string | null | undefined) => {
+      if (!playerId) {
+        return "Player";
+      }
+
+      return (
+        players.find((player) => player.id === playerId)?.display_name ?? "Player"
+      );
+    },
     [players],
   );
   const getTileNameByIndex = useCallback(
