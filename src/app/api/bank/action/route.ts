@@ -22,6 +22,12 @@ import {
 import { DEFAULT_RULES, getRules } from "@/lib/rules";
 import { MACRO_DECK_PH_HARD_V1, drawMacroCardPhHardV1 } from "@/lib/macroDeckPhHardV1";
 import { computeEffectiveGoSalary } from "@/lib/salary";
+import {
+  computeIncomeTaxAmount,
+  computeNetWorthForTax,
+  computeSuperTaxAmount,
+  isCustomTaxBoardPack,
+} from "@/lib/tax";
 
 const supabaseUrl = (process.env.SUPABASE_URL ?? SUPABASE_URL ?? "").trim();
 const supabaseAnonKey = (
@@ -2427,19 +2433,48 @@ const finalizeMoveResolution = async ({
   let shouldPayRent = rentAmount > 0 && Boolean(rentOwnerId);
   const isUnownedOwnableTile = isOwnableTile && !ownership;
   const isTaxTile = activeLandingTile.type === "TAX";
+  const usesCustomTaxRules = isCustomTaxBoardPack(boardPack?.id);
   const normalizedTaxTileId = isTaxTile
     ? activeLandingTile.tile_id.toLowerCase()
     : "";
   const isIncomeTax = isTaxTile && normalizedTaxTileId === "income-tax";
+  const isSuperTax = isTaxTile && normalizedTaxTileId === "super-tax";
   const baseTaxAmount = isTaxTile ? activeLandingTile.taxAmount ?? 0 : 0;
-  const taxAmount = isIncomeTax
-    ? computeEffectiveGoSalary({
-        packEconomy: boardPackEconomy,
-        boardTiles,
-        ownershipByTile,
-        playerId: currentPlayer.id,
-      })
-    : baseTaxAmount;
+  const currentCashForTax = updatedBalances[currentPlayer.id] ?? startingCash;
+  let taxAmount = baseTaxAmount;
+
+  if (usesCustomTaxRules && isIncomeTax) {
+    taxAmount = computeIncomeTaxAmount(currentCashForTax, startingCash);
+  }
+
+  if (usesCustomTaxRules && isSuperTax) {
+    const [activeLoans, activeMortgages] = await Promise.all([
+      fetchFromSupabaseWithService(
+        `player_loans?select=principal,remaining_principal&game_id=eq.${gameId}&player_id=eq.${currentPlayer.id}&status=eq.active`,
+      ),
+      fetchFromSupabaseWithService(
+        `purchase_mortgages?select=principal_remaining,accrued_interest_unpaid&game_id=eq.${gameId}&player_id=eq.${currentPlayer.id}&status=eq.active`,
+      ),
+    ]);
+
+    const netWorthForTax = computeNetWorthForTax({
+      currentCash: currentCashForTax,
+      playerId: currentPlayer.id,
+      boardTiles,
+      ownershipByTile,
+      activeCollateralLoans: Array.isArray(activeLoans)
+        ? (activeLoans as Array<{ principal: number; remaining_principal: number | null }>)
+        : [],
+      activePurchaseMortgages: Array.isArray(activeMortgages)
+        ? (activeMortgages as Array<{
+            principal_remaining: number;
+            accrued_interest_unpaid: number;
+          }>)
+        : [],
+    });
+
+    taxAmount = computeSuperTaxAmount(netWorthForTax);
+  }
   const shouldPayTax = isTaxTile && taxAmount > 0;
   const isFreeParking = activeLandingTile.type === "FREE_PARKING";
 
@@ -2528,10 +2563,16 @@ const finalizeMoveResolution = async ({
       payer_player_id: currentPlayer.id,
       payer_display_name: currentPlayer.display_name,
     };
-    if (isIncomeTax) {
+    if (usesCustomTaxRules && isIncomeTax) {
       Object.assign(taxPayload, {
         tax_kind: "INCOME_TAX",
-        computed_from: "effectiveGoSalary",
+        computed_from: "cash_minus_starting_cash",
+      });
+    }
+    if (usesCustomTaxRules && isSuperTax) {
+      Object.assign(taxPayload, {
+        tax_kind: "SUPER_TAX",
+        computed_from: "net_worth_for_tax",
       });
     }
     events.push(
