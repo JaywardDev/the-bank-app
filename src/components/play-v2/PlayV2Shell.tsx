@@ -21,6 +21,7 @@ type DecisionButtonProps = {
   open: boolean;
   onClick: () => void;
   disabled?: boolean;
+  showAttention?: boolean;
 };
 
 type TradeButtonProps = {
@@ -63,12 +64,12 @@ function MarketButton({ open, onClick }: MarketButtonProps) {
   );
 }
 
-function DecisionButton({ open, onClick, disabled = false }: DecisionButtonProps) {
+function DecisionButton({ open, onClick, disabled = false, showAttention = false }: DecisionButtonProps) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex items-center justify-center rounded border border-white/30 bg-neutral-900 px-2 py-1 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40"
+      className="relative inline-flex items-center justify-center rounded border border-white/30 bg-neutral-900 px-2 py-1 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40"
       aria-expanded={open}
       aria-controls="right-drawer"
       aria-label="Open decisions panel"
@@ -77,6 +78,11 @@ function DecisionButton({ open, onClick, disabled = false }: DecisionButtonProps
       <span className="decision-icon" aria-hidden>
         ⚖️
       </span>
+      {showAttention ? (
+        <span className="absolute -left-1 -top-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-none text-white">
+          !
+        </span>
+      ) : null}
     </button>
   );
 }
@@ -589,24 +595,11 @@ export default function PlayV2Shell({
               rightOpen ? "right-72" : "right-0"
             }`}
           >
-            <button
-              type="button"
-              onClick={handleDecisionToggle}
-              className="inline-flex items-center justify-center rounded-l-lg border border-white/20 bg-neutral-900 px-2 py-3 text-xs font-semibold uppercase tracking-wide"
-              aria-label="Open right panel"
-              disabled={rightDrawerLocked}
-            >
-              <span className="chevron chevron-right" aria-hidden />
-              {decisionNeedsAttention ? (
-                <span className="absolute -left-1 -top-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-none text-white">
-                  !
-                </span>
-              ) : null}
-            </button>
             <DecisionButton
               open={rightOpen && rightDrawerMode === "decision"}
               onClick={handleDecisionToggle}
               disabled={rightDrawerLocked}
+              showAttention={decisionNeedsAttention}
             />
             <TradeButton
               open={rightOpen && rightDrawerMode === "trade"}
