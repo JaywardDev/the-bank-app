@@ -28,6 +28,7 @@ type TradeButtonProps = {
   open: boolean;
   onClick: () => void;
   disabled?: boolean;
+  showAttention?: boolean;
 };
 
 function WalletButton({ open, onClick }: WalletButtonProps) {
@@ -87,12 +88,12 @@ function DecisionButton({ open, onClick, disabled = false, showAttention = false
   );
 }
 
-function TradeButton({ open, onClick, disabled = false }: TradeButtonProps) {
+function TradeButton({ open, onClick, disabled = false, showAttention = false }: TradeButtonProps) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex items-center justify-center rounded border border-white/30 bg-neutral-900 px-2 py-1 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40"
+      className="relative inline-flex items-center justify-center rounded border border-white/30 bg-neutral-900 px-2 py-1 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40"
       aria-expanded={open}
       aria-controls="right-drawer"
       aria-label="Open trade panel"
@@ -101,6 +102,11 @@ function TradeButton({ open, onClick, disabled = false }: TradeButtonProps) {
       <span className="trade-icon" aria-hidden>
         🤝
       </span>
+      {showAttention ? (
+        <span className="absolute -left-1 -top-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-none text-white">
+          !
+        </span>
+      ) : null}
     </button>
   );
 }
@@ -209,6 +215,7 @@ type PlayV2ShellProps = {
   walletLoansContent?: ReactNode;
   walletMortgagesContent?: ReactNode;
   decisionActive?: boolean;
+  tradeNeedsAttention?: boolean;
   rightDrawerLocked?: boolean;
   auctionActive?: boolean;
   headerActions?: ReactNode;
@@ -252,6 +259,7 @@ export default function PlayV2Shell({
   walletLoansContent,
   walletMortgagesContent,
   decisionActive = false,
+  tradeNeedsAttention = false,
   rightDrawerLocked = false,
   auctionActive = false,
   headerActions,
@@ -605,6 +613,7 @@ export default function PlayV2Shell({
               open={rightOpen && rightDrawerMode === "trade"}
               onClick={handleTradeToggle}
               disabled={rightDrawerLocked || decisionActive}
+              showAttention={tradeNeedsAttention}
             />
           </div>
 

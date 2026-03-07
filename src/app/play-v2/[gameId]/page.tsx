@@ -29,8 +29,6 @@ import { getRules } from "@/lib/rules";
 import { getCurrentTileRent, ownsFullColorSet } from "@/lib/rent";
 import { formatCurrency, getCurrencyMetaFromBoardPack } from "@/lib/currency";
 import { useMarketInvestController } from "@/features/market-invest/useMarketInvestController";
-import { IncomingTradeModal } from "@/features/trade/components/IncomingTradeModal";
-import { TradeProposalModal } from "@/features/trade/components/TradeProposalModal";
 import {
   hasTradeValue,
   normalizeTradeSnapshot,
@@ -234,8 +232,6 @@ export default function PlayV2Page() {
   const [events, setEvents] = useState<GameEvent[]>([]);
   const [ownershipByTile, setOwnershipByTile] = useState<OwnershipByTile>({});
   const [tradeProposals, setTradeProposals] = useState<TradeProposal[]>([]);
-  const [isProposeTradeOpen, setIsProposeTradeOpen] = useState(false);
-  const [isIncomingTradeOpen, setIsIncomingTradeOpen] = useState(false);
   const [tradeCounterpartyId, setTradeCounterpartyId] = useState<string>("");
   const [tradeOfferCash, setTradeOfferCash] = useState<number>(0);
   const [tradeOfferTiles, setTradeOfferTiles] = useState<number[]>([]);
@@ -298,8 +294,6 @@ export default function PlayV2Page() {
     setEvents([]);
     setOwnershipByTile({});
     setTradeProposals([]);
-    setIsProposeTradeOpen(false);
-    setIsIncomingTradeOpen(false);
     setTradeCounterpartyId("");
     setTradeOfferCash(0);
     setTradeOfferTiles([]);
@@ -1681,27 +1675,14 @@ export default function PlayV2Page() {
   const formatTradeMoney = useCallback((amount: number) => {
     return formatMoney(amount);
   }, [formatMoney]);
-
-
-  const openProposeTrade = useCallback(() => {
-    if (!currentUserPlayer) {
-      setNotice("Join a game lobby first.");
+  useEffect(() => {
+    if (tradeCounterpartyId && availableTradeCounterparties.some((option) => option.id === tradeCounterpartyId)) {
       return;
     }
 
-    if (availableTradeCounterparties.length === 0) {
-      setNotice("No other players are available to trade.");
-      return;
-    }
-
-    const defaultCounterparty = availableTradeCounterparties[0]?.id ?? "";
-    setTradeCounterpartyId(defaultCounterparty);
-    setTradeOfferCash(0);
-    setTradeOfferTiles([]);
-    setTradeRequestCash(0);
+    setTradeCounterpartyId(availableTradeCounterparties[0]?.id ?? "");
     setTradeRequestTiles([]);
-    setIsProposeTradeOpen(true);
-  }, [availableTradeCounterparties, currentUserPlayer]);
+  }, [availableTradeCounterparties, tradeCounterpartyId]);
 
   const handleSubmitTradeProposal = useCallback(async () => {
     if (!tradeCounterpartyId) {
@@ -1727,8 +1708,6 @@ export default function PlayV2Page() {
       requestCash: toOptionalPositiveCash(tradeRequestCash),
       requestTiles: toOptionalTileIndices(tradeRequestTiles),
     });
-
-    setIsProposeTradeOpen(false);
   }, [handleBankAction, tradeCounterpartyId, tradeOfferCash, tradeOfferTiles, tradeRequestCash, tradeRequestTiles]);
 
   const toggleOfferTile = useCallback((tileIndex: number, checked: boolean) => {
@@ -1745,12 +1724,10 @@ export default function PlayV2Page() {
 
   const handleAcceptTrade = useCallback((tradeId: string) => {
     void handleBankAction({ action: "ACCEPT_TRADE", tradeId });
-    setIsIncomingTradeOpen(false);
   }, [handleBankAction]);
 
   const handleRejectTrade = useCallback((tradeId: string) => {
     void handleBankAction({ action: "REJECT_TRADE", tradeId });
-    setIsIncomingTradeOpen(false);
   }, [handleBankAction]);
 
   const handleCancelOutgoingTrade = useCallback((tradeId: string) => {
@@ -2515,6 +2492,7 @@ export default function PlayV2Page() {
       onRightOpenChange={setIsRightDrawerOpen}
       rightDrawerMode={rightDrawerMode}
       onRightDrawerModeChange={setRightDrawerMode}
+      tradeNeedsAttention={Boolean(incomingTradeProposal)}
       canRoll={canRoll}
       canEndTurn={canEndTurn}
       actionLoading={actionLoading}
@@ -2594,29 +2572,200 @@ export default function PlayV2Page() {
           <div className="rounded-lg border border-white/10 bg-white/5 p-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-white/60">Trade</p>
             <p className="mt-1 text-xs text-white/70">Send offers or respond to pending incoming trades.</p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button
-                type="button"
-                className="rounded-md border border-indigo-300/40 bg-indigo-500/20 px-2.5 py-1.5 text-xs font-semibold text-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={actionLoading !== null || availableTradeCounterparties.length === 0}
-                onClick={openProposeTrade}
-              >
-                Propose trade
-              </button>
-              <button
-                type="button"
-                className="rounded-md border border-emerald-300/40 bg-emerald-500/20 px-2.5 py-1.5 text-xs font-semibold text-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={!incomingTradeProposal}
-                onClick={() => setIsIncomingTradeOpen(true)}
-              >
-                Review incoming
-              </button>
+            {availableTradeCounterparties.length === 0 ? (
+              <p className="mt-3 rounded-md border border-white/10 bg-white/5 px-2.5 py-2 text-xs text-white/60">
+                No eligible counterparty is available right now.
+              </p>
+            ) : null}
+          </div>
+
+          <div className="rounded-lg border border-indigo-300/30 bg-indigo-500/10 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-indigo-100">Compose proposal</p>
+            <div className="mt-3 space-y-3">
+              <label className="block text-xs text-white/75">
+                Counterparty
+                <select
+                  className="mt-1 w-full rounded-md border border-white/15 bg-neutral-900/90 px-2.5 py-2 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  value={tradeCounterpartyId}
+                  onChange={(event) => {
+                    setTradeCounterpartyId(event.target.value);
+                    setTradeRequestTiles([]);
+                  }}
+                  disabled={actionLoading === "PROPOSE_TRADE" || availableTradeCounterparties.length === 0}
+                >
+                  {availableTradeCounterparties.map((player) => (
+                    <option key={player.id} value={player.id}>
+                      {player.displayName}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="grid grid-cols-1 gap-3">
+                <div className="rounded-md border border-white/10 bg-black/20 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-white/60">Offer</p>
+                  <label className="mt-2 block text-xs text-white/75">
+                    Cash
+                    <input
+                      className="mt-1 w-full rounded-md border border-white/15 bg-neutral-900/90 px-2.5 py-2 text-sm text-white"
+                      type="number"
+                      min={0}
+                      max={Math.max(0, currentUserCash ?? 0)}
+                      value={tradeOfferCash}
+                      onChange={(event) =>
+                        setTradeOfferCash(
+                          Math.min(Math.max(0, Number(event.target.value)), Math.max(0, currentUserCash ?? 0)),
+                        )
+                      }
+                    />
+                  </label>
+                  <div className="mt-2 space-y-1">
+                    <p className="text-xs text-white/70">Properties</p>
+                    {ownTradePropertyOptions.length === 0 ? (
+                      <p className="text-xs text-white/50">No owned properties to offer.</p>
+                    ) : (
+                      <div className="max-h-36 space-y-1 overflow-y-auto pr-1 text-xs">
+                        {ownTradePropertyOptions.map((tile) => (
+                          <label key={`offer-${tile.tileIndex}`} className="flex items-center gap-2 text-white/90">
+                            <input
+                              type="checkbox"
+                              checked={tradeOfferTiles.includes(tile.tileIndex)}
+                              onChange={(event) => toggleOfferTile(tile.tileIndex, event.target.checked)}
+                            />
+                            <span>
+                              {tile.tileName}
+                              {tile.houses > 0 ? ` · ${tile.houses} ${tile.houses === 1 ? "house" : "houses"}` : ""}
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded-md border border-white/10 bg-black/20 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-white/60">Request</p>
+                  <label className="mt-2 block text-xs text-white/75">
+                    Cash
+                    <input
+                      className="mt-1 w-full rounded-md border border-white/15 bg-neutral-900/90 px-2.5 py-2 text-sm text-white"
+                      type="number"
+                      min={0}
+                      value={tradeRequestCash}
+                      onChange={(event) => setTradeRequestCash(Math.max(0, Number(event.target.value)))}
+                    />
+                  </label>
+                  <div className="mt-2 space-y-1">
+                    <p className="text-xs text-white/70">Properties</p>
+                    {!tradeCounterpartyId ? (
+                      <p className="text-xs text-white/50">Select a counterparty first.</p>
+                    ) : counterpartyOwnedProperties.length === 0 ? (
+                      <p className="text-xs text-white/50">No properties owned by the selected player.</p>
+                    ) : (
+                      <div className="max-h-36 space-y-1 overflow-y-auto pr-1 text-xs">
+                        {counterpartyOwnedProperties.map((tile) => (
+                          <label key={`request-${tile.tileIndex}`} className="flex items-center gap-2 text-white/90">
+                            <input
+                              type="checkbox"
+                              checked={tradeRequestTiles.includes(tile.tileIndex)}
+                              onChange={(event) => toggleRequestTile(tile.tileIndex, event.target.checked)}
+                            />
+                            <span>
+                              {tile.tileName}
+                              {tile.houses > 0 ? ` · ${tile.houses} ${tile.houses === 1 ? "house" : "houses"}` : ""}
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  className="rounded-md border border-indigo-300/40 bg-indigo-500/20 px-3 py-1.5 text-xs font-semibold text-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={
+                    actionLoading === "PROPOSE_TRADE" ||
+                    availableTradeCounterparties.length === 0 ||
+                    !canSubmitTradeProposal
+                  }
+                  onClick={() => void handleSubmitTradeProposal()}
+                >
+                  {actionLoading === "PROPOSE_TRADE" ? "Sending…" : "Send trade"}
+                </button>
+              </div>
             </div>
           </div>
 
           {incomingTradeProposal ? (
-            <div className="rounded-lg border border-emerald-300/30 bg-emerald-500/10 p-3 text-xs text-emerald-100">
-              Incoming from {incomingTradeCounterpartyName}
+            <div className="rounded-lg border border-emerald-300/30 bg-emerald-500/10 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-100">Incoming from {incomingTradeCounterpartyName}</p>
+              <div className="mt-2 grid gap-2 text-xs text-emerald-50 md:grid-cols-2">
+                <div className="rounded-md border border-emerald-200/30 bg-emerald-950/20 p-2">
+                  <p className="font-semibold">You give</p>
+                  <ul className="mt-1 space-y-1 text-emerald-100/95">
+                    {incomingTradeProposal.request_cash > 0 ? (
+                      <li>Cash: {formatTradeMoney(incomingTradeProposal.request_cash)}</li>
+                    ) : null}
+                    {incomingTradeProposal.request_tile_indices.length > 0 ? (
+                      incomingTradeProposal.request_tile_indices.map((tileIndex) => {
+                        const snapshot = incomingTradeSnapshotTiles.find((entry) => entry.tile_index === tileIndex);
+                        const houses = snapshot?.houses ?? 0;
+                        return (
+                          <li key={`incoming-give-${tileIndex}`}>
+                            {getTileNameByIndex(tileIndex)}
+                            {houses > 0 ? ` · ${houses} ${houses === 1 ? "house" : "houses"}` : ""}
+                          </li>
+                        );
+                      })
+                    ) : incomingTradeProposal.request_cash === 0 ? (
+                      <li className="text-emerald-100/70">No properties</li>
+                    ) : null}
+                  </ul>
+                </div>
+                <div className="rounded-md border border-emerald-200/30 bg-emerald-950/20 p-2">
+                  <p className="font-semibold">You receive</p>
+                  <ul className="mt-1 space-y-1 text-emerald-100/95">
+                    {incomingTradeProposal.offer_cash > 0 ? (
+                      <li>Cash: {formatTradeMoney(incomingTradeProposal.offer_cash)}</li>
+                    ) : null}
+                    {incomingTradeProposal.offer_tile_indices.length > 0 ? (
+                      incomingTradeProposal.offer_tile_indices.map((tileIndex) => {
+                        const snapshot = incomingTradeSnapshotTiles.find((entry) => entry.tile_index === tileIndex);
+                        const houses = snapshot?.houses ?? 0;
+                        return (
+                          <li key={`incoming-receive-${tileIndex}`}>
+                            {getTileNameByIndex(tileIndex)}
+                            {houses > 0 ? ` · ${houses} ${houses === 1 ? "house" : "houses"}` : ""}
+                          </li>
+                        );
+                      })
+                    ) : incomingTradeProposal.offer_cash === 0 ? (
+                      <li className="text-emerald-100/70">No properties</li>
+                    ) : null}
+                  </ul>
+                </div>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  className="rounded-md border border-emerald-300/40 px-2.5 py-1.5 text-xs font-semibold text-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={actionLoading === "REJECT_TRADE"}
+                  onClick={() => handleRejectTrade(incomingTradeProposal.id)}
+                >
+                  {actionLoading === "REJECT_TRADE" ? "Rejecting…" : "Reject"}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-md border border-emerald-200/30 bg-emerald-100/10 px-2.5 py-1.5 text-xs font-semibold text-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={actionLoading === "ACCEPT_TRADE"}
+                  onClick={() => handleAcceptTrade(incomingTradeProposal.id)}
+                >
+                  {actionLoading === "ACCEPT_TRADE" ? "Accepting…" : "Accept"}
+                </button>
+              </div>
             </div>
           ) : (
             <div className="rounded-lg border border-white/10 bg-white/5 p-3 text-xs text-white/60">
@@ -2704,58 +2853,6 @@ export default function PlayV2Page() {
           </button>
         </div>
       )}
-    />
-    <TradeProposalModal
-      isOpen={isProposeTradeOpen}
-      counterparties={availableTradeCounterparties}
-      selectedCounterpartyId={tradeCounterpartyId}
-      onSelectedCounterpartyChange={(value) => {
-        setTradeCounterpartyId(value);
-        setTradeRequestTiles([]);
-      }}
-      offerCash={tradeOfferCash}
-      maxOfferCash={Math.max(0, currentUserCash ?? 0)}
-      onOfferCashChange={(value) => setTradeOfferCash(Math.min(Math.max(0, value), Math.max(0, currentUserCash ?? 0)))}
-      offerProperties={ownTradePropertyOptions}
-      selectedOfferTileIndices={tradeOfferTiles}
-      onOfferTileToggle={toggleOfferTile}
-      requestCash={tradeRequestCash}
-      onRequestCashChange={(value) => setTradeRequestCash(Math.max(0, value))}
-      requestProperties={counterpartyOwnedProperties}
-      selectedRequestTileIndices={tradeRequestTiles}
-      onRequestTileToggle={toggleRequestTile}
-      canSubmitTradeProposal={canSubmitTradeProposal}
-      isSubmitting={actionLoading === "PROPOSE_TRADE"}
-      onClose={() => setIsProposeTradeOpen(false)}
-      onSubmit={() => void handleSubmitTradeProposal()}
-    />
-    <IncomingTradeModal
-      isOpen={Boolean(incomingTradeProposal && isIncomingTradeOpen)}
-      counterpartyName={incomingTradeCounterpartyName}
-      requestCash={incomingTradeProposal?.request_cash ?? 0}
-      requestTileIndices={incomingTradeProposal?.request_tile_indices ?? []}
-      offerCash={incomingTradeProposal?.offer_cash ?? 0}
-      offerTileIndices={incomingTradeProposal?.offer_tile_indices ?? []}
-      snapshotTiles={incomingTradeSnapshotTiles}
-      liabilities={[]}
-      currencySymbol={currencySymbol}
-      getTileNameByIndex={getTileNameByIndex}
-      formatMoney={formatTradeMoney}
-      isRejecting={actionLoading === "REJECT_TRADE"}
-      isAccepting={actionLoading === "ACCEPT_TRADE"}
-      onClose={() => setIsIncomingTradeOpen(false)}
-      onReject={() => {
-        if (!incomingTradeProposal) {
-          return;
-        }
-        handleRejectTrade(incomingTradeProposal.id);
-      }}
-      onAccept={() => {
-        if (!incomingTradeProposal) {
-          return;
-        }
-        handleAcceptTrade(incomingTradeProposal.id);
-      }}
     />
     {fullscreenEventNode ? (
       <div className="fixed inset-0 z-[200]">
