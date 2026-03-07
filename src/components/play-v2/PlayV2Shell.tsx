@@ -588,6 +588,24 @@ export default function PlayV2Shell({
         <section className="absolute inset-x-0 bottom-0 top-9 md:top-10">
           {boardViewport}
 
+          {leftOpen ? (
+            <button
+              type="button"
+              className="absolute inset-y-0 left-72 right-0 z-10 bg-transparent"
+              onClick={() => setLeftOpen(false)}
+              aria-label="Close left drawer"
+            />
+          ) : null}
+
+          {rightOpen && !rightDrawerLocked ? (
+            <button
+              type="button"
+              className="absolute inset-y-0 left-0 right-72 z-10 bg-transparent"
+              onClick={() => setRightOpen(false)}
+              aria-label="Close right drawer"
+            />
+          ) : null}
+
           <div
             className={`control-stack control-stack-left absolute left-0 top-0 z-20 flex flex-col transition-[left] duration-200 ${
               leftOpen ? "control-stack-left-open" : ""
