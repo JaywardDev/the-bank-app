@@ -589,8 +589,8 @@ export default function PlayV2Shell({
           {boardViewport}
 
           <div
-            className={`control-stack control-stack-left absolute top-2 z-20 flex flex-col gap-2 transition-[left] duration-200 ${
-              leftOpen ? "left-[18.5rem]" : "left-2"
+            className={`control-stack control-stack-left absolute left-0 top-0 z-20 flex flex-col transition-[left] duration-200 ${
+              leftOpen ? "control-stack-left-open" : ""
             }`}
           >
             <button
@@ -630,8 +630,8 @@ export default function PlayV2Shell({
           </div>
 
           <div
-            className={`control-stack control-stack-right absolute top-2 z-20 flex flex-col gap-2 transition-[right] duration-200 ${
-              rightOpen ? "right-[18.5rem]" : "right-2"
+            className={`control-stack control-stack-right absolute right-0 top-0 z-20 flex flex-col transition-[right] duration-200 ${
+              rightOpen ? "control-stack-right-open" : ""
             }`}
           >
             <button
@@ -661,7 +661,7 @@ export default function PlayV2Shell({
           </div>
 
           {showTurnActions ? (
-            <section className="action-stack absolute bottom-2 right-2 z-20 flex flex-col items-center gap-3">
+            <section className="action-stack absolute bottom-0 right-0 z-20 flex flex-col items-center">
               <button
                 type="button"
                 className={`flex h-14 w-14 items-center justify-center rounded-full border shadow-lg transition ${
@@ -741,20 +741,38 @@ export default function PlayV2Shell({
 
       <style jsx>{`
         .control-stack {
-          --stack-offset: 0.5rem;
+          --stack-offset: 0.875rem;
+          --stack-side-offset: 0.875rem;
           --stack-gap: 0.5rem;
           gap: var(--stack-gap);
         }
 
         .control-stack-left,
         .control-stack-right {
-          top: var(--stack-offset);
+          top: calc(var(--stack-offset) + env(safe-area-inset-top, 0px));
+        }
+
+        .control-stack-left {
+          left: calc(var(--stack-side-offset) + env(safe-area-inset-left, 0px));
+        }
+
+        .control-stack-left.control-stack-left-open {
+          left: calc(18.5rem + var(--stack-side-offset) + env(safe-area-inset-left, 0px));
+        }
+
+        .control-stack-right {
+          right: calc(var(--stack-side-offset) + env(safe-area-inset-right, 0px));
+        }
+
+        .control-stack-right.control-stack-right-open {
+          right: calc(18.5rem + var(--stack-side-offset) + env(safe-area-inset-right, 0px));
         }
 
         .action-stack {
-          --action-stack-offset: 0.5rem;
+          --action-stack-offset: 0.875rem;
           --action-stack-gap: 0.75rem;
-          bottom: var(--action-stack-offset);
+          bottom: calc(var(--action-stack-offset) + env(safe-area-inset-bottom, 0px));
+          right: calc(var(--action-stack-offset) + env(safe-area-inset-right, 0px));
           gap: var(--action-stack-gap);
         }
 
@@ -800,12 +818,13 @@ export default function PlayV2Shell({
 
         @media (max-height: 760px) {
           .control-stack {
-            --stack-offset: 0.35rem;
+            --stack-offset: 0.625rem;
+            --stack-side-offset: 0.625rem;
             --stack-gap: 0.35rem;
           }
 
           .action-stack {
-            --action-stack-offset: 0.35rem;
+            --action-stack-offset: 0.625rem;
             --action-stack-gap: 0.5rem;
           }
         }
