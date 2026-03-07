@@ -32,7 +32,7 @@ type TradeButtonProps = {
 };
 
 const utilityButtonClass =
-  "inline-flex h-12 w-12 items-center justify-center rounded-xl border border-white/30 bg-neutral-900 text-xs font-semibold shadow-lg transition hover:bg-neutral-800";
+  "inline-flex h-12 w-12 items-center justify-center rounded-xl border border-white/30 bg-neutral-900 p-0 text-white shadow-lg transition hover:bg-neutral-800";
 
 function WalletButton({ open, onClick }: WalletButtonProps) {
   return (
@@ -43,6 +43,7 @@ function WalletButton({ open, onClick }: WalletButtonProps) {
       aria-expanded={open}
       aria-controls="left-drawer"
       aria-label="Open bank panel"
+      title="Open bank panel"
     >
       <span className="bank-icon" aria-hidden>
         🏦
@@ -60,6 +61,7 @@ function MarketButton({ open, onClick }: MarketButtonProps) {
       aria-expanded={open}
       aria-controls="left-drawer"
       aria-label="Open market panel"
+      title="Open market panel"
     >
       <span className="market-icon" aria-hidden>
         📈
@@ -77,6 +79,7 @@ function DecisionButton({ open, onClick, disabled = false, showAttention = false
       aria-expanded={open}
       aria-controls="right-drawer"
       aria-label="Open decisions panel"
+      title="Open decisions panel"
       disabled={disabled}
     >
       <span className="decision-icon" aria-hidden>
@@ -100,6 +103,7 @@ function TradeButton({ open, onClick, disabled = false, showAttention = false }:
       aria-expanded={open}
       aria-controls="right-drawer"
       aria-label="Open trade panel"
+      title="Open trade panel"
       disabled={disabled}
     >
       <span className="trade-icon" aria-hidden>
@@ -585,7 +589,7 @@ export default function PlayV2Shell({
           {boardViewport}
 
           <div
-            className={`absolute top-2 z-20 flex flex-col gap-2 transition-[left] duration-200 ${
+            className={`control-stack control-stack-left absolute top-2 z-20 flex flex-col gap-2 transition-[left] duration-200 ${
               leftOpen ? "left-[18.5rem]" : "left-2"
             }`}
           >
@@ -596,7 +600,7 @@ export default function PlayV2Shell({
               title="Recenter"
               className={utilityButtonClass}
             >
-              <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg aria-hidden="true" viewBox="0 0 24 24" className="utility-svg-icon" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="3.5" />
                 <path d="M12 2v3" />
                 <path d="M12 19v3" />
@@ -608,10 +612,11 @@ export default function PlayV2Shell({
               type="button"
               onClick={handleLeftToggle}
               className={utilityButtonClass}
-              aria-label="Open left panel"
+              aria-label="Open tile information panel"
+              title="Tile information"
             >
-              <span className="text-lg leading-none" aria-hidden>
-                ?
+              <span className="info-icon" aria-hidden>
+                ⓘ
               </span>
             </button>
             <WalletButton
@@ -625,7 +630,7 @@ export default function PlayV2Shell({
           </div>
 
           <div
-            className={`absolute top-2 z-20 flex flex-col gap-2 transition-[right] duration-200 ${
+            className={`control-stack control-stack-right absolute top-2 z-20 flex flex-col gap-2 transition-[right] duration-200 ${
               rightOpen ? "right-[18.5rem]" : "right-2"
             }`}
           >
@@ -634,9 +639,10 @@ export default function PlayV2Shell({
               onClick={onMenuToggle}
               className={utilityButtonClass}
               aria-label="Menu"
+              title="Open menu"
               aria-expanded={menuOpen}
             >
-              <span className="text-xl leading-none" aria-hidden>
+              <span className="menu-icon" aria-hidden>
                 ≡
               </span>
             </button>
@@ -655,7 +661,7 @@ export default function PlayV2Shell({
           </div>
 
           {showTurnActions ? (
-            <section className="absolute bottom-2 right-2 z-20 flex flex-col items-center gap-3">
+            <section className="action-stack absolute bottom-2 right-2 z-20 flex flex-col items-center gap-3">
               <button
                 type="button"
                 className={`flex h-14 w-14 items-center justify-center rounded-full border shadow-lg transition ${
@@ -734,20 +740,74 @@ export default function PlayV2Shell({
       </div>
 
       <style jsx>{`
-        .bank-icon {
-          font-size: 16px;
+        .control-stack {
+          --stack-offset: 0.5rem;
+          --stack-gap: 0.5rem;
+          gap: var(--stack-gap);
+        }
+
+        .control-stack-left,
+        .control-stack-right {
+          top: var(--stack-offset);
+        }
+
+        .action-stack {
+          --action-stack-offset: 0.5rem;
+          --action-stack-gap: 0.75rem;
+          bottom: var(--action-stack-offset);
+          gap: var(--action-stack-gap);
+        }
+
+        .utility-svg-icon {
+          height: 20px;
+          width: 20px;
+          flex-shrink: 0;
+        }
+
+        .menu-icon,
+        .bank-icon,
+        .market-icon,
+        .decision-icon,
+        .trade-icon,
+        .info-icon {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 20px;
+          height: 20px;
+          font-size: 20px;
           line-height: 1;
+          flex-shrink: 0;
+        }
+
+        .bank-icon {
+          font-size: 19px;
         }
 
         .market-icon {
-          font-size: 16px;
-          line-height: 1;
+          font-size: 18px;
         }
 
         .decision-icon,
         .trade-icon {
-          font-size: 16px;
-          line-height: 1;
+          font-size: 18px;
+        }
+
+        .menu-icon,
+        .info-icon {
+          font-size: 20px;
+        }
+
+        @media (max-height: 760px) {
+          .control-stack {
+            --stack-offset: 0.35rem;
+            --stack-gap: 0.35rem;
+          }
+
+          .action-stack {
+            --action-stack-offset: 0.35rem;
+            --action-stack-gap: 0.5rem;
+          }
         }
       `}</style>
     </main>
