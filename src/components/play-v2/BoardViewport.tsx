@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState, type PointerEvent, type WheelEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent, type WheelEvent } from "react";
 import { DEFAULT_BOARD_PACK_ECONOMY } from "@/lib/boardPacks";
 import BoardSquare from "@/app/components/BoardSquare";
 import BoardTrack from "@/app/components/BoardTrack";
@@ -29,6 +29,7 @@ type BoardViewportProps = {
   currentPlayerId: string | null;
   selectedTileIndex: number | null;
   onSelectTileIndex: (tileIndex: number) => void;
+  onRecenterReady?: (handler: () => void) => void;
 };
 
 const playerColors = [
@@ -57,6 +58,7 @@ export default function BoardViewport({
   currentPlayerId,
   selectedTileIndex,
   onSelectTileIndex,
+  onRecenterReady,
 }: BoardViewportProps) {
   const boardPack = useMemo(() => getBoardPackById(boardPackId), [boardPackId]);
   const boardTiles = useMemo(() => boardPack?.tiles ?? [], [boardPack]);
@@ -290,10 +292,14 @@ export default function BoardViewport({
     [getLocalPoint, scale, scheduleTileInteractionReset, zoomAroundPoint],
   );
 
-  const handleRecenter = useCallback(() => {
+  const recenterBoard = useCallback(() => {
     suppressTileInteractionRef.current = false;
     applyTransform(MIN_SCALE, 0, 0);
   }, [applyTransform]);
+
+  useEffect(() => {
+    onRecenterReady?.(recenterBoard);
+  }, [onRecenterReady, recenterBoard]);
 
   return (
     <div className="relative h-full w-full overflow-hidden">
@@ -339,21 +345,6 @@ export default function BoardViewport({
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={handleRecenter}
-          aria-label="Recenter"
-          title="Recenter"
-          className="absolute left-2 top-2 z-20 inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/20 bg-black/70 text-white shadow-lg transition hover:bg-black/80"
-        >
-          <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="3.5" />
-            <path d="M12 2v3" />
-            <path d="M12 19v3" />
-            <path d="M2 12h3" />
-            <path d="M19 12h3" />
-          </svg>
-        </button>
       </div>
     </div>
   );

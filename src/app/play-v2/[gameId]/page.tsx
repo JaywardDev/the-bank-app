@@ -273,6 +273,7 @@ export default function PlayV2Page() {
 
   const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
   const ownedReasonTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recenterBoardRef = useRef<(() => void) | null>(null);
 
   const clearLastOpenedIfMatches = useCallback((targetGameId: string | null) => {
     if (!targetGameId || typeof window === "undefined") {
@@ -2499,6 +2500,9 @@ export default function PlayV2Page() {
       rollDiceDisabledReason={rollDiceDisabledReason}
       onRollDice={() => void handleBankAction("ROLL_DICE")}
       onEndTurn={() => void handleBankAction("END_TURN")}
+      onRecenterBoard={() => recenterBoardRef.current?.()}
+      onMenuToggle={() => setShowMenuOverlay((open) => !open)}
+      menuOpen={showMenuOverlay}
       walletOwnedCount={ownedProperties.length}
       walletLoanCount={activeLoans.length}
       walletMortgageCount={activePurchaseMortgages.length}
@@ -2803,6 +2807,9 @@ export default function PlayV2Page() {
             setLeftDrawerMode("info");
             setIsLeftDrawerOpen(true);
           }}
+          onRecenterReady={(handler) => {
+            recenterBoardRef.current = handler;
+          }}
         />
       )}
       debugPanel={(
@@ -2882,14 +2889,6 @@ export default function PlayV2Page() {
       currencySymbol={currencySymbol}
       currentPlayerId={currentUserPlayerId}
     />
-    <button
-      type="button"
-      onClick={() => setShowMenuOverlay((open) => !open)}
-      className="fixed right-3 top-14 z-30 inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/20 bg-neutral-900/90 text-xl leading-none text-white shadow-lg backdrop-blur transition hover:bg-neutral-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
-      aria-label="Menu"
-    >
-      ≡
-    </button>
     {showMenuOverlay ? (
       <div
         className="fixed inset-0 z-40 flex items-center justify-center bg-black/55 p-4"

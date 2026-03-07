@@ -31,12 +31,15 @@ type TradeButtonProps = {
   showAttention?: boolean;
 };
 
+const utilityButtonClass =
+  "inline-flex h-12 w-12 items-center justify-center rounded-xl border border-white/30 bg-neutral-900 text-xs font-semibold shadow-lg transition hover:bg-neutral-800";
+
 function WalletButton({ open, onClick }: WalletButtonProps) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex items-center justify-center rounded border border-white/30 bg-neutral-900 px-2 py-1 text-xs font-semibold"
+      className={utilityButtonClass}
       aria-expanded={open}
       aria-controls="left-drawer"
       aria-label="Open bank panel"
@@ -53,7 +56,7 @@ function MarketButton({ open, onClick }: MarketButtonProps) {
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex items-center justify-center rounded border border-white/30 bg-neutral-900 px-2 py-1 text-xs font-semibold"
+      className={utilityButtonClass}
       aria-expanded={open}
       aria-controls="left-drawer"
       aria-label="Open market panel"
@@ -70,7 +73,7 @@ function DecisionButton({ open, onClick, disabled = false, showAttention = false
     <button
       type="button"
       onClick={onClick}
-      className="relative inline-flex items-center justify-center rounded border border-white/30 bg-neutral-900 px-2 py-1 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40"
+      className={`${utilityButtonClass} relative disabled:cursor-not-allowed disabled:opacity-40`}
       aria-expanded={open}
       aria-controls="right-drawer"
       aria-label="Open decisions panel"
@@ -93,7 +96,7 @@ function TradeButton({ open, onClick, disabled = false, showAttention = false }:
     <button
       type="button"
       onClick={onClick}
-      className="relative inline-flex items-center justify-center rounded border border-white/30 bg-neutral-900 px-2 py-1 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40"
+      className={`${utilityButtonClass} relative disabled:cursor-not-allowed disabled:opacity-40`}
       aria-expanded={open}
       aria-controls="right-drawer"
       aria-label="Open trade panel"
@@ -219,6 +222,9 @@ type PlayV2ShellProps = {
   rightDrawerLocked?: boolean;
   auctionActive?: boolean;
   headerActions?: ReactNode;
+  onRecenterBoard?: () => void;
+  onMenuToggle?: () => void;
+  menuOpen?: boolean;
   boardPackEconomy: BoardPackEconomy;
 };
 
@@ -263,6 +269,9 @@ export default function PlayV2Shell({
   rightDrawerLocked = false,
   auctionActive = false,
   headerActions,
+  onRecenterBoard,
+  onMenuToggle,
+  menuOpen = false,
   boardPackEconomy,
 }: PlayV2ShellProps) {
   const [uncontrolledLeftOpen, setUncontrolledLeftOpen] = useState(false);
@@ -576,17 +585,34 @@ export default function PlayV2Shell({
           {boardViewport}
 
           <div
-            className={`absolute top-1/2 z-70 flex -translate-y-1/2 flex-col gap-2 transition-[left] duration-200 ${
-              leftOpen ? "left-72" : "left-0"
+            className={`absolute top-2 z-20 flex flex-col gap-2 transition-[left] duration-200 ${
+              leftOpen ? "left-[18.5rem]" : "left-2"
             }`}
           >
             <button
               type="button"
+              onClick={onRecenterBoard}
+              aria-label="Recenter"
+              title="Recenter"
+              className={utilityButtonClass}
+            >
+              <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3.5" />
+                <path d="M12 2v3" />
+                <path d="M12 19v3" />
+                <path d="M2 12h3" />
+                <path d="M19 12h3" />
+              </svg>
+            </button>
+            <button
+              type="button"
               onClick={handleLeftToggle}
-              className="inline-flex items-center justify-center rounded-r-lg border border-white/20 bg-neutral-900 px-2 py-3 text-xs font-semibold uppercase tracking-wide"
+              className={utilityButtonClass}
               aria-label="Open left panel"
             >
-              <span className="chevron chevron-left" aria-hidden />
+              <span className="text-lg leading-none" aria-hidden>
+                ?
+              </span>
             </button>
             <WalletButton
               open={leftOpen && leftDrawerMode === "wallet"}
@@ -599,10 +625,21 @@ export default function PlayV2Shell({
           </div>
 
           <div
-            className={`absolute top-1/2 z-[70] flex -translate-y-1/2 flex-col gap-2 transition-[right] duration-200 ${
-              rightOpen ? "right-72" : "right-0"
+            className={`absolute top-2 z-20 flex flex-col gap-2 transition-[right] duration-200 ${
+              rightOpen ? "right-[18.5rem]" : "right-2"
             }`}
           >
+            <button
+              type="button"
+              onClick={onMenuToggle}
+              className={utilityButtonClass}
+              aria-label="Menu"
+              aria-expanded={menuOpen}
+            >
+              <span className="text-xl leading-none" aria-hidden>
+                ≡
+              </span>
+            </button>
             <DecisionButton
               open={rightOpen && rightDrawerMode === "decision"}
               onClick={handleDecisionToggle}
@@ -686,7 +723,7 @@ export default function PlayV2Shell({
 
         <aside
           id="right-drawer"
-          className={`absolute bottom-0 right-0 top-9 z-[70] flex w-72 flex-col border-l border-white/15 bg-neutral-900 transition-transform duration-200 md:top-10 ${
+          className={`absolute bottom-0 right-0 top-9 z-20 flex w-72 flex-col border-l border-white/15 bg-neutral-900 transition-transform duration-200 md:top-10 ${
             rightOpen ? "translate-x-0" : "translate-x-full"
           }`}
         >
@@ -697,22 +734,6 @@ export default function PlayV2Shell({
       </div>
 
       <style jsx>{`
-        .chevron {
-          display: inline-block;
-          width: 10px;
-          height: 10px;
-          border-right: 2px solid white;
-          border-bottom: 2px solid white;
-        }
-
-        .chevron-left {
-          transform: rotate(135deg);
-        }
-
-        .chevron-right {
-          transform: rotate(-45deg);
-        }
-
         .bank-icon {
           font-size: 16px;
           line-height: 1;
