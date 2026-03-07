@@ -133,8 +133,11 @@ export default function AuctionOverlayV2({
           <p className="mt-1 text-lg font-semibold text-neutral-900">
             {auctionTile?.name ?? "Unowned tile"}
           </p>
+          <p className="mt-1 text-sm text-neutral-500">
+            Price: {auctionTile?.price != null ? formatCurrency(auctionTile.price, currency) : "—"}
+          </p>          
           <p className="mt-1 text-sm text-neutral-600">
-            Highest bid: {formatCurrency(highestBid, currency)}
+            Current bid: {formatCurrency(highestBid, currency)}
           </p>
           <p className="mt-1 text-sm text-neutral-600">
             Current leader: {highestBidderName ?? "No bids yet"}
