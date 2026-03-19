@@ -31,6 +31,13 @@ type TradeButtonProps = {
   showAttention?: boolean;
 };
 
+type MacroButtonProps = {
+  open: boolean;
+  onClick: () => void;
+  disabled?: boolean;
+  showIndicator?: boolean;
+};
+
 const utilityButtonClass =
   "inline-flex h-12 w-12 items-center justify-center rounded-xl border border-white/30 bg-neutral-900 p-0 text-white shadow-lg transition hover:bg-neutral-800";
 
@@ -118,6 +125,28 @@ function TradeButton({ open, onClick, disabled = false, showAttention = false }:
   );
 }
 
+function MacroButton({ open, onClick, disabled = false, showIndicator = false }: MacroButtonProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`${utilityButtonClass} relative disabled:cursor-not-allowed disabled:opacity-40`}
+      aria-expanded={open}
+      aria-controls="right-drawer"
+      aria-label="Open active macro effects panel"
+      title="Open active macro effects panel"
+      disabled={disabled}
+    >
+      <span className="macro-icon" aria-hidden>
+        🌐
+      </span>
+      {showIndicator ? (
+        <span className="absolute -left-0.5 -top-0.5 inline-flex h-2.5 w-2.5 rounded-full border border-sky-100/40 bg-sky-300 shadow-[0_0_0_2px_rgba(10,10,10,0.55)]" />
+      ) : null}
+    </button>
+  );
+}
+
 type WalletPanelProps = {
   ownedCount: number;
   loanCount: number;
@@ -200,14 +229,15 @@ type PlayV2ShellProps = {
   marketDrawerContent?: ReactNode;
   decisionDrawerContent?: ReactNode;
   tradeDrawerContent?: ReactNode;
+  macroDrawerContent?: ReactNode;
   leftOpen?: boolean;
   onLeftOpenChange?: (open: boolean) => void;
   leftDrawerMode?: "info" | "wallet" | "market";
   onLeftDrawerModeChange?: (mode: "info" | "wallet" | "market") => void;
   rightOpen?: boolean;
   onRightOpenChange?: (open: boolean) => void;
-  rightDrawerMode?: "decision" | "trade";
-  onRightDrawerModeChange?: (mode: "decision" | "trade") => void;
+  rightDrawerMode?: "decision" | "trade" | "macro";
+  onRightDrawerModeChange?: (mode: "decision" | "trade" | "macro") => void;
   showTurnActions?: boolean;
   canRoll?: boolean;
   canEndTurn?: boolean;
@@ -223,6 +253,7 @@ type PlayV2ShellProps = {
   walletMortgagesContent?: ReactNode;
   decisionActive?: boolean;
   tradeNeedsAttention?: boolean;
+  macroEffectsActive?: boolean;
   rightDrawerLocked?: boolean;
   auctionActive?: boolean;
   headerActions?: ReactNode;
@@ -247,6 +278,7 @@ export default function PlayV2Shell({
   marketDrawerContent,
   decisionDrawerContent,
   tradeDrawerContent,
+  macroDrawerContent,
   leftOpen: controlledLeftOpen,
   onLeftOpenChange,
   leftDrawerMode: controlledLeftDrawerMode,
@@ -270,6 +302,7 @@ export default function PlayV2Shell({
   walletMortgagesContent,
   decisionActive = false,
   tradeNeedsAttention = false,
+  macroEffectsActive = false,
   rightDrawerLocked = false,
   auctionActive = false,
   headerActions,
@@ -281,11 +314,11 @@ export default function PlayV2Shell({
   const [uncontrolledLeftOpen, setUncontrolledLeftOpen] = useState(false);
   const [uncontrolledLeftDrawerMode, setUncontrolledLeftDrawerMode] = useState<"info" | "wallet" | "market">("info");
   const [uncontrolledRightOpen, setUncontrolledRightOpen] = useState(false);
-  const [uncontrolledRightDrawerMode, setUncontrolledRightDrawerMode] = useState<"decision" | "trade">("decision");
+  const [uncontrolledRightDrawerMode, setUncontrolledRightDrawerMode] = useState<"decision" | "trade" | "macro">("decision");
   const [showNetWorthPopover, setShowNetWorthPopover] = useState(false);
   const wasDecisionActive = useRef(decisionActive);
   const rightDrawerAutoOpenedForDecision = useRef(false);
-  const previousModeBeforeDecisionOverride = useRef<"decision" | "trade" | null>(null);
+  const previousModeBeforeDecisionOverride = useRef<"decision" | "trade" | "macro" | null>(null);
   const netWorthPopoverRef = useRef<HTMLDivElement | null>(null);
   const leftOpen = controlledLeftOpen ?? uncontrolledLeftOpen;
   const leftDrawerMode = controlledLeftDrawerMode ?? uncontrolledLeftDrawerMode;
@@ -318,7 +351,7 @@ export default function PlayV2Shell({
   }, [showNetWorthPopover]);
 
 
-  const setRightDrawerMode = useCallback((nextMode: "decision" | "trade") => {
+  const setRightDrawerMode = useCallback((nextMode: "decision" | "trade" | "macro") => {
     if (controlledRightDrawerMode === undefined) {
       setUncontrolledRightDrawerMode(nextMode);
     }
@@ -332,7 +365,7 @@ export default function PlayV2Shell({
     onRightOpenChange?.(nextOpen);
   }, [controlledRightOpen, onRightOpenChange]);
 
-  const setRightDrawerState = (nextState: { isOpen: boolean; mode: "decision" | "trade" }) => {
+  const setRightDrawerState = (nextState: { isOpen: boolean; mode: "decision" | "trade" | "macro" }) => {
     setRightDrawerMode(nextState.mode);
     setRightOpen(nextState.isOpen);
   };
@@ -493,6 +526,27 @@ export default function PlayV2Shell({
     }
 
     setRightDrawerState({ isOpen: true, mode: "trade" });
+  };
+
+  const handleMacroToggle = () => {
+    if (rightDrawerLocked || decisionActive) {
+      return;
+    }
+
+    rightDrawerAutoOpenedForDecision.current = false;
+    previousModeBeforeDecisionOverride.current = null;
+
+    if (!rightOpen) {
+      setRightDrawerState({ isOpen: true, mode: "macro" });
+      return;
+    }
+
+    if (rightDrawerMode === "macro") {
+      setRightDrawerState({ isOpen: false, mode: "macro" });
+      return;
+    }
+
+    setRightDrawerState({ isOpen: true, mode: "macro" });
   };
 
   const isRolling = actionLoading === "ROLL_DICE";
@@ -676,6 +730,12 @@ export default function PlayV2Shell({
               disabled={rightDrawerLocked || decisionActive}
               showAttention={tradeNeedsAttention}
             />
+            <MacroButton
+              open={rightOpen && rightDrawerMode === "macro"}
+              onClick={handleMacroToggle}
+              disabled={rightDrawerLocked || decisionActive}
+              showIndicator={macroEffectsActive}
+            />
           </div>
 
           {showTurnActions ? (
@@ -752,7 +812,11 @@ export default function PlayV2Shell({
           }`}
         >
           <div className="min-h-0 flex-1 overflow-auto p-4">
-            {rightDrawerMode === "decision" ? decisionDrawerContent : tradeDrawerContent}
+            {rightDrawerMode === "decision"
+              ? decisionDrawerContent
+              : rightDrawerMode === "trade"
+                ? tradeDrawerContent
+                : macroDrawerContent}
           </div>
         </aside>
       </div>
@@ -805,6 +869,7 @@ export default function PlayV2Shell({
         .market-icon,
         .decision-icon,
         .trade-icon,
+        .macro-icon,
         .info-icon {
           display: inline-flex;
           align-items: center;
@@ -825,7 +890,8 @@ export default function PlayV2Shell({
         }
 
         .decision-icon,
-        .trade-icon {
+        .trade-icon,
+        .macro-icon {
           font-size: 18px;
         }
 

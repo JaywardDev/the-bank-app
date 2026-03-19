@@ -60,10 +60,15 @@ type Player = {
 type ActiveMacroEffectV1 = {
   id?: string;
   name?: string;
+  rarity?: string | null;
   effects?: {
     house_build_blocked?: boolean;
     loan_mortgage_new_blocked?: boolean;
+    [key: string]: unknown;
   };
+  roundsRemaining?: number;
+  roundsApplied?: number;
+  tooltip?: string;
 };
 
 type GameState = {
@@ -248,7 +253,7 @@ export default function PlayV2Page() {
   const [isLeftDrawerOpen, setIsLeftDrawerOpen] = useState(false);
   const [leftDrawerMode, setLeftDrawerMode] = useState<"info" | "wallet" | "market">("info");
   const [isRightDrawerOpen, setIsRightDrawerOpen] = useState(false);
-  const [rightDrawerMode, setRightDrawerMode] = useState<"decision" | "trade">("decision");
+  const [rightDrawerMode, setRightDrawerMode] = useState<"decision" | "trade" | "macro">("decision");
   const [pendingGoToJailAckVersion, setPendingGoToJailAckVersion] = useState<number | null>(null);
   const [sellToMarketTileIndex, setSellToMarketTileIndex] = useState<number | null>(null);
   const [payoffLoanId, setPayoffLoanId] = useState<string | null>(null);
@@ -1341,6 +1346,49 @@ export default function PlayV2Page() {
     });
     return lookup;
   }, [selectedBoardPack?.macroDeck?.cards]);
+
+  const macroCardById = useMemo(() => {
+    const cards = selectedBoardPack?.macroDeck?.cards ?? [];
+    return new Map(cards.map((card) => [card.id, card]));
+  }, [selectedBoardPack?.macroDeck?.cards]);
+
+  const activeMacroDisplayItems = useMemo(() => {
+    return activeMacroEffectsV1.map((effect) => {
+      const macroId = typeof effect.id === "string" ? effect.id : "";
+      const card = macroId ? macroCardById.get(macroId) : undefined;
+      const title =
+        (typeof effect.name === "string" && effect.name.trim().length > 0 ? effect.name : null) ??
+        card?.name ??
+        "Macro effect";
+      const rarity =
+        (typeof effect.rarity === "string" && effect.rarity.trim().length > 0 ? effect.rarity : null) ??
+        card?.rarity ??
+        null;
+      const rulesText = card?.rulesText ?? null;
+      const tooltip =
+        (typeof effect.tooltip === "string" && effect.tooltip.trim().length > 0 ? effect.tooltip : null) ??
+        (macroId ? macroTooltipById.get(macroId) ?? null : null);
+      const turnsRemaining =
+        typeof effect.roundsRemaining === "number" && Number.isFinite(effect.roundsRemaining)
+          ? Math.max(0, Math.floor(effect.roundsRemaining))
+          : null;
+      const roundsApplied =
+        typeof effect.roundsApplied === "number" && Number.isFinite(effect.roundsApplied)
+          ? Math.max(0, Math.floor(effect.roundsApplied))
+          : null;
+      const summary = tooltip ?? rulesText;
+
+      return {
+        id: macroId || title,
+        title,
+        rarityLabel: rarity ? rarity.replaceAll("_", " ") : null,
+        rulesText,
+        summary,
+        turnsRemaining,
+        roundsApplied,
+      };
+    });
+  }, [activeMacroEffectsV1, macroCardById, macroTooltipById]);
 
   const currentUserOwnedTiles = useMemo(() => {
     if (!selectedBoardPack?.tiles || !currentUserPlayer) {
@@ -2494,6 +2542,7 @@ export default function PlayV2Page() {
       rightDrawerMode={rightDrawerMode}
       onRightDrawerModeChange={setRightDrawerMode}
       tradeNeedsAttention={Boolean(incomingTradeProposal)}
+      macroEffectsActive={activeMacroDisplayItems.length > 0}
       canRoll={canRoll}
       canEndTurn={canEndTurn}
       actionLoading={actionLoading}
@@ -2793,6 +2842,53 @@ export default function PlayV2Page() {
               </button>
             </div>
           ) : null}
+        </section>
+      )}
+      macroDrawerContent={(
+        <section className="space-y-3 text-sm text-white/85">
+          <div className="rounded-lg border border-sky-300/20 bg-sky-500/10 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-sky-100">Active macro effects</p>
+            <p className="mt-1 text-xs text-white/70">
+              Current macro factors affecting this game.
+            </p>
+          </div>
+
+          {activeMacroDisplayItems.length === 0 ? (
+            <div className="rounded-lg border border-white/10 bg-white/5 p-3 text-xs text-white/60">
+              No active macro effects right now.
+            </div>
+          ) : (
+            activeMacroDisplayItems.map((effect) => (
+              <article key={effect.id} className="rounded-lg border border-sky-300/25 bg-white/5 p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-semibold text-white">{effect.title}</p>
+                  {effect.rarityLabel ? (
+                    <span className="rounded-full bg-sky-100/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-100">
+                      {effect.rarityLabel}
+                    </span>
+                  ) : null}
+                </div>
+                {effect.rulesText ? (
+                  <p className="mt-2 text-xs text-white/85">{effect.rulesText}</p>
+                ) : null}
+                {effect.summary && effect.summary !== effect.rulesText ? (
+                  <p className="mt-2 text-xs text-white/65">{effect.summary}</p>
+                ) : null}
+                <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-white/65">
+                  {effect.turnsRemaining !== null ? (
+                    <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">
+                      {effect.turnsRemaining} turn{effect.turnsRemaining === 1 ? "" : "s"} remaining
+                    </span>
+                  ) : null}
+                  {effect.roundsApplied !== null ? (
+                    <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">
+                      Applied for {effect.roundsApplied} round{effect.roundsApplied === 1 ? "" : "s"}
+                    </span>
+                  ) : null}
+                </div>
+              </article>
+            ))
+          )}
         </section>
       )}
       boardViewport={(
