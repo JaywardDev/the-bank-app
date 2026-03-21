@@ -253,6 +253,7 @@ type PlayV2ShellProps = {
   walletMortgagesContent?: ReactNode;
   decisionActive?: boolean;
   tradeNeedsAttention?: boolean;
+  tradeAccessibleDuringDecision?: boolean;
   macroEffectsActive?: boolean;
   rightDrawerLocked?: boolean;
   auctionActive?: boolean;
@@ -302,6 +303,7 @@ export default function PlayV2Shell({
   walletMortgagesContent,
   decisionActive = false,
   tradeNeedsAttention = false,
+  tradeAccessibleDuringDecision = false,
   macroEffectsActive = false,
   rightDrawerLocked = false,
   auctionActive = false,
@@ -508,7 +510,7 @@ export default function PlayV2Shell({
   };
 
   const handleTradeToggle = () => {
-    if (rightDrawerLocked || decisionActive) {
+    if (rightDrawerLocked || (decisionActive && !tradeAccessibleDuringDecision)) {
       return;
     }
 
@@ -727,7 +729,7 @@ export default function PlayV2Shell({
             <TradeButton
               open={rightOpen && rightDrawerMode === "trade"}
               onClick={handleTradeToggle}
-              disabled={rightDrawerLocked || decisionActive}
+              disabled={rightDrawerLocked || (decisionActive && !tradeAccessibleDuringDecision)}
               showAttention={tradeNeedsAttention}
             />
             <MacroButton

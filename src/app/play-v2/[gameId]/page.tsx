@@ -870,6 +870,12 @@ export default function PlayV2Page() {
     return type === "PENDING_CARD" || type === "MACRO_EVENT" || type === "GO_TO_JAIL";
   }, []);
 
+  const isInsolvencyRecoveryMode = Boolean(
+    pendingInsolvencyRecovery &&
+      isMyTurn &&
+      currentUserPlayer?.id &&
+      pendingInsolvencyRecovery.player_id === currentUserPlayer.id,
+  );
   const hasBlockingPendingAction = activeDecisionType !== null;
   const rules = getRules(gameState?.rules ?? null);
   const mortgageLtv =
@@ -892,6 +898,7 @@ export default function PlayV2Page() {
     ? (currentUserCash ?? 0) >= pendingMortgageDownPayment
     : false;
   const canAct = isMyTurn && !isEliminated && !auctionActive && !hasBlockingPendingAction;
+  const canUseRecoveryActions = isMyTurn && !isEliminated && !auctionActive && isInsolvencyRecoveryMode;
   const canRoll =
     canAct &&
     !isJailDecisionActor &&
@@ -1618,6 +1625,7 @@ export default function PlayV2Page() {
       .map((tile) => {
         const ownership = ownershipByTile[tile.index];
         const isMyTurn = canAct;
+        const isRecoveryTurn = canUseRecoveryActions;
         const isCollateralized = Boolean(ownership?.collateral_loan_id);
         const isPurchaseMortgaged = Boolean(ownership?.purchase_mortgage_id);
         const housesCount = ownership?.houses ?? 0;
@@ -1653,7 +1661,7 @@ export default function PlayV2Page() {
           : housesCount < 5
             ? "Need top level first"
             : null;
-        const collateralDisabledReason = !isMyTurn
+        const collateralDisabledReason = !isRecoveryTurn
           ? "Not your turn"
           : isCollateralized
             ? "Already collateralized"
@@ -1664,7 +1672,7 @@ export default function PlayV2Page() {
                 : !rules.loanCollateralEnabled
                   ? "Collateral loans disabled"
                   : null;
-        const sellToMarketDisabledReason = !isMyTurn
+        const sellToMarketDisabledReason = !isRecoveryTurn
           ? "Not your turn"
           : housesCount > 0
             ? "Remove upgrades first"
@@ -1677,6 +1685,7 @@ export default function PlayV2Page() {
         return {
           tile,
           isMyTurn,
+          isRecoveryTurn,
           isCollateralized,
           isPurchaseMortgaged,
           housesCount,
@@ -1697,6 +1706,7 @@ export default function PlayV2Page() {
       });
   }, [
     canAct,
+    canUseRecoveryActions,
     currentUserPlayer,
     ownershipByTile,
     rules.loanCollateralEnabled,
@@ -2344,18 +2354,58 @@ export default function PlayV2Page() {
             onAuction={handleDeclineProperty}
           />
         );
-      case "INSOLVENCY_RECOVERY":
+      case "INSOLVENCY_RECOVERY": {
+        const payeeName = pendingInsolvencyRecovery?.owed_to_player_id
+          ? getPlayerNameById(pendingInsolvencyRecovery.owed_to_player_id)
+          : null;
         return (
-          <div className="rounded-3xl border border-amber-400/30 bg-amber-500/10 p-5 text-sm text-amber-50">
-            <p className="font-semibold">Insolvency recovery pending</p>
-            <p className="mt-2">
-              {currentTurnPlayer?.display_name ?? "Player"} must raise funds before play can continue.
-            </p>
-            <p className="mt-2 text-amber-100/80">
-              Amount due: {formatMoney(pendingInsolvencyRecovery?.amount_due ?? 0)} · Cash available: {formatMoney(pendingInsolvencyRecovery?.cash_available ?? 0)} · Shortfall: {formatMoney(pendingInsolvencyRecovery?.shortfall ?? 0)}
-            </p>
+          <div className="space-y-3 rounded-3xl border border-amber-400/30 bg-amber-500/10 p-5 text-sm text-amber-50">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-200/80">Forced recovery</p>
+              <h2 className="mt-1 text-lg font-semibold text-white">Insufficient cash</h2>
+              <p className="mt-2 text-amber-50/90">
+                Raise funds to complete this payment.
+              </p>
+              <p className="mt-2 text-xs leading-5 text-amber-100/80">
+                Available recovery actions: sell property to bank, take collateralized loan, or trade with other players.
+              </p>
+            </div>
+
+            <dl className="grid grid-cols-1 gap-2 text-xs text-amber-100/85">
+              <div className="rounded-2xl border border-amber-200/10 bg-black/10 px-3 py-2">
+                <dt className="uppercase tracking-wide text-amber-200/70">Amount due</dt>
+                <dd className="mt-1 text-sm font-semibold text-white">{formatMoney(pendingInsolvencyRecovery?.amount_due ?? 0)}</dd>
+              </div>
+              <div className="rounded-2xl border border-amber-200/10 bg-black/10 px-3 py-2">
+                <dt className="uppercase tracking-wide text-amber-200/70">Current cash</dt>
+                <dd className="mt-1 text-sm font-semibold text-white">{formatMoney(pendingInsolvencyRecovery?.cash_available ?? 0)}</dd>
+              </div>
+              <div className="rounded-2xl border border-amber-200/10 bg-black/10 px-3 py-2">
+                <dt className="uppercase tracking-wide text-amber-200/70">Shortfall</dt>
+                <dd className="mt-1 text-sm font-semibold text-white">{formatMoney(pendingInsolvencyRecovery?.shortfall ?? 0)}</dd>
+              </div>
+              <div className="rounded-2xl border border-amber-200/10 bg-black/10 px-3 py-2">
+                <dt className="uppercase tracking-wide text-amber-200/70">Payment reason</dt>
+                <dd className="mt-1 text-sm font-semibold text-white">{pendingInsolvencyRecovery?.label ?? pendingInsolvencyRecovery?.reason ?? "Payment due"}</dd>
+              </div>
+              <div className="rounded-2xl border border-amber-200/10 bg-black/10 px-3 py-2">
+                <dt className="uppercase tracking-wide text-amber-200/70">Recipient / payee</dt>
+                <dd className="mt-1 text-sm font-semibold text-white">{payeeName ?? "Bank"}</dd>
+              </div>
+            </dl>
+
+            {isInsolvencyRecoveryMode ? (
+              <div className="rounded-2xl border border-emerald-300/25 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">
+                Normal turn flow stays locked until you raise enough funds, but trade remains available from the trade drawer.
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/70">
+                {currentTurnPlayer?.display_name ?? "Current player"} is resolving insolvency before play can continue.
+              </div>
+            )}
           </div>
         );
+      }
       default:
         return null;
     }
@@ -2386,6 +2436,8 @@ export default function PlayV2Page() {
     pendingPurchase,
     selectedBoardPack?.tiles,
     formatMoney,
+    getPlayerNameById,
+    isInsolvencyRecoveryMode,
   ]);
 
   const fullscreenEventNode = useMemo(() => {
@@ -2605,6 +2657,7 @@ export default function PlayV2Page() {
       rightDrawerMode={rightDrawerMode}
       onRightDrawerModeChange={setRightDrawerMode}
       tradeNeedsAttention={Boolean(incomingTradeProposal)}
+      tradeAccessibleDuringDecision={isInsolvencyRecoveryMode}
       macroEffectsActive={activeMacroDisplayItems.length > 0}
       canRoll={canRoll}
       canEndTurn={canEndTurn}

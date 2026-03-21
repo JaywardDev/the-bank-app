@@ -5170,11 +5170,19 @@ export async function POST(request: Request) {
       );
     }
 
-    if ((gameState.pending_action as { type?: unknown } | null)?.type === "INSOLVENCY_RECOVERY") {
-      return NextResponse.json(
-        { error: "Resolve insolvency before continuing." },
-        { status: 409 },
-      );
+    const pendingInsolvencyAction = gameState.pending_action as { type?: unknown; player_id?: unknown } | null;
+    const isInsolvencyRecoveryAction =
+      body.action === "SELL_TO_MARKET" || body.action === "TAKE_COLLATERAL_LOAN";
+    if (pendingInsolvencyAction?.type === "INSOLVENCY_RECOVERY") {
+      const isRecoveryActor =
+        typeof pendingInsolvencyAction.player_id === "string" &&
+        pendingInsolvencyAction.player_id === currentUserPlayer.id;
+      if (!isRecoveryActor || !isInsolvencyRecoveryAction) {
+        return NextResponse.json(
+          { error: "Resolve insolvency with recovery actions before continuing." },
+          { status: 409 },
+        );
+      }
     }
 
     if (isAuctionAction) {
