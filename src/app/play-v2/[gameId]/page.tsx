@@ -152,6 +152,7 @@ type BankAction =
   | "USE_GET_OUT_OF_JAIL_FREE"
   | "CONFIRM_PENDING_CARD"
   | "CONFIRM_MACRO_EVENT"
+  | "CONFIRM_INSOLVENCY_PAYMENT"
   | "BUY_PROPERTY"
   | "DECLINE_PROPERTY"
   | "AUCTION_BID"
@@ -876,6 +877,10 @@ export default function PlayV2Page() {
       currentUserPlayer?.id &&
       pendingInsolvencyRecovery.player_id === currentUserPlayer.id,
   );
+  const insolvencyAmountDue = pendingInsolvencyRecovery?.amount_due ?? 0;
+  const insolvencyCurrentCash = isInsolvencyRecoveryMode ? currentUserCash ?? 0 : pendingInsolvencyRecovery?.cash_available ?? 0;
+  const insolvencyShortfall = Math.max(insolvencyAmountDue - insolvencyCurrentCash, 0);
+  const isInsolvencyReadyToPay = Boolean(isInsolvencyRecoveryMode && pendingInsolvencyRecovery && insolvencyCurrentCash >= insolvencyAmountDue);
   const hasBlockingPendingAction = activeDecisionType !== null;
   const rules = getRules(gameState?.rules ?? null);
   const mortgageLtv =
@@ -1181,6 +1186,13 @@ export default function PlayV2Page() {
   const handleConfirmMacroEvent = useCallback(() => {
     void handleBankAction("CONFIRM_MACRO_EVENT");
   }, [handleBankAction]);
+
+  const handleConfirmInsolvencyPayment = useCallback(() => {
+    if (!isInsolvencyReadyToPay) {
+      return;
+    }
+    void handleBankAction("CONFIRM_INSOLVENCY_PAYMENT");
+  }, [handleBankAction, isInsolvencyReadyToPay]);
 
   const handleBuyProperty = useCallback(() => {
     if (!pendingPurchase) {
@@ -2362,27 +2374,31 @@ export default function PlayV2Page() {
           <div className="space-y-3 rounded-3xl border border-amber-400/30 bg-amber-500/10 p-5 text-sm text-amber-50">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-200/80">Forced recovery</p>
-              <h2 className="mt-1 text-lg font-semibold text-white">Insufficient cash</h2>
+              <h2 className="mt-1 text-lg font-semibold text-white">{isInsolvencyReadyToPay ? "Recovery successful" : "Insufficient cash"}</h2>
               <p className="mt-2 text-amber-50/90">
-                Raise funds to complete this payment.
+                {isInsolvencyReadyToPay
+                  ? "You now have enough cash to complete the payment."
+                  : "Raise funds to complete this payment."}
               </p>
               <p className="mt-2 text-xs leading-5 text-amber-100/80">
-                Available recovery actions: sell property to bank, take collateralized loan, or trade with other players.
+                {isInsolvencyReadyToPay
+                  ? "Confirm the held payment to clear insolvency and resume normal play."
+                  : "Available recovery actions: sell property to bank, take collateralized loan, or trade with other players."}
               </p>
             </div>
 
             <dl className="grid grid-cols-1 gap-2 text-xs text-amber-100/85">
               <div className="rounded-2xl border border-amber-200/10 bg-black/10 px-3 py-2">
                 <dt className="uppercase tracking-wide text-amber-200/70">Amount due</dt>
-                <dd className="mt-1 text-sm font-semibold text-white">{formatMoney(pendingInsolvencyRecovery?.amount_due ?? 0)}</dd>
+                <dd className="mt-1 text-sm font-semibold text-white">{formatMoney(insolvencyAmountDue)}</dd>
               </div>
               <div className="rounded-2xl border border-amber-200/10 bg-black/10 px-3 py-2">
                 <dt className="uppercase tracking-wide text-amber-200/70">Current cash</dt>
-                <dd className="mt-1 text-sm font-semibold text-white">{formatMoney(pendingInsolvencyRecovery?.cash_available ?? 0)}</dd>
+                <dd className="mt-1 text-sm font-semibold text-white">{formatMoney(insolvencyCurrentCash)}</dd>
               </div>
               <div className="rounded-2xl border border-amber-200/10 bg-black/10 px-3 py-2">
                 <dt className="uppercase tracking-wide text-amber-200/70">Shortfall</dt>
-                <dd className="mt-1 text-sm font-semibold text-white">{formatMoney(pendingInsolvencyRecovery?.shortfall ?? 0)}</dd>
+                <dd className="mt-1 text-sm font-semibold text-white">{formatMoney(insolvencyShortfall)}</dd>
               </div>
               <div className="rounded-2xl border border-amber-200/10 bg-black/10 px-3 py-2">
                 <dt className="uppercase tracking-wide text-amber-200/70">Payment reason</dt>
@@ -2395,9 +2411,25 @@ export default function PlayV2Page() {
             </dl>
 
             {isInsolvencyRecoveryMode ? (
-              <div className="rounded-2xl border border-emerald-300/25 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">
-                Normal turn flow stays locked until you raise enough funds, but trade remains available from the trade drawer.
-              </div>
+              isInsolvencyReadyToPay ? (
+                <div className="space-y-3">
+                  <div className="rounded-2xl border border-emerald-300/25 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">
+                    Your payment is still on hold. Confirm it to clear insolvency and unlock normal turn flow.
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleConfirmInsolvencyPayment}
+                    disabled={actionLoading === "CONFIRM_INSOLVENCY_PAYMENT"}
+                    className="w-full rounded-2xl bg-emerald-400 px-4 py-3 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {actionLoading === "CONFIRM_INSOLVENCY_PAYMENT" ? "Confirming…" : "Confirm payment"}
+                  </button>
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-emerald-300/25 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">
+                  Normal turn flow stays locked until you raise enough funds, but trade remains available from the trade drawer.
+                </div>
+              )
             ) : (
               <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/70">
                 {currentTurnPlayer?.display_name ?? "Current player"} is resolving insolvency before play can continue.
@@ -2420,11 +2452,15 @@ export default function PlayV2Page() {
     currentUserPlayer,
     handleBuyProperty,
     handleBuyPropertyWithMortgage,
+    handleConfirmInsolvencyPayment,
     handleDeclineProperty,
     handlePayJailFine,
     handleRollForDoubles,
     handleUseGetOutOfJailFree,
     hasGetOutOfJailFree,
+    insolvencyAmountDue,
+    insolvencyCurrentCash,
+    insolvencyShortfall,
     isAwaitingJailDecision,
     isDrawerDecision,
     isJailDecisionActor,
@@ -2437,6 +2473,7 @@ export default function PlayV2Page() {
     selectedBoardPack?.tiles,
     formatMoney,
     getPlayerNameById,
+    isInsolvencyReadyToPay,
     isInsolvencyRecoveryMode,
   ]);
 

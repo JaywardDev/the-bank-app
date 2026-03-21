@@ -126,6 +126,7 @@ type BankActionRequest =
         | "USE_GET_OUT_OF_JAIL_FREE"
         | "CONFIRM_PENDING_CARD"
         | "CONFIRM_MACRO_EVENT"
+        | "CONFIRM_INSOLVENCY_PAYMENT"
         | "PAYOFF_COLLATERAL_LOAN"
         | "PAYOFF_PURCHASE_MORTGAGE"
         | "BUILD_HOUSE"
@@ -162,6 +163,9 @@ type BankActionRequest =
   | (BaseActionRequest & {
       action: "PAYOFF_PURCHASE_MORTGAGE";
       mortgageId: string;
+    })
+  | (BaseActionRequest & {
+      action: "CONFIRM_INSOLVENCY_PAYMENT";
     });
 
 type SupabaseUser = {
@@ -1565,6 +1569,43 @@ const getNextEligibleAuctionPlayerId = (
     }
   }
   return null;
+};
+
+const parsePendingInsolvencyAction = (
+  pendingAction: Record<string, unknown> | null | undefined,
+): InsolvencyPendingAction | null => {
+  if (!pendingAction || pendingAction.type !== "INSOLVENCY_RECOVERY") {
+    return null;
+  }
+
+  const amountDue = pendingAction.amount_due;
+  const cashAvailable = pendingAction.cash_available;
+  const shortfall = pendingAction.shortfall;
+  if (
+    typeof pendingAction.player_id !== "string" ||
+    typeof pendingAction.reason !== "string" ||
+    typeof amountDue !== "number" ||
+    typeof cashAvailable !== "number" ||
+    typeof shortfall !== "number"
+  ) {
+    return null;
+  }
+
+  return {
+    type: "INSOLVENCY_RECOVERY",
+    player_id: pendingAction.player_id,
+    reason: pendingAction.reason as InsolvencyReason,
+    amount_due: amountDue,
+    cash_available: cashAvailable,
+    shortfall,
+    owed_to_player_id:
+      typeof pendingAction.owed_to_player_id === "string"
+        ? pendingAction.owed_to_player_id
+        : null,
+    tile_index: typeof pendingAction.tile_index === "number" ? pendingAction.tile_index : null,
+    tile_id: typeof pendingAction.tile_id === "string" ? pendingAction.tile_id : null,
+    label: typeof pendingAction.label === "string" ? pendingAction.label : null,
+  };
 };
 
 const createInsolvencyPendingAction = ({
@@ -5172,7 +5213,9 @@ export async function POST(request: Request) {
 
     const pendingInsolvencyAction = gameState.pending_action as { type?: unknown; player_id?: unknown } | null;
     const isInsolvencyRecoveryAction =
-      body.action === "SELL_TO_MARKET" || body.action === "TAKE_COLLATERAL_LOAN";
+      body.action === "SELL_TO_MARKET" ||
+      body.action === "TAKE_COLLATERAL_LOAN" ||
+      body.action === "CONFIRM_INSOLVENCY_PAYMENT";
     if (pendingInsolvencyAction?.type === "INSOLVENCY_RECOVERY") {
       const isRecoveryActor =
         typeof pendingInsolvencyAction.player_id === "string" &&
@@ -6626,6 +6669,281 @@ export async function POST(request: Request) {
             turn_phase: nextPlayer.is_in_jail
               ? "AWAITING_JAIL_DECISION"
               : "AWAITING_ROLL",
+            pending_action: null,
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      )) ?? [];
+
+      if (!updatedState) {
+        return NextResponse.json(
+          { error: "Version mismatch." },
+          { status: 409 },
+        );
+      }
+
+      await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+
+      return NextResponse.json({ gameState: updatedState });
+    }
+
+    if (body.action === "CONFIRM_INSOLVENCY_PAYMENT") {
+      const pendingAction = parsePendingInsolvencyAction(
+        gameState.pending_action as Record<string, unknown> | null,
+      );
+
+      if (!pendingAction) {
+        return NextResponse.json(
+          { error: "No pending insolvency payment to confirm." },
+          { status: 409 },
+        );
+      }
+
+      if (pendingAction.player_id !== currentPlayer.id) {
+        return NextResponse.json(
+          { error: "Only the insolvent player can confirm this payment." },
+          { status: 403 },
+        );
+      }
+
+      const balances = gameState.balances ?? {};
+      const currentBalance = balances[currentPlayer.id] ?? startingCash;
+      if (currentBalance < pendingAction.amount_due) {
+        return NextResponse.json(
+          { error: "You still need more cash before confirming this payment." },
+          { status: 409 },
+        );
+      }
+
+      let updatedBalances: Record<string, number> = {
+        ...balances,
+        [currentPlayer.id]: currentBalance - pendingAction.amount_due,
+      };
+      const events: Array<{ event_type: string; payload: Record<string, unknown> }> = [];
+
+      if (pendingAction.reason === "PAY_RENT") {
+        const payeeId = pendingAction.owed_to_player_id;
+        if (!payeeId) {
+          return NextResponse.json(
+            { error: "Held rent payment is missing its payee." },
+            { status: 409 },
+          );
+        }
+        const payeeBalance = updatedBalances[payeeId] ?? startingCash;
+        updatedBalances = {
+          ...updatedBalances,
+          [payeeId]: payeeBalance + pendingAction.amount_due,
+        };
+        events.push(
+          {
+            event_type: "PAY_RENT",
+            payload: {
+              tile_index: pendingAction.tile_index,
+              tile_id: pendingAction.tile_id,
+              from_player_id: currentPlayer.id,
+              to_player_id: payeeId,
+              amount: pendingAction.amount_due,
+            },
+          },
+          {
+            event_type: "CASH_DEBIT",
+            payload: {
+              player_id: currentPlayer.id,
+              amount: pendingAction.amount_due,
+              reason: "PAY_RENT",
+              tile_index: pendingAction.tile_index,
+            },
+          },
+          {
+            event_type: "CASH_CREDIT",
+            payload: {
+              player_id: payeeId,
+              amount: pendingAction.amount_due,
+              reason: "PAY_RENT",
+              tile_index: pendingAction.tile_index,
+            },
+          },
+        );
+      } else if (pendingAction.reason === "PAY_TAX") {
+        events.push(
+          {
+            event_type: "PAY_TAX",
+            payload: {
+              tile_index: pendingAction.tile_index,
+              tile_name: pendingAction.label,
+              amount: pendingAction.amount_due,
+              payer_player_id: currentPlayer.id,
+              payer_display_name: currentPlayer.display_name,
+            },
+          },
+          {
+            event_type: "CASH_DEBIT",
+            payload: {
+              player_id: currentPlayer.id,
+              amount: pendingAction.amount_due,
+              reason: "PAY_TAX",
+              tile_index: pendingAction.tile_index,
+            },
+          },
+        );
+      } else if (pendingAction.reason === "JAIL_PAY_FINE") {
+        events.push(
+          {
+            event_type: "JAIL_PAY_FINE",
+            payload: {
+              player_id: currentPlayer.id,
+              player_name: currentPlayer.display_name,
+              amount: pendingAction.amount_due,
+            },
+          },
+          {
+            event_type: "CASH_DEBIT",
+            payload: {
+              player_id: currentPlayer.id,
+              amount: pendingAction.amount_due,
+              reason: "JAIL_PAY_FINE",
+            },
+          },
+        );
+      } else if (pendingAction.reason === "CARD_PAY") {
+        events.push(
+          {
+            event_type: "CARD_PAY",
+            payload: {
+              player_id: currentPlayer.id,
+              player_name: currentPlayer.display_name,
+              card_title: pendingAction.label,
+              card_kind: "PAY",
+              amount: pendingAction.amount_due,
+            },
+          },
+          {
+            event_type: "CASH_DEBIT",
+            payload: {
+              player_id: currentPlayer.id,
+              amount: pendingAction.amount_due,
+              reason: "CARD_PAY",
+            },
+          },
+        );
+      } else if (pendingAction.reason === "COLLATERAL_LOAN_PAYMENT") {
+        const [loan] = (await fetchFromSupabaseWithService<PlayerLoanRow[]>(
+          `player_loans?select=id,collateral_tile_index,principal,remaining_principal,turns_remaining,payment_per_turn,status&game_id=eq.${gameId}&player_id=eq.${currentPlayer.id}&collateral_tile_index=eq.${pendingAction.tile_index}&status=eq.active&limit=1`,
+          { method: "GET" },
+        )) ?? [];
+        if (!loan) {
+          return NextResponse.json(
+            { error: "Active collateral loan not found for held payment." },
+            { status: 409 },
+          );
+        }
+        const remainingPrincipal =
+          typeof loan.remaining_principal === "number" ? loan.remaining_principal : loan.principal;
+        const remainingPrincipalAfter = Math.max(0, remainingPrincipal - pendingAction.amount_due);
+        const turnsRemainingAfter = Math.max(0, loan.turns_remaining - 1);
+        const status =
+          turnsRemainingAfter === 0 || remainingPrincipalAfter === 0 ? "paid" : "active";
+        await fetchFromSupabaseWithService(`player_loans?id=eq.${loan.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            turns_remaining: turnsRemainingAfter,
+            status,
+            remaining_principal: remainingPrincipalAfter,
+            updated_at: new Date().toISOString(),
+          }),
+        });
+        events.push(
+          {
+            event_type: "COLLATERAL_LOAN_PAYMENT",
+            payload: {
+              player_id: currentPlayer.id,
+              tile_index: pendingAction.tile_index,
+              amount: pendingAction.amount_due,
+              turns_remaining_after: turnsRemainingAfter,
+            },
+          },
+          {
+            event_type: "CASH_DEBIT",
+            payload: {
+              player_id: currentPlayer.id,
+              amount: pendingAction.amount_due,
+              reason: "COLLATERAL_LOAN_PAYMENT",
+              tile_index: pendingAction.tile_index,
+              loan_id: loan.id,
+            },
+          },
+        );
+      } else if (pendingAction.reason === "MACRO_INTEREST_SURCHARGE") {
+        const activeMacroEffects = getActiveMacroEffectsV1ForRules(
+          gameState.active_macro_effects_v1,
+          rules.macroEnabled,
+        );
+        const macroInterestTrendAccumulator = getMacroInterestTrendAccumulatorV1(activeMacroEffects);
+        const [loan] = (await fetchFromSupabaseWithService<PlayerLoanRow[]>(
+          `player_loans?select=id,collateral_tile_index,principal,remaining_principal,status&game_id=eq.${gameId}&player_id=eq.${currentPlayer.id}&collateral_tile_index=eq.${pendingAction.tile_index}&status=eq.active&limit=1`,
+          { method: "GET" },
+        )) ?? [];
+        const remainingPrincipal = loan
+          ? typeof loan.remaining_principal === "number"
+            ? loan.remaining_principal
+            : loan.principal
+          : null;
+        events.push(
+          {
+            event_type: "CASH_DEBIT",
+            payload: {
+              player_id: currentPlayer.id,
+              amount: pendingAction.amount_due,
+              reason: "MACRO_INTEREST_SURCHARGE",
+              loan_id: loan?.id ?? null,
+              tile_index: pendingAction.tile_index,
+              principal_remaining: remainingPrincipal,
+              macro_interest_delta_per_turn: macroInterestTrendAccumulator,
+            },
+          },
+          {
+            event_type: "MACRO_INTEREST_SURCHARGE",
+            payload: {
+              player_id: currentPlayer.id,
+              loan_id: loan?.id ?? null,
+              tile_index: pendingAction.tile_index,
+              amount: pendingAction.amount_due,
+              principal_remaining: remainingPrincipal,
+              macro_interest_delta_per_turn: macroInterestTrendAccumulator,
+            },
+          },
+        );
+      } else {
+        return NextResponse.json(
+          { error: "Unsupported insolvency payment type." },
+          { status: 409 },
+        );
+      }
+
+      events.push({
+        event_type: "INSOLVENCY_RECOVERY_COMPLETED",
+        payload: {
+          player_id: currentPlayer.id,
+          amount_due: pendingAction.amount_due,
+          reason: pendingAction.reason,
+          owed_to_player_id: pendingAction.owed_to_player_id,
+          tile_index: pendingAction.tile_index,
+          tile_id: pendingAction.tile_id,
+          label: pendingAction.label,
+        },
+      });
+
+      const finalVersion = currentVersion + events.length;
+      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            version: finalVersion,
+            balances: updatedBalances,
             pending_action: null,
             updated_at: new Date().toISOString(),
           }),
