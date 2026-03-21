@@ -153,6 +153,7 @@ type BankAction =
   | "CONFIRM_PENDING_CARD"
   | "CONFIRM_MACRO_EVENT"
   | "CONFIRM_INSOLVENCY_PAYMENT"
+  | "DECLARE_BANKRUPTCY"
   | "BUY_PROPERTY"
   | "DECLINE_PROPERTY"
   | "AUCTION_BID"
@@ -1193,6 +1194,13 @@ export default function PlayV2Page() {
     }
     void handleBankAction("CONFIRM_INSOLVENCY_PAYMENT");
   }, [handleBankAction, isInsolvencyReadyToPay]);
+
+  const handleDeclareBankruptcy = useCallback(() => {
+    if (!isInsolvencyRecoveryMode) {
+      return;
+    }
+    void handleBankAction("DECLARE_BANKRUPTCY");
+  }, [handleBankAction, isInsolvencyRecoveryMode]);
 
   const handleBuyProperty = useCallback(() => {
     if (!pendingPurchase) {
@@ -2411,25 +2419,41 @@ export default function PlayV2Page() {
             </dl>
 
             {isInsolvencyRecoveryMode ? (
-              isInsolvencyReadyToPay ? (
-                <div className="space-y-3">
+              <div className="space-y-3">
+                {isInsolvencyReadyToPay ? (
+                  <>
+                    <div className="rounded-2xl border border-emerald-300/25 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">
+                      Your payment is still on hold. Confirm it to clear insolvency and unlock normal turn flow.
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleConfirmInsolvencyPayment}
+                      disabled={actionLoading === "CONFIRM_INSOLVENCY_PAYMENT"}
+                      className="w-full rounded-2xl bg-emerald-400 px-4 py-3 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {actionLoading === "CONFIRM_INSOLVENCY_PAYMENT" ? "Confirming…" : "Confirm payment"}
+                    </button>
+                  </>
+                ) : (
                   <div className="rounded-2xl border border-emerald-300/25 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">
-                    Your payment is still on hold. Confirm it to clear insolvency and unlock normal turn flow.
+                    Normal turn flow stays locked until you raise enough funds, but trade remains available from the trade drawer.
                   </div>
+                )}
+                <div className="rounded-2xl border border-rose-400/25 bg-rose-500/10 px-3 py-3 text-xs text-rose-100">
+                  <p className="font-semibold uppercase tracking-wide text-rose-200/90">Final option</p>
+                  <p className="mt-1 text-rose-100/85">
+                    If you cannot or do not want to keep raising funds, you can eliminate yourself and return any remaining properties to the bank.
+                  </p>
                   <button
                     type="button"
-                    onClick={handleConfirmInsolvencyPayment}
-                    disabled={actionLoading === "CONFIRM_INSOLVENCY_PAYMENT"}
-                    className="w-full rounded-2xl bg-emerald-400 px-4 py-3 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
+                    onClick={handleDeclareBankruptcy}
+                    disabled={actionLoading === "DECLARE_BANKRUPTCY"}
+                    className="mt-3 w-full rounded-2xl border border-rose-300/35 bg-rose-400 px-4 py-3 text-sm font-semibold text-rose-950 transition hover:bg-rose-300 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {actionLoading === "CONFIRM_INSOLVENCY_PAYMENT" ? "Confirming…" : "Confirm payment"}
+                    {actionLoading === "DECLARE_BANKRUPTCY" ? "Declaring…" : "Declare bankruptcy"}
                   </button>
                 </div>
-              ) : (
-                <div className="rounded-2xl border border-emerald-300/25 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">
-                  Normal turn flow stays locked until you raise enough funds, but trade remains available from the trade drawer.
-                </div>
-              )
+              </div>
             ) : (
               <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/70">
                 {currentTurnPlayer?.display_name ?? "Current player"} is resolving insolvency before play can continue.
@@ -2453,6 +2477,7 @@ export default function PlayV2Page() {
     handleBuyProperty,
     handleBuyPropertyWithMortgage,
     handleConfirmInsolvencyPayment,
+    handleDeclareBankruptcy,
     handleDeclineProperty,
     handlePayJailFine,
     handleRollForDoubles,

@@ -127,6 +127,7 @@ type BankActionRequest =
         | "CONFIRM_PENDING_CARD"
         | "CONFIRM_MACRO_EVENT"
         | "CONFIRM_INSOLVENCY_PAYMENT"
+        | "DECLARE_BANKRUPTCY"
         | "PAYOFF_COLLATERAL_LOAN"
         | "PAYOFF_PURCHASE_MORTGAGE"
         | "BUILD_HOUSE"
@@ -165,7 +166,7 @@ type BankActionRequest =
       mortgageId: string;
     })
   | (BaseActionRequest & {
-      action: "CONFIRM_INSOLVENCY_PAYMENT";
+      action: "CONFIRM_INSOLVENCY_PAYMENT" | "DECLARE_BANKRUPTCY";
     });
 
 type SupabaseUser = {
@@ -1783,6 +1784,8 @@ const resolveBankruptcyIfNeeded = async ({
         body: JSON.stringify({
           owner_player_id: null,
           collateral_loan_id: null,
+          purchase_mortgage_id: null,
+          houses: 0,
         }),
       },
     );
@@ -1790,6 +1793,17 @@ const resolveBankruptcyIfNeeded = async ({
 
   await fetchFromSupabaseWithService(
     `player_loans?game_id=eq.${gameId}&player_id=eq.${player.id}&status=eq.active`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        status: "defaulted",
+        updated_at: now,
+      }),
+    },
+  );
+
+  await fetchFromSupabaseWithService(
+    `purchase_mortgages?game_id=eq.${gameId}&player_id=eq.${player.id}&status=eq.active`,
     {
       method: "PATCH",
       body: JSON.stringify({
@@ -5215,7 +5229,8 @@ export async function POST(request: Request) {
     const isInsolvencyRecoveryAction =
       body.action === "SELL_TO_MARKET" ||
       body.action === "TAKE_COLLATERAL_LOAN" ||
-      body.action === "CONFIRM_INSOLVENCY_PAYMENT";
+      body.action === "CONFIRM_INSOLVENCY_PAYMENT" ||
+      body.action === "DECLARE_BANKRUPTCY";
     if (pendingInsolvencyAction?.type === "INSOLVENCY_RECOVERY") {
       const isRecoveryActor =
         typeof pendingInsolvencyAction.player_id === "string" &&
@@ -6685,6 +6700,59 @@ export async function POST(request: Request) {
       await emitGameEvents(gameId, currentVersion + 1, events, user.id);
 
       return NextResponse.json({ gameState: updatedState });
+    }
+
+    if (body.action === "DECLARE_BANKRUPTCY") {
+      const pendingAction = parsePendingInsolvencyAction(
+        gameState.pending_action as Record<string, unknown> | null,
+      );
+
+      if (!pendingAction) {
+        return NextResponse.json(
+          { error: "No insolvency recovery is pending." },
+          { status: 409 },
+        );
+      }
+
+      if (pendingAction.player_id !== currentPlayer.id) {
+        return NextResponse.json(
+          { error: "Only the insolvent player can declare bankruptcy." },
+          { status: 403 },
+        );
+      }
+
+      const balances = gameState.balances ?? {};
+      const currentBalance = balances[currentPlayer.id] ?? startingCash;
+      const bankruptcyResult = await resolveBankruptcyIfNeeded({
+        gameId,
+        gameState,
+        players,
+        player: currentPlayer,
+        updatedBalances: balances,
+        cashBefore: currentBalance,
+        cashAfter: -1,
+        reason: pendingAction.reason,
+        events: [],
+        currentVersion,
+        userId: user.id,
+        playerPosition: currentPlayer.position,
+      });
+
+      if (bankruptcyResult.error) {
+        return NextResponse.json(
+          { error: bankruptcyResult.error },
+          { status: bankruptcyResult.error === "Version mismatch." ? 409 : 500 },
+        );
+      }
+
+      if (bankruptcyResult.updatedState) {
+        return NextResponse.json({ gameState: bankruptcyResult.updatedState });
+      }
+
+      return NextResponse.json(
+        { error: "Bankruptcy declaration could not be completed." },
+        { status: 409 },
+      );
     }
 
     if (body.action === "CONFIRM_INSOLVENCY_PAYMENT") {
