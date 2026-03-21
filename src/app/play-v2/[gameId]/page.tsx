@@ -2719,7 +2719,7 @@ export default function PlayV2Page() {
       rightDrawerMode={rightDrawerMode}
       onRightDrawerModeChange={setRightDrawerMode}
       tradeNeedsAttention={Boolean(incomingTradeProposal)}
-      tradeAccessibleDuringDecision={isInsolvencyRecoveryMode}
+      tradeAccessibleDuringDecision={Boolean(pendingInsolvencyRecovery)}
       macroEffectsActive={activeMacroDisplayItems.length > 0}
       canRoll={canRoll}
       canEndTurn={canEndTurn}

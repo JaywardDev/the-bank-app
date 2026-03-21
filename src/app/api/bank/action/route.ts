@@ -1728,6 +1728,136 @@ const enterInsolvencyRecovery = async ({
   return { handled: true, updatedState };
 };
 
+const commitResolvedMoveState = async ({
+  gameId,
+  gameState,
+  currentVersion,
+  nextVersion,
+  currentPlayer,
+  finalPosition,
+  shouldSendToJail,
+  jailTile,
+  nextGetOutOfJailFreeCount,
+  getOutOfJailFreeCountChanged,
+  rollTotal,
+  nextDoublesCount,
+  updatedBalances,
+  balancesChanged,
+  nextChanceIndex,
+  nextCommunityIndex,
+  chanceStateChanged,
+  nextChanceOrder,
+  nextChanceDrawPtr,
+  nextChanceSeed,
+  nextChanceReshuffleCount,
+  communityStateChanged,
+  nextCommunityOrder,
+  nextCommunityDrawPtr,
+  nextCommunitySeed,
+  nextCommunityReshuffleCount,
+  turnPhase,
+  extraGameStatePatch,
+}: {
+  gameId: string;
+  gameState: GameStateRow;
+  currentVersion: number;
+  nextVersion: number;
+  currentPlayer: PlayerRow;
+  finalPosition: number;
+  shouldSendToJail: boolean;
+  jailTile: TileInfo | null;
+  nextGetOutOfJailFreeCount: number;
+  getOutOfJailFreeCountChanged: boolean;
+  rollTotal: number | null;
+  nextDoublesCount: number;
+  updatedBalances: Record<string, number>;
+  balancesChanged: boolean;
+  nextChanceIndex: number;
+  nextCommunityIndex: number;
+  chanceStateChanged: boolean;
+  nextChanceOrder: number[] | null;
+  nextChanceDrawPtr: number;
+  nextChanceSeed: string | null;
+  nextChanceReshuffleCount: number;
+  communityStateChanged: boolean;
+  nextCommunityOrder: number[] | null;
+  nextCommunityDrawPtr: number;
+  nextCommunitySeed: string | null;
+  nextCommunityReshuffleCount: number;
+  turnPhase: string;
+  extraGameStatePatch?: Record<string, unknown>;
+}): Promise<GameStateRow | null> => {
+  const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+    `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+    {
+      method: "PATCH",
+      headers: {
+        Prefer: "return=representation",
+      },
+      body: JSON.stringify({
+        version: nextVersion,
+        last_roll: rollTotal ?? null,
+        doubles_count: nextDoublesCount,
+        ...(balancesChanged ? { balances: updatedBalances } : {}),
+        ...(nextChanceIndex !== (gameState?.chance_index ?? 0)
+          ? { chance_index: nextChanceIndex }
+          : {}),
+        ...(nextCommunityIndex !== (gameState?.community_index ?? 0)
+          ? { community_index: nextCommunityIndex }
+          : {}),
+        ...(chanceStateChanged
+          ? {
+              chance_order: nextChanceOrder,
+              chance_draw_ptr: nextChanceDrawPtr,
+              chance_seed: nextChanceSeed,
+              chance_reshuffle_count: nextChanceReshuffleCount,
+            }
+          : {}),
+        ...(communityStateChanged
+          ? {
+              community_order: nextCommunityOrder,
+              community_draw_ptr: nextCommunityDrawPtr,
+              community_seed: nextCommunitySeed,
+              community_reshuffle_count: nextCommunityReshuffleCount,
+            }
+          : {}),
+        turn_phase: turnPhase,
+        pending_action: null,
+        ...(extraGameStatePatch ?? {}),
+        updated_at: new Date().toISOString(),
+      }),
+    },
+  )) ?? [];
+
+  if (!updatedState) {
+    return null;
+  }
+
+  const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
+    `players?id=eq.${currentPlayer.id}`,
+    {
+      method: "PATCH",
+      headers: {
+        Prefer: "return=representation",
+      },
+      body: JSON.stringify({
+        position: finalPosition,
+        is_in_jail: Boolean(shouldSendToJail && jailTile),
+        jail_turns_remaining: shouldSendToJail && jailTile ? 3 : 0,
+        ...(getOutOfJailFreeCountChanged
+          ? { get_out_of_jail_free_count: nextGetOutOfJailFreeCount }
+          : {}),
+      }),
+    },
+  )) ?? [];
+
+  if (!updatedPlayer) {
+    throw new Error("Unable to update player position.");
+  }
+
+  return updatedState;
+};
+
 const resolveBankruptcyIfNeeded = async ({
   gameId,
   gameState,
@@ -2878,13 +3008,68 @@ const finalizeMoveResolution = async ({
   }
 
   if (bankruptcyCandidate) {
+    const resolvedMoveVersion = currentVersion + events.length;
+    const turnPhaseAfterMove =
+      pendingPurchaseAction ? "AWAITING_DECISION" : "AWAITING_ROLL";
+
+    let resolvedMoveState: GameStateRow;
+    try {
+      const committedState = await commitResolvedMoveState({
+        gameId,
+        gameState,
+        currentVersion,
+        nextVersion: resolvedMoveVersion,
+        currentPlayer,
+        finalPosition,
+        shouldSendToJail,
+        jailTile,
+        nextGetOutOfJailFreeCount,
+        getOutOfJailFreeCountChanged,
+        rollTotal,
+        nextDoublesCount,
+        updatedBalances,
+        balancesChanged,
+        nextChanceIndex,
+        nextCommunityIndex,
+        chanceStateChanged,
+        nextChanceOrder,
+        nextChanceDrawPtr,
+        nextChanceSeed,
+        nextChanceReshuffleCount,
+        communityStateChanged,
+        nextCommunityOrder,
+        nextCommunityDrawPtr,
+        nextCommunitySeed,
+        nextCommunityReshuffleCount,
+        turnPhase: turnPhaseAfterMove,
+        extraGameStatePatch,
+      });
+
+      if (!committedState) {
+        return NextResponse.json(
+          { error: "Version mismatch." },
+          { status: 409 },
+        );
+      }
+
+      resolvedMoveState = committedState;
+    } catch (error) {
+      console.error("[Bank][Insolvency] Failed to commit resolved move state", error);
+      return NextResponse.json(
+        { error: "Unable to update player position." },
+        { status: 500 },
+      );
+    }
+
+    await emitGameEvents(gameId, currentVersion + 1, events, userId);
+
     const bankruptcyResult = await enterInsolvencyRecovery({
       gameId,
-      gameState,
+      gameState: resolvedMoveState,
       player: currentPlayer,
       candidate: bankruptcyCandidate,
-      events,
-      currentVersion,
+      events: [],
+      currentVersion: resolvedMoveVersion,
       userId,
     });
 
