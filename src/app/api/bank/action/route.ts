@@ -210,6 +210,38 @@ type ActiveMacroEffectV1 = {
   tooltip?: string;
 };
 
+type InsolvencyReason =
+  | "PAY_RENT"
+  | "PAY_TAX"
+  | "JAIL_PAY_FINE"
+  | "CARD_PAY"
+  | "COLLATERAL_LOAN_PAYMENT"
+  | "MACRO_INTEREST_SURCHARGE";
+
+type InsolvencyPendingAction = {
+  type: "INSOLVENCY_RECOVERY";
+  player_id: string;
+  reason: InsolvencyReason;
+  amount_due: number;
+  cash_available: number;
+  shortfall: number;
+  owed_to_player_id: string | null;
+  tile_index: number | null;
+  tile_id: string | null;
+  label: string | null;
+};
+
+type BankruptcyCandidate = {
+  reason: InsolvencyReason;
+  cashBefore: number;
+  cashAfter: number;
+  amountDue: number;
+  owedToPlayerId?: string | null;
+  tileIndex?: number | null;
+  tileId?: string | null;
+  label?: string | null;
+};
+
 type GameStateRow = {
   game_id: string;
   version: number;
@@ -1535,6 +1567,116 @@ const getNextEligibleAuctionPlayerId = (
   return null;
 };
 
+const createInsolvencyPendingAction = ({
+  playerId,
+  reason,
+  amountDue,
+  cashAvailable,
+  owedToPlayerId = null,
+  tileIndex = null,
+  tileId = null,
+  label = null,
+}: {
+  playerId: string;
+  reason: InsolvencyReason;
+  amountDue: number;
+  cashAvailable: number;
+  owedToPlayerId?: string | null;
+  tileIndex?: number | null;
+  tileId?: string | null;
+  label?: string | null;
+}): InsolvencyPendingAction => ({
+  type: "INSOLVENCY_RECOVERY",
+  player_id: playerId,
+  reason,
+  amount_due: amountDue,
+  cash_available: cashAvailable,
+  shortfall: Math.max(amountDue - cashAvailable, 0),
+  owed_to_player_id: owedToPlayerId,
+  tile_index: tileIndex,
+  tile_id: tileId,
+  label,
+});
+
+const enterInsolvencyRecovery = async ({
+  gameId,
+  gameState,
+  player,
+  candidate,
+  events,
+  currentVersion,
+  userId,
+}: {
+  gameId: string;
+  gameState: GameStateRow;
+  player: PlayerRow;
+  candidate: BankruptcyCandidate;
+  events: Array<{ event_type: string; payload: Record<string, unknown> }>;
+  currentVersion: number;
+  userId: string;
+}): Promise<{
+  handled: boolean;
+  updatedState?: GameStateRow;
+  error?: string;
+}> => {
+  if (candidate.cashAfter >= 0) {
+    return { handled: false };
+  }
+
+  const pendingAction = createInsolvencyPendingAction({
+    playerId: player.id,
+    reason: candidate.reason,
+    amountDue: candidate.amountDue,
+    cashAvailable: candidate.cashBefore,
+    owedToPlayerId: candidate.owedToPlayerId ?? null,
+    tileIndex: candidate.tileIndex ?? null,
+    tileId: candidate.tileId ?? null,
+    label: candidate.label ?? null,
+  });
+
+  const insolvencyEvents = [
+    ...events,
+    {
+      event_type: "INSOLVENCY_RECOVERY_STARTED",
+      payload: {
+        player_id: player.id,
+        player_name: player.display_name,
+        reason: pendingAction.reason,
+        amount_due: pendingAction.amount_due,
+        cash_available: pendingAction.cash_available,
+        shortfall: pendingAction.shortfall,
+        owed_to_player_id: pendingAction.owed_to_player_id,
+        tile_index: pendingAction.tile_index,
+        tile_id: pendingAction.tile_id,
+        label: pendingAction.label,
+      },
+    },
+  ];
+
+  const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+    `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+    {
+      method: "PATCH",
+      headers: {
+        Prefer: "return=representation",
+      },
+      body: JSON.stringify({
+        version: currentVersion + insolvencyEvents.length,
+        pending_action: pendingAction,
+        updated_at: new Date().toISOString(),
+      }),
+    },
+  )) ?? [];
+
+  if (!updatedState) {
+    return { handled: true, error: "Version mismatch." };
+  }
+
+  await emitGameEvents(gameId, currentVersion + 1, insolvencyEvents, userId);
+
+  return { handled: true, updatedState };
+};
+
 const resolveBankruptcyIfNeeded = async ({
   gameId,
   gameState,
@@ -2009,7 +2151,7 @@ const applyCardEffect = ({
   updatedBalances: Record<string, number>;
   balancesChanged: boolean;
   bankruptcyCandidate:
-    | { reason: string; cashBefore: number; cashAfter: number }
+    | BankruptcyCandidate
     | null;
   nextGetOutOfJailFreeCount: number;
   getOutOfJailFreeCountChanged: boolean;
@@ -2034,31 +2176,35 @@ const applyCardEffect = ({
     const currentBalance = updatedBalances[currentPlayer.id] ?? startingCash;
     const nextBalance =
       card.kind === "PAY" ? currentBalance - amount : currentBalance + amount;
-    updatedBalances = {
-      ...updatedBalances,
-      [currentPlayer.id]: nextBalance,
-    };
-    if (amount !== 0) {
-      balancesChanged = true;
-    }
     if (card.kind === "PAY" && nextBalance < 0 && !bankruptcyCandidate) {
       bankruptcyCandidate = {
         reason: "CARD_PAY",
         cashBefore: currentBalance,
         cashAfter: nextBalance,
+        amountDue: amount,
+        label: card.title,
       };
     }
-    events.push({
-      event_type: card.kind === "PAY" ? "CARD_PAY" : "CARD_RECEIVE",
-      payload: {
-        player_id: currentPlayer.id,
-        player_name: currentPlayer.display_name,
-        card_id: card.id,
-        card_title: card.title,
-        card_kind: card.kind,
-        amount,
-      },
-    });
+    if (card.kind === "RECEIVE" || nextBalance >= 0) {
+      updatedBalances = {
+        ...updatedBalances,
+        [currentPlayer.id]: nextBalance,
+      };
+      if (amount !== 0) {
+        balancesChanged = true;
+      }
+      events.push({
+        event_type: card.kind === "PAY" ? "CARD_PAY" : "CARD_RECEIVE",
+        payload: {
+          player_id: currentPlayer.id,
+          player_name: currentPlayer.display_name,
+          card_id: card.id,
+          card_title: card.title,
+          card_kind: card.kind,
+          amount,
+        },
+      });
+    }
   }
 
   if (card.kind === "GET_OUT_OF_JAIL_FREE") {
@@ -2362,7 +2508,7 @@ const finalizeMoveResolution = async ({
   updatedBalances: Record<string, number>;
   balancesChanged: boolean;
   bankruptcyCandidate:
-    | { reason: string; cashBefore: number; cashAfter: number }
+    | BankruptcyCandidate
     | null;
   activeLandingTile: TileInfo;
   activeResolvedTile: TileInfo;
@@ -2513,18 +2659,25 @@ const finalizeMoveResolution = async ({
     const payerBalance = updatedBalances[currentPlayer.id] ?? startingCash;
     const ownerBalance = updatedBalances[rentOwnerId] ?? startingCash;
     const nextBalance = payerBalance - rentAmount;
-    updatedBalances = {
-      ...updatedBalances,
-      [currentPlayer.id]: nextBalance,
-      [rentOwnerId]: ownerBalance + rentAmount,
-    };
-    balancesChanged = true;
     if (nextBalance < 0 && !bankruptcyCandidate) {
       bankruptcyCandidate = {
         reason: "PAY_RENT",
         cashBefore: payerBalance,
         cashAfter: nextBalance,
+        amountDue: rentAmount,
+        owedToPlayerId: rentOwnerId,
+        tileIndex: activeLandingTile.index,
+        tileId: activeLandingTile.tile_id,
+        label: activeLandingTile.name,
       };
+    }
+    if (nextBalance >= 0) {
+      updatedBalances = {
+        ...updatedBalances,
+        [currentPlayer.id]: nextBalance,
+        [rentOwnerId]: ownerBalance + rentAmount,
+      };
+      balancesChanged = true;
     }
     const rentPayload: Record<string, unknown> = {
       tile_index: activeLandingTile.index,
@@ -2537,26 +2690,34 @@ const finalizeMoveResolution = async ({
     if (rentCalculation.meta) {
       Object.assign(rentPayload, rentCalculation.meta);
     }
-    events.push({
-      event_type: "PAY_RENT",
-      payload: rentPayload,
-    });
+    if (nextBalance >= 0) {
+      events.push({
+        event_type: "PAY_RENT",
+        payload: rentPayload,
+      });
+    }
   }
 
   if (shouldPayTax) {
     const payerBalance = updatedBalances[currentPlayer.id] ?? startingCash;
     const nextBalance = payerBalance - taxAmount;
-    updatedBalances = {
-      ...updatedBalances,
-      [currentPlayer.id]: nextBalance,
-    };
-    balancesChanged = true;
     if (nextBalance < 0 && !bankruptcyCandidate) {
       bankruptcyCandidate = {
         reason: "PAY_TAX",
         cashBefore: payerBalance,
         cashAfter: nextBalance,
+        amountDue: taxAmount,
+        tileIndex: activeLandingTile.index,
+        tileId: activeLandingTile.tile_id,
+        label: activeLandingTile.name,
       };
+    }
+    if (nextBalance >= 0) {
+      updatedBalances = {
+        ...updatedBalances,
+        [currentPlayer.id]: nextBalance,
+      };
+      balancesChanged = true;
     }
     const taxPayload: Record<string, unknown> = {
       tile_index: activeLandingTile.index,
@@ -2577,21 +2738,23 @@ const finalizeMoveResolution = async ({
         computed_from: "net_worth_for_tax",
       });
     }
-    events.push(
-      {
-        event_type: "PAY_TAX",
-        payload: taxPayload,
-      },
-      {
-        event_type: "CASH_DEBIT",
-        payload: {
-          player_id: currentPlayer.id,
-          amount: taxAmount,
-          reason: "PAY_TAX",
-          tile_index: activeLandingTile.index,
+    if (nextBalance >= 0) {
+      events.push(
+        {
+          event_type: "PAY_TAX",
+          payload: taxPayload,
         },
-      },
-    );
+        {
+          event_type: "CASH_DEBIT",
+          payload: {
+            player_id: currentPlayer.id,
+            amount: taxAmount,
+            reason: "PAY_TAX",
+            tile_index: activeLandingTile.index,
+          },
+        },
+      );
+    }
     // TODO: If rules.freeParkingJackpotEnabled, route taxAmount into free_parking_pot.
   }
 
@@ -2651,19 +2814,14 @@ const finalizeMoveResolution = async ({
   }
 
   if (bankruptcyCandidate) {
-    const bankruptcyResult = await resolveBankruptcyIfNeeded({
+    const bankruptcyResult = await enterInsolvencyRecovery({
       gameId,
       gameState,
-      players,
       player: currentPlayer,
-      updatedBalances,
-      cashBefore: bankruptcyCandidate.cashBefore,
-      cashAfter: bankruptcyCandidate.cashAfter,
-      reason: bankruptcyCandidate.reason,
+      candidate: bankruptcyCandidate,
       events,
       currentVersion,
       userId,
-      playerPosition: finalPosition,
     });
 
     if (bankruptcyResult.handled) {
@@ -2780,19 +2938,14 @@ const finalizeMoveResolution = async ({
     events.push(...loanResult.events);
 
     if (loanResult.bankruptcyCandidate) {
-      const bankruptcyResult = await resolveBankruptcyIfNeeded({
+      const bankruptcyResult = await enterInsolvencyRecovery({
         gameId,
         gameState,
-        players,
         player: nextPlayer,
-        updatedBalances,
-        cashBefore: loanResult.bankruptcyCandidate.cashBefore,
-        cashAfter: loanResult.bankruptcyCandidate.cashAfter,
-        reason: loanResult.bankruptcyCandidate.reason,
+        candidate: loanResult.bankruptcyCandidate,
         events,
         currentVersion,
         userId,
-        playerPosition: nextPlayer.position ?? null,
       });
 
       if (bankruptcyResult.handled) {
@@ -3001,22 +3154,30 @@ const applyLoanPaymentsForPlayer = async ({
       balances,
       balancesChanged: false,
       events: [] as Array<{ event_type: string; payload: Record<string, unknown> }>,
-      bankruptcyCandidate: null as
-        | { reason: string; cashBefore: number; cashAfter: number }
-        | null,
+      bankruptcyCandidate: null as BankruptcyCandidate | null,
     };
   }
 
   let updatedBalances = balances;
   let balancesChanged = false;
-  let bankruptcyCandidate: { reason: string; cashBefore: number; cashAfter: number } | null =
-    null;
+  let bankruptcyCandidate: BankruptcyCandidate | null = null;
   const events: Array<{ event_type: string; payload: Record<string, unknown> }> = [];
 
   for (const loan of activeLoans) {
     const paymentAmount = loan.payment_per_turn;
     const currentBalance = updatedBalances[player.id] ?? startingCash;
     const nextBalance = currentBalance - paymentAmount;
+    if (nextBalance < 0 && !bankruptcyCandidate) {
+      bankruptcyCandidate = {
+        reason: "COLLATERAL_LOAN_PAYMENT",
+        cashBefore: currentBalance,
+        cashAfter: nextBalance,
+        amountDue: paymentAmount,
+        tileIndex: loan.collateral_tile_index,
+        label: "Collateral loan payment",
+      };
+      break;
+    }
     const remainingPrincipal =
       typeof loan.remaining_principal === "number"
         ? loan.remaining_principal
@@ -3031,13 +3192,6 @@ const applyLoanPaymentsForPlayer = async ({
     };
     if (paymentAmount !== 0) {
       balancesChanged = true;
-    }
-    if (nextBalance < 0 && !bankruptcyCandidate) {
-      bankruptcyCandidate = {
-        reason: "COLLATERAL_LOAN_PAYMENT",
-        cashBefore: currentBalance,
-        cashAfter: nextBalance,
-      };
     }
 
     const turnsRemainingAfter = Math.max(0, loan.turns_remaining - 1);
@@ -3072,18 +3226,22 @@ const applyLoanPaymentsForPlayer = async ({
     if (macroInterestSurcharge !== 0) {
       const surchargeBalance = updatedBalances[player.id] ?? startingCash;
       const surchargeAfter = surchargeBalance - macroInterestSurcharge;
-      updatedBalances = {
-        ...updatedBalances,
-        [player.id]: surchargeAfter,
-      };
-      balancesChanged = true;
       if (surchargeAfter < 0 && !bankruptcyCandidate) {
         bankruptcyCandidate = {
           reason: "MACRO_INTEREST_SURCHARGE",
           cashBefore: surchargeBalance,
           cashAfter: surchargeAfter,
+          amountDue: macroInterestSurcharge,
+          tileIndex: loan.collateral_tile_index,
+          label: "Macro interest surcharge",
         };
+        break;
       }
+      updatedBalances = {
+        ...updatedBalances,
+        [player.id]: surchargeAfter,
+      };
+      balancesChanged = true;
       events.push(
         {
           event_type: macroInterestSurcharge > 0 ? "CASH_DEBIT" : "CASH_CREDIT",
@@ -3319,9 +3477,7 @@ const advanceTurn = async ({
   const balances = gameState.balances ?? {};
   let updatedBalances = balances;
   let balancesChanged = false;
-  let bankruptcyCandidate:
-    | { reason: string; cashBefore: number; cashAfter: number }
-    | null = null;
+  let bankruptcyCandidate: BankruptcyCandidate | null = null;
   const events: Array<{ event_type: string; payload: Record<string, unknown> }> = [
     ...extraEvents,
     {
@@ -3420,19 +3576,14 @@ const advanceTurn = async ({
   }
 
   if (bankruptcyCandidate) {
-    const bankruptcyResult = await resolveBankruptcyIfNeeded({
+    const bankruptcyResult = await enterInsolvencyRecovery({
       gameId,
       gameState,
-      players,
       player: nextPlayer,
-      updatedBalances,
-      cashBefore: bankruptcyCandidate.cashBefore,
-      cashAfter: bankruptcyCandidate.cashAfter,
-      reason: bankruptcyCandidate.reason,
+      candidate: bankruptcyCandidate,
       events,
       currentVersion,
       userId,
-      playerPosition: nextPlayer.position ?? null,
     });
 
     if (bankruptcyResult.handled) {
@@ -5019,6 +5170,13 @@ export async function POST(request: Request) {
       );
     }
 
+    if ((gameState.pending_action as { type?: unknown } | null)?.type === "INSOLVENCY_RECOVERY") {
+      return NextResponse.json(
+        { error: "Resolve insolvency before continuing." },
+        { status: 409 },
+      );
+    }
+
     if (isAuctionAction) {
       if (!gameState.auction_active) {
         return NextResponse.json(
@@ -5520,9 +5678,7 @@ export async function POST(request: Request) {
       const balances = gameState?.balances ?? {};
       let updatedBalances = balances;
       let balancesChanged = false;
-      let bankruptcyCandidate:
-        | { reason: string; cashBefore: number; cashAfter: number }
-        | null = null;
+      let bankruptcyCandidate: BankruptcyCandidate | null = null;
       const rollTotal =
         typeof gameState.last_roll === "number" ? gameState.last_roll : null;
       const ownershipByTile = await loadOwnershipByTile(gameId);
@@ -5727,9 +5883,7 @@ export async function POST(request: Request) {
       const balances = gameState?.balances ?? {};
       let updatedBalances = balances;
       let balancesChanged = false;
-      let bankruptcyCandidate:
-        | { reason: string; cashBefore: number; cashAfter: number }
-        | null = null;
+      let bankruptcyCandidate: BankruptcyCandidate | null = null;
       let nextChanceIndex = gameState?.chance_index ?? 0;
       let nextCommunityIndex = gameState?.community_index ?? 0;
       let nextChanceOrder = gameState?.chance_order ?? null;
@@ -5835,19 +5989,14 @@ export async function POST(request: Request) {
         events.push(...loanResult.events);
 
         if (loanResult.bankruptcyCandidate) {
-          const bankruptcyResult = await resolveBankruptcyIfNeeded({
+          const bankruptcyResult = await enterInsolvencyRecovery({
             gameId,
             gameState,
-            players,
             player: nextPlayer,
-            updatedBalances,
-            cashBefore: loanResult.bankruptcyCandidate.cashBefore,
-            cashAfter: loanResult.bankruptcyCandidate.cashAfter,
-            reason: loanResult.bankruptcyCandidate.reason,
+            candidate: loanResult.bankruptcyCandidate,
             events,
             currentVersion,
             userId: user.id,
-            playerPosition: nextPlayer.position ?? null,
           });
 
           if (bankruptcyResult.handled) {
@@ -8758,19 +8907,14 @@ export async function POST(request: Request) {
         events.push(...loanResult.events);
 
         if (loanResult.bankruptcyCandidate) {
-          const bankruptcyResult = await resolveBankruptcyIfNeeded({
+          const bankruptcyResult = await enterInsolvencyRecovery({
             gameId,
             gameState,
-            players,
             player: nextPlayer,
-            updatedBalances,
-            cashBefore: loanResult.bankruptcyCandidate.cashBefore,
-            cashAfter: loanResult.bankruptcyCandidate.cashAfter,
-            reason: loanResult.bankruptcyCandidate.reason,
+            candidate: loanResult.bankruptcyCandidate,
             events,
             currentVersion,
             userId: user.id,
-            playerPosition: nextPlayer.position ?? null,
           });
 
           if (bankruptcyResult.handled) {
@@ -8871,24 +9015,25 @@ export async function POST(request: Request) {
       const balances = gameState?.balances ?? {};
       let updatedBalances = balances;
       let balancesChanged = false;
-      let bankruptcyCandidate:
-        | { reason: string; cashBefore: number; cashAfter: number }
-        | null = null;
+      let bankruptcyCandidate: BankruptcyCandidate | null = null;
       if (forcedFine) {
         const currentBalance =
           updatedBalances[currentPlayer.id] ?? startingCash;
         const nextBalance = currentBalance - jailFineAmount;
-        updatedBalances = {
-          ...updatedBalances,
-          [currentPlayer.id]: nextBalance,
-        };
-        balancesChanged = true;
         if (nextBalance < 0) {
           bankruptcyCandidate = {
             reason: "JAIL_PAY_FINE",
             cashBefore: currentBalance,
             cashAfter: nextBalance,
+            amountDue: jailFineAmount,
+            label: "Jail fine",
           };
+        } else {
+          updatedBalances = {
+            ...updatedBalances,
+            [currentPlayer.id]: nextBalance,
+          };
+          balancesChanged = true;
         }
       }
       let nextChanceIndex = gameState?.chance_index ?? 0;
@@ -9290,29 +9435,30 @@ export async function POST(request: Request) {
         },
       ];
       if (nextBalance < 0) {
-        const bankruptcyResult = await resolveBankruptcyIfNeeded({
+        const insolvencyResult = await enterInsolvencyRecovery({
           gameId,
           gameState,
-          players,
           player: currentPlayer,
-          updatedBalances,
-          cashBefore: currentBalance,
-          cashAfter: nextBalance,
-          reason: "JAIL_PAY_FINE",
-          events,
+          candidate: {
+            reason: "JAIL_PAY_FINE",
+            cashBefore: currentBalance,
+            cashAfter: nextBalance,
+            amountDue: jailFineAmount,
+            label: "Jail fine",
+          },
+          events: [],
           currentVersion,
           userId: user.id,
-          playerPosition: currentPlayer.position ?? null,
         });
 
-        if (bankruptcyResult.handled) {
-          if (bankruptcyResult.error) {
+        if (insolvencyResult.handled) {
+          if (insolvencyResult.error) {
             return NextResponse.json(
-              { error: bankruptcyResult.error },
+              { error: insolvencyResult.error },
               { status: 409 },
             );
           }
-          return NextResponse.json({ gameState: bankruptcyResult.updatedState });
+          return NextResponse.json({ gameState: insolvencyResult.updatedState });
         }
       }
       const finalVersion = currentVersion + events.length;

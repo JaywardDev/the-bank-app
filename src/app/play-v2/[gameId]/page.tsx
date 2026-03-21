@@ -122,12 +122,26 @@ type PendingPurchaseAction = {
   price: number;
 };
 
+type InsolvencyRecoveryAction = {
+  type: "INSOLVENCY_RECOVERY";
+  player_id: string | null;
+  reason: string | null;
+  amount_due: number;
+  cash_available: number;
+  shortfall: number;
+  owed_to_player_id: string | null;
+  tile_index: number | null;
+  tile_id: string | null;
+  label: string | null;
+};
+
 type ActiveDecisionType =
   | "GO_TO_JAIL"
   | "JAIL_DECISION"
   | "PENDING_CARD"
   | "MACRO_EVENT"
-  | "BUY_PROPERTY";
+  | "BUY_PROPERTY"
+  | "INSOLVENCY_RECOVERY";
 
 
 type BankAction =
@@ -695,6 +709,41 @@ export default function PlayV2Page() {
 
     return candidate;
   }, [gameState?.pending_action]);
+  const pendingInsolvencyRecovery = useMemo<InsolvencyRecoveryAction | null>(() => {
+    const pendingAction = gameState?.pending_action;
+    if (!pendingAction || typeof pendingAction !== "object") {
+      return null;
+    }
+
+    const candidate = pendingAction as Record<string, unknown>;
+    if (candidate.type !== "INSOLVENCY_RECOVERY") {
+      return null;
+    }
+
+    if (
+      typeof candidate.amount_due !== "number" ||
+      typeof candidate.cash_available !== "number" ||
+      typeof candidate.shortfall !== "number"
+    ) {
+      return null;
+    }
+
+    return {
+      type: "INSOLVENCY_RECOVERY",
+      player_id: typeof candidate.player_id === "string" ? candidate.player_id : null,
+      reason: typeof candidate.reason === "string" ? candidate.reason : null,
+      amount_due: candidate.amount_due,
+      cash_available: candidate.cash_available,
+      shortfall: candidate.shortfall,
+      owed_to_player_id:
+        typeof candidate.owed_to_player_id === "string"
+          ? candidate.owed_to_player_id
+          : null,
+      tile_index: typeof candidate.tile_index === "number" ? candidate.tile_index : null,
+      tile_id: typeof candidate.tile_id === "string" ? candidate.tile_id : null,
+      label: typeof candidate.label === "string" ? candidate.label : null,
+    };
+  }, [gameState?.pending_action]);
   const pendingCard = useMemo(() => {
     if (!gameState?.pending_card_active) {
       return null;
@@ -806,13 +855,14 @@ export default function PlayV2Page() {
     if (isAwaitingJailDecision) return "JAIL_DECISION";
     if (pendingCard) return "PENDING_CARD";
     if (pendingMacroEvent) return "MACRO_EVENT";
+    if (pendingInsolvencyRecovery) return "INSOLVENCY_RECOVERY";
     if (pendingPurchase) return "BUY_PROPERTY";
     return null;
-  }, [isAwaitingJailDecision, pendingCard, pendingMacroEvent, pendingPurchase, shouldShowGoToJailConfirm]);
+  }, [isAwaitingJailDecision, pendingCard, pendingMacroEvent, pendingInsolvencyRecovery, pendingPurchase, shouldShowGoToJailConfirm]);
 
   const isDrawerDecision = useCallback((type: ActiveDecisionType | null) => {
     if (!type) return false;
-    return type === "BUY_PROPERTY" || type === "JAIL_DECISION";
+    return type === "BUY_PROPERTY" || type === "JAIL_DECISION" || type === "INSOLVENCY_RECOVERY";
   }, []);
 
   const isFullscreenEvent = useCallback((type: ActiveDecisionType | null) => {
@@ -2294,6 +2344,18 @@ export default function PlayV2Page() {
             onAuction={handleDeclineProperty}
           />
         );
+      case "INSOLVENCY_RECOVERY":
+        return (
+          <div className="rounded-3xl border border-amber-400/30 bg-amber-500/10 p-5 text-sm text-amber-50">
+            <p className="font-semibold">Insolvency recovery pending</p>
+            <p className="mt-2">
+              {currentTurnPlayer?.display_name ?? "Player"} must raise funds before play can continue.
+            </p>
+            <p className="mt-2 text-amber-100/80">
+              Amount due: {formatMoney(pendingInsolvencyRecovery?.amount_due ?? 0)} · Cash available: {formatMoney(pendingInsolvencyRecovery?.cash_available ?? 0)} · Shortfall: {formatMoney(pendingInsolvencyRecovery?.shortfall ?? 0)}
+            </p>
+          </div>
+        );
       default:
         return null;
     }
@@ -2320,6 +2382,7 @@ export default function PlayV2Page() {
     mortgageDownPaymentPercent,
     mortgageLtvPercent,
     pendingMortgageDownPayment,
+    pendingInsolvencyRecovery,
     pendingPurchase,
     selectedBoardPack?.tiles,
     formatMoney,
