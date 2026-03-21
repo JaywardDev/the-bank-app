@@ -3805,47 +3805,6 @@ const advanceTurn = async ({
     }
   }
 
-  const loanResult = await applyLoanPaymentsForPlayer({
-    gameId,
-    player: nextPlayer,
-    balances: updatedBalances,
-    startingCash,
-    macroInterestTrendAccumulator: getMacroInterestTrendAccumulatorV1(
-      macroEnabled ? nextActiveMacroEffectsV1 : [],
-    ),
-    macroMortgageFlatDelta: getMacroMortgageFlatDeltaV1(
-      macroEnabled ? nextActiveMacroEffectsV1 : [],
-    ),
-  });
-  updatedBalances = loanResult.balances;
-  balancesChanged = balancesChanged || loanResult.balancesChanged;
-  events.push(...loanResult.events);
-  if (!bankruptcyCandidate && loanResult.bankruptcyCandidate) {
-    bankruptcyCandidate = loanResult.bankruptcyCandidate;
-  }
-
-  if (bankruptcyCandidate) {
-    const bankruptcyResult = await enterInsolvencyRecovery({
-      gameId,
-      gameState,
-      player: nextPlayer,
-      candidate: bankruptcyCandidate,
-      events,
-      currentVersion,
-      userId,
-    });
-
-    if (bankruptcyResult.handled) {
-      if (bankruptcyResult.error) {
-        return NextResponse.json(
-          { error: bankruptcyResult.error },
-          { status: 409 },
-        );
-      }
-      return NextResponse.json({ gameState: bankruptcyResult.updatedState });
-    }
-  }
-
   const nextTurnPhase = nextPlayer.is_in_jail
     ? "AWAITING_JAIL_DECISION"
     : "AWAITING_ROLL";
@@ -3864,8 +3823,9 @@ const advanceTurn = async ({
         return_turn_phase: nextTurnPhase,
       }
     : null;
-  const finalVersion = currentVersion + events.length;
-  const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+  const preServicingEvents = [...events];
+  const turnContextVersion = currentVersion + preServicingEvents.length;
+  const [committedTurnState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
     `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
     {
       method: "PATCH",
@@ -3873,7 +3833,7 @@ const advanceTurn = async ({
         Prefer: "return=representation",
       },
       body: JSON.stringify({
-        version: finalVersion,
+        version: turnContextVersion,
         current_player_id: nextPlayer.id,
         last_roll: null,
         doubles_count: 0,
@@ -3891,6 +3851,73 @@ const advanceTurn = async ({
     },
   )) ?? [];
 
+  if (!committedTurnState) {
+    return NextResponse.json(
+      { error: "Supabase returned no data for END_TURN game_state update." },
+      { status: 500 },
+    );
+  }
+
+  await emitGameEvents(gameId, currentVersion + 1, preServicingEvents, userId);
+
+  const committedGameState = committedTurnState;
+  const loanResult = await applyLoanPaymentsForPlayer({
+    gameId,
+    player: nextPlayer,
+    balances: updatedBalances,
+    startingCash,
+    macroInterestTrendAccumulator: getMacroInterestTrendAccumulatorV1(
+      macroEnabled ? nextActiveMacroEffectsV1 : [],
+    ),
+    macroMortgageFlatDelta: getMacroMortgageFlatDeltaV1(
+      macroEnabled ? nextActiveMacroEffectsV1 : [],
+    ),
+  });
+  updatedBalances = loanResult.balances;
+  balancesChanged = balancesChanged || loanResult.balancesChanged;
+  const postCommitEvents = loanResult.events;
+  if (!bankruptcyCandidate && loanResult.bankruptcyCandidate) {
+    bankruptcyCandidate = loanResult.bankruptcyCandidate;
+  }
+
+  if (bankruptcyCandidate) {
+    const bankruptcyResult = await enterInsolvencyRecovery({
+      gameId,
+      gameState: committedGameState,
+      player: nextPlayer,
+      candidate: bankruptcyCandidate,
+      events: postCommitEvents,
+      currentVersion: turnContextVersion,
+      userId,
+    });
+
+    if (bankruptcyResult.handled) {
+      if (bankruptcyResult.error) {
+        return NextResponse.json(
+          { error: bankruptcyResult.error },
+          { status: 409 },
+        );
+      }
+      return NextResponse.json({ gameState: bankruptcyResult.updatedState });
+    }
+  }
+
+  const finalVersion = turnContextVersion + postCommitEvents.length;
+  const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+    `game_state?game_id=eq.${gameId}&version=eq.${turnContextVersion}`,
+    {
+      method: "PATCH",
+      headers: {
+        Prefer: "return=representation",
+      },
+      body: JSON.stringify({
+        version: finalVersion,
+        ...(balancesChanged ? { balances: updatedBalances } : {}),
+        updated_at: new Date().toISOString(),
+      }),
+    },
+  )) ?? [];
+
   if (!updatedState) {
     return NextResponse.json(
       { error: "Supabase returned no data for END_TURN game_state update." },
@@ -3898,7 +3925,9 @@ const advanceTurn = async ({
     );
   }
 
-  await emitGameEvents(gameId, currentVersion + 1, events, userId);
+  if (postCommitEvents.length > 0) {
+    await emitGameEvents(gameId, turnContextVersion + 1, postCommitEvents, userId);
+  }
 
   return NextResponse.json({ gameState: updatedState });
 };
