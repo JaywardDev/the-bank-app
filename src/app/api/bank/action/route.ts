@@ -24,8 +24,7 @@ import { MACRO_DECK_PH_HARD_V1, drawMacroCardPhHardV1 } from "@/lib/macroDeckPhH
 import { computeEffectiveGoSalary } from "@/lib/salary";
 import {
   computeIncomeTaxAmount,
-  computeNetWorthForTax,
-  computeSuperTaxAmount,
+  computeSuperTaxBreakdown,
   isCustomTaxBoardPack,
 } from "@/lib/tax";
 
@@ -130,6 +129,7 @@ type BankActionRequest =
         | "DECLARE_BANKRUPTCY"
         | "PAYOFF_COLLATERAL_LOAN"
         | "PAYOFF_PURCHASE_MORTGAGE"
+        | "CONFIRM_SUPER_TAX"
         | "BUILD_HOUSE"
         | "SELL_HOUSE"
         | "SELL_HOTEL"
@@ -166,7 +166,7 @@ type BankActionRequest =
       mortgageId: string;
     })
   | (BaseActionRequest & {
-      action: "CONFIRM_INSOLVENCY_PAYMENT" | "DECLARE_BANKRUPTCY";
+      action: "CONFIRM_INSOLVENCY_PAYMENT" | "DECLARE_BANKRUPTCY" | "CONFIRM_SUPER_TAX";
     });
 
 type SupabaseUser = {
@@ -235,6 +235,26 @@ type InsolvencyPendingAction = {
   tile_id: string | null;
   label: string | null;
 };
+
+type SuperTaxPendingAction = {
+  type: "SUPER_TAX_CONFIRM";
+  player_id: string;
+  tile_id: string;
+  tile_index: number;
+  tile_name: string;
+  boardpack_id: string | null;
+  current_cash: number;
+  asset_value: number;
+  total_liabilities: number;
+  net_worth_for_tax: number;
+  tax_rate: number;
+  tax_amount: number;
+  uses_custom_formula: boolean;
+  currency_code: string;
+  currency_symbol: string;
+  return_turn_phase: string;
+};
+
 
 type BankruptcyCandidate = {
   reason: InsolvencyReason;
@@ -1618,6 +1638,95 @@ const parsePendingInsolvencyAction = (
   };
 };
 
+const parsePendingSuperTaxAction = (
+  pendingAction: Record<string, unknown> | null | undefined,
+): SuperTaxPendingAction | null => {
+  if (!pendingAction || pendingAction.type !== "SUPER_TAX_CONFIRM") {
+    return null;
+  }
+
+  if (
+    typeof pendingAction.player_id !== "string" ||
+    typeof pendingAction.tile_id !== "string" ||
+    typeof pendingAction.tile_index !== "number" ||
+    typeof pendingAction.tile_name !== "string" ||
+    typeof pendingAction.current_cash !== "number" ||
+    typeof pendingAction.asset_value !== "number" ||
+    typeof pendingAction.total_liabilities !== "number" ||
+    typeof pendingAction.net_worth_for_tax !== "number" ||
+    typeof pendingAction.tax_rate !== "number" ||
+    typeof pendingAction.tax_amount !== "number" ||
+    typeof pendingAction.uses_custom_formula !== "boolean" ||
+    typeof pendingAction.currency_code !== "string" ||
+    typeof pendingAction.currency_symbol !== "string" ||
+    typeof pendingAction.return_turn_phase !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    type: "SUPER_TAX_CONFIRM",
+    player_id: pendingAction.player_id,
+    tile_id: pendingAction.tile_id,
+    tile_index: pendingAction.tile_index,
+    tile_name: pendingAction.tile_name,
+    boardpack_id:
+      typeof pendingAction.boardpack_id === "string" ? pendingAction.boardpack_id : null,
+    current_cash: pendingAction.current_cash,
+    asset_value: pendingAction.asset_value,
+    total_liabilities: pendingAction.total_liabilities,
+    net_worth_for_tax: pendingAction.net_worth_for_tax,
+    tax_rate: pendingAction.tax_rate,
+    tax_amount: pendingAction.tax_amount,
+    uses_custom_formula: pendingAction.uses_custom_formula,
+    currency_code: pendingAction.currency_code,
+    currency_symbol: pendingAction.currency_symbol,
+    return_turn_phase: pendingAction.return_turn_phase,
+  };
+};
+
+const createSuperTaxPendingAction = ({
+  player,
+  tile,
+  boardPack,
+  boardPackEconomy,
+  breakdown,
+  usesCustomFormula,
+  returnTurnPhase,
+}: {
+  player: PlayerRow;
+  tile: TileInfo;
+  boardPack: ReturnType<typeof getBoardPackById> | null;
+  boardPackEconomy: BoardPackEconomy;
+  breakdown: {
+    currentCash: number;
+    assetValue: number;
+    totalLiabilities: number;
+    netWorthForTax: number;
+    taxRate: number;
+    taxAmount: number;
+  };
+  usesCustomFormula: boolean;
+  returnTurnPhase: string;
+}): SuperTaxPendingAction => ({
+  type: "SUPER_TAX_CONFIRM",
+  player_id: player.id,
+  tile_id: tile.tile_id,
+  tile_index: tile.index,
+  tile_name: tile.name,
+  boardpack_id: boardPack?.id ?? null,
+  current_cash: breakdown.currentCash,
+  asset_value: breakdown.assetValue,
+  total_liabilities: breakdown.totalLiabilities,
+  net_worth_for_tax: breakdown.netWorthForTax,
+  tax_rate: breakdown.taxRate,
+  tax_amount: breakdown.taxAmount,
+  uses_custom_formula: usesCustomFormula,
+  currency_code: boardPackEconomy.currency.code,
+  currency_symbol: boardPackEconomy.currency.symbol,
+  return_turn_phase: returnTurnPhase,
+});
+
 const createInsolvencyPendingAction = ({
   playerId,
   reason,
@@ -2782,42 +2891,78 @@ const finalizeMoveResolution = async ({
   const baseTaxAmount = isTaxTile ? activeLandingTile.taxAmount ?? 0 : 0;
   const currentCashForTax = updatedBalances[currentPlayer.id] ?? startingCash;
   let taxAmount = baseTaxAmount;
+  let superTaxBreakdown: {
+    currentCash: number;
+    assetValue: number;
+    totalLiabilities: number;
+    netWorthForTax: number;
+    taxRate: number;
+    taxAmount: number;
+  } | null = null;
 
   if (usesCustomTaxRules && isIncomeTax) {
     taxAmount = computeIncomeTaxAmount(currentCashForTax, startingCash);
   }
 
-  if (usesCustomTaxRules && isSuperTax) {
-    const [activeLoans, activeMortgages] = await Promise.all([
-      fetchFromSupabaseWithService(
-        `player_loans?select=principal,remaining_principal&game_id=eq.${gameId}&player_id=eq.${currentPlayer.id}&status=eq.active`,
-        { method: "GET" },
-      ),
-      fetchFromSupabaseWithService(
-        `purchase_mortgages?select=principal_remaining,accrued_interest_unpaid&game_id=eq.${gameId}&player_id=eq.${currentPlayer.id}&status=eq.active`,
-        { method: "GET" },
-      ),
-    ]);
+  if (isSuperTax) {
+    if (usesCustomTaxRules) {
+      const [activeLoans, activeMortgages] = await Promise.all([
+        fetchFromSupabaseWithService(
+          `player_loans?select=principal,remaining_principal&game_id=eq.${gameId}&player_id=eq.${currentPlayer.id}&status=eq.active`,
+          { method: "GET" },
+        ),
+        fetchFromSupabaseWithService(
+          `purchase_mortgages?select=principal_remaining,accrued_interest_unpaid&game_id=eq.${gameId}&player_id=eq.${currentPlayer.id}&status=eq.active`,
+          { method: "GET" },
+        ),
+      ]);
 
-    const netWorthForTax = computeNetWorthForTax({
-      currentCash: currentCashForTax,
-      playerId: currentPlayer.id,
-      boardTiles,
-      ownershipByTile,
-      activeCollateralLoans: Array.isArray(activeLoans)
-        ? (activeLoans as Array<{ principal: number; remaining_principal: number | null }>)
-        : [],
-      activePurchaseMortgages: Array.isArray(activeMortgages)
-        ? (activeMortgages as Array<{
-            principal_remaining: number;
-            accrued_interest_unpaid: number;
-          }>)
-        : [],
-    });
+      superTaxBreakdown = computeSuperTaxBreakdown({
+        currentCash: currentCashForTax,
+        playerId: currentPlayer.id,
+        boardTiles,
+        ownershipByTile,
+        activeCollateralLoans: Array.isArray(activeLoans)
+          ? (activeLoans as Array<{ principal: number; remaining_principal: number | null }>)
+          : [],
+        activePurchaseMortgages: Array.isArray(activeMortgages)
+          ? (activeMortgages as Array<{
+              principal_remaining: number;
+              accrued_interest_unpaid: number;
+            }>)
+          : [],
+      });
 
-    taxAmount = computeSuperTaxAmount(netWorthForTax);
+      taxAmount = superTaxBreakdown.taxAmount;
+    } else {
+      superTaxBreakdown = {
+        currentCash: currentCashForTax,
+        assetValue: 0,
+        totalLiabilities: 0,
+        netWorthForTax: currentCashForTax,
+        taxRate: 0,
+        taxAmount: baseTaxAmount,
+      };
+      taxAmount = baseTaxAmount;
+    }
   }
   const shouldPayTax = isTaxTile && taxAmount > 0;
+  const superTaxPendingAction =
+    !bankruptcyCandidate &&
+    isSuperTax &&
+    taxAmount > 0 &&
+    superTaxBreakdown &&
+    !(shouldSendToJail && jailTile)
+      ? createSuperTaxPendingAction({
+          player: currentPlayer,
+          tile: activeLandingTile,
+          boardPack,
+          boardPackEconomy,
+          breakdown: superTaxBreakdown,
+          usesCustomFormula: usesCustomTaxRules,
+          returnTurnPhase: "AWAITING_ROLL",
+        })
+      : null;
   const isFreeParking = activeLandingTile.type === "FREE_PARKING";
 
   if (
@@ -2892,7 +3037,7 @@ const finalizeMoveResolution = async ({
     }
   }
 
-  if (shouldPayTax) {
+  if (shouldPayTax && !superTaxPendingAction) {
     const payerBalance = updatedBalances[currentPlayer.id] ?? startingCash;
     const nextBalance = payerBalance - taxAmount;
     if (nextBalance < 0 && !bankruptcyCandidate) {
@@ -2958,7 +3103,7 @@ const finalizeMoveResolution = async ({
 
   const isBankruptcyPending = Boolean(bankruptcyCandidate);
   const pendingPurchaseAction =
-    !isBankruptcyPending && isUnownedOwnableTile && !(shouldSendToJail && jailTile)
+    !isBankruptcyPending && !superTaxPendingAction && isUnownedOwnableTile && !(shouldSendToJail && jailTile)
       ? {
           type: "BUY_PROPERTY",
           player_id: currentPlayer.id,
@@ -2994,6 +3139,7 @@ const finalizeMoveResolution = async ({
     allowExtraRoll &&
     isDouble &&
     !pendingPurchaseAction &&
+    !superTaxPendingAction &&
     !isBankruptcyPending &&
     !(shouldSendToJail && jailTile)
   ) {
@@ -3010,7 +3156,7 @@ const finalizeMoveResolution = async ({
   if (bankruptcyCandidate) {
     const resolvedMoveVersion = currentVersion + events.length;
     const turnPhaseAfterMove =
-      pendingPurchaseAction ? "AWAITING_DECISION" : "AWAITING_ROLL";
+      pendingPurchaseAction || superTaxPendingAction ? "AWAITING_DECISION" : "AWAITING_ROLL";
 
     let resolvedMoveState: GameStateRow;
     try {
@@ -3327,10 +3473,10 @@ const finalizeMoveResolution = async ({
               community_reshuffle_count: nextCommunityReshuffleCount,
             }
           : {}),
-        turn_phase: pendingPurchaseAction
+        turn_phase: pendingPurchaseAction || superTaxPendingAction
           ? "AWAITING_DECISION"
           : "AWAITING_ROLL",
-        pending_action: pendingPurchaseAction,
+        pending_action: superTaxPendingAction ?? pendingPurchaseAction,
         ...(extraGameStatePatch ?? {}),
         updated_at: new Date().toISOString(),
       }),
@@ -5448,6 +5594,19 @@ export async function POST(request: Request) {
       );
     }
 
+    const pendingSuperTaxAction = gameState.pending_action as { type?: unknown; player_id?: unknown } | null;
+    if (pendingSuperTaxAction?.type === "SUPER_TAX_CONFIRM") {
+      const isSuperTaxActor =
+        typeof pendingSuperTaxAction.player_id === "string" &&
+        pendingSuperTaxAction.player_id === currentUserPlayer.id;
+      if (!isSuperTaxActor || body.action !== "CONFIRM_SUPER_TAX") {
+        return NextResponse.json(
+          { error: "Acknowledge Super Tax before continuing." },
+          { status: 409 },
+        );
+      }
+    }
+
     const pendingInsolvencyAction = gameState.pending_action as { type?: unknown; player_id?: unknown } | null;
     const isInsolvencyRecoveryAction =
       body.action === "SELL_TO_MARKET" ||
@@ -6983,6 +7142,119 @@ export async function POST(request: Request) {
       }
 
       return NextResponse.json({ gameState: rpcResult.game_state });
+    }
+
+    if (body.action === "CONFIRM_SUPER_TAX") {
+      const pendingAction = parsePendingSuperTaxAction(gameState.pending_action);
+
+      if (!pendingAction) {
+        return NextResponse.json(
+          { error: "No pending Super Tax to confirm." },
+          { status: 409 },
+        );
+      }
+
+      if (gameState.turn_phase !== "AWAITING_DECISION") {
+        return NextResponse.json(
+          { error: "Not ready to confirm Super Tax yet." },
+          { status: 409 },
+        );
+      }
+
+      if (pendingAction.player_id !== currentPlayer.id) {
+        return NextResponse.json(
+          { error: "Only the acting player can confirm Super Tax." },
+          { status: 403 },
+        );
+      }
+
+      const payerBalance = gameState.balances?.[currentPlayer.id] ?? startingCash;
+      const nextBalance = payerBalance - pendingAction.tax_amount;
+
+      if (nextBalance < 0) {
+        const bankruptcyResult = await enterInsolvencyRecovery({
+          gameId,
+          gameState,
+          player: currentPlayer,
+          candidate: {
+            reason: "PAY_TAX",
+            cashBefore: payerBalance,
+            cashAfter: nextBalance,
+            amountDue: pendingAction.tax_amount,
+            tileIndex: pendingAction.tile_index,
+            tileId: pendingAction.tile_id,
+            label: pendingAction.tile_name,
+          },
+          events: [],
+          currentVersion,
+          userId: user.id,
+        });
+
+        if (bankruptcyResult.handled) {
+          if (bankruptcyResult.error) {
+            return NextResponse.json(
+              { error: bankruptcyResult.error },
+              { status: 409 },
+            );
+          }
+          return NextResponse.json({ gameState: bankruptcyResult.updatedState });
+        }
+      }
+
+      const updatedBalances = {
+        ...(gameState.balances ?? {}),
+        [currentPlayer.id]: nextBalance,
+      };
+      const events = [
+        {
+          event_type: "PAY_TAX",
+          payload: {
+            tile_index: pendingAction.tile_index,
+            tile_name: pendingAction.tile_name,
+            amount: pendingAction.tax_amount,
+            payer_player_id: currentPlayer.id,
+            payer_display_name: currentPlayer.display_name,
+            tax_kind: "SUPER_TAX",
+            computed_from: pendingAction.uses_custom_formula
+              ? "net_worth_for_tax"
+              : "fixed_amount",
+          },
+        },
+        {
+          event_type: "CASH_DEBIT",
+          payload: {
+            player_id: currentPlayer.id,
+            amount: pendingAction.tax_amount,
+            reason: "PAY_TAX",
+            tile_index: pendingAction.tile_index,
+          },
+        },
+      ] as Array<{ event_type: string; payload: Record<string, unknown> }>;
+
+      const finalVersion = currentVersion + events.length;
+      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            version: finalVersion,
+            balances: updatedBalances,
+            pending_action: null,
+            turn_phase: pendingAction.return_turn_phase,
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      )) ?? [];
+
+      if (!updatedState) {
+        return NextResponse.json({ error: "Version mismatch." }, { status: 409 });
+      }
+
+      await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+      return NextResponse.json({ gameState: updatedState });
     }
 
     if (body.action === "CONFIRM_INSOLVENCY_PAYMENT") {

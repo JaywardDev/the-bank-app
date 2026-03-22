@@ -31,7 +31,7 @@ type PurchaseMortgageForTax = {
   accrued_interest_unpaid: number;
 };
 
-type NetWorthForTaxInput = {
+export type NetWorthForTaxInput = {
   currentCash: number;
   playerId: string;
   boardTiles: BoardTile[];
@@ -40,14 +40,24 @@ type NetWorthForTaxInput = {
   activePurchaseMortgages: PurchaseMortgageForTax[];
 };
 
-export const computeNetWorthForTax = ({
+
+export type SuperTaxBreakdown = {
+  currentCash: number;
+  assetValue: number;
+  totalLiabilities: number;
+  netWorthForTax: number;
+  taxRate: number;
+  taxAmount: number;
+};
+
+export const computeSuperTaxBreakdown = ({
   currentCash,
   playerId,
   boardTiles,
   ownershipByTile,
   activeCollateralLoans,
   activePurchaseMortgages,
-}: NetWorthForTaxInput) => {
+}: NetWorthForTaxInput): SuperTaxBreakdown => {
   let assetValue = 0;
 
   for (const tile of boardTiles) {
@@ -81,8 +91,24 @@ export const computeNetWorthForTax = ({
     0,
   );
 
-  return currentCash + assetValue - (collateralLiabilities + purchaseMortgageLiabilities);
+  const totalLiabilities = collateralLiabilities + purchaseMortgageLiabilities;
+  const netWorthForTax = currentCash + assetValue - totalLiabilities;
+  const taxRate = 0.1;
+
+  return {
+    currentCash,
+    assetValue,
+    totalLiabilities,
+    netWorthForTax,
+    taxRate,
+    taxAmount: computeSuperTaxAmount(netWorthForTax, taxRate),
+  };
 };
 
-export const computeSuperTaxAmount = (netWorthForTax: number) =>
-  Math.floor(0.1 * Math.max(0, netWorthForTax));
+export const computeNetWorthForTax = (input: NetWorthForTaxInput) =>
+  computeSuperTaxBreakdown(input).netWorthForTax;
+
+export const computeSuperTaxAmount = (
+  netWorthForTax: number,
+  taxRate = 0.1,
+) => Math.floor(taxRate * Math.max(0, netWorthForTax));
