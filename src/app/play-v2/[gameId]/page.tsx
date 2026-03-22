@@ -11,6 +11,7 @@ import GoToJailModalV2 from "@/components/play-v2/GoToJailModalV2";
 import PendingCardModalV2 from "@/components/play-v2/PendingCardModalV2";
 import PendingMacroModalV2 from "@/components/play-v2/PendingMacroModalV2";
 import SuperTaxModalV2 from "@/components/play-v2/SuperTaxModalV2";
+import IncomeTaxModalV2 from "@/components/play-v2/IncomeTaxModalV2";
 import PendingPurchaseModalV2 from "@/components/play-v2/PendingPurchaseModalV2";
 import AuctionOverlayV2 from "@/components/play-v2/AuctionOverlayV2";
 import JailDecisionModalV2 from "@/components/play-v2/JailDecisionModalV2";
@@ -154,6 +155,22 @@ type SuperTaxPendingAction = {
   currency_symbol: string;
 };
 
+type IncomeTaxPendingAction = {
+  type: "INCOME_TAX_CONFIRM";
+  player_id: string | null;
+  tile_id: string;
+  tile_index: number;
+  tile_name: string;
+  boardpack_id: string | null;
+  current_cash: number;
+  baseline_cash: number;
+  taxable_gain: number;
+  tax_rate: number;
+  tax_amount: number;
+  currency_code: string;
+  currency_symbol: string;
+};
+
 type ActiveDecisionType =
   | "GO_TO_JAIL"
   | "JAIL_DECISION"
@@ -161,6 +178,7 @@ type ActiveDecisionType =
   | "MACRO_EVENT"
   | "BUY_PROPERTY"
   | "INSOLVENCY_RECOVERY"
+  | "INCOME_TAX_CONFIRM"
   | "SUPER_TAX_CONFIRM";
 
 
@@ -172,6 +190,7 @@ type BankAction =
   | "USE_GET_OUT_OF_JAIL_FREE"
   | "CONFIRM_PENDING_CARD"
   | "CONFIRM_MACRO_EVENT"
+  | "CONFIRM_INCOME_TAX"
   | "CONFIRM_SUPER_TAX"
   | "CONFIRM_INSOLVENCY_PAYMENT"
   | "DECLARE_BANKRUPTCY"
@@ -380,7 +399,7 @@ export default function PlayV2Page() {
 
   const loadGameState = useCallback(async (gameId: string, accessToken?: string) => {
     const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
-      `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,active_macro_effects_v1,skip_next_roll_by_player,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
+      `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,active_macro_effects_v1,skip_next_roll_by_player,income_tax_baseline_cash_by_player,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
       { method: "GET" },
       accessToken,
     );
@@ -765,6 +784,41 @@ export default function PlayV2Page() {
       currency_symbol: candidate.currency_symbol,
     };
   }, [gameState?.pending_action]);
+  const pendingIncomeTax = useMemo<IncomeTaxPendingAction | null>(() => {
+    const pendingAction = gameState?.pending_action;
+    if (!pendingAction || typeof pendingAction !== "object") return null;
+    const candidate = pendingAction as Record<string, unknown>;
+    if (candidate.type !== "INCOME_TAX_CONFIRM") return null;
+    if (
+      typeof candidate.tile_id !== "string" ||
+      typeof candidate.tile_index !== "number" ||
+      typeof candidate.tile_name !== "string" ||
+      typeof candidate.current_cash !== "number" ||
+      typeof candidate.baseline_cash !== "number" ||
+      typeof candidate.taxable_gain !== "number" ||
+      typeof candidate.tax_rate !== "number" ||
+      typeof candidate.tax_amount !== "number" ||
+      typeof candidate.currency_code !== "string" ||
+      typeof candidate.currency_symbol !== "string"
+    ) {
+      return null;
+    }
+    return {
+      type: "INCOME_TAX_CONFIRM",
+      player_id: typeof candidate.player_id === "string" ? candidate.player_id : null,
+      tile_id: candidate.tile_id,
+      tile_index: candidate.tile_index,
+      tile_name: candidate.tile_name,
+      boardpack_id: typeof candidate.boardpack_id === "string" ? candidate.boardpack_id : null,
+      current_cash: candidate.current_cash,
+      baseline_cash: candidate.baseline_cash,
+      taxable_gain: candidate.taxable_gain,
+      tax_rate: candidate.tax_rate,
+      tax_amount: candidate.tax_amount,
+      currency_code: candidate.currency_code,
+      currency_symbol: candidate.currency_symbol,
+    };
+  }, [gameState?.pending_action]);
 
   const pendingMacroEvent = useMemo(() => {
     const pendingAction = gameState?.pending_action;
@@ -925,11 +979,12 @@ export default function PlayV2Page() {
     if (isAwaitingJailDecision) return "JAIL_DECISION";
     if (pendingCard) return "PENDING_CARD";
     if (pendingMacroEvent) return "MACRO_EVENT";
+    if (pendingIncomeTax) return "INCOME_TAX_CONFIRM";
     if (pendingSuperTax) return "SUPER_TAX_CONFIRM";
     if (pendingInsolvencyRecovery) return "INSOLVENCY_RECOVERY";
     if (pendingPurchase) return "BUY_PROPERTY";
     return null;
-  }, [isAwaitingJailDecision, pendingCard, pendingMacroEvent, pendingSuperTax, pendingInsolvencyRecovery, pendingPurchase, shouldShowGoToJailConfirm]);
+  }, [isAwaitingJailDecision, pendingCard, pendingMacroEvent, pendingIncomeTax, pendingSuperTax, pendingInsolvencyRecovery, pendingPurchase, shouldShowGoToJailConfirm]);
 
   const isDrawerDecision = useCallback((type: ActiveDecisionType | null) => {
     if (!type) return false;
@@ -938,7 +993,7 @@ export default function PlayV2Page() {
 
   const isFullscreenEvent = useCallback((type: ActiveDecisionType | null) => {
     if (!type) return false;
-    return type === "PENDING_CARD" || type === "MACRO_EVENT" || type === "GO_TO_JAIL" || type === "SUPER_TAX_CONFIRM";
+    return type === "PENDING_CARD" || type === "MACRO_EVENT" || type === "GO_TO_JAIL" || type === "SUPER_TAX_CONFIRM" || type === "INCOME_TAX_CONFIRM";
   }, []);
 
   const isInsolvencyRecoveryMode = Boolean(
@@ -1255,6 +1310,10 @@ export default function PlayV2Page() {
 
   const handleConfirmMacroEvent = useCallback(() => {
     void handleBankAction("CONFIRM_MACRO_EVENT");
+  }, [handleBankAction]);
+
+  const handleConfirmIncomeTax = useCallback(() => {
+    void handleBankAction("CONFIRM_INCOME_TAX");
   }, [handleBankAction]);
 
   const handleConfirmSuperTax = useCallback(() => {
@@ -2611,6 +2670,16 @@ export default function PlayV2Page() {
             onConfirm={handleConfirmMacroEvent}
           />
         );
+      case "INCOME_TAX_CONFIRM":
+        return (
+          <IncomeTaxModalV2
+            pendingIncomeTax={pendingIncomeTax}
+            actorName={currentTurnPlayer?.display_name ?? null}
+            isActor={Boolean(currentUserPlayer && currentTurnPlayer && currentUserPlayer.id === currentTurnPlayer.id)}
+            actionLoading={actionLoading}
+            onConfirm={handleConfirmIncomeTax}
+          />
+        );
       case "SUPER_TAX_CONFIRM":
         return (
           <SuperTaxModalV2
@@ -2632,12 +2701,14 @@ export default function PlayV2Page() {
     currentUserPlayer,
     handleAcknowledgeGoToJail,
     handleConfirmMacroEvent,
+    handleConfirmIncomeTax,
     handleConfirmSuperTax,
     handleConfirmPendingCard,
     isFullscreenEvent,
     pendingCard,
     pendingGoToJail,
     pendingMacroEvent,
+    pendingIncomeTax,
     pendingSuperTax,
     players,
     selectedBoardPack,

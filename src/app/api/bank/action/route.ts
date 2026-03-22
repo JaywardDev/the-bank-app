@@ -24,6 +24,7 @@ import { MACRO_DECK_PH_HARD_V1, drawMacroCardPhHardV1 } from "@/lib/macroDeckPhH
 import { computeEffectiveGoSalary } from "@/lib/salary";
 import {
   computeIncomeTaxAmount,
+  computeIncomeTaxBreakdown,
   computeSuperTaxBreakdown,
   isCustomTaxBoardPack,
 } from "@/lib/tax";
@@ -129,6 +130,7 @@ type BankActionRequest =
         | "DECLARE_BANKRUPTCY"
         | "PAYOFF_COLLATERAL_LOAN"
         | "PAYOFF_PURCHASE_MORTGAGE"
+        | "CONFIRM_INCOME_TAX"
         | "CONFIRM_SUPER_TAX"
         | "BUILD_HOUSE"
         | "SELL_HOUSE"
@@ -166,7 +168,11 @@ type BankActionRequest =
       mortgageId: string;
     })
   | (BaseActionRequest & {
-      action: "CONFIRM_INSOLVENCY_PAYMENT" | "DECLARE_BANKRUPTCY" | "CONFIRM_SUPER_TAX";
+      action:
+        | "CONFIRM_INSOLVENCY_PAYMENT"
+        | "DECLARE_BANKRUPTCY"
+        | "CONFIRM_SUPER_TAX"
+        | "CONFIRM_INCOME_TAX";
     });
 
 type SupabaseUser = {
@@ -255,6 +261,23 @@ type SuperTaxPendingAction = {
   return_turn_phase: string;
 };
 
+type IncomeTaxPendingAction = {
+  type: "INCOME_TAX_CONFIRM";
+  player_id: string;
+  tile_id: string;
+  tile_index: number;
+  tile_name: string;
+  boardpack_id: string | null;
+  current_cash: number;
+  baseline_cash: number;
+  taxable_gain: number;
+  tax_rate: number;
+  tax_amount: number;
+  currency_code: string;
+  currency_symbol: string;
+  return_turn_phase: string;
+};
+
 
 type BankruptcyCandidate = {
   reason: InsolvencyReason;
@@ -313,6 +336,7 @@ type GameStateRow = {
   pending_card_drawn_at: string | null;
   pending_card_source_tile_index: number | null;
   skip_next_roll_by_player: Record<string, boolean> | null;
+  income_tax_baseline_cash_by_player: Record<string, number> | null;
 };
 
 type OwnershipRow = {
@@ -1685,6 +1709,49 @@ const parsePendingSuperTaxAction = (
   };
 };
 
+const parsePendingIncomeTaxAction = (
+  pendingAction: Record<string, unknown> | null | undefined,
+): IncomeTaxPendingAction | null => {
+  if (!pendingAction || pendingAction.type !== "INCOME_TAX_CONFIRM") {
+    return null;
+  }
+
+  if (
+    typeof pendingAction.player_id !== "string" ||
+    typeof pendingAction.tile_id !== "string" ||
+    typeof pendingAction.tile_index !== "number" ||
+    typeof pendingAction.tile_name !== "string" ||
+    typeof pendingAction.current_cash !== "number" ||
+    typeof pendingAction.baseline_cash !== "number" ||
+    typeof pendingAction.taxable_gain !== "number" ||
+    typeof pendingAction.tax_rate !== "number" ||
+    typeof pendingAction.tax_amount !== "number" ||
+    typeof pendingAction.currency_code !== "string" ||
+    typeof pendingAction.currency_symbol !== "string" ||
+    typeof pendingAction.return_turn_phase !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    type: "INCOME_TAX_CONFIRM",
+    player_id: pendingAction.player_id,
+    tile_id: pendingAction.tile_id,
+    tile_index: pendingAction.tile_index,
+    tile_name: pendingAction.tile_name,
+    boardpack_id:
+      typeof pendingAction.boardpack_id === "string" ? pendingAction.boardpack_id : null,
+    current_cash: pendingAction.current_cash,
+    baseline_cash: pendingAction.baseline_cash,
+    taxable_gain: pendingAction.taxable_gain,
+    tax_rate: pendingAction.tax_rate,
+    tax_amount: pendingAction.tax_amount,
+    currency_code: pendingAction.currency_code,
+    currency_symbol: pendingAction.currency_symbol,
+    return_turn_phase: pendingAction.return_turn_phase,
+  };
+};
+
 const createSuperTaxPendingAction = ({
   player,
   tile,
@@ -1722,6 +1789,43 @@ const createSuperTaxPendingAction = ({
   tax_rate: breakdown.taxRate,
   tax_amount: breakdown.taxAmount,
   uses_custom_formula: usesCustomFormula,
+  currency_code: boardPackEconomy.currency.code,
+  currency_symbol: boardPackEconomy.currency.symbol,
+  return_turn_phase: returnTurnPhase,
+});
+
+const createIncomeTaxPendingAction = ({
+  player,
+  tile,
+  boardPack,
+  boardPackEconomy,
+  breakdown,
+  returnTurnPhase,
+}: {
+  player: PlayerRow;
+  tile: TileInfo;
+  boardPack: ReturnType<typeof getBoardPackById> | null;
+  boardPackEconomy: BoardPackEconomy;
+  breakdown: {
+    currentCash: number;
+    baselineCash: number;
+    taxableGain: number;
+    taxRate: number;
+    taxAmount: number;
+  };
+  returnTurnPhase: string;
+}): IncomeTaxPendingAction => ({
+  type: "INCOME_TAX_CONFIRM",
+  player_id: player.id,
+  tile_id: tile.tile_id,
+  tile_index: tile.index,
+  tile_name: tile.name,
+  boardpack_id: boardPack?.id ?? null,
+  current_cash: breakdown.currentCash,
+  baseline_cash: breakdown.baselineCash,
+  taxable_gain: breakdown.taxableGain,
+  tax_rate: breakdown.taxRate,
+  tax_amount: breakdown.taxAmount,
   currency_code: boardPackEconomy.currency.code,
   currency_symbol: boardPackEconomy.currency.symbol,
   return_turn_phase: returnTurnPhase,
@@ -2891,6 +2995,13 @@ const finalizeMoveResolution = async ({
   const baseTaxAmount = isTaxTile ? activeLandingTile.taxAmount ?? 0 : 0;
   const currentCashForTax = updatedBalances[currentPlayer.id] ?? startingCash;
   let taxAmount = baseTaxAmount;
+  let incomeTaxBreakdown: {
+    currentCash: number;
+    baselineCash: number;
+    taxableGain: number;
+    taxRate: number;
+    taxAmount: number;
+  } | null = null;
   let superTaxBreakdown: {
     currentCash: number;
     assetValue: number;
@@ -2901,7 +3012,13 @@ const finalizeMoveResolution = async ({
   } | null = null;
 
   if (usesCustomTaxRules && isIncomeTax) {
-    taxAmount = computeIncomeTaxAmount(currentCashForTax, startingCash);
+    const baselineByPlayer = gameState.income_tax_baseline_cash_by_player ?? {};
+    const baselineCash = baselineByPlayer[currentPlayer.id] ?? startingCash;
+    incomeTaxBreakdown = computeIncomeTaxBreakdown({
+      currentCash: currentCashForTax,
+      baselineCash,
+    });
+    taxAmount = computeIncomeTaxAmount(currentCashForTax, baselineCash);
   }
 
   if (isSuperTax) {
@@ -2947,6 +3064,21 @@ const finalizeMoveResolution = async ({
     }
   }
   const shouldPayTax = isTaxTile && taxAmount > 0;
+  const incomeTaxPendingAction =
+    !bankruptcyCandidate &&
+    isIncomeTax &&
+    usesCustomTaxRules &&
+    incomeTaxBreakdown &&
+    !(shouldSendToJail && jailTile)
+      ? createIncomeTaxPendingAction({
+          player: currentPlayer,
+          tile: activeLandingTile,
+          boardPack,
+          boardPackEconomy,
+          breakdown: incomeTaxBreakdown,
+          returnTurnPhase: "AWAITING_ROLL",
+        })
+      : null;
   const superTaxPendingAction =
     !bankruptcyCandidate &&
     isSuperTax &&
@@ -3037,7 +3169,7 @@ const finalizeMoveResolution = async ({
     }
   }
 
-  if (shouldPayTax && !superTaxPendingAction) {
+  if (shouldPayTax && !superTaxPendingAction && !incomeTaxPendingAction) {
     const payerBalance = updatedBalances[currentPlayer.id] ?? startingCash;
     const nextBalance = payerBalance - taxAmount;
     if (nextBalance < 0 && !bankruptcyCandidate) {
@@ -3103,7 +3235,11 @@ const finalizeMoveResolution = async ({
 
   const isBankruptcyPending = Boolean(bankruptcyCandidate);
   const pendingPurchaseAction =
-    !isBankruptcyPending && !superTaxPendingAction && isUnownedOwnableTile && !(shouldSendToJail && jailTile)
+    !isBankruptcyPending &&
+    !superTaxPendingAction &&
+    !incomeTaxPendingAction &&
+    isUnownedOwnableTile &&
+    !(shouldSendToJail && jailTile)
       ? {
           type: "BUY_PROPERTY",
           player_id: currentPlayer.id,
@@ -3139,6 +3275,7 @@ const finalizeMoveResolution = async ({
     allowExtraRoll &&
     isDouble &&
     !pendingPurchaseAction &&
+    !incomeTaxPendingAction &&
     !superTaxPendingAction &&
     !isBankruptcyPending &&
     !(shouldSendToJail && jailTile)
@@ -3156,7 +3293,9 @@ const finalizeMoveResolution = async ({
   if (bankruptcyCandidate) {
     const resolvedMoveVersion = currentVersion + events.length;
     const turnPhaseAfterMove =
-      pendingPurchaseAction || superTaxPendingAction ? "AWAITING_DECISION" : "AWAITING_ROLL";
+      pendingPurchaseAction || superTaxPendingAction || incomeTaxPendingAction
+        ? "AWAITING_DECISION"
+        : "AWAITING_ROLL";
 
     let resolvedMoveState: GameStateRow;
     try {
@@ -3473,10 +3612,10 @@ const finalizeMoveResolution = async ({
               community_reshuffle_count: nextCommunityReshuffleCount,
             }
           : {}),
-        turn_phase: pendingPurchaseAction || superTaxPendingAction
+        turn_phase: pendingPurchaseAction || superTaxPendingAction || incomeTaxPendingAction
           ? "AWAITING_DECISION"
           : "AWAITING_ROLL",
-        pending_action: superTaxPendingAction ?? pendingPurchaseAction,
+        pending_action: incomeTaxPendingAction ?? superTaxPendingAction ?? pendingPurchaseAction,
         ...(extraGameStatePatch ?? {}),
         updated_at: new Date().toISOString(),
       }),
@@ -4177,7 +4316,7 @@ export async function POST(request: Request) {
       }
 
       await fetchFromSupabaseWithService<GameStateRow[]>(
-        "game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment",
+        "game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment",
         {
           method: "POST",
           headers: {
@@ -4196,6 +4335,7 @@ export async function POST(request: Request) {
             pending_action: null,
             free_parking_pot: 0,
             rules: getRules(resolvedBoardPack?.rules),
+            income_tax_baseline_cash_by_player: {},
             updated_at: new Date().toISOString(),
           }),
         },
@@ -4471,7 +4611,7 @@ export async function POST(request: Request) {
     )) ?? [];
 
     const [gameState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
-      `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
+      `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
       { method: "GET" },
     )) ?? [];
 
@@ -4613,7 +4753,7 @@ export async function POST(request: Request) {
       );
 
       const upsertResponse = await fetch(
-        `${supabaseUrl}/rest/v1/game_state?on_conflict=game_id&select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment`,
+        `${supabaseUrl}/rest/v1/game_state?on_conflict=game_id&select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment`,
         {
           method: "POST",
           headers: {
@@ -4644,6 +4784,7 @@ export async function POST(request: Request) {
             chance_reshuffle_count: 0,
             community_reshuffle_count: 0,
             skip_next_roll_by_player: {},
+            income_tax_baseline_cash_by_player: balances,
             updated_at: new Date().toISOString(),
           }),
         },
@@ -4984,7 +5125,7 @@ export async function POST(request: Request) {
         const finalVersion = currentVersion + events.length;
         const [updatedState] =
           (await fetchFromSupabaseWithService<GameStateRow[]>(
-            `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
+            `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
             {
               method: "PATCH",
               headers: {
@@ -5073,7 +5214,7 @@ export async function POST(request: Request) {
         const finalVersion = currentVersion + events.length;
         const [updatedState] =
           (await fetchFromSupabaseWithService<GameStateRow[]>(
-            `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
+            `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
             {
               method: "PATCH",
               headers: {
@@ -5167,7 +5308,7 @@ export async function POST(request: Request) {
         const finalVersion = currentVersion + events.length;
         const [updatedState] =
           (await fetchFromSupabaseWithService<GameStateRow[]>(
-            `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
+            `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
             {
               method: "PATCH",
               headers: {
@@ -5521,7 +5662,7 @@ export async function POST(request: Request) {
       const finalVersion = currentVersion + events.length;
       const [updatedState] =
         (await fetchFromSupabaseWithService<GameStateRow[]>(
-          `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
+          `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
           {
             method: "PATCH",
             headers: {
@@ -5602,6 +5743,19 @@ export async function POST(request: Request) {
       if (!isSuperTaxActor || body.action !== "CONFIRM_SUPER_TAX") {
         return NextResponse.json(
           { error: "Acknowledge Super Tax before continuing." },
+          { status: 409 },
+        );
+      }
+    }
+
+    const pendingIncomeTaxAction = gameState.pending_action as { type?: unknown; player_id?: unknown } | null;
+    if (pendingIncomeTaxAction?.type === "INCOME_TAX_CONFIRM") {
+      const isIncomeTaxActor =
+        typeof pendingIncomeTaxAction.player_id === "string" &&
+        pendingIncomeTaxAction.player_id === currentUserPlayer.id;
+      if (!isIncomeTaxActor || body.action !== "CONFIRM_INCOME_TAX") {
+        return NextResponse.json(
+          { error: "Resolve Income Tax before continuing." },
           { status: 409 },
         );
       }
@@ -7142,6 +7296,136 @@ export async function POST(request: Request) {
       }
 
       return NextResponse.json({ gameState: rpcResult.game_state });
+    }
+
+    if (body.action === "CONFIRM_INCOME_TAX") {
+      const pendingAction = parsePendingIncomeTaxAction(gameState.pending_action);
+
+      if (!pendingAction) {
+        return NextResponse.json(
+          { error: "No pending Income Tax to confirm." },
+          { status: 409 },
+        );
+      }
+
+      if (gameState.turn_phase !== "AWAITING_DECISION") {
+        return NextResponse.json(
+          { error: "Not ready to confirm Income Tax yet." },
+          { status: 409 },
+        );
+      }
+
+      if (pendingAction.player_id !== currentPlayer.id) {
+        return NextResponse.json(
+          { error: "Only the acting player can confirm Income Tax." },
+          { status: 403 },
+        );
+      }
+
+      const currentCashBeforeTax = gameState.balances?.[currentPlayer.id] ?? startingCash;
+      const nextBalance = currentCashBeforeTax - pendingAction.tax_amount;
+      const shouldUpdateBaseline = currentCashBeforeTax > pendingAction.baseline_cash;
+      const nextIncomeTaxBaselineCashByPlayer = {
+        ...(gameState.income_tax_baseline_cash_by_player ?? {}),
+        ...(shouldUpdateBaseline ? { [currentPlayer.id]: currentCashBeforeTax } : {}),
+      };
+
+      if (pendingAction.tax_amount > 0 && nextBalance < 0) {
+        const bankruptcyResult = await enterInsolvencyRecovery({
+          gameId,
+          gameState,
+          player: currentPlayer,
+          candidate: {
+            reason: "PAY_TAX",
+            cashBefore: currentCashBeforeTax,
+            cashAfter: nextBalance,
+            amountDue: pendingAction.tax_amount,
+            tileIndex: pendingAction.tile_index,
+            tileId: pendingAction.tile_id,
+            label: pendingAction.tile_name,
+          },
+          events: [],
+          currentVersion,
+          userId: user.id,
+        });
+
+        if (bankruptcyResult.handled) {
+          if (bankruptcyResult.error) {
+            return NextResponse.json(
+              { error: bankruptcyResult.error },
+              { status: 409 },
+            );
+          }
+          return NextResponse.json({ gameState: bankruptcyResult.updatedState });
+        }
+      }
+
+      const updatedBalances =
+        pendingAction.tax_amount > 0
+          ? {
+              ...(gameState.balances ?? {}),
+              [currentPlayer.id]: nextBalance,
+            }
+          : gameState.balances ?? {};
+
+      const events =
+        pendingAction.tax_amount > 0
+          ? ([
+              {
+                event_type: "PAY_TAX",
+                payload: {
+                  tile_index: pendingAction.tile_index,
+                  tile_name: pendingAction.tile_name,
+                  amount: pendingAction.tax_amount,
+                  payer_player_id: currentPlayer.id,
+                  payer_display_name: currentPlayer.display_name,
+                  tax_kind: "INCOME_TAX",
+                  computed_from: "cash_gain_since_last_income_tax_checkpoint",
+                  current_cash: currentCashBeforeTax,
+                  baseline_cash: pendingAction.baseline_cash,
+                  taxable_gain: pendingAction.taxable_gain,
+                  tax_rate: pendingAction.tax_rate,
+                },
+              },
+              {
+                event_type: "CASH_DEBIT",
+                payload: {
+                  player_id: currentPlayer.id,
+                  amount: pendingAction.tax_amount,
+                  reason: "PAY_TAX",
+                  tile_index: pendingAction.tile_index,
+                },
+              },
+            ] satisfies Array<{ event_type: string; payload: Record<string, unknown> }>)
+          : [];
+
+      const finalVersion = currentVersion + events.length;
+      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            version: finalVersion,
+            ...(pendingAction.tax_amount > 0 ? { balances: updatedBalances } : {}),
+            income_tax_baseline_cash_by_player: nextIncomeTaxBaselineCashByPlayer,
+            pending_action: null,
+            turn_phase: pendingAction.return_turn_phase,
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      )) ?? [];
+
+      if (!updatedState) {
+        return NextResponse.json({ error: "Version mismatch." }, { status: 409 });
+      }
+
+      if (events.length > 0) {
+        await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+      }
+      return NextResponse.json({ gameState: updatedState });
     }
 
     if (body.action === "CONFIRM_SUPER_TAX") {

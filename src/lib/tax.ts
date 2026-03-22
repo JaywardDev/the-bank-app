@@ -11,8 +11,35 @@ export const isCustomTaxBoardPack = (boardPackId?: string | null) =>
 
 export const computeIncomeTaxAmount = (
   currentCash: number,
-  startingCash: number,
-) => Math.floor(0.2 * Math.max(0, currentCash - startingCash));
+  baselineCash: number,
+) => Math.floor(0.2 * Math.max(0, currentCash - baselineCash));
+
+export type IncomeTaxBreakdown = {
+  currentCash: number;
+  baselineCash: number;
+  taxableGain: number;
+  taxRate: number;
+  taxAmount: number;
+};
+
+export const computeIncomeTaxBreakdown = ({
+  currentCash,
+  baselineCash,
+  taxRate = 0.2,
+}: {
+  currentCash: number;
+  baselineCash: number;
+  taxRate?: number;
+}): IncomeTaxBreakdown => {
+  const taxableGain = Math.max(0, currentCash - baselineCash);
+  return {
+    currentCash,
+    baselineCash,
+    taxableGain,
+    taxRate,
+    taxAmount: Math.floor(taxRate * taxableGain),
+  };
+};
 
 type OwnershipByTileForTax = Record<
   number,
