@@ -240,6 +240,7 @@ type InsolvencyPendingAction = {
   tile_index: number | null;
   tile_id: string | null;
   label: string | null;
+  tax_kind?: "INCOME_TAX";
 };
 
 type SuperTaxPendingAction = {
@@ -288,6 +289,7 @@ type BankruptcyCandidate = {
   tileIndex?: number | null;
   tileId?: string | null;
   label?: string | null;
+  taxKind?: "INCOME_TAX";
 };
 
 type GameStateRow = {
@@ -1659,6 +1661,7 @@ const parsePendingInsolvencyAction = (
     tile_index: typeof pendingAction.tile_index === "number" ? pendingAction.tile_index : null,
     tile_id: typeof pendingAction.tile_id === "string" ? pendingAction.tile_id : null,
     label: typeof pendingAction.label === "string" ? pendingAction.label : null,
+    ...(pendingAction.tax_kind === "INCOME_TAX" ? { tax_kind: "INCOME_TAX" as const } : {}),
   };
 };
 
@@ -1849,6 +1852,7 @@ const createInsolvencyPendingAction = ({
   tileIndex?: number | null;
   tileId?: string | null;
   label?: string | null;
+  taxKind?: "INCOME_TAX";
 }): InsolvencyPendingAction => ({
   type: "INSOLVENCY_RECOVERY",
   player_id: playerId,
@@ -1860,6 +1864,7 @@ const createInsolvencyPendingAction = ({
   tile_index: tileIndex,
   tile_id: tileId,
   label,
+  ...(taxKind ? { tax_kind: taxKind } : {}),
 });
 
 const enterInsolvencyRecovery = async ({
@@ -1896,6 +1901,7 @@ const enterInsolvencyRecovery = async ({
     tileIndex: candidate.tileIndex ?? null,
     tileId: candidate.tileId ?? null,
     label: candidate.label ?? null,
+    taxKind: candidate.taxKind,
   });
 
   const insolvencyEvents = [
@@ -1913,6 +1919,7 @@ const enterInsolvencyRecovery = async ({
         tile_index: pendingAction.tile_index,
         tile_id: pendingAction.tile_id,
         label: pendingAction.label,
+        ...(pendingAction.tax_kind ? { tax_kind: pendingAction.tax_kind } : {}),
       },
     },
   ];
@@ -7324,10 +7331,10 @@ export async function POST(request: Request) {
 
       const currentCashBeforeTax = gameState.balances?.[currentPlayer.id] ?? startingCash;
       const nextBalance = currentCashBeforeTax - pendingAction.tax_amount;
-      const shouldUpdateBaseline = currentCashBeforeTax > pendingAction.baseline_cash;
+      const shouldUpdateBaseline = pendingAction.taxable_gain > 0;
       const nextIncomeTaxBaselineCashByPlayer = {
         ...(gameState.income_tax_baseline_cash_by_player ?? {}),
-        ...(shouldUpdateBaseline ? { [currentPlayer.id]: currentCashBeforeTax } : {}),
+        ...(shouldUpdateBaseline ? { [currentPlayer.id]: nextBalance } : {}),
       };
 
       if (pendingAction.tax_amount > 0 && nextBalance < 0) {
@@ -7343,6 +7350,7 @@ export async function POST(request: Request) {
             tileIndex: pendingAction.tile_index,
             tileId: pendingAction.tile_id,
             label: pendingAction.tile_name,
+            taxKind: shouldUpdateBaseline ? "INCOME_TAX" : undefined,
           },
           events: [],
           currentVersion,
