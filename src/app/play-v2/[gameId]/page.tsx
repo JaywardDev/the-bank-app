@@ -622,14 +622,7 @@ export default function PlayV2Page() {
     session,
   ]);
 
-  useEffect(() => {
-    if (gameMeta?.status !== "ended") {
-      return;
-    }
-
-    clearPlayV2State(routeGameId ?? null);
-    router.replace("/");
-  }, [clearPlayV2State, gameMeta?.status, routeGameId, router]);
+  const isGameEnded = (gameMeta?.status ?? "").toLowerCase() === "ended";
 
   const activeMacroEffectsV1 = useMemo(() => {
     return (gameState?.active_macro_effects_v1 ?? []).filter(
@@ -686,6 +679,41 @@ export default function PlayV2Page() {
     if (!currentUserPlayer) return null;
     return gameState?.balances?.[currentUserPlayer.id] ?? null;
   }, [currentUserPlayer, gameState?.balances]);
+
+  const latestGameOverEvent = useMemo(
+    () => events.find((event) => event.event_type === "GAME_OVER") ?? null,
+    [events],
+  );
+
+  const gameOverState = useMemo(() => {
+    if (!isGameEnded) {
+      return null;
+    }
+
+    const payload = latestGameOverEvent?.payload;
+    const winnerPlayerId =
+      typeof payload?.winner_player_id === "string"
+        ? payload.winner_player_id
+        : gameState?.current_player_id ?? null;
+    const winnerPlayer = winnerPlayerId
+      ? players.find((player) => player.id === winnerPlayerId) ?? null
+      : null;
+    const winnerNameFromEvent =
+      typeof payload?.winner_player_name === "string" && payload.winner_player_name.trim().length > 0
+        ? payload.winner_player_name
+        : null;
+    const winnerName = winnerNameFromEvent ?? winnerPlayer?.display_name ?? "Unknown player";
+    const rawReason = typeof payload?.reason === "string" ? payload.reason : null;
+    const reasonLabel = rawReason ? rawReason.replaceAll("_", " ").toLowerCase() : null;
+
+    return {
+      winnerPlayerId,
+      winnerName,
+      rawReason,
+      reasonLabel,
+      isCurrentUserWinner: Boolean(currentUserPlayerId && winnerPlayerId && currentUserPlayerId === winnerPlayerId),
+    };
+  }, [currentUserPlayerId, gameState?.current_player_id, isGameEnded, latestGameOverEvent, players]);
 
   const isInProgress = (gameMeta?.status ?? "").toLowerCase() === "in_progress";
   const isEliminated = Boolean(currentUserPlayer?.is_eliminated);
@@ -1064,6 +1092,11 @@ export default function PlayV2Page() {
 
     setShowLeaveConfirm(true);
   }, [closeMenuOverlay, isHost, routeGameId, router]);
+
+  const handleReturnHomeFromGameOver = useCallback(() => {
+    clearPlayV2State(routeGameId ?? null);
+    router.push("/");
+  }, [clearPlayV2State, routeGameId, router]);
 
   useEffect(() => {
     if (!showMenuOverlay) {
@@ -3291,6 +3324,34 @@ export default function PlayV2Page() {
         </div>
       )}
     />
+    {gameOverState ? (
+      <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm">
+        <div className="w-full max-w-md rounded-3xl border border-white/15 bg-neutral-950/95 p-6 text-center shadow-2xl">
+          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-white/55">Game Over</p>
+          <h2 className="mt-3 text-3xl font-semibold text-white">
+            {gameOverState.isCurrentUserWinner ? "You won" : "You lost"}
+          </h2>
+          <p className="mt-2 text-sm text-white/75">
+            Winner: <span className="font-semibold text-white">{gameOverState.winnerName}</span>
+          </p>
+          {gameOverState.reasonLabel ? (
+            <p className="mt-4 rounded-2xl border border-emerald-300/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-50">
+              Game ended due to {gameOverState.reasonLabel}.
+            </p>
+          ) : null}
+          <p className="mt-4 text-sm text-white/65">All other players have been eliminated. The final board remains visible behind this overlay.</p>
+          <div className="mt-6 flex justify-center">
+            <button
+              type="button"
+              onClick={handleReturnHomeFromGameOver}
+              className="inline-flex min-w-40 items-center justify-center rounded-2xl border border-white/15 bg-white px-4 py-3 text-sm font-semibold text-neutral-950 transition hover:bg-white/90"
+            >
+              Return Home
+            </button>
+          </div>
+        </div>
+      </div>
+    ) : null}
     {fullscreenEventNode ? (
       <div className="fixed inset-0 z-[200]">
         <div className="absolute inset-0 bg-black/60" />
