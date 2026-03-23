@@ -18,6 +18,7 @@ import JailDecisionModalV2 from "@/components/play-v2/JailDecisionModalV2";
 import ConfirmActionModalV2 from "@/components/play-v2/ConfirmActionModalV2";
 import RotateToLandscapeOverlay from "@/components/play-v2/RotateToLandscapeOverlay";
 import ActivityPopupV2 from "@/components/play-v2/ActivityPopupV2";
+import EndedGameResultsPanel from "@/components/play-v2/EndedGameResultsPanel";
 import InvestPanel from "@/app/components/InvestPanel";
 import { TitleDeedPreview } from "@/app/components/TitleDeedPreview";
 import { getDevelopmentLevelLabel } from "@/components/play-v2/utils/developmentLabels";
@@ -181,7 +182,6 @@ type ActiveDecisionType =
   | "INCOME_TAX_CONFIRM"
   | "SUPER_TAX_CONFIRM";
 
-
 type BankAction =
   | "ROLL_DICE"
   | "END_TURN"
@@ -276,7 +276,6 @@ const SESSION_EXPIRED_MESSAGE = "Session expired — please sign in again";
 const MIN_LOADING_SCREEN_MS = 5000;
 const lastGameKey = "bank.lastGameId";
 
-
 export default function PlayV2Page() {
   const router = useRouter();
   const params = useParams<{ gameId?: string | string[] }>();
@@ -299,30 +298,50 @@ export default function PlayV2Page() {
   const [tradeRequestCash, setTradeRequestCash] = useState<number>(0);
   const [tradeRequestTiles, setTradeRequestTiles] = useState<number[]>([]);
   const [playerLoans, setPlayerLoans] = useState<PlayerLoan[]>([]);
-  const [purchaseMortgages, setPurchaseMortgages] = useState<PurchaseMortgage[]>([]);
+  const [purchaseMortgages, setPurchaseMortgages] = useState<
+    PurchaseMortgage[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [needsAuth, setNeedsAuth] = useState(false);
   const [gameMetaError, setGameMetaError] = useState<string | null>(null);
-  const [selectedTileIndex, setSelectedTileIndex] = useState<number | null>(null);
+  const [selectedTileIndex, setSelectedTileIndex] = useState<number | null>(
+    null,
+  );
   const [isLeftDrawerOpen, setIsLeftDrawerOpen] = useState(false);
-  const [leftDrawerMode, setLeftDrawerMode] = useState<"info" | "wallet" | "market">("info");
+  const [leftDrawerMode, setLeftDrawerMode] = useState<
+    "info" | "wallet" | "market"
+  >("info");
   const [isRightDrawerOpen, setIsRightDrawerOpen] = useState(false);
-  const [rightDrawerMode, setRightDrawerMode] = useState<"decision" | "trade" | "macro">("decision");
-  const [pendingGoToJailAckVersion, setPendingGoToJailAckVersion] = useState<number | null>(null);
-  const [sellToMarketTileIndex, setSellToMarketTileIndex] = useState<number | null>(null);
+  const [rightDrawerMode, setRightDrawerMode] = useState<
+    "decision" | "trade" | "macro"
+  >("decision");
+  const [pendingGoToJailAckVersion, setPendingGoToJailAckVersion] = useState<
+    number | null
+  >(null);
+  const [sellToMarketTileIndex, setSellToMarketTileIndex] = useState<
+    number | null
+  >(null);
   const [payoffLoanId, setPayoffLoanId] = useState<string | null>(null);
-  const [defaultLoanTileIndex, setDefaultLoanTileIndex] = useState<number | null>(null);
+  const [defaultLoanTileIndex, setDefaultLoanTileIndex] = useState<
+    number | null
+  >(null);
   const [payoffMortgageId, setPayoffMortgageId] = useState<string | null>(null);
   const [auctionNow, setAuctionNow] = useState<Date>(() => new Date());
   const [loadingStartedAt, setLoadingStartedAt] = useState<number | null>(null);
   const [loadingElapsedMs, setLoadingElapsedMs] = useState(0);
   const [loadingMinElapsed, setLoadingMinElapsed] = useState(false);
   const [introDismissed, setIntroDismissed] = useState(false);
+  const [gameOverOverlayDismissed, setGameOverOverlayDismissed] =
+    useState(false);
   const [ownedActionReason, setOwnedActionReason] = useState<{
     tileIndex: number;
-    actionKey: "BUILD_HOUSE" | "SELL_HOUSE" | "SELL_TO_MARKET" | "TAKE_COLLATERAL_LOAN";
+    actionKey:
+      | "BUILD_HOUSE"
+      | "SELL_HOUSE"
+      | "SELL_TO_MARKET"
+      | "TAKE_COLLATERAL_LOAN";
     reason: string;
   } | null>(null);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
@@ -333,172 +352,210 @@ export default function PlayV2Page() {
   const [investPanelCollapsed, setInvestPanelCollapsed] = useState(true);
 
   const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
-  const ownedReasonTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ownedReasonTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const recenterBoardRef = useRef<(() => void) | null>(null);
 
-  const clearLastOpenedIfMatches = useCallback((targetGameId: string | null) => {
-    if (!targetGameId || typeof window === "undefined") {
-      return;
-    }
-
-    if (window.localStorage.getItem(lastGameKey) === targetGameId) {
-      window.localStorage.removeItem(lastGameKey);
-    }
-  }, []);
-
-  const clearPlayV2State = useCallback((targetGameId: string | null) => {
-    clearLastOpenedIfMatches(targetGameId);
-    setGameMeta(null);
-    setGameMetaError(null);
-    setPlayers([]);
-    setPlayersLoaded(false);
-    setGameState(null);
-    setEvents([]);
-    setOwnershipByTile({});
-    setTradeProposals([]);
-    setTradeCounterpartyId("");
-    setTradeOfferCash(0);
-    setTradeOfferTiles([]);
-    setTradeRequestCash(0);
-    setTradeRequestTiles([]);
-    setPlayerLoans([]);
-    setPurchaseMortgages([]);
-    setNotice(null);
-    setSelectedTileIndex(null);
-    setPendingGoToJailAckVersion(null);
-    setSellToMarketTileIndex(null);
-    setPayoffLoanId(null);
-    setDefaultLoanTileIndex(null);
-    setPayoffMortgageId(null);
-    setShowLeaveConfirm(false);
-    setShowEndSessionConfirm(false);
-    setShowHostLeaveGuard(false);
-  }, [clearLastOpenedIfMatches]);
-
-  const loadGameMeta = useCallback(async (gameId: string, accessToken?: string) => {
-    const [game] = await supabaseClient.fetchFromSupabase<GameMeta[]>(
-      `games?select=id,board_pack_id,status,created_by&id=eq.${gameId}&limit=1`,
-      { method: "GET" },
-      accessToken,
-    );
-    const resolvedGameMeta = game ?? null;
-    setGameMeta(resolvedGameMeta);
-    return resolvedGameMeta;
-  }, []);
-
-  const loadPlayers = useCallback(async (gameId: string, accessToken?: string) => {
-    const rows = await supabaseClient.fetchFromSupabase<Player[]>(
-      `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,is_eliminated,eliminated_at&game_id=eq.${gameId}&order=created_at.asc`,
-      { method: "GET" },
-      accessToken,
-    );
-    setPlayers(rows);
-    setPlayersLoaded(true);
-    return rows;
-  }, []);
-
-  const loadGameState = useCallback(async (gameId: string, accessToken?: string) => {
-    const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
-      `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,active_macro_effects_v1,skip_next_roll_by_player,income_tax_baseline_cash_by_player,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
-      { method: "GET" },
-      accessToken,
-    );
-    setGameState(stateRow ?? null);
-  }, []);
-
-  const loadEvents = useCallback(async (gameId: string, accessToken?: string) => {
-    const rows = await supabaseClient.fetchFromSupabase<GameEvent[]>(
-      `game_events?select=id,event_type,payload,created_at,version&game_id=eq.${gameId}&order=version.desc&limit=100`,
-      { method: "GET" },
-      accessToken,
-    );
-    setEvents(rows);
-  }, []);
-
-  const loadOwnership = useCallback(async (gameId: string, accessToken?: string) => {
-    const rows = await supabaseClient.fetchFromSupabase<OwnershipRow[]>(
-      `property_ownership?select=tile_index,owner_player_id,collateral_loan_id,purchase_mortgage_id,houses&game_id=eq.${gameId}`,
-      { method: "GET" },
-      accessToken,
-    );
-    const mapped = rows.reduce<OwnershipByTile>((acc, row) => {
-      if (row.owner_player_id) {
-        acc[row.tile_index] = {
-          owner_player_id: row.owner_player_id,
-          collateral_loan_id: row.collateral_loan_id ?? null,
-          purchase_mortgage_id: row.purchase_mortgage_id ?? null,
-          houses: row.houses ?? 0,
-        };
+  const clearLastOpenedIfMatches = useCallback(
+    (targetGameId: string | null) => {
+      if (!targetGameId || typeof window === "undefined") {
+        return;
       }
-      return acc;
-    }, {});
-    setOwnershipByTile(mapped);
-  }, []);
 
-  const loadTradeProposals = useCallback(async (gameId: string, accessToken?: string) => {
-    const rows = await supabaseClient.fetchFromSupabase<TradeProposal[]>(
-      `trade_proposals?select=id,game_id,proposer_player_id,counterparty_player_id,offer_cash,offer_tile_indices,request_cash,request_tile_indices,snapshot,status,created_at&game_id=eq.${gameId}&order=created_at.desc`,
-      { method: "GET" },
-      accessToken,
-    );
-    setTradeProposals(rows);
-  }, []);
+      if (window.localStorage.getItem(lastGameKey) === targetGameId) {
+        window.localStorage.removeItem(lastGameKey);
+      }
+    },
+    [],
+  );
 
-  const loadLoans = useCallback(async (gameId: string, accessToken?: string, playerId?: string | null) => {
-    if (!playerId) {
+  const clearPlayV2State = useCallback(
+    (targetGameId: string | null) => {
+      clearLastOpenedIfMatches(targetGameId);
+      setGameMeta(null);
+      setGameMetaError(null);
+      setPlayers([]);
+      setPlayersLoaded(false);
+      setGameState(null);
+      setEvents([]);
+      setOwnershipByTile({});
+      setTradeProposals([]);
+      setTradeCounterpartyId("");
+      setTradeOfferCash(0);
+      setTradeOfferTiles([]);
+      setTradeRequestCash(0);
+      setTradeRequestTiles([]);
       setPlayerLoans([]);
-      return;
-    }
-    const rows = await supabaseClient.fetchFromSupabase<PlayerLoan[]>(
-      `player_loans?select=id,player_id,collateral_tile_index,principal,remaining_principal,rate_per_turn,term_turns,turns_remaining,payment_per_turn,status&game_id=eq.${gameId}&player_id=eq.${playerId}`,
-      { method: "GET" },
-      accessToken,
-    );
-    setPlayerLoans(rows);
-  }, []);
-
-  const loadPurchaseMortgages = useCallback(async (gameId: string, accessToken?: string, playerId?: string | null) => {
-    if (!playerId) {
       setPurchaseMortgages([]);
-      return;
-    }
-    const rows = await supabaseClient.fetchFromSupabase<PurchaseMortgage[]>(
-      `purchase_mortgages?select=id,player_id,tile_index,principal_original,principal_remaining,rate_per_turn,term_turns,turns_remaining,payment_per_turn,turns_elapsed,accrued_interest_unpaid,status&game_id=eq.${gameId}&player_id=eq.${playerId}`,
-      { method: "GET" },
-      accessToken,
-    );
-    setPurchaseMortgages(rows);
-  }, []);
+      setNotice(null);
+      setSelectedTileIndex(null);
+      setPendingGoToJailAckVersion(null);
+      setSellToMarketTileIndex(null);
+      setPayoffLoanId(null);
+      setDefaultLoanTileIndex(null);
+      setPayoffMortgageId(null);
+      setShowLeaveConfirm(false);
+      setShowEndSessionConfirm(false);
+      setShowHostLeaveGuard(false);
+    },
+    [clearLastOpenedIfMatches],
+  );
+
+  const loadGameMeta = useCallback(
+    async (gameId: string, accessToken?: string) => {
+      const [game] = await supabaseClient.fetchFromSupabase<GameMeta[]>(
+        `games?select=id,board_pack_id,status,created_by&id=eq.${gameId}&limit=1`,
+        { method: "GET" },
+        accessToken,
+      );
+      const resolvedGameMeta = game ?? null;
+      setGameMeta(resolvedGameMeta);
+      return resolvedGameMeta;
+    },
+    [],
+  );
+
+  const loadPlayers = useCallback(
+    async (gameId: string, accessToken?: string) => {
+      const rows = await supabaseClient.fetchFromSupabase<Player[]>(
+        `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,is_eliminated,eliminated_at&game_id=eq.${gameId}&order=created_at.asc`,
+        { method: "GET" },
+        accessToken,
+      );
+      setPlayers(rows);
+      setPlayersLoaded(true);
+      return rows;
+    },
+    [],
+  );
+
+  const loadGameState = useCallback(
+    async (gameId: string, accessToken?: string) => {
+      const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
+        `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,active_macro_effects_v1,skip_next_roll_by_player,income_tax_baseline_cash_by_player,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
+        { method: "GET" },
+        accessToken,
+      );
+      setGameState(stateRow ?? null);
+    },
+    [],
+  );
+
+  const loadEvents = useCallback(
+    async (gameId: string, accessToken?: string) => {
+      const rows = await supabaseClient.fetchFromSupabase<GameEvent[]>(
+        `game_events?select=id,event_type,payload,created_at,version&game_id=eq.${gameId}&order=version.desc&limit=100`,
+        { method: "GET" },
+        accessToken,
+      );
+      setEvents(rows);
+    },
+    [],
+  );
+
+  const loadOwnership = useCallback(
+    async (gameId: string, accessToken?: string) => {
+      const rows = await supabaseClient.fetchFromSupabase<OwnershipRow[]>(
+        `property_ownership?select=tile_index,owner_player_id,collateral_loan_id,purchase_mortgage_id,houses&game_id=eq.${gameId}`,
+        { method: "GET" },
+        accessToken,
+      );
+      const mapped = rows.reduce<OwnershipByTile>((acc, row) => {
+        if (row.owner_player_id) {
+          acc[row.tile_index] = {
+            owner_player_id: row.owner_player_id,
+            collateral_loan_id: row.collateral_loan_id ?? null,
+            purchase_mortgage_id: row.purchase_mortgage_id ?? null,
+            houses: row.houses ?? 0,
+          };
+        }
+        return acc;
+      }, {});
+      setOwnershipByTile(mapped);
+    },
+    [],
+  );
+
+  const loadTradeProposals = useCallback(
+    async (gameId: string, accessToken?: string) => {
+      const rows = await supabaseClient.fetchFromSupabase<TradeProposal[]>(
+        `trade_proposals?select=id,game_id,proposer_player_id,counterparty_player_id,offer_cash,offer_tile_indices,request_cash,request_tile_indices,snapshot,status,created_at&game_id=eq.${gameId}&order=created_at.desc`,
+        { method: "GET" },
+        accessToken,
+      );
+      setTradeProposals(rows);
+    },
+    [],
+  );
+
+  const loadLoans = useCallback(
+    async (gameId: string, accessToken?: string, playerId?: string | null) => {
+      if (!playerId) {
+        setPlayerLoans([]);
+        return;
+      }
+      const rows = await supabaseClient.fetchFromSupabase<PlayerLoan[]>(
+        `player_loans?select=id,player_id,collateral_tile_index,principal,remaining_principal,rate_per_turn,term_turns,turns_remaining,payment_per_turn,status&game_id=eq.${gameId}&player_id=eq.${playerId}`,
+        { method: "GET" },
+        accessToken,
+      );
+      setPlayerLoans(rows);
+    },
+    [],
+  );
+
+  const loadPurchaseMortgages = useCallback(
+    async (gameId: string, accessToken?: string, playerId?: string | null) => {
+      if (!playerId) {
+        setPurchaseMortgages([]);
+        return;
+      }
+      const rows = await supabaseClient.fetchFromSupabase<PurchaseMortgage[]>(
+        `purchase_mortgages?select=id,player_id,tile_index,principal_original,principal_remaining,rate_per_turn,term_turns,turns_remaining,payment_per_turn,turns_elapsed,accrued_interest_unpaid,status&game_id=eq.${gameId}&player_id=eq.${playerId}`,
+        { method: "GET" },
+        accessToken,
+      );
+      setPurchaseMortgages(rows);
+    },
+    [],
+  );
 
   const currentUserPlayerId = useMemo(
-    () => players.find((player) => player.user_id === session?.user.id)?.id ?? null,
+    () =>
+      players.find((player) => player.user_id === session?.user.id)?.id ?? null,
     [players, session?.user.id],
   );
 
-  const loadAllSlices = useCallback(async (gameId: string, accessToken?: string) => {
-    const playerRows = await loadPlayers(gameId, accessToken);
-    const currentPlayerId = playerRows.find((player) => player.user_id === session?.user.id)?.id ?? null;
-    const [loadedGameMeta] = await Promise.all([
-      loadGameMeta(gameId, accessToken),
-      loadGameState(gameId, accessToken),
-      loadEvents(gameId, accessToken),
-      loadOwnership(gameId, accessToken),
-      loadTradeProposals(gameId, accessToken),
-      loadLoans(gameId, accessToken, currentPlayerId),
-      loadPurchaseMortgages(gameId, accessToken, currentPlayerId),
-    ]);
-    return loadedGameMeta;
-  }, [
-    loadEvents,
-    loadGameMeta,
-    loadGameState,
-    loadLoans,
-    loadOwnership,
-    loadPlayers,
-    loadPurchaseMortgages,
-    loadTradeProposals,
-    session?.user.id,
-  ]);
+  const loadAllSlices = useCallback(
+    async (gameId: string, accessToken?: string) => {
+      const playerRows = await loadPlayers(gameId, accessToken);
+      const currentPlayerId =
+        playerRows.find((player) => player.user_id === session?.user.id)?.id ??
+        null;
+      const [loadedGameMeta] = await Promise.all([
+        loadGameMeta(gameId, accessToken),
+        loadGameState(gameId, accessToken),
+        loadEvents(gameId, accessToken),
+        loadOwnership(gameId, accessToken),
+        loadTradeProposals(gameId, accessToken),
+        loadLoans(gameId, accessToken, currentPlayerId),
+        loadPurchaseMortgages(gameId, accessToken, currentPlayerId),
+      ]);
+      return loadedGameMeta;
+    },
+    [
+      loadEvents,
+      loadGameMeta,
+      loadGameState,
+      loadLoans,
+      loadOwnership,
+      loadPlayers,
+      loadPurchaseMortgages,
+      loadTradeProposals,
+      session?.user.id,
+    ],
+  );
 
   const refetchActionSlices = useCallback(
     async (gameId: string, accessToken?: string) => {
@@ -553,7 +610,8 @@ export default function PlayV2Page() {
           setGameMetaError("No active game.");
         }
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Unable to load game";
+        const message =
+          error instanceof Error ? error.message : "Unable to load game";
         if (message === SESSION_EXPIRED_MESSAGE) {
           setNeedsAuth(true);
         } else {
@@ -573,7 +631,12 @@ export default function PlayV2Page() {
   }, [loadAllSlices, routeGameId, router]);
 
   useEffect(() => {
-    if (!loading && !needsAuth && gameMeta && !getBoardPackById(gameMeta.board_pack_id ?? null)) {
+    if (
+      !loading &&
+      !needsAuth &&
+      gameMeta &&
+      !getBoardPackById(gameMeta.board_pack_id ?? null)
+    ) {
       setGameMetaError("Unable to resolve board pack for this game.");
     }
   }, [gameMeta, loading, needsAuth]);
@@ -590,14 +653,92 @@ export default function PlayV2Page() {
 
     const channel = realtimeClient
       .channel(`play-v2:${routeGameId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "players", filter: `game_id=eq.${routeGameId}` }, async () => loadPlayers(routeGameId, session.access_token))
-      .on("postgres_changes", { event: "*", schema: "public", table: "game_state", filter: `game_id=eq.${routeGameId}` }, async () => loadGameState(routeGameId, session.access_token))
-      .on("postgres_changes", { event: "*", schema: "public", table: "game_events", filter: `game_id=eq.${routeGameId}` }, async () => loadEvents(routeGameId, session.access_token))
-      .on("postgres_changes", { event: "*", schema: "public", table: "property_ownership", filter: `game_id=eq.${routeGameId}` }, async () => loadOwnership(routeGameId, session.access_token))
-      .on("postgres_changes", { event: "*", schema: "public", table: "trade_proposals", filter: `game_id=eq.${routeGameId}` }, async () => loadTradeProposals(routeGameId, session.access_token))
-      .on("postgres_changes", { event: "*", schema: "public", table: "player_loans", filter: `game_id=eq.${routeGameId}` }, async () => loadLoans(routeGameId, session.access_token, currentUserPlayerId))
-      .on("postgres_changes", { event: "*", schema: "public", table: "purchase_mortgages", filter: `game_id=eq.${routeGameId}` }, async () => loadPurchaseMortgages(routeGameId, session.access_token, currentUserPlayerId))
-      .on("postgres_changes", { event: "*", schema: "public", table: "games", filter: `id=eq.${routeGameId}` }, async () => loadGameMeta(routeGameId, session.access_token))
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "players",
+          filter: `game_id=eq.${routeGameId}`,
+        },
+        async () => loadPlayers(routeGameId, session.access_token),
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "game_state",
+          filter: `game_id=eq.${routeGameId}`,
+        },
+        async () => loadGameState(routeGameId, session.access_token),
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "game_events",
+          filter: `game_id=eq.${routeGameId}`,
+        },
+        async () => loadEvents(routeGameId, session.access_token),
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "property_ownership",
+          filter: `game_id=eq.${routeGameId}`,
+        },
+        async () => loadOwnership(routeGameId, session.access_token),
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "trade_proposals",
+          filter: `game_id=eq.${routeGameId}`,
+        },
+        async () => loadTradeProposals(routeGameId, session.access_token),
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "player_loans",
+          filter: `game_id=eq.${routeGameId}`,
+        },
+        async () =>
+          loadLoans(routeGameId, session.access_token, currentUserPlayerId),
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "purchase_mortgages",
+          filter: `game_id=eq.${routeGameId}`,
+        },
+        async () =>
+          loadPurchaseMortgages(
+            routeGameId,
+            session.access_token,
+            currentUserPlayerId,
+          ),
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "games",
+          filter: `id=eq.${routeGameId}`,
+        },
+        async () => loadGameMeta(routeGameId, session.access_token),
+      )
       .subscribe();
 
     realtimeChannelRef.current = channel;
@@ -657,7 +798,8 @@ export default function PlayV2Page() {
   );
 
   const boardTilesByIndex = useMemo(() => {
-    const tiles = getBoardPackById(gameMeta?.board_pack_id ?? null)?.tiles ?? [];
+    const tiles =
+      getBoardPackById(gameMeta?.board_pack_id ?? null)?.tiles ?? [];
     return new Map(tiles.map((tile) => [tile.index, tile]));
   }, [gameMeta?.board_pack_id]);
 
@@ -694,36 +836,57 @@ export default function PlayV2Page() {
     const winnerPlayerId =
       typeof payload?.winner_player_id === "string"
         ? payload.winner_player_id
-        : gameState?.current_player_id ?? null;
+        : (gameState?.current_player_id ?? null);
     const winnerPlayer = winnerPlayerId
-      ? players.find((player) => player.id === winnerPlayerId) ?? null
+      ? (players.find((player) => player.id === winnerPlayerId) ?? null)
       : null;
     const winnerNameFromEvent =
-      typeof payload?.winner_player_name === "string" && payload.winner_player_name.trim().length > 0
+      typeof payload?.winner_player_name === "string" &&
+      payload.winner_player_name.trim().length > 0
         ? payload.winner_player_name
         : null;
-    const winnerName = winnerNameFromEvent ?? winnerPlayer?.display_name ?? "Unknown player";
-    const rawReason = typeof payload?.reason === "string" ? payload.reason : null;
-    const reasonLabel = rawReason ? rawReason.replaceAll("_", " ").toLowerCase() : null;
+    const winnerName =
+      winnerNameFromEvent ?? winnerPlayer?.display_name ?? "Unknown player";
+    const rawReason =
+      typeof payload?.reason === "string" ? payload.reason : null;
+    const reasonLabel = rawReason
+      ? rawReason.replaceAll("_", " ").toLowerCase()
+      : null;
 
     return {
       winnerPlayerId,
       winnerName,
       rawReason,
       reasonLabel,
-      isCurrentUserWinner: Boolean(currentUserPlayerId && winnerPlayerId && currentUserPlayerId === winnerPlayerId),
+      isCurrentUserWinner: Boolean(
+        currentUserPlayerId &&
+        winnerPlayerId &&
+        currentUserPlayerId === winnerPlayerId,
+      ),
     };
-  }, [currentUserPlayerId, gameState?.current_player_id, isGameEnded, latestGameOverEvent, players]);
+  }, [
+    currentUserPlayerId,
+    gameState?.current_player_id,
+    isGameEnded,
+    latestGameOverEvent,
+    players,
+  ]);
+
+  useEffect(() => {
+    if (gameOverState) {
+      setGameOverOverlayDismissed(false);
+    }
+  }, [gameOverState?.winnerPlayerId, gameOverState?.rawReason]);
 
   const isInProgress = (gameMeta?.status ?? "").toLowerCase() === "in_progress";
   const isEliminated = Boolean(currentUserPlayer?.is_eliminated);
   const auctionActive = Boolean(gameState?.auction_active);
   const isMyTurn = Boolean(
     isInProgress &&
-      session &&
-      currentUserPlayer &&
-      gameState?.current_player_id === currentUserPlayer.id &&
-      !currentUserPlayer.is_eliminated,
+    session &&
+    currentUserPlayer &&
+    gameState?.current_player_id === currentUserPlayer.id &&
+    !currentUserPlayer.is_eliminated,
   );
   const pendingPurchase = useMemo<PendingPurchaseAction | null>(() => {
     const pendingAction = gameState?.pending_action;
@@ -796,11 +959,15 @@ export default function PlayV2Page() {
 
     return {
       type: "SUPER_TAX_CONFIRM",
-      player_id: typeof candidate.player_id === "string" ? candidate.player_id : null,
+      player_id:
+        typeof candidate.player_id === "string" ? candidate.player_id : null,
       tile_id: candidate.tile_id,
       tile_index: candidate.tile_index,
       tile_name: candidate.tile_name,
-      boardpack_id: typeof candidate.boardpack_id === "string" ? candidate.boardpack_id : null,
+      boardpack_id:
+        typeof candidate.boardpack_id === "string"
+          ? candidate.boardpack_id
+          : null,
       current_cash: candidate.current_cash,
       asset_value: candidate.asset_value,
       total_liabilities: candidate.total_liabilities,
@@ -833,11 +1000,15 @@ export default function PlayV2Page() {
     }
     return {
       type: "INCOME_TAX_CONFIRM",
-      player_id: typeof candidate.player_id === "string" ? candidate.player_id : null,
+      player_id:
+        typeof candidate.player_id === "string" ? candidate.player_id : null,
       tile_id: candidate.tile_id,
       tile_index: candidate.tile_index,
       tile_name: candidate.tile_name,
-      boardpack_id: typeof candidate.boardpack_id === "string" ? candidate.boardpack_id : null,
+      boardpack_id:
+        typeof candidate.boardpack_id === "string"
+          ? candidate.boardpack_id
+          : null,
       current_cash: candidate.current_cash,
       baseline_cash: candidate.baseline_cash,
       taxable_gain: candidate.taxable_gain,
@@ -861,41 +1032,47 @@ export default function PlayV2Page() {
 
     return candidate;
   }, [gameState?.pending_action]);
-  const pendingInsolvencyRecovery = useMemo<InsolvencyRecoveryAction | null>(() => {
-    const pendingAction = gameState?.pending_action;
-    if (!pendingAction || typeof pendingAction !== "object") {
-      return null;
-    }
+  const pendingInsolvencyRecovery =
+    useMemo<InsolvencyRecoveryAction | null>(() => {
+      const pendingAction = gameState?.pending_action;
+      if (!pendingAction || typeof pendingAction !== "object") {
+        return null;
+      }
 
-    const candidate = pendingAction as Record<string, unknown>;
-    if (candidate.type !== "INSOLVENCY_RECOVERY") {
-      return null;
-    }
+      const candidate = pendingAction as Record<string, unknown>;
+      if (candidate.type !== "INSOLVENCY_RECOVERY") {
+        return null;
+      }
 
-    if (
-      typeof candidate.amount_due !== "number" ||
-      typeof candidate.cash_available !== "number" ||
-      typeof candidate.shortfall !== "number"
-    ) {
-      return null;
-    }
+      if (
+        typeof candidate.amount_due !== "number" ||
+        typeof candidate.cash_available !== "number" ||
+        typeof candidate.shortfall !== "number"
+      ) {
+        return null;
+      }
 
-    return {
-      type: "INSOLVENCY_RECOVERY",
-      player_id: typeof candidate.player_id === "string" ? candidate.player_id : null,
-      reason: typeof candidate.reason === "string" ? candidate.reason : null,
-      amount_due: candidate.amount_due,
-      cash_available: candidate.cash_available,
-      shortfall: candidate.shortfall,
-      owed_to_player_id:
-        typeof candidate.owed_to_player_id === "string"
-          ? candidate.owed_to_player_id
-          : null,
-      tile_index: typeof candidate.tile_index === "number" ? candidate.tile_index : null,
-      tile_id: typeof candidate.tile_id === "string" ? candidate.tile_id : null,
-      label: typeof candidate.label === "string" ? candidate.label : null,
-    };
-  }, [gameState?.pending_action]);
+      return {
+        type: "INSOLVENCY_RECOVERY",
+        player_id:
+          typeof candidate.player_id === "string" ? candidate.player_id : null,
+        reason: typeof candidate.reason === "string" ? candidate.reason : null,
+        amount_due: candidate.amount_due,
+        cash_available: candidate.cash_available,
+        shortfall: candidate.shortfall,
+        owed_to_player_id:
+          typeof candidate.owed_to_player_id === "string"
+            ? candidate.owed_to_player_id
+            : null,
+        tile_index:
+          typeof candidate.tile_index === "number"
+            ? candidate.tile_index
+            : null,
+        tile_id:
+          typeof candidate.tile_id === "string" ? candidate.tile_id : null,
+        label: typeof candidate.label === "string" ? candidate.label : null,
+      };
+    }, [gameState?.pending_action]);
   const pendingCard = useMemo(() => {
     if (!gameState?.pending_card_active) {
       return null;
@@ -987,20 +1164,27 @@ export default function PlayV2Page() {
     if (!latestDiceValues) {
       return false;
     }
-    return latestRolledDoubleConfirmed || latestDiceValues[0] === latestDiceValues[1];
+    return (
+      latestRolledDoubleConfirmed || latestDiceValues[0] === latestDiceValues[1]
+    );
   }, [latestDiceValues, latestRolledDoubleConfirmed]);
   const shouldShowGoToJailConfirm = Boolean(
     isMyTurn &&
-      currentUserPlayer?.id &&
-      gameState?.current_player_id === currentUserPlayer.id &&
-      pendingGoToJail,
+    currentUserPlayer?.id &&
+    gameState?.current_player_id === currentUserPlayer.id &&
+    pendingGoToJail,
   );
   const isAwaitingJailDecision =
     gameState?.turn_phase === "AWAITING_JAIL_DECISION";
   const isJailDecisionActor = Boolean(isMyTurn && isAwaitingJailDecision);
-  const canRollForDoubles = Boolean(isJailDecisionActor && currentUserPlayer?.is_in_jail);
-  const hasGetOutOfJailFree = (currentUserPlayer?.get_out_of_jail_free_count ?? 0) > 0;
-  const jailFineAmount = getBoardPackById(gameMeta?.board_pack_id ?? null)?.economy?.jailFineAmount ?? 50;
+  const canRollForDoubles = Boolean(
+    isJailDecisionActor && currentUserPlayer?.is_in_jail,
+  );
+  const hasGetOutOfJailFree =
+    (currentUserPlayer?.get_out_of_jail_free_count ?? 0) > 0;
+  const jailFineAmount =
+    getBoardPackById(gameMeta?.board_pack_id ?? null)?.economy
+      ?.jailFineAmount ?? 50;
 
   const activeDecisionType: ActiveDecisionType | null = useMemo(() => {
     if (shouldShowGoToJailConfirm) return "GO_TO_JAIL";
@@ -1012,28 +1196,56 @@ export default function PlayV2Page() {
     if (pendingInsolvencyRecovery) return "INSOLVENCY_RECOVERY";
     if (pendingPurchase) return "BUY_PROPERTY";
     return null;
-  }, [isAwaitingJailDecision, pendingCard, pendingMacroEvent, pendingIncomeTax, pendingSuperTax, pendingInsolvencyRecovery, pendingPurchase, shouldShowGoToJailConfirm]);
+  }, [
+    isAwaitingJailDecision,
+    pendingCard,
+    pendingMacroEvent,
+    pendingIncomeTax,
+    pendingSuperTax,
+    pendingInsolvencyRecovery,
+    pendingPurchase,
+    shouldShowGoToJailConfirm,
+  ]);
 
   const isDrawerDecision = useCallback((type: ActiveDecisionType | null) => {
     if (!type) return false;
-    return type === "BUY_PROPERTY" || type === "JAIL_DECISION" || type === "INSOLVENCY_RECOVERY";
+    return (
+      type === "BUY_PROPERTY" ||
+      type === "JAIL_DECISION" ||
+      type === "INSOLVENCY_RECOVERY"
+    );
   }, []);
 
   const isFullscreenEvent = useCallback((type: ActiveDecisionType | null) => {
     if (!type) return false;
-    return type === "PENDING_CARD" || type === "MACRO_EVENT" || type === "GO_TO_JAIL" || type === "SUPER_TAX_CONFIRM" || type === "INCOME_TAX_CONFIRM";
+    return (
+      type === "PENDING_CARD" ||
+      type === "MACRO_EVENT" ||
+      type === "GO_TO_JAIL" ||
+      type === "SUPER_TAX_CONFIRM" ||
+      type === "INCOME_TAX_CONFIRM"
+    );
   }, []);
 
   const isInsolvencyRecoveryMode = Boolean(
     pendingInsolvencyRecovery &&
-      isMyTurn &&
-      currentUserPlayer?.id &&
-      pendingInsolvencyRecovery.player_id === currentUserPlayer.id,
+    isMyTurn &&
+    currentUserPlayer?.id &&
+    pendingInsolvencyRecovery.player_id === currentUserPlayer.id,
   );
   const insolvencyAmountDue = pendingInsolvencyRecovery?.amount_due ?? 0;
-  const insolvencyCurrentCash = isInsolvencyRecoveryMode ? currentUserCash ?? 0 : pendingInsolvencyRecovery?.cash_available ?? 0;
-  const insolvencyShortfall = Math.max(insolvencyAmountDue - insolvencyCurrentCash, 0);
-  const isInsolvencyReadyToPay = Boolean(isInsolvencyRecoveryMode && pendingInsolvencyRecovery && insolvencyCurrentCash >= insolvencyAmountDue);
+  const insolvencyCurrentCash = isInsolvencyRecoveryMode
+    ? (currentUserCash ?? 0)
+    : (pendingInsolvencyRecovery?.cash_available ?? 0);
+  const insolvencyShortfall = Math.max(
+    insolvencyAmountDue - insolvencyCurrentCash,
+    0,
+  );
+  const isInsolvencyReadyToPay = Boolean(
+    isInsolvencyRecoveryMode &&
+    pendingInsolvencyRecovery &&
+    insolvencyCurrentCash >= insolvencyAmountDue,
+  );
   const hasBlockingPendingAction = activeDecisionType !== null;
   const rules = getRules(gameState?.rules ?? null);
   const mortgageLtv =
@@ -1055,14 +1267,18 @@ export default function PlayV2Page() {
   const canAffordPendingMortgage = pendingPurchase
     ? (currentUserCash ?? 0) >= pendingMortgageDownPayment
     : false;
-  const canAct = isMyTurn && !isEliminated && !auctionActive && !hasBlockingPendingAction;
-  const canUseRecoveryActions = isMyTurn && !isEliminated && !auctionActive && isInsolvencyRecoveryMode;
+  const canAct =
+    isMyTurn && !isEliminated && !auctionActive && !hasBlockingPendingAction;
+  const canUseRecoveryActions =
+    isMyTurn && !isEliminated && !auctionActive && isInsolvencyRecoveryMode;
   const canRoll =
     canAct &&
     !isJailDecisionActor &&
     (gameState?.last_roll == null || (gameState?.doubles_count ?? 0) > 0);
   const canEndTurn = canAct && gameState?.last_roll != null;
-  const isHost = Boolean(session?.user.id && gameMeta?.created_by === session.user.id);
+  const isHost = Boolean(
+    session?.user.id && gameMeta?.created_by === session.user.id,
+  );
   const isActionInFlight = actionLoading !== null;
 
   const closeMenuOverlay = useCallback(() => {
@@ -1160,14 +1376,16 @@ export default function PlayV2Page() {
     if (auctionTileIndex === null) {
       return null;
     }
-    const boardTiles = getBoardPackById(gameMeta?.board_pack_id ?? null)?.tiles ?? [];
+    const boardTiles =
+      getBoardPackById(gameMeta?.board_pack_id ?? null)?.tiles ?? [];
     return boardTiles.find((tile) => tile.index === auctionTileIndex) ?? null;
   }, [auctionTileIndex, gameMeta?.board_pack_id]);
   const auctionHighestBid = gameState?.auction_current_bid ?? 0;
-  const auctionHighestBidderId = gameState?.auction_current_winner_player_id ?? null;
+  const auctionHighestBidderId =
+    gameState?.auction_current_winner_player_id ?? null;
   const auctionHighestBidderName =
-    players.find((player) => player.id === auctionHighestBidderId)?.display_name ??
-    (auctionHighestBidderId ? "Player" : null);
+    players.find((player) => player.id === auctionHighestBidderId)
+      ?.display_name ?? (auctionHighestBidderId ? "Player" : null);
   const auctionTurnPlayerId = gameState?.auction_turn_player_id ?? null;
   const auctionTurnPlayerName =
     players.find((player) => player.id === auctionTurnPlayerId)?.display_name ??
@@ -1176,10 +1394,12 @@ export default function PlayV2Page() {
   const auctionPassedBidderIds = gameState?.auction_passed_player_ids ?? [];
   const auctionTurnEndsAt = gameState?.auction_turn_ends_at ?? null;
   const auctionMinIncrement =
-    gameState?.auction_min_increment ?? DEFAULT_BOARD_PACK_ECONOMY.auctionMinIncrement ?? 10;
+    gameState?.auction_min_increment ??
+    DEFAULT_BOARD_PACK_ECONOMY.auctionMinIncrement ??
+    10;
   const currentBidderCash =
     currentUserPlayer && gameState?.balances
-      ? gameState.balances[currentUserPlayer.id] ?? 0
+      ? (gameState.balances[currentUserPlayer.id] ?? 0)
       : 0;
   const isEligibleAuctionBidder = Boolean(
     currentUserPlayer?.id &&
@@ -1189,7 +1409,8 @@ export default function PlayV2Page() {
   const isCurrentAuctionBidder = Boolean(
     currentUserPlayer?.id && currentUserPlayer.id === auctionTurnPlayerId,
   );
-  const canActInAuction = auctionActive && isEligibleAuctionBidder && isCurrentAuctionBidder;
+  const canActInAuction =
+    auctionActive && isEligibleAuctionBidder && isCurrentAuctionBidder;
 
   const auctionRemainingSeconds = useMemo(() => {
     if (!auctionTurnEndsAt) {
@@ -1219,123 +1440,150 @@ export default function PlayV2Page() {
     return () => window.clearInterval(tick);
   }, [auctionActive]);
 
-  useEffect(() => () => {
-    if (ownedReasonTimeoutRef.current) {
-      clearTimeout(ownedReasonTimeoutRef.current);
-    }
-  }, []);
+  useEffect(
+    () => () => {
+      if (ownedReasonTimeoutRef.current) {
+        clearTimeout(ownedReasonTimeoutRef.current);
+      }
+    },
+    [],
+  );
 
-  const handleBankAction = useCallback(async (
-    actionOrRequest: BankAction | BankActionRequest,
-    options?: Omit<BankActionRequest, "action">,
-  ) => {
-    if (!routeGameId || !session?.access_token) {
-      return;
-    }
+  const handleBankAction = useCallback(
+    async (
+      actionOrRequest: BankAction | BankActionRequest,
+      options?: Omit<BankActionRequest, "action">,
+    ) => {
+      if (!routeGameId || !session?.access_token) {
+        return;
+      }
 
-    const request =
-      typeof actionOrRequest === "string"
-        ? { action: actionOrRequest, ...options }
-        : actionOrRequest;
+      const request =
+        typeof actionOrRequest === "string"
+          ? { action: actionOrRequest, ...options }
+          : actionOrRequest;
 
-    setActionLoading(request.action);
-    setNotice(null);
-    try {
-      const requestBody = {
-        action: request.action,
-        gameId: routeGameId,
-        expectedVersion: gameState?.version ?? 0,
-        ...(request.tileIndex !== undefined ? { tileIndex: request.tileIndex } : {}),
-        ...(request.amount !== undefined ? { amount: request.amount } : {}),
-        ...(request.financing ? { financing: request.financing } : {}),
-        ...(request.loanId ? { loanId: request.loanId } : {}),
-        ...(request.mortgageId ? { mortgageId: request.mortgageId } : {}),
-        ...(request.tradeId ? { tradeId: request.tradeId } : {}),
-        ...(request.counterpartyPlayerId ? { counterpartyPlayerId: request.counterpartyPlayerId } : {}),
-        ...(request.offerCash !== undefined ? { offerCash: request.offerCash } : {}),
-        ...(request.offerTiles ? { offerTiles: request.offerTiles } : {}),
-        ...(request.requestCash !== undefined ? { requestCash: request.requestCash } : {}),
-        ...(request.requestTiles ? { requestTiles: request.requestTiles } : {}),
-      };
+      setActionLoading(request.action);
+      setNotice(null);
+      try {
+        const requestBody = {
+          action: request.action,
+          gameId: routeGameId,
+          expectedVersion: gameState?.version ?? 0,
+          ...(request.tileIndex !== undefined
+            ? { tileIndex: request.tileIndex }
+            : {}),
+          ...(request.amount !== undefined ? { amount: request.amount } : {}),
+          ...(request.financing ? { financing: request.financing } : {}),
+          ...(request.loanId ? { loanId: request.loanId } : {}),
+          ...(request.mortgageId ? { mortgageId: request.mortgageId } : {}),
+          ...(request.tradeId ? { tradeId: request.tradeId } : {}),
+          ...(request.counterpartyPlayerId
+            ? { counterpartyPlayerId: request.counterpartyPlayerId }
+            : {}),
+          ...(request.offerCash !== undefined
+            ? { offerCash: request.offerCash }
+            : {}),
+          ...(request.offerTiles ? { offerTiles: request.offerTiles } : {}),
+          ...(request.requestCash !== undefined
+            ? { requestCash: request.requestCash }
+            : {}),
+          ...(request.requestTiles
+            ? { requestTiles: request.requestTiles }
+            : {}),
+        };
 
-      const runActionRequest = async (accessToken: string) => {
-        const response = await fetch("/api/bank/action", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${accessToken}`,
-          },
-          body: JSON.stringify(requestBody),
-        });
+        const runActionRequest = async (accessToken: string) => {
+          const response = await fetch("/api/bank/action", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify(requestBody),
+          });
 
-        const payload = (await response.json().catch(() => null)) as
-          | { error?: string; message?: string }
-          | null;
+          const payload = (await response.json().catch(() => null)) as {
+            error?: string;
+            message?: string;
+          } | null;
 
-        return { payload, response };
-      };
+          return { payload, response };
+        };
 
-      const getErrorMessage = (
-        status: number,
-        payload: { error?: string; message?: string } | null,
-      ) => {
-        if (status === 401) {
-          return SESSION_EXPIRED_MESSAGE;
+        const getErrorMessage = (
+          status: number,
+          payload: { error?: string; message?: string } | null,
+        ) => {
+          if (status === 401) {
+            return SESSION_EXPIRED_MESSAGE;
+          }
+          if (status === 409) {
+            return "Game state updated. Please try again.";
+          }
+          if (
+            typeof payload?.error === "string" &&
+            payload.error.trim().length > 0
+          ) {
+            return payload.error;
+          }
+          if (
+            typeof payload?.message === "string" &&
+            payload.message.trim().length > 0
+          ) {
+            return payload.message;
+          }
+          return "Action failed. Please try again.";
+        };
+
+        let accessToken = session.access_token;
+        let result = await runActionRequest(accessToken);
+
+        if (result.response.status === 401) {
+          const refreshedSession = await supabaseClient.refreshSession();
+          if (!refreshedSession?.access_token) {
+            setNeedsAuth(true);
+            setNotice(SESSION_EXPIRED_MESSAGE);
+            return;
+          }
+          setSession(refreshedSession);
+          accessToken = refreshedSession.access_token;
+          result = await runActionRequest(accessToken);
         }
-        if (status === 409) {
-          return "Game state updated. Please try again.";
-        }
-        if (typeof payload?.error === "string" && payload.error.trim().length > 0) {
-          return payload.error;
-        }
-        if (typeof payload?.message === "string" && payload.message.trim().length > 0) {
-          return payload.message;
-        }
-        return "Action failed. Please try again.";
-      };
 
-      let accessToken = session.access_token;
-      let result = await runActionRequest(accessToken);
-
-      if (result.response.status === 401) {
-        const refreshedSession = await supabaseClient.refreshSession();
-        if (!refreshedSession?.access_token) {
-          setNeedsAuth(true);
-          setNotice(SESSION_EXPIRED_MESSAGE);
+        if (result.response.status === 409) {
+          await loadAllSlices(routeGameId, accessToken);
+          setNotice("Game state updated. Please try again.");
           return;
         }
-        setSession(refreshedSession);
-        accessToken = refreshedSession.access_token;
-        result = await runActionRequest(accessToken);
-      }
 
-      if (result.response.status === 409) {
-        await loadAllSlices(routeGameId, accessToken);
-        setNotice("Game state updated. Please try again.");
-        return;
-      }
-
-      if (!result.response.ok) {
-        if (result.response.status === 401) {
-          setNeedsAuth(true);
+        if (!result.response.ok) {
+          if (result.response.status === 401) {
+            setNeedsAuth(true);
+          }
+          setNotice(getErrorMessage(result.response.status, result.payload));
+          return;
         }
-        setNotice(getErrorMessage(result.response.status, result.payload));
-        return;
-      }
 
-      await refetchActionSlices(routeGameId, accessToken);
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Action failed. Please try again.");
-    } finally {
-      setActionLoading(null);
-    }
-  }, [
-    gameState?.version,
-    loadAllSlices,
-    refetchActionSlices,
-    routeGameId,
-    session,
-  ]);
+        await refetchActionSlices(routeGameId, accessToken);
+      } catch (error) {
+        setNotice(
+          error instanceof Error
+            ? error.message
+            : "Action failed. Please try again.",
+        );
+      } finally {
+        setActionLoading(null);
+      }
+    },
+    [
+      gameState?.version,
+      loadAllSlices,
+      refetchActionSlices,
+      routeGameId,
+      session,
+    ],
+  );
 
   const handleConfirmPendingCard = useCallback(() => {
     void handleBankAction("CONFIRM_PENDING_CARD");
@@ -1371,7 +1619,9 @@ export default function PlayV2Page() {
     if (!pendingPurchase) {
       return;
     }
-    void handleBankAction("BUY_PROPERTY", { tileIndex: pendingPurchase.tile_index });
+    void handleBankAction("BUY_PROPERTY", {
+      tileIndex: pendingPurchase.tile_index,
+    });
   }, [handleBankAction, pendingPurchase]);
 
   const handleBuyPropertyWithMortgage = useCallback(() => {
@@ -1388,7 +1638,9 @@ export default function PlayV2Page() {
     if (!pendingPurchase) {
       return;
     }
-    void handleBankAction("DECLINE_PROPERTY", { tileIndex: pendingPurchase.tile_index });
+    void handleBankAction("DECLINE_PROPERTY", {
+      tileIndex: pendingPurchase.tile_index,
+    });
   }, [handleBankAction, pendingPurchase]);
 
   const handleAcknowledgeGoToJail = useCallback(() => {
@@ -1398,12 +1650,15 @@ export default function PlayV2Page() {
     setPendingGoToJailAckVersion(pendingGoToJail.eventVersion);
   }, [pendingGoToJail]);
 
-  const handleAuctionBid = useCallback((amount: number) => {
-    if (!canActInAuction) {
-      return;
-    }
-    void handleBankAction("AUCTION_BID", { amount });
-  }, [canActInAuction, handleBankAction]);
+  const handleAuctionBid = useCallback(
+    (amount: number) => {
+      if (!canActInAuction) {
+        return;
+      }
+      void handleBankAction("AUCTION_BID", { amount });
+    },
+    [canActInAuction, handleBankAction],
+  );
 
   const handleAuctionPass = useCallback(() => {
     if (!canActInAuction) {
@@ -1482,14 +1737,18 @@ export default function PlayV2Page() {
       }
 
       if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        const payload = (await response.json().catch(() => null)) as {
+          error?: string;
+        } | null;
         throw new Error(payload?.error ?? "Unable to leave this table.");
       }
 
       clearPlayV2State(routeGameId);
       router.push("/");
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Unable to leave this table.");
+      setNotice(
+        error instanceof Error ? error.message : "Unable to leave this table.",
+      );
     } finally {
       setActionLoading(null);
     }
@@ -1551,32 +1810,51 @@ export default function PlayV2Page() {
       }
 
       if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        const payload = (await response.json().catch(() => null)) as {
+          error?: string;
+        } | null;
         throw new Error(payload?.error ?? "Unable to end the session.");
       }
 
       clearPlayV2State(routeGameId);
       router.push("/");
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Unable to end the session.");
+      setNotice(
+        error instanceof Error ? error.message : "Unable to end the session.",
+      );
     } finally {
       setActionLoading(null);
     }
-  }, [actionLoading, clearPlayV2State, gameState?.version, loadAllSlices, routeGameId, router, session]);
+  }, [
+    actionLoading,
+    clearPlayV2State,
+    gameState?.version,
+    loadAllSlices,
+    routeGameId,
+    router,
+    session,
+  ]);
 
-  const turnPlayerMissingFromPlayers = Boolean(turnPlayerId) && !currentTurnPlayer;
+  const turnPlayerMissingFromPlayers =
+    Boolean(turnPlayerId) && !currentTurnPlayer;
 
   const lastFiveEvents = useMemo(() => events.slice(0, 5), [events]);
 
-  const selectedBoardPack = useMemo(() => getBoardPackById(gameMeta?.board_pack_id ?? null), [gameMeta?.board_pack_id]);
+  const selectedBoardPack = useMemo(
+    () => getBoardPackById(gameMeta?.board_pack_id ?? null),
+    [gameMeta?.board_pack_id],
+  );
   const currency = getCurrencyMetaFromBoardPack(selectedBoardPack);
   const currencySymbol = currency.symbol ?? "$";
   const investCurrencySymbol = currency.symbol ?? "$";
   const investCurrencyCode = currency.code ?? "USD";
-  const formatMoney = useCallback((value: number | null) => {
-    if (value === null) return "—";
-    return formatCurrency(value, currency);
-  }, [currency]);
+  const formatMoney = useCallback(
+    (value: number | null) => {
+      if (value === null) return "—";
+      return formatCurrency(value, currency);
+    },
+    [currency],
+  );
 
   const macroTooltipById = useMemo(() => {
     const lookup = new Map<string, string>();
@@ -1599,23 +1877,30 @@ export default function PlayV2Page() {
       const macroId = typeof effect.id === "string" ? effect.id : "";
       const card = macroId ? macroCardById.get(macroId) : undefined;
       const title =
-        (typeof effect.name === "string" && effect.name.trim().length > 0 ? effect.name : null) ??
+        (typeof effect.name === "string" && effect.name.trim().length > 0
+          ? effect.name
+          : null) ??
         card?.name ??
         "Macro effect";
       const rarity =
-        (typeof effect.rarity === "string" && effect.rarity.trim().length > 0 ? effect.rarity : null) ??
+        (typeof effect.rarity === "string" && effect.rarity.trim().length > 0
+          ? effect.rarity
+          : null) ??
         card?.rarity ??
         null;
       const rulesText = card?.rulesText ?? null;
       const tooltip =
-        (typeof effect.tooltip === "string" && effect.tooltip.trim().length > 0 ? effect.tooltip : null) ??
-        (macroId ? macroTooltipById.get(macroId) ?? null : null);
+        (typeof effect.tooltip === "string" && effect.tooltip.trim().length > 0
+          ? effect.tooltip
+          : null) ?? (macroId ? (macroTooltipById.get(macroId) ?? null) : null);
       const turnsRemaining =
-        typeof effect.roundsRemaining === "number" && Number.isFinite(effect.roundsRemaining)
+        typeof effect.roundsRemaining === "number" &&
+        Number.isFinite(effect.roundsRemaining)
           ? Math.max(0, Math.floor(effect.roundsRemaining))
           : null;
       const roundsApplied =
-        typeof effect.roundsApplied === "number" && Number.isFinite(effect.roundsApplied)
+        typeof effect.roundsApplied === "number" &&
+        Number.isFinite(effect.roundsApplied)
           ? Math.max(0, Math.floor(effect.roundsApplied))
           : null;
       const summary = tooltip ?? rulesText;
@@ -1682,8 +1967,98 @@ export default function PlayV2Page() {
 
   const netWorth = useMemo(() => {
     const cash = currentUserCash ?? 0;
-    return cash + ownedTileValue - collateralLoanLiability - purchaseMortgageLiability;
-  }, [collateralLoanLiability, currentUserCash, ownedTileValue, purchaseMortgageLiability]);
+    return (
+      cash +
+      ownedTileValue -
+      collateralLoanLiability -
+      purchaseMortgageLiability
+    );
+  }, [
+    collateralLoanLiability,
+    currentUserCash,
+    ownedTileValue,
+    purchaseMortgageLiability,
+  ]);
+
+  const finalStandings = useMemo(() => {
+    if (!gameOverState || !selectedBoardPack?.tiles.length) {
+      return [];
+    }
+
+    return players
+      .map((player) => {
+        const ownedTiles = selectedBoardPack.tiles.filter(
+          (tile) =>
+            ["PROPERTY", "RAIL", "UTILITY"].includes(tile.type) &&
+            ownershipByTile[tile.index]?.owner_player_id === player.id,
+        );
+        const ownedCount = ownedTiles.length;
+        const ownedAssetValue = computeOwnedAssetValue(ownedTiles);
+        const activePlayerLoans = playerLoans.filter(
+          (loan) => loan.player_id === player.id && loan.status === "active",
+        );
+        const activePlayerMortgages = purchaseMortgages.filter(
+          (mortgage) =>
+            mortgage.player_id === player.id && mortgage.status === "active",
+        );
+        const loanLiability = activePlayerLoans.reduce(
+          (total, loan) => total + (loan.remaining_principal ?? loan.principal),
+          0,
+        );
+        const mortgageLiability = activePlayerMortgages.reduce(
+          (total, mortgage) =>
+            total +
+            (mortgage.principal_remaining ?? 0) +
+            (mortgage.accrued_interest_unpaid ?? 0),
+          0,
+        );
+        const cash = gameState?.balances?.[player.id] ?? 0;
+        const totalLiability = loanLiability + mortgageLiability;
+        const playerNetWorth = cash + ownedAssetValue - totalLiability;
+
+        return {
+          playerId: player.id,
+          playerName: player.display_name,
+          cash,
+          netWorth: playerNetWorth,
+          isWinner: player.id === gameOverState.winnerPlayerId,
+          isEliminated: player.is_eliminated,
+          ownedCount,
+          liabilityCount:
+            activePlayerLoans.length + activePlayerMortgages.length,
+          eliminatedAtMs: player.eliminated_at
+            ? Date.parse(player.eliminated_at)
+            : Number.POSITIVE_INFINITY,
+        };
+      })
+      .sort((a, b) => {
+        if (a.isWinner !== b.isWinner) {
+          return a.isWinner ? -1 : 1;
+        }
+        if (b.netWorth !== a.netWorth) {
+          return b.netWorth - a.netWorth;
+        }
+        if (a.isEliminated !== b.isEliminated) {
+          return a.isEliminated ? 1 : -1;
+        }
+        if (a.eliminatedAtMs !== b.eliminatedAtMs) {
+          return a.eliminatedAtMs - b.eliminatedAtMs;
+        }
+        return a.playerName.localeCompare(b.playerName);
+      })
+      .map((entry, index) => ({
+        ...entry,
+        rank: index + 1,
+      }));
+  }, [
+    gameOverState,
+    gameState?.balances,
+    ownershipByTile,
+    playerLoans,
+    players,
+    purchaseMortgages,
+    selectedBoardPack?.tiles,
+  ]);
 
   const collateralizedTileIndexes = useMemo(
     () =>
@@ -1692,7 +2067,9 @@ export default function PlayV2Page() {
           if (typeof loan.collateral_tile_index === "number") {
             return loan.collateral_tile_index;
           }
-          const loanWithTileIndex = loan as PlayerLoan & { tile_index?: number };
+          const loanWithTileIndex = loan as PlayerLoan & {
+            tile_index?: number;
+          };
           return typeof loanWithTileIndex.tile_index === "number"
             ? loanWithTileIndex.tile_index
             : null;
@@ -1724,9 +2101,13 @@ export default function PlayV2Page() {
     Boolean(gameState) &&
     playersLoaded;
   const isConfigured = Boolean(session?.access_token);
-  const canShowIntro = isConfigured && Boolean(routeGameId) && !needsAuth && !gameMetaError;
+  const canShowIntro =
+    isConfigured && Boolean(routeGameId) && !needsAuth && !gameMetaError;
   const shouldShowIntro = canShowIntro && !introDismissed;
-  const loadingProgress = Math.min((loadingElapsedMs / MIN_LOADING_SCREEN_MS) * 100, 100);
+  const loadingProgress = Math.min(
+    (loadingElapsedMs / MIN_LOADING_SCREEN_MS) * 100,
+    100,
+  );
 
   const selectedTile = useMemo(() => {
     if (selectedTileIndex === null) {
@@ -1736,15 +2117,19 @@ export default function PlayV2Page() {
     return boardTiles.find((tile) => tile.index === selectedTileIndex) ?? null;
   }, [selectedBoardPack, selectedTileIndex]);
 
-  const selectedOwnerId = selectedTileIndex === null
-    ? null
-    : ownershipByTile[selectedTileIndex]?.owner_player_id ?? null;
+  const selectedOwnerId =
+    selectedTileIndex === null
+      ? null
+      : (ownershipByTile[selectedTileIndex]?.owner_player_id ?? null);
 
   const selectedOwnerLabel = useMemo(() => {
     if (!selectedOwnerId) {
       return "Unowned";
     }
-    return players.find((player) => player.id === selectedOwnerId)?.display_name ?? selectedOwnerId;
+    return (
+      players.find((player) => player.id === selectedOwnerId)?.display_name ??
+      selectedOwnerId
+    );
   }, [players, selectedOwnerId]);
 
   const selectedTileStatus = useMemo(() => {
@@ -1782,7 +2167,9 @@ export default function PlayV2Page() {
     }
     const boardTiles = selectedBoardPack?.tiles ?? [];
     return boardTiles.filter(
-      (tile) => tile.type === "RAIL" && ownershipByTile[tile.index]?.owner_player_id === selectedOwnerId,
+      (tile) =>
+        tile.type === "RAIL" &&
+        ownershipByTile[tile.index]?.owner_player_id === selectedOwnerId,
     ).length;
   }, [ownershipByTile, selectedBoardPack, selectedOwnerId]);
 
@@ -1792,7 +2179,9 @@ export default function PlayV2Page() {
     }
     const boardTiles = selectedBoardPack?.tiles ?? [];
     return boardTiles.filter(
-      (tile) => tile.type === "UTILITY" && ownershipByTile[tile.index]?.owner_player_id === selectedOwnerId,
+      (tile) =>
+        tile.type === "UTILITY" &&
+        ownershipByTile[tile.index]?.owner_player_id === selectedOwnerId,
     ).length;
   }, [ownershipByTile, selectedBoardPack, selectedOwnerId]);
 
@@ -1814,7 +2203,10 @@ export default function PlayV2Page() {
         const isCollateralized = Boolean(ownership?.collateral_loan_id);
         const isPurchaseMortgaged = Boolean(ownership?.purchase_mortgage_id);
         const housesCount = ownership?.houses ?? 0;
-        const developmentLabel = getDevelopmentLevelLabel(housesCount, tile.rentByHouses);
+        const developmentLabel = getDevelopmentLevelLabel(
+          housesCount,
+          tile.rentByHouses,
+        );
         const hasFullSet = ownsFullColorSet(
           tile,
           selectedBoardPack.tiles,
@@ -1878,9 +2270,12 @@ export default function PlayV2Page() {
           hasFullSet,
           tilePrice,
           currentRent,
-          canBuildHouse: tile.type === "PROPERTY" && buildHouseDisabledReason === null,
-          canSellHouse: tile.type === "PROPERTY" && sellHouseDisabledReason === null,
-          canSellHotel: tile.type === "PROPERTY" && sellHotelDisabledReason === null,
+          canBuildHouse:
+            tile.type === "PROPERTY" && buildHouseDisabledReason === null,
+          canSellHouse:
+            tile.type === "PROPERTY" && sellHouseDisabledReason === null,
+          canSellHotel:
+            tile.type === "PROPERTY" && sellHotelDisabledReason === null,
           canSellToMarket: sellToMarketDisabledReason === null,
           buildHouseDisabledReason,
           sellHouseDisabledReason,
@@ -1899,14 +2294,14 @@ export default function PlayV2Page() {
     selectedBoardPack?.tiles,
   ]);
 
-
-
   const availableTradeCounterparties = useMemo(() => {
     if (!currentUserPlayer) {
       return [];
     }
     return players
-      .filter((player) => player.id !== currentUserPlayer.id && !player.is_eliminated)
+      .filter(
+        (player) => player.id !== currentUserPlayer.id && !player.is_eliminated,
+      )
       .map((player) => ({ id: player.id, displayName: player.display_name }));
   }, [currentUserPlayer, players]);
 
@@ -1929,22 +2324,34 @@ export default function PlayV2Page() {
   }, [ownershipByTile, selectedBoardPack?.tiles, tradeCounterpartyId]);
 
   const canSubmitTradeProposal = useMemo(() => {
-    return Boolean(tradeCounterpartyId) &&
+    return (
+      Boolean(tradeCounterpartyId) &&
       hasTradeValue({
         offerCash: tradeOfferCash,
         offerTiles: tradeOfferTiles,
         requestCash: tradeRequestCash,
         requestTiles: tradeRequestTiles,
-      });
-  }, [tradeCounterpartyId, tradeOfferCash, tradeOfferTiles, tradeRequestCash, tradeRequestTiles]);
+      })
+    );
+  }, [
+    tradeCounterpartyId,
+    tradeOfferCash,
+    tradeOfferTiles,
+    tradeRequestCash,
+    tradeRequestTiles,
+  ]);
 
   const incomingTradeProposal = useMemo(() => {
     if (!currentUserPlayer) {
       return null;
     }
-    return tradeProposals.find((proposal) =>
-      proposal.status === "PENDING" && proposal.counterparty_player_id === currentUserPlayer.id,
-    ) ?? null;
+    return (
+      tradeProposals.find(
+        (proposal) =>
+          proposal.status === "PENDING" &&
+          proposal.counterparty_player_id === currentUserPlayer.id,
+      ) ?? null
+    );
   }, [currentUserPlayer, tradeProposals]);
 
   const incomingTradeSnapshotTiles = useMemo(
@@ -1952,25 +2359,42 @@ export default function PlayV2Page() {
     [incomingTradeProposal?.snapshot],
   );
 
-  const getPlayerNameById = useCallback((playerId: string | null | undefined) => {
-    if (!playerId) {
-      return "Player";
-    }
-    return players.find((player) => player.id === playerId)?.display_name ?? "Player";
-  }, [players]);
+  const getPlayerNameById = useCallback(
+    (playerId: string | null | undefined) => {
+      if (!playerId) {
+        return "Player";
+      }
+      return (
+        players.find((player) => player.id === playerId)?.display_name ??
+        "Player"
+      );
+    },
+    [players],
+  );
 
-  const getTileNameByIndex = useCallback((tileIndex: number) => {
-    return boardTilesByIndex.get(tileIndex)?.name ?? `Tile ${tileIndex}`;
-  }, [boardTilesByIndex]);
+  const getTileNameByIndex = useCallback(
+    (tileIndex: number) => {
+      return boardTilesByIndex.get(tileIndex)?.name ?? `Tile ${tileIndex}`;
+    },
+    [boardTilesByIndex],
+  );
 
   const incomingTradeCounterpartyName = incomingTradeProposal
     ? getPlayerNameById(incomingTradeProposal.proposer_player_id)
     : "";
-  const formatTradeMoney = useCallback((amount: number) => {
-    return formatMoney(amount);
-  }, [formatMoney]);
+  const formatTradeMoney = useCallback(
+    (amount: number) => {
+      return formatMoney(amount);
+    },
+    [formatMoney],
+  );
   useEffect(() => {
-    if (tradeCounterpartyId && availableTradeCounterparties.some((option) => option.id === tradeCounterpartyId)) {
+    if (
+      tradeCounterpartyId &&
+      availableTradeCounterparties.some(
+        (option) => option.id === tradeCounterpartyId,
+      )
+    ) {
       return;
     }
 
@@ -1984,12 +2408,14 @@ export default function PlayV2Page() {
       return;
     }
 
-    if (!hasTradeValue({
-      offerCash: tradeOfferCash,
-      offerTiles: tradeOfferTiles,
-      requestCash: tradeRequestCash,
-      requestTiles: tradeRequestTiles,
-    })) {
+    if (
+      !hasTradeValue({
+        offerCash: tradeOfferCash,
+        offerTiles: tradeOfferTiles,
+        requestCash: tradeRequestCash,
+        requestTiles: tradeRequestTiles,
+      })
+    ) {
       setNotice("Add cash or properties to the trade.");
       return;
     }
@@ -2002,91 +2428,131 @@ export default function PlayV2Page() {
       requestCash: toOptionalPositiveCash(tradeRequestCash),
       requestTiles: toOptionalTileIndices(tradeRequestTiles),
     });
-  }, [handleBankAction, tradeCounterpartyId, tradeOfferCash, tradeOfferTiles, tradeRequestCash, tradeRequestTiles]);
+  }, [
+    handleBankAction,
+    tradeCounterpartyId,
+    tradeOfferCash,
+    tradeOfferTiles,
+    tradeRequestCash,
+    tradeRequestTiles,
+  ]);
 
   const toggleOfferTile = useCallback((tileIndex: number, checked: boolean) => {
     setTradeOfferTiles((current) =>
-      checked ? Array.from(new Set([...current, tileIndex])) : current.filter((entry) => entry !== tileIndex),
+      checked
+        ? Array.from(new Set([...current, tileIndex]))
+        : current.filter((entry) => entry !== tileIndex),
     );
   }, []);
 
-  const toggleRequestTile = useCallback((tileIndex: number, checked: boolean) => {
-    setTradeRequestTiles((current) =>
-      checked ? Array.from(new Set([...current, tileIndex])) : current.filter((entry) => entry !== tileIndex),
-    );
-  }, []);
+  const toggleRequestTile = useCallback(
+    (tileIndex: number, checked: boolean) => {
+      setTradeRequestTiles((current) =>
+        checked
+          ? Array.from(new Set([...current, tileIndex]))
+          : current.filter((entry) => entry !== tileIndex),
+      );
+    },
+    [],
+  );
 
-  const handleAcceptTrade = useCallback((tradeId: string) => {
-    void handleBankAction({ action: "ACCEPT_TRADE", tradeId });
-  }, [handleBankAction]);
+  const handleAcceptTrade = useCallback(
+    (tradeId: string) => {
+      void handleBankAction({ action: "ACCEPT_TRADE", tradeId });
+    },
+    [handleBankAction],
+  );
 
-  const handleRejectTrade = useCallback((tradeId: string) => {
-    void handleBankAction({ action: "REJECT_TRADE", tradeId });
-  }, [handleBankAction]);
+  const handleRejectTrade = useCallback(
+    (tradeId: string) => {
+      void handleBankAction({ action: "REJECT_TRADE", tradeId });
+    },
+    [handleBankAction],
+  );
 
-  const handleCancelOutgoingTrade = useCallback((tradeId: string) => {
-    void handleBankAction({ action: "CANCEL_TRADE", tradeId });
-  }, [handleBankAction]);
+  const handleCancelOutgoingTrade = useCallback(
+    (tradeId: string) => {
+      void handleBankAction({ action: "CANCEL_TRADE", tradeId });
+    },
+    [handleBankAction],
+  );
 
   const outgoingPendingTrade = useMemo(() => {
     if (!currentUserPlayer) {
       return null;
     }
-    return tradeProposals.find((proposal) => proposal.status === "PENDING" && proposal.proposer_player_id === currentUserPlayer.id) ?? null;
+    return (
+      tradeProposals.find(
+        (proposal) =>
+          proposal.status === "PENDING" &&
+          proposal.proposer_player_id === currentUserPlayer.id,
+      ) ?? null
+    );
   }, [currentUserPlayer, tradeProposals]);
 
-  const ownTradePropertyOptions = useMemo(() =>
-    ownedProperties.map((entry) => ({
-      tileIndex: entry.tile.index,
-      tileName: entry.tile.name,
-      houses: entry.housesCount,
-    })),
-  [ownedProperties]);
+  const ownTradePropertyOptions = useMemo(
+    () =>
+      ownedProperties.map((entry) => ({
+        tileIndex: entry.tile.index,
+        tileName: entry.tile.name,
+        houses: entry.housesCount,
+      })),
+    [ownedProperties],
+  );
 
-  const handleOwnedActionClick = useCallback((args: {
-    tileIndex: number;
-    actionKey: "BUILD_HOUSE" | "SELL_HOUSE" | "SELL_TO_MARKET" | "TAKE_COLLATERAL_LOAN";
-    allowed: boolean;
-    reason: string | null;
-    run: () => void;
-  }) => {
-    const { tileIndex, actionKey, allowed, reason, run } = args;
+  const handleOwnedActionClick = useCallback(
+    (args: {
+      tileIndex: number;
+      actionKey:
+        | "BUILD_HOUSE"
+        | "SELL_HOUSE"
+        | "SELL_TO_MARKET"
+        | "TAKE_COLLATERAL_LOAN";
+      allowed: boolean;
+      reason: string | null;
+      run: () => void;
+    }) => {
+      const { tileIndex, actionKey, allowed, reason, run } = args;
 
-    if (allowed) {
-      setOwnedActionReason(null);
-      if (ownedReasonTimeoutRef.current) {
-        clearTimeout(ownedReasonTimeoutRef.current);
-        ownedReasonTimeoutRef.current = null;
+      if (allowed) {
+        setOwnedActionReason(null);
+        if (ownedReasonTimeoutRef.current) {
+          clearTimeout(ownedReasonTimeoutRef.current);
+          ownedReasonTimeoutRef.current = null;
+        }
+        run();
+        return;
       }
-      run();
-      return;
-    }
 
-    const isSameReason =
-      ownedActionReason?.tileIndex === tileIndex &&
-      ownedActionReason?.actionKey === actionKey;
+      const isSameReason =
+        ownedActionReason?.tileIndex === tileIndex &&
+        ownedActionReason?.actionKey === actionKey;
 
-    if (isSameReason) {
-      setOwnedActionReason(null);
-      if (ownedReasonTimeoutRef.current) {
-        clearTimeout(ownedReasonTimeoutRef.current);
-        ownedReasonTimeoutRef.current = null;
+      if (isSameReason) {
+        setOwnedActionReason(null);
+        if (ownedReasonTimeoutRef.current) {
+          clearTimeout(ownedReasonTimeoutRef.current);
+          ownedReasonTimeoutRef.current = null;
+        }
+        return;
       }
-      return;
-    }
 
-    if (reason) {
-      setOwnedActionReason({ tileIndex, actionKey, reason });
-      if (ownedReasonTimeoutRef.current) {
-        clearTimeout(ownedReasonTimeoutRef.current);
+      if (reason) {
+        setOwnedActionReason({ tileIndex, actionKey, reason });
+        if (ownedReasonTimeoutRef.current) {
+          clearTimeout(ownedReasonTimeoutRef.current);
+        }
+        ownedReasonTimeoutRef.current = setTimeout(() => {
+          setOwnedActionReason((prev) =>
+            prev?.tileIndex === tileIndex && prev.actionKey === actionKey
+              ? null
+              : prev,
+          );
+        }, 4000);
       }
-      ownedReasonTimeoutRef.current = setTimeout(() => {
-        setOwnedActionReason((prev) =>
-          prev?.tileIndex === tileIndex && prev.actionKey === actionKey ? null : prev,
-        );
-      }, 4000);
-    }
-  }, [ownedActionReason]);
+    },
+    [ownedActionReason],
+  );
 
   const walletOwnedContent = useMemo(() => {
     if (!selectedBoardPack) {
@@ -2094,7 +2560,9 @@ export default function PlayV2Page() {
     }
 
     if (ownedProperties.length === 0) {
-      return <p className="text-sm text-white/70">No owned properties available.</p>;
+      return (
+        <p className="text-sm text-white/70">No owned properties available.</p>
+      );
     }
 
     return (
@@ -2116,10 +2584,15 @@ export default function PlayV2Page() {
             collateralDisabledReason,
           } = entry;
           const activeReasonForTile =
-            ownedActionReason?.tileIndex === tile.index ? ownedActionReason : null;
+            ownedActionReason?.tileIndex === tile.index
+              ? ownedActionReason
+              : null;
 
           return (
-            <div key={tile.index} className="space-y-2 rounded-lg border border-white/15 bg-white/5 p-2.5">
+            <div
+              key={tile.index}
+              className="space-y-2 rounded-lg border border-white/15 bg-white/5 p-2.5"
+            >
               <div className="flex items-start justify-between gap-2 text-xs">
                 <p className="font-semibold text-white">{tile.name}</p>
                 <p className="text-white/80">Rent {formatMoney(currentRent)}</p>
@@ -2138,16 +2611,26 @@ export default function PlayV2Page() {
                       handleOwnedActionClick({
                         tileIndex: tile.index,
                         actionKey: "BUILD_HOUSE",
-                        allowed: canBuildHouse && actionLoading !== "BUILD_HOUSE",
-                        reason: actionLoading === "BUILD_HOUSE" ? null : buildHouseDisabledReason,
-                        run: () => void handleBankAction({ action: "BUILD_HOUSE", tileIndex: tile.index }),
+                        allowed:
+                          canBuildHouse && actionLoading !== "BUILD_HOUSE",
+                        reason:
+                          actionLoading === "BUILD_HOUSE"
+                            ? null
+                            : buildHouseDisabledReason,
+                        run: () =>
+                          void handleBankAction({
+                            action: "BUILD_HOUSE",
+                            tileIndex: tile.index,
+                          }),
                       })
                     }
                   >
                     {actionLoading === "BUILD_HOUSE" ? "Upgrading…" : "Upgrade"}
                   </button>
                   {activeReasonForTile?.actionKey === "BUILD_HOUSE" ? (
-                    <p className="text-[10px] text-red-300">{activeReasonForTile.reason}</p>
+                    <p className="text-[10px] text-red-300">
+                      {activeReasonForTile.reason}
+                    </p>
                   ) : null}
                 </div>
 
@@ -2165,15 +2648,26 @@ export default function PlayV2Page() {
                         tileIndex: tile.index,
                         actionKey: "SELL_HOUSE",
                         allowed: canSellHouse && actionLoading !== "SELL_HOUSE",
-                        reason: actionLoading === "SELL_HOUSE" ? null : sellHouseDisabledReason,
-                        run: () => void handleBankAction({ action: "SELL_HOUSE", tileIndex: tile.index }),
+                        reason:
+                          actionLoading === "SELL_HOUSE"
+                            ? null
+                            : sellHouseDisabledReason,
+                        run: () =>
+                          void handleBankAction({
+                            action: "SELL_HOUSE",
+                            tileIndex: tile.index,
+                          }),
                       })
                     }
                   >
-                    {actionLoading === "SELL_HOUSE" ? "Downgrading…" : "Downgrade"}
+                    {actionLoading === "SELL_HOUSE"
+                      ? "Downgrading…"
+                      : "Downgrade"}
                   </button>
                   {activeReasonForTile?.actionKey === "SELL_HOUSE" ? (
-                    <p className="text-[10px] text-red-300">{activeReasonForTile.reason}</p>
+                    <p className="text-[10px] text-red-300">
+                      {activeReasonForTile.reason}
+                    </p>
                   ) : null}
                 </div>
 
@@ -2190,16 +2684,24 @@ export default function PlayV2Page() {
                       handleOwnedActionClick({
                         tileIndex: tile.index,
                         actionKey: "SELL_TO_MARKET",
-                        allowed: canSellToMarket && actionLoading !== "SELL_TO_MARKET",
-                        reason: actionLoading === "SELL_TO_MARKET" ? null : sellToMarketDisabledReason,
+                        allowed:
+                          canSellToMarket && actionLoading !== "SELL_TO_MARKET",
+                        reason:
+                          actionLoading === "SELL_TO_MARKET"
+                            ? null
+                            : sellToMarketDisabledReason,
                         run: () => setSellToMarketTileIndex(tile.index),
                       })
                     }
                   >
-                    {actionLoading === "SELL_TO_MARKET" ? "Selling…" : "Sell to Market"}
+                    {actionLoading === "SELL_TO_MARKET"
+                      ? "Selling…"
+                      : "Sell to Market"}
                   </button>
                   {activeReasonForTile?.actionKey === "SELL_TO_MARKET" ? (
-                    <p className="text-[10px] text-red-300">{activeReasonForTile.reason}</p>
+                    <p className="text-[10px] text-red-300">
+                      {activeReasonForTile.reason}
+                    </p>
                   ) : null}
                 </div>
 
@@ -2216,7 +2718,9 @@ export default function PlayV2Page() {
                       handleOwnedActionClick({
                         tileIndex: tile.index,
                         actionKey: "TAKE_COLLATERAL_LOAN",
-                        allowed: collateralDisabledReason === null && actionLoading !== "TAKE_COLLATERAL_LOAN",
+                        allowed:
+                          collateralDisabledReason === null &&
+                          actionLoading !== "TAKE_COLLATERAL_LOAN",
                         reason:
                           actionLoading === "TAKE_COLLATERAL_LOAN"
                             ? null
@@ -2229,20 +2733,30 @@ export default function PlayV2Page() {
                       })
                     }
                   >
-                    {actionLoading === "TAKE_COLLATERAL_LOAN" ? "Collateralizing…" : "Collateralize"}
+                    {actionLoading === "TAKE_COLLATERAL_LOAN"
+                      ? "Collateralizing…"
+                      : "Collateralize"}
                   </button>
                   {activeReasonForTile?.actionKey === "TAKE_COLLATERAL_LOAN" ? (
-                    <p className="text-[10px] text-red-300">{activeReasonForTile.reason}</p>
+                    <p className="text-[10px] text-red-300">
+                      {activeReasonForTile.reason}
+                    </p>
                   ) : null}
                 </div>
               </div>
               <div className="flex items-center gap-1.5 text-[10px] text-white/65">
-                <span>Upgrade: Lv {housesCount} • {developmentLabel}</span>
+                <span>
+                  Upgrade: Lv {housesCount} • {developmentLabel}
+                </span>
                 {isPurchaseMortgaged ? (
-                  <span className="rounded-full border border-amber-400/50 px-1.5 py-0.5 text-amber-200">Mortgaged</span>
+                  <span className="rounded-full border border-amber-400/50 px-1.5 py-0.5 text-amber-200">
+                    Mortgaged
+                  </span>
                 ) : null}
                 {isCollateralized ? (
-                  <span className="rounded-full border border-orange-400/50 px-1.5 py-0.5 text-orange-200">Collateralized</span>
+                  <span className="rounded-full border border-orange-400/50 px-1.5 py-0.5 text-orange-200">
+                    Collateralized
+                  </span>
                 ) : null}
               </div>
             </div>
@@ -2260,13 +2774,15 @@ export default function PlayV2Page() {
     formatMoney,
   ]);
 
-
   const handleConfirmSellToMarket = useCallback(() => {
     if (sellToMarketTileIndex === null) {
       return;
     }
 
-    void handleBankAction({ action: "SELL_TO_MARKET", tileIndex: sellToMarketTileIndex });
+    void handleBankAction({
+      action: "SELL_TO_MARKET",
+      tileIndex: sellToMarketTileIndex,
+    });
     setSellToMarketTileIndex(null);
   }, [handleBankAction, sellToMarketTileIndex]);
 
@@ -2278,20 +2794,28 @@ export default function PlayV2Page() {
     return (
       <div className="space-y-3">
         {activeLoans.map((loan) => {
-          const tile = boardTilesByIndex.get(loan.collateral_tile_index) ?? null;
-          const houses = ownershipByTile[loan.collateral_tile_index]?.houses ?? 0;
+          const tile =
+            boardTilesByIndex.get(loan.collateral_tile_index) ?? null;
+          const houses =
+            ownershipByTile[loan.collateral_tile_index]?.houses ?? 0;
           const canDefault = canAct && houses === 0;
-          const defaultDisabledReason = houses > 0 ? "Downgrade first" : !canAct ? "Not your turn" : null;
+          const defaultDisabledReason =
+            houses > 0 ? "Downgrade first" : !canAct ? "Not your turn" : null;
           const isPayoffLoading = actionLoading === "PAYOFF_COLLATERAL_LOAN";
           const isDefaultLoading = actionLoading === "DEFAULT_PROPERTY";
 
           return (
-            <div key={loan.id} className="space-y-2 rounded-xl border border-white/15 bg-white/5 p-2">
+            <div
+              key={loan.id}
+              className="space-y-2 rounded-xl border border-white/15 bg-white/5 p-2"
+            >
               {tile ? (
                 <TitleDeedPreview
                   tile={tile}
                   bandColor={getTileBandColor(tile)}
-                  boardPackEconomy={selectedBoardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY}
+                  boardPackEconomy={
+                    selectedBoardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY
+                  }
                   mode="readonly"
                   size="compact"
                   showDevelopment={tile.type === "PROPERTY"}
@@ -2299,16 +2823,37 @@ export default function PlayV2Page() {
                   ownerPlayerId={currentUserPlayer?.id ?? null}
                   ownershipByTile={ownershipByTile}
                   boardTiles={selectedBoardPack?.tiles ?? []}
-                  ownedRailCount={selectedBoardPack?.tiles.filter((boardTile) => boardTile.type === "RAIL" && ownershipByTile[boardTile.index]?.owner_player_id === currentUserPlayer?.id).length ?? 0}
-                  ownedUtilityCount={selectedBoardPack?.tiles.filter((boardTile) => boardTile.type === "UTILITY" && ownershipByTile[boardTile.index]?.owner_player_id === currentUserPlayer?.id).length ?? 0}
+                  ownedRailCount={
+                    selectedBoardPack?.tiles.filter(
+                      (boardTile) =>
+                        boardTile.type === "RAIL" &&
+                        ownershipByTile[boardTile.index]?.owner_player_id ===
+                          currentUserPlayer?.id,
+                    ).length ?? 0
+                  }
+                  ownedUtilityCount={
+                    selectedBoardPack?.tiles.filter(
+                      (boardTile) =>
+                        boardTile.type === "UTILITY" &&
+                        ownershipByTile[boardTile.index]?.owner_player_id ===
+                          currentUserPlayer?.id,
+                    ).length ?? 0
+                  }
                 />
               ) : null}
               <div className="space-y-1 px-1 text-xs text-white/80">
-                <p className="text-sm font-semibold text-white">{tile?.name ?? `Tile ${loan.collateral_tile_index}`}</p>
-                <p>Remaining principal: {formatMoney(loan.remaining_principal ?? loan.principal)}</p>
+                <p className="text-sm font-semibold text-white">
+                  {tile?.name ?? `Tile ${loan.collateral_tile_index}`}
+                </p>
+                <p>
+                  Remaining principal:{" "}
+                  {formatMoney(loan.remaining_principal ?? loan.principal)}
+                </p>
                 <p>Payment / turn: {formatMoney(loan.payment_per_turn)}</p>
                 <p>Turns remaining: {loan.turns_remaining}</p>
-                <p>Rate / turn: {((loan.rate_per_turn ?? 0) * 100).toFixed(2)}%</p>
+                <p>
+                  Rate / turn: {((loan.rate_per_turn ?? 0) * 100).toFixed(2)}%
+                </p>
               </div>
               <div className="flex flex-wrap gap-2 px-1 pb-1">
                 <button
@@ -2325,12 +2870,18 @@ export default function PlayV2Page() {
                   className="rounded-md border border-rose-400/60 px-2 py-1 text-[11px] font-semibold text-rose-200 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-white/40"
                   disabled={!canDefault || isDefaultLoading}
                   title={defaultDisabledReason ?? undefined}
-                  onClick={() => setDefaultLoanTileIndex(loan.collateral_tile_index)}
+                  onClick={() =>
+                    setDefaultLoanTileIndex(loan.collateral_tile_index)
+                  }
                 >
                   {isDefaultLoading ? "Defaulting…" : "Default"}
                 </button>
               </div>
-              {defaultDisabledReason ? <p className="px-1 pb-1 text-[11px] text-white/50">{defaultDisabledReason}</p> : null}
+              {defaultDisabledReason ? (
+                <p className="px-1 pb-1 text-[11px] text-white/50">
+                  {defaultDisabledReason}
+                </p>
+              ) : null}
               {payoffLoanId === loan.id ? (
                 <div className="mx-1 rounded-lg border border-amber-300/50 bg-amber-100/10 p-2 text-xs text-white">
                   <p className="font-semibold">Pay off collateral loan?</p>
@@ -2340,13 +2891,19 @@ export default function PlayV2Page() {
                       className="rounded bg-emerald-600 px-2 py-1 font-semibold text-white"
                       disabled={isPayoffLoading}
                       onClick={() => {
-                        void handleBankAction("PAYOFF_COLLATERAL_LOAN", { loanId: loan.id });
+                        void handleBankAction("PAYOFF_COLLATERAL_LOAN", {
+                          loanId: loan.id,
+                        });
                         setPayoffLoanId(null);
                       }}
                     >
                       Confirm
                     </button>
-                    <button type="button" className="rounded border border-white/30 px-2 py-1" onClick={() => setPayoffLoanId(null)}>
+                    <button
+                      type="button"
+                      className="rounded border border-white/30 px-2 py-1"
+                      onClick={() => setPayoffLoanId(null)}
+                    >
                       Cancel
                     </button>
                   </div>
@@ -2361,13 +2918,19 @@ export default function PlayV2Page() {
                       className="rounded bg-rose-500 px-2 py-1 font-semibold text-white"
                       disabled={isDefaultLoading}
                       onClick={() => {
-                        void handleBankAction("DEFAULT_PROPERTY", { tileIndex: loan.collateral_tile_index });
+                        void handleBankAction("DEFAULT_PROPERTY", {
+                          tileIndex: loan.collateral_tile_index,
+                        });
                         setDefaultLoanTileIndex(null);
                       }}
                     >
                       Confirm
                     </button>
-                    <button type="button" className="rounded border border-white/30 px-2 py-1" onClick={() => setDefaultLoanTileIndex(null)}>
+                    <button
+                      type="button"
+                      className="rounded border border-white/30 px-2 py-1"
+                      onClick={() => setDefaultLoanTileIndex(null)}
+                    >
                       Cancel
                     </button>
                   </div>
@@ -2378,7 +2941,19 @@ export default function PlayV2Page() {
         })}
       </div>
     );
-  }, [actionLoading, activeLoans, boardTilesByIndex, canAct, currentUserPlayer?.id, handleBankAction, ownershipByTile, payoffLoanId, defaultLoanTileIndex, selectedBoardPack, formatMoney]);
+  }, [
+    actionLoading,
+    activeLoans,
+    boardTilesByIndex,
+    canAct,
+    currentUserPlayer?.id,
+    handleBankAction,
+    ownershipByTile,
+    payoffLoanId,
+    defaultLoanTileIndex,
+    selectedBoardPack,
+    formatMoney,
+  ]);
 
   const walletMortgagesContent = useMemo(() => {
     if (activePurchaseMortgages.length === 0) {
@@ -2389,8 +2964,13 @@ export default function PlayV2Page() {
       <div className="space-y-3">
         {activePurchaseMortgages.map((mortgage) => {
           const tile = boardTilesByIndex.get(mortgage.tile_index) ?? null;
-          const payoffAmount = (mortgage.principal_remaining ?? 0) + (mortgage.accrued_interest_unpaid ?? 0);
-          const canPayoff = canAct && payoffAmount > 0 && (currentUserCash ?? 0) >= payoffAmount;
+          const payoffAmount =
+            (mortgage.principal_remaining ?? 0) +
+            (mortgage.accrued_interest_unpaid ?? 0);
+          const canPayoff =
+            canAct &&
+            payoffAmount > 0 &&
+            (currentUserCash ?? 0) >= payoffAmount;
           const payoffDisabledReason = !canAct
             ? "Not your turn"
             : payoffAmount <= 0
@@ -2401,11 +2981,22 @@ export default function PlayV2Page() {
           const isPayoffLoading = actionLoading === "PAYOFF_PURCHASE_MORTGAGE";
 
           return (
-            <div key={mortgage.id} className="space-y-2 rounded-xl border border-white/15 bg-white/5 p-2">
+            <div
+              key={mortgage.id}
+              className="space-y-2 rounded-xl border border-white/15 bg-white/5 p-2"
+            >
               <div className="space-y-1 px-1 text-xs text-white/80">
-                <p className="text-sm font-semibold text-white">{tile?.name ?? `Tile ${mortgage.tile_index}`}</p>
-                <p>Principal remaining: {formatMoney(mortgage.principal_remaining)}</p>
-                <p>Accrued interest: {formatMoney(mortgage.accrued_interest_unpaid)}</p>
+                <p className="text-sm font-semibold text-white">
+                  {tile?.name ?? `Tile ${mortgage.tile_index}`}
+                </p>
+                <p>
+                  Principal remaining:{" "}
+                  {formatMoney(mortgage.principal_remaining)}
+                </p>
+                <p>
+                  Accrued interest:{" "}
+                  {formatMoney(mortgage.accrued_interest_unpaid)}
+                </p>
                 <p>Payment / turn: {formatMoney(mortgage.payment_per_turn)}</p>
                 <p>Turns remaining: {mortgage.turns_remaining}</p>
                 <p>Payoff amount: {formatMoney(payoffAmount)}</p>
@@ -2421,7 +3012,11 @@ export default function PlayV2Page() {
                   {isPayoffLoading ? "Paying…" : "Pay off"}
                 </button>
               </div>
-              {payoffDisabledReason ? <p className="px-1 pb-1 text-[11px] text-white/50">{payoffDisabledReason}</p> : null}
+              {payoffDisabledReason ? (
+                <p className="px-1 pb-1 text-[11px] text-white/50">
+                  {payoffDisabledReason}
+                </p>
+              ) : null}
               {payoffMortgageId === mortgage.id ? (
                 <div className="mx-1 rounded-lg border border-amber-300/50 bg-amber-100/10 p-2 text-xs text-white">
                   <p className="font-semibold">Pay off purchase mortgage?</p>
@@ -2431,13 +3026,19 @@ export default function PlayV2Page() {
                       className="rounded bg-emerald-600 px-2 py-1 font-semibold text-white"
                       disabled={isPayoffLoading}
                       onClick={() => {
-                        void handleBankAction("PAYOFF_PURCHASE_MORTGAGE", { mortgageId: mortgage.id });
+                        void handleBankAction("PAYOFF_PURCHASE_MORTGAGE", {
+                          mortgageId: mortgage.id,
+                        });
                         setPayoffMortgageId(null);
                       }}
                     >
                       Confirm
                     </button>
-                    <button type="button" className="rounded border border-white/30 px-2 py-1" onClick={() => setPayoffMortgageId(null)}>
+                    <button
+                      type="button"
+                      className="rounded border border-white/30 px-2 py-1"
+                      onClick={() => setPayoffMortgageId(null)}
+                    >
                       Cancel
                     </button>
                   </div>
@@ -2448,7 +3049,16 @@ export default function PlayV2Page() {
         })}
       </div>
     );
-  }, [actionLoading, activePurchaseMortgages, boardTilesByIndex, canAct, currentUserCash, handleBankAction, payoffMortgageId, formatMoney]);
+  }, [
+    actionLoading,
+    activePurchaseMortgages,
+    boardTilesByIndex,
+    canAct,
+    currentUserCash,
+    handleBankAction,
+    payoffMortgageId,
+    formatMoney,
+  ]);
 
   const onRefetch = useCallback(async () => {
     if (!routeGameId || !session?.access_token) return;
@@ -2500,7 +3110,11 @@ export default function PlayV2Page() {
   ]);
 
   const drawerDecisionNode = useMemo(() => {
-    if (auctionActive || !activeDecisionType || !isDrawerDecision(activeDecisionType)) {
+    if (
+      auctionActive ||
+      !activeDecisionType ||
+      !isDrawerDecision(activeDecisionType)
+    ) {
       return null;
     }
 
@@ -2525,9 +3139,17 @@ export default function PlayV2Page() {
         return (
           <PendingPurchaseModalV2
             pendingPurchase={pendingPurchase}
-            pendingTile={selectedBoardPack?.tiles.find((tile) => tile.index === pendingPurchase?.tile_index) ?? null}
+            pendingTile={
+              selectedBoardPack?.tiles.find(
+                (tile) => tile.index === pendingPurchase?.tile_index,
+              ) ?? null
+            }
             actorName={currentTurnPlayer?.display_name ?? null}
-            isActor={Boolean(currentUserPlayer && currentTurnPlayer && currentUserPlayer.id === currentTurnPlayer.id)}
+            isActor={Boolean(
+              currentUserPlayer &&
+              currentTurnPlayer &&
+              currentUserPlayer.id === currentTurnPlayer.id,
+            )}
             actionLoading={actionLoading}
             canAffordPurchase={canAffordPendingPurchase}
             canAffordMortgage={canAffordPendingMortgage}
@@ -2546,8 +3168,14 @@ export default function PlayV2Page() {
         return (
           <div className="space-y-3 rounded-3xl border border-amber-400/30 bg-amber-500/10 p-5 text-sm text-amber-50">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-200/80">Forced recovery</p>
-              <h2 className="mt-1 text-lg font-semibold text-white">{isInsolvencyReadyToPay ? "Recovery successful" : "Insufficient cash"}</h2>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-200/80">
+                Forced recovery
+              </p>
+              <h2 className="mt-1 text-lg font-semibold text-white">
+                {isInsolvencyReadyToPay
+                  ? "Recovery successful"
+                  : "Insufficient cash"}
+              </h2>
               <p className="mt-2 text-amber-50/90">
                 {isInsolvencyReadyToPay
                   ? "You now have enough cash to complete the payment."
@@ -2562,24 +3190,46 @@ export default function PlayV2Page() {
 
             <dl className="grid grid-cols-1 gap-2 text-xs text-amber-100/85">
               <div className="rounded-2xl border border-amber-200/10 bg-black/10 px-3 py-2">
-                <dt className="uppercase tracking-wide text-amber-200/70">Amount due</dt>
-                <dd className="mt-1 text-sm font-semibold text-white">{formatMoney(insolvencyAmountDue)}</dd>
+                <dt className="uppercase tracking-wide text-amber-200/70">
+                  Amount due
+                </dt>
+                <dd className="mt-1 text-sm font-semibold text-white">
+                  {formatMoney(insolvencyAmountDue)}
+                </dd>
               </div>
               <div className="rounded-2xl border border-amber-200/10 bg-black/10 px-3 py-2">
-                <dt className="uppercase tracking-wide text-amber-200/70">Current cash</dt>
-                <dd className="mt-1 text-sm font-semibold text-white">{formatMoney(insolvencyCurrentCash)}</dd>
+                <dt className="uppercase tracking-wide text-amber-200/70">
+                  Current cash
+                </dt>
+                <dd className="mt-1 text-sm font-semibold text-white">
+                  {formatMoney(insolvencyCurrentCash)}
+                </dd>
               </div>
               <div className="rounded-2xl border border-amber-200/10 bg-black/10 px-3 py-2">
-                <dt className="uppercase tracking-wide text-amber-200/70">Shortfall</dt>
-                <dd className="mt-1 text-sm font-semibold text-white">{formatMoney(insolvencyShortfall)}</dd>
+                <dt className="uppercase tracking-wide text-amber-200/70">
+                  Shortfall
+                </dt>
+                <dd className="mt-1 text-sm font-semibold text-white">
+                  {formatMoney(insolvencyShortfall)}
+                </dd>
               </div>
               <div className="rounded-2xl border border-amber-200/10 bg-black/10 px-3 py-2">
-                <dt className="uppercase tracking-wide text-amber-200/70">Payment reason</dt>
-                <dd className="mt-1 text-sm font-semibold text-white">{pendingInsolvencyRecovery?.label ?? pendingInsolvencyRecovery?.reason ?? "Payment due"}</dd>
+                <dt className="uppercase tracking-wide text-amber-200/70">
+                  Payment reason
+                </dt>
+                <dd className="mt-1 text-sm font-semibold text-white">
+                  {pendingInsolvencyRecovery?.label ??
+                    pendingInsolvencyRecovery?.reason ??
+                    "Payment due"}
+                </dd>
               </div>
               <div className="rounded-2xl border border-amber-200/10 bg-black/10 px-3 py-2">
-                <dt className="uppercase tracking-wide text-amber-200/70">Recipient / payee</dt>
-                <dd className="mt-1 text-sm font-semibold text-white">{payeeName ?? "Bank"}</dd>
+                <dt className="uppercase tracking-wide text-amber-200/70">
+                  Recipient / payee
+                </dt>
+                <dd className="mt-1 text-sm font-semibold text-white">
+                  {payeeName ?? "Bank"}
+                </dd>
               </div>
             </dl>
 
@@ -2588,7 +3238,8 @@ export default function PlayV2Page() {
                 {isInsolvencyReadyToPay ? (
                   <>
                     <div className="rounded-2xl border border-emerald-300/25 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">
-                      Your payment is still on hold. Confirm it to clear insolvency and unlock normal turn flow.
+                      Your payment is still on hold. Confirm it to clear
+                      insolvency and unlock normal turn flow.
                     </div>
                     <button
                       type="button"
@@ -2596,18 +3247,25 @@ export default function PlayV2Page() {
                       disabled={actionLoading === "CONFIRM_INSOLVENCY_PAYMENT"}
                       className="w-full rounded-2xl bg-emerald-400 px-4 py-3 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      {actionLoading === "CONFIRM_INSOLVENCY_PAYMENT" ? "Confirming…" : "Confirm payment"}
+                      {actionLoading === "CONFIRM_INSOLVENCY_PAYMENT"
+                        ? "Confirming…"
+                        : "Confirm payment"}
                     </button>
                   </>
                 ) : (
                   <div className="rounded-2xl border border-emerald-300/25 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">
-                    Normal turn flow stays locked until you raise enough funds, but trade remains available from the trade drawer.
+                    Normal turn flow stays locked until you raise enough funds,
+                    but trade remains available from the trade drawer.
                   </div>
                 )}
                 <div className="rounded-2xl border border-rose-400/25 bg-rose-500/10 px-3 py-3 text-xs text-rose-100">
-                  <p className="font-semibold uppercase tracking-wide text-rose-200/90">Final option</p>
+                  <p className="font-semibold uppercase tracking-wide text-rose-200/90">
+                    Final option
+                  </p>
                   <p className="mt-1 text-rose-100/85">
-                    If you cannot or do not want to keep raising funds, you can eliminate yourself and return any remaining properties to the bank.
+                    If you cannot or do not want to keep raising funds, you can
+                    eliminate yourself and return any remaining properties to
+                    the bank.
                   </p>
                   <button
                     type="button"
@@ -2615,13 +3273,16 @@ export default function PlayV2Page() {
                     disabled={actionLoading === "DECLARE_BANKRUPTCY"}
                     className="mt-3 w-full rounded-2xl border border-rose-300/35 bg-rose-400 px-4 py-3 text-sm font-semibold text-rose-950 transition hover:bg-rose-300 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {actionLoading === "DECLARE_BANKRUPTCY" ? "Declaring…" : "Declare bankruptcy"}
+                    {actionLoading === "DECLARE_BANKRUPTCY"
+                      ? "Declaring…"
+                      : "Declare bankruptcy"}
                   </button>
                 </div>
               </div>
             ) : (
               <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/70">
-                {currentTurnPlayer?.display_name ?? "Current player"} is resolving insolvency before play can continue.
+                {currentTurnPlayer?.display_name ?? "Current player"} is
+                resolving insolvency before play can continue.
               </div>
             )}
           </div>
@@ -2668,7 +3329,11 @@ export default function PlayV2Page() {
   ]);
 
   const fullscreenEventNode = useMemo(() => {
-    if (auctionActive || !activeDecisionType || !isFullscreenEvent(activeDecisionType)) {
+    if (
+      auctionActive ||
+      !activeDecisionType ||
+      !isFullscreenEvent(activeDecisionType)
+    ) {
       return null;
     }
 
@@ -2684,8 +3349,14 @@ export default function PlayV2Page() {
         return (
           <PendingCardModalV2
             pendingCard={pendingCard}
-            actorName={players.find((player) => player.id === pendingCard?.drawnBy)?.display_name ?? null}
-            isActor={Boolean(currentUserPlayer && pendingCard?.drawnBy === currentUserPlayer.id)}
+            actorName={
+              players.find((player) => player.id === pendingCard?.drawnBy)
+                ?.display_name ?? null
+            }
+            isActor={Boolean(
+              currentUserPlayer &&
+              pendingCard?.drawnBy === currentUserPlayer.id,
+            )}
             actionLoading={actionLoading}
             boardPack={selectedBoardPack}
             currencySymbol={currencySymbol}
@@ -2698,7 +3369,11 @@ export default function PlayV2Page() {
             pendingMacroEvent={pendingMacroEvent}
             macroTooltipById={macroTooltipById}
             actorName={currentTurnPlayer?.display_name ?? null}
-            isActor={Boolean(currentUserPlayer && currentTurnPlayer && currentUserPlayer.id === currentTurnPlayer.id)}
+            isActor={Boolean(
+              currentUserPlayer &&
+              currentTurnPlayer &&
+              currentUserPlayer.id === currentTurnPlayer.id,
+            )}
             actionLoading={actionLoading}
             onConfirm={handleConfirmMacroEvent}
           />
@@ -2708,7 +3383,11 @@ export default function PlayV2Page() {
           <IncomeTaxModalV2
             pendingIncomeTax={pendingIncomeTax}
             actorName={currentTurnPlayer?.display_name ?? null}
-            isActor={Boolean(currentUserPlayer && currentTurnPlayer && currentUserPlayer.id === currentTurnPlayer.id)}
+            isActor={Boolean(
+              currentUserPlayer &&
+              currentTurnPlayer &&
+              currentUserPlayer.id === currentTurnPlayer.id,
+            )}
             actionLoading={actionLoading}
             onConfirm={handleConfirmIncomeTax}
           />
@@ -2718,7 +3397,11 @@ export default function PlayV2Page() {
           <SuperTaxModalV2
             pendingSuperTax={pendingSuperTax}
             actorName={currentTurnPlayer?.display_name ?? null}
-            isActor={Boolean(currentUserPlayer && currentTurnPlayer && currentUserPlayer.id === currentTurnPlayer.id)}
+            isActor={Boolean(
+              currentUserPlayer &&
+              currentTurnPlayer &&
+              currentUserPlayer.id === currentTurnPlayer.id,
+            )}
             actionLoading={actionLoading}
             onConfirm={handleConfirmSuperTax}
           />
@@ -2786,7 +3469,9 @@ export default function PlayV2Page() {
     return (
       <main className="mx-auto max-w-3xl p-6">
         <h1 className="text-xl font-semibold">Play V2 Debug</h1>
-        <p className="mt-3 text-sm text-neutral-700">Please sign in to view this game.</p>
+        <p className="mt-3 text-sm text-neutral-700">
+          Please sign in to view this game.
+        </p>
       </main>
     );
   }
@@ -2872,8 +3557,9 @@ export default function PlayV2Page() {
 
   const turnPlayerLabel = currentTurnPlayer
     ? `${currentTurnPlayer.display_name}`
-    : turnPlayerId ?? "—";
-  const lastRollLabel = gameState?.last_roll != null ? String(gameState.last_roll) : "—";
+    : (turnPlayerId ?? "—");
+  const lastRollLabel =
+    gameState?.last_roll != null ? String(gameState.last_roll) : "—";
 
   const inGame = Boolean(routeGameId);
   const leaveMenuDisabled = actionLoading === "LEAVE_GAME";
@@ -2884,657 +3570,831 @@ export default function PlayV2Page() {
     <>
       <RotateToLandscapeOverlay />
       <PlayV2Shell
-      cashLabel={formatMoney(currentUserCash)}
-      boardPackEconomy={selectedBoardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY}
-      netWorthLabel={formatMoney(netWorth)}
-      netWorthBreakdown={{
-        cash: currentUserCash ?? 0,
-        assets: totalAssets,
-        liabilities: totalLiabilities,
-        netWorth,
-      }}
-      turnPlayerLabel={turnPlayerLabel}
-      lastRollLabel={lastRollLabel}
-      lastDiceLabel={latestDiceDisplay}
-      isDoubleRoll={latestIsDouble}
-      loading={loading}
-      notice={notice}
-      leftOpen={isLeftDrawerOpen}
-      onLeftOpenChange={setIsLeftDrawerOpen}
-      leftDrawerMode={leftDrawerMode}
-      onLeftDrawerModeChange={setLeftDrawerMode}
-      rightOpen={isRightDrawerOpen}
-      onRightOpenChange={setIsRightDrawerOpen}
-      rightDrawerMode={rightDrawerMode}
-      onRightDrawerModeChange={setRightDrawerMode}
-      tradeNeedsAttention={Boolean(incomingTradeProposal)}
-      tradeAccessibleDuringDecision={Boolean(pendingInsolvencyRecovery)}
-      macroEffectsActive={activeMacroDisplayItems.length > 0}
-      canRoll={canRoll}
-      canEndTurn={canEndTurn}
-      actionLoading={actionLoading}
-      rollDiceDisabledReason={rollDiceDisabledReason}
-      onRollDice={() => void handleBankAction("ROLL_DICE")}
-      onEndTurn={() => void handleBankAction("END_TURN")}
-      onRecenterBoard={() => recenterBoardRef.current?.()}
-      onMenuToggle={() => setShowMenuOverlay((open) => !open)}
-      menuOpen={showMenuOverlay}
-      walletOwnedCount={ownedProperties.length}
-      walletLoanCount={activeLoans.length}
-      walletMortgageCount={activePurchaseMortgages.length}
-      walletOwnedContent={walletOwnedContent}
-      walletLoansContent={walletLoansContent}
-      walletMortgagesContent={walletMortgagesContent}
-      decisionActive={drawerDecisionNode !== null}
-      rightDrawerLocked={fullscreenEventNode !== null}
-      auctionActive={auctionActive}
-      marketDrawerContent={(
-        <section className="space-y-2">
-          <p className="text-xs font-semibold uppercase tracking-wide text-white/60">Invest in Market</p>
-          <div className="rounded-xl border border-white/10 bg-white/95 p-2 text-neutral-900">
-            <InvestPanel
-              currencySymbol={investCurrencySymbol}
-              currencyCode={investCurrencyCode}
-              cashLocal={currentUserCash ?? 0}
-              fxRate={investFxRate}
-              prices={marketPrices}
-              holdings={playerHoldings}
-              collapsed={investPanelCollapsed}
-              onToggleCollapsed={() => setInvestPanelCollapsed((previous) => !previous)}
-              isTrading={isTradeSubmitting}
-              isRefreshingMarket={isMarketRefreshSubmitting}
-              tradeError={tradeError}
-              onRefreshMarket={handleManualMarketRefresh}
-              onTrade={handleMarketTrade}
-            />
-          </div>
-        </section>
-      )}
-      leftDrawerContent={(
-        <div className="h-full space-y-4">
+        cashLabel={formatMoney(currentUserCash)}
+        boardPackEconomy={
+          selectedBoardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY
+        }
+        netWorthLabel={formatMoney(netWorth)}
+        netWorthBreakdown={{
+          cash: currentUserCash ?? 0,
+          assets: totalAssets,
+          liabilities: totalLiabilities,
+          netWorth,
+        }}
+        turnPlayerLabel={turnPlayerLabel}
+        lastRollLabel={lastRollLabel}
+        lastDiceLabel={latestDiceDisplay}
+        isDoubleRoll={latestIsDouble}
+        loading={loading}
+        notice={notice}
+        leftOpen={isLeftDrawerOpen}
+        onLeftOpenChange={setIsLeftDrawerOpen}
+        leftDrawerMode={leftDrawerMode}
+        onLeftDrawerModeChange={setLeftDrawerMode}
+        rightOpen={isRightDrawerOpen}
+        onRightOpenChange={setIsRightDrawerOpen}
+        rightDrawerMode={rightDrawerMode}
+        onRightDrawerModeChange={setRightDrawerMode}
+        tradeNeedsAttention={Boolean(incomingTradeProposal)}
+        tradeAccessibleDuringDecision={Boolean(pendingInsolvencyRecovery)}
+        macroEffectsActive={activeMacroDisplayItems.length > 0}
+        canRoll={canRoll}
+        canEndTurn={canEndTurn}
+        actionLoading={actionLoading}
+        rollDiceDisabledReason={rollDiceDisabledReason}
+        onRollDice={() => void handleBankAction("ROLL_DICE")}
+        onEndTurn={() => void handleBankAction("END_TURN")}
+        onRecenterBoard={() => recenterBoardRef.current?.()}
+        onMenuToggle={() => setShowMenuOverlay((open) => !open)}
+        menuOpen={showMenuOverlay}
+        walletOwnedCount={ownedProperties.length}
+        walletLoanCount={activeLoans.length}
+        walletMortgageCount={activePurchaseMortgages.length}
+        walletOwnedContent={walletOwnedContent}
+        walletLoansContent={walletLoansContent}
+        walletMortgagesContent={walletMortgagesContent}
+        decisionActive={drawerDecisionNode !== null}
+        rightDrawerLocked={fullscreenEventNode !== null}
+        auctionActive={auctionActive}
+        marketDrawerContent={
           <section className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-white/60">Tile Info</p>
-            {selectedTile ? (
-              <>
-                <TitleDeedPreview
-                  tile={selectedTile}
-                  bandColor={getTileBandColor(selectedTile)}
-                  boardPackEconomy={selectedBoardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY}
-                  price={selectedTile.price}
-                  ownedRailCount={selectedOwnerRailCount}
-                  ownedUtilityCount={selectedOwnerUtilityCount}
-                  mode="readonly"
-                  size="compact"
-                />
-                <div className="rounded-lg border border-white/15 bg-white/10 px-3 py-2 text-xs text-white/90">
-                  <p>Current Rent: {selectedTileCurrentRent !== null ? formatMoney(selectedTileCurrentRent) : "—"}</p>
-                  <p>Owner: {selectedOwnerLabel}</p>
-                  <p>Status: {selectedTileStatus}</p>
-                </div>
-              </>
-            ) : (
-              <p className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/70">
-                Select a tile to view the title deed
+            <p className="text-xs font-semibold uppercase tracking-wide text-white/60">
+              Invest in Market
+            </p>
+            <div className="rounded-xl border border-white/10 bg-white/95 p-2 text-neutral-900">
+              <InvestPanel
+                currencySymbol={investCurrencySymbol}
+                currencyCode={investCurrencyCode}
+                cashLocal={currentUserCash ?? 0}
+                fxRate={investFxRate}
+                prices={marketPrices}
+                holdings={playerHoldings}
+                collapsed={investPanelCollapsed}
+                onToggleCollapsed={() =>
+                  setInvestPanelCollapsed((previous) => !previous)
+                }
+                isTrading={isTradeSubmitting}
+                isRefreshingMarket={isMarketRefreshSubmitting}
+                tradeError={tradeError}
+                onRefreshMarket={handleManualMarketRefresh}
+                onTrade={handleMarketTrade}
+              />
+            </div>
+          </section>
+        }
+        leftDrawerContent={
+          <div className="h-full space-y-4">
+            <section className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-white/60">
+                Tile Info
               </p>
+              {selectedTile ? (
+                <>
+                  <TitleDeedPreview
+                    tile={selectedTile}
+                    bandColor={getTileBandColor(selectedTile)}
+                    boardPackEconomy={
+                      selectedBoardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY
+                    }
+                    price={selectedTile.price}
+                    ownedRailCount={selectedOwnerRailCount}
+                    ownedUtilityCount={selectedOwnerUtilityCount}
+                    mode="readonly"
+                    size="compact"
+                  />
+                  <div className="rounded-lg border border-white/15 bg-white/10 px-3 py-2 text-xs text-white/90">
+                    <p>
+                      Current Rent:{" "}
+                      {selectedTileCurrentRent !== null
+                        ? formatMoney(selectedTileCurrentRent)
+                        : "—"}
+                    </p>
+                    <p>Owner: {selectedOwnerLabel}</p>
+                    <p>Status: {selectedTileStatus}</p>
+                  </div>
+                </>
+              ) : (
+                <p className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/70">
+                  Select a tile to view the title deed
+                </p>
+              )}
+            </section>
+          </div>
+        }
+        decisionDrawerContent={
+          !auctionActive && drawerDecisionNode !== null ? (
+            <div className="space-y-3">{drawerDecisionNode}</div>
+          ) : (
+            <p className="text-sm text-white/70">No active decision</p>
+          )
+        }
+        tradeDrawerContent={
+          <section className="space-y-3 text-sm text-white/85">
+            <div className="rounded-lg border border-white/10 bg-white/5 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-white/60">
+                Trade
+              </p>
+              <p className="mt-1 text-xs text-white/70">
+                Send offers or respond to pending incoming trades.
+              </p>
+              {availableTradeCounterparties.length === 0 ? (
+                <p className="mt-3 rounded-md border border-white/10 bg-white/5 px-2.5 py-2 text-xs text-white/60">
+                  No eligible counterparty is available right now.
+                </p>
+              ) : null}
+            </div>
+
+            <div className="rounded-lg border border-indigo-300/30 bg-indigo-500/10 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-indigo-100">
+                Compose proposal
+              </p>
+              <div className="mt-3 space-y-3">
+                <label className="block text-xs text-white/75">
+                  Counterparty
+                  <select
+                    className="mt-1 w-full rounded-md border border-white/15 bg-neutral-900/90 px-2.5 py-2 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
+                    value={tradeCounterpartyId}
+                    onChange={(event) => {
+                      setTradeCounterpartyId(event.target.value);
+                      setTradeRequestTiles([]);
+                    }}
+                    disabled={
+                      actionLoading === "PROPOSE_TRADE" ||
+                      availableTradeCounterparties.length === 0
+                    }
+                  >
+                    {availableTradeCounterparties.map((player) => (
+                      <option key={player.id} value={player.id}>
+                        {player.displayName}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <div className="grid grid-cols-1 gap-3">
+                  <div className="rounded-md border border-white/10 bg-black/20 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-white/60">
+                      Offer
+                    </p>
+                    <label className="mt-2 block text-xs text-white/75">
+                      Cash
+                      <input
+                        className="mt-1 w-full rounded-md border border-white/15 bg-neutral-900/90 px-2.5 py-2 text-sm text-white"
+                        type="number"
+                        min={0}
+                        max={Math.max(0, currentUserCash ?? 0)}
+                        value={tradeOfferCash}
+                        onChange={(event) =>
+                          setTradeOfferCash(
+                            Math.min(
+                              Math.max(0, Number(event.target.value)),
+                              Math.max(0, currentUserCash ?? 0),
+                            ),
+                          )
+                        }
+                      />
+                    </label>
+                    <div className="mt-2 space-y-1">
+                      <p className="text-xs text-white/70">Properties</p>
+                      {ownTradePropertyOptions.length === 0 ? (
+                        <p className="text-xs text-white/50">
+                          No owned properties to offer.
+                        </p>
+                      ) : (
+                        <div className="max-h-36 space-y-1 overflow-y-auto pr-1 text-xs">
+                          {ownTradePropertyOptions.map((tile) => (
+                            <label
+                              key={`offer-${tile.tileIndex}`}
+                              className="flex items-center gap-2 text-white/90"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={tradeOfferTiles.includes(
+                                  tile.tileIndex,
+                                )}
+                                onChange={(event) =>
+                                  toggleOfferTile(
+                                    tile.tileIndex,
+                                    event.target.checked,
+                                  )
+                                }
+                              />
+                              <span>
+                                {tile.tileName}
+                                {tile.houses > 0
+                                  ? ` · ${tile.houses} ${tile.houses === 1 ? "house" : "houses"}`
+                                  : ""}
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="rounded-md border border-white/10 bg-black/20 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-white/60">
+                      Request
+                    </p>
+                    <label className="mt-2 block text-xs text-white/75">
+                      Cash
+                      <input
+                        className="mt-1 w-full rounded-md border border-white/15 bg-neutral-900/90 px-2.5 py-2 text-sm text-white"
+                        type="number"
+                        min={0}
+                        value={tradeRequestCash}
+                        onChange={(event) =>
+                          setTradeRequestCash(
+                            Math.max(0, Number(event.target.value)),
+                          )
+                        }
+                      />
+                    </label>
+                    <div className="mt-2 space-y-1">
+                      <p className="text-xs text-white/70">Properties</p>
+                      {!tradeCounterpartyId ? (
+                        <p className="text-xs text-white/50">
+                          Select a counterparty first.
+                        </p>
+                      ) : counterpartyOwnedProperties.length === 0 ? (
+                        <p className="text-xs text-white/50">
+                          No properties owned by the selected player.
+                        </p>
+                      ) : (
+                        <div className="max-h-36 space-y-1 overflow-y-auto pr-1 text-xs">
+                          {counterpartyOwnedProperties.map((tile) => (
+                            <label
+                              key={`request-${tile.tileIndex}`}
+                              className="flex items-center gap-2 text-white/90"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={tradeRequestTiles.includes(
+                                  tile.tileIndex,
+                                )}
+                                onChange={(event) =>
+                                  toggleRequestTile(
+                                    tile.tileIndex,
+                                    event.target.checked,
+                                  )
+                                }
+                              />
+                              <span>
+                                {tile.tileName}
+                                {tile.houses > 0
+                                  ? ` · ${tile.houses} ${tile.houses === 1 ? "house" : "houses"}`
+                                  : ""}
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    className="rounded-md border border-indigo-300/40 bg-indigo-500/20 px-3 py-1.5 text-xs font-semibold text-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={
+                      actionLoading === "PROPOSE_TRADE" ||
+                      availableTradeCounterparties.length === 0 ||
+                      !canSubmitTradeProposal
+                    }
+                    onClick={() => void handleSubmitTradeProposal()}
+                  >
+                    {actionLoading === "PROPOSE_TRADE"
+                      ? "Sending…"
+                      : "Send trade"}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {incomingTradeProposal ? (
+              <div className="rounded-lg border border-emerald-300/30 bg-emerald-500/10 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-emerald-100">
+                  Incoming from {incomingTradeCounterpartyName}
+                </p>
+                <div className="mt-2 grid gap-2 text-xs text-emerald-50 md:grid-cols-2">
+                  <div className="rounded-md border border-emerald-200/30 bg-emerald-950/20 p-2">
+                    <p className="font-semibold">You give</p>
+                    <ul className="mt-1 space-y-1 text-emerald-100/95">
+                      {incomingTradeProposal.request_cash > 0 ? (
+                        <li>
+                          Cash:{" "}
+                          {formatTradeMoney(incomingTradeProposal.request_cash)}
+                        </li>
+                      ) : null}
+                      {incomingTradeProposal.request_tile_indices.length > 0 ? (
+                        incomingTradeProposal.request_tile_indices.map(
+                          (tileIndex) => {
+                            const snapshot = incomingTradeSnapshotTiles.find(
+                              (entry) => entry.tile_index === tileIndex,
+                            );
+                            const houses = snapshot?.houses ?? 0;
+                            return (
+                              <li key={`incoming-give-${tileIndex}`}>
+                                {getTileNameByIndex(tileIndex)}
+                                {houses > 0
+                                  ? ` · ${houses} ${houses === 1 ? "house" : "houses"}`
+                                  : ""}
+                              </li>
+                            );
+                          },
+                        )
+                      ) : incomingTradeProposal.request_cash === 0 ? (
+                        <li className="text-emerald-100/70">No properties</li>
+                      ) : null}
+                    </ul>
+                  </div>
+                  <div className="rounded-md border border-emerald-200/30 bg-emerald-950/20 p-2">
+                    <p className="font-semibold">You receive</p>
+                    <ul className="mt-1 space-y-1 text-emerald-100/95">
+                      {incomingTradeProposal.offer_cash > 0 ? (
+                        <li>
+                          Cash:{" "}
+                          {formatTradeMoney(incomingTradeProposal.offer_cash)}
+                        </li>
+                      ) : null}
+                      {incomingTradeProposal.offer_tile_indices.length > 0 ? (
+                        incomingTradeProposal.offer_tile_indices.map(
+                          (tileIndex) => {
+                            const snapshot = incomingTradeSnapshotTiles.find(
+                              (entry) => entry.tile_index === tileIndex,
+                            );
+                            const houses = snapshot?.houses ?? 0;
+                            return (
+                              <li key={`incoming-receive-${tileIndex}`}>
+                                {getTileNameByIndex(tileIndex)}
+                                {houses > 0
+                                  ? ` · ${houses} ${houses === 1 ? "house" : "houses"}`
+                                  : ""}
+                              </li>
+                            );
+                          },
+                        )
+                      ) : incomingTradeProposal.offer_cash === 0 ? (
+                        <li className="text-emerald-100/70">No properties</li>
+                      ) : null}
+                    </ul>
+                  </div>
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    className="rounded-md border border-emerald-300/40 px-2.5 py-1.5 text-xs font-semibold text-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={actionLoading === "REJECT_TRADE"}
+                    onClick={() => handleRejectTrade(incomingTradeProposal.id)}
+                  >
+                    {actionLoading === "REJECT_TRADE" ? "Rejecting…" : "Reject"}
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-md border border-emerald-200/30 bg-emerald-100/10 px-2.5 py-1.5 text-xs font-semibold text-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={actionLoading === "ACCEPT_TRADE"}
+                    onClick={() => handleAcceptTrade(incomingTradeProposal.id)}
+                  >
+                    {actionLoading === "ACCEPT_TRADE" ? "Accepting…" : "Accept"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-lg border border-white/10 bg-white/5 p-3 text-xs text-white/60">
+                No incoming trade offer right now.
+              </div>
+            )}
+
+            {outgoingPendingTrade ? (
+              <div className="rounded-lg border border-amber-300/35 bg-amber-500/10 p-3">
+                <p className="text-xs text-amber-100">
+                  Outgoing proposal pending
+                </p>
+                <p className="mt-1 text-xs text-white/70">
+                  Waiting on{" "}
+                  {getPlayerNameById(
+                    outgoingPendingTrade.counterparty_player_id,
+                  )}
+                </p>
+                <button
+                  type="button"
+                  className="mt-2 rounded-md border border-amber-300/45 px-2.5 py-1 text-xs font-semibold text-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={actionLoading === "CANCEL_TRADE"}
+                  onClick={() =>
+                    handleCancelOutgoingTrade(outgoingPendingTrade.id)
+                  }
+                >
+                  {actionLoading === "CANCEL_TRADE"
+                    ? "Cancelling…"
+                    : "Cancel proposal"}
+                </button>
+              </div>
+            ) : null}
+          </section>
+        }
+        macroDrawerContent={
+          <section className="space-y-3 text-sm text-white/85">
+            <div className="rounded-lg border border-sky-300/20 bg-sky-500/10 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-sky-100">
+                Active macro effects
+              </p>
+              <p className="mt-1 text-xs text-white/70">
+                Current macro factors affecting this game.
+              </p>
+            </div>
+
+            {activeMacroDisplayItems.length === 0 ? (
+              <div className="rounded-lg border border-white/10 bg-white/5 p-3 text-xs text-white/60">
+                No active macro effects right now.
+              </div>
+            ) : (
+              activeMacroDisplayItems.map((effect) => (
+                <article
+                  key={effect.id}
+                  className="rounded-lg border border-sky-300/25 bg-white/5 p-3"
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm font-semibold text-white">
+                      {effect.title}
+                    </p>
+                    {effect.rarityLabel ? (
+                      <span className="rounded-full bg-sky-100/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-100">
+                        {effect.rarityLabel}
+                      </span>
+                    ) : null}
+                  </div>
+                  {effect.rulesText ? (
+                    <p className="mt-2 text-xs text-white/85">
+                      {effect.rulesText}
+                    </p>
+                  ) : null}
+                  {effect.summary && effect.summary !== effect.rulesText ? (
+                    <p className="mt-2 text-xs text-white/65">
+                      {effect.summary}
+                    </p>
+                  ) : null}
+                  <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-white/65">
+                    {effect.turnsRemaining !== null ? (
+                      <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">
+                        {effect.turnsRemaining} turn
+                        {effect.turnsRemaining === 1 ? "" : "s"} remaining
+                      </span>
+                    ) : null}
+                    {effect.roundsApplied !== null ? (
+                      <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">
+                        Applied for {effect.roundsApplied} round
+                        {effect.roundsApplied === 1 ? "" : "s"}
+                      </span>
+                    ) : null}
+                  </div>
+                </article>
+              ))
             )}
           </section>
-        </div>
-      )}
-      decisionDrawerContent={
-        !auctionActive && drawerDecisionNode !== null ? (
-          <div className="space-y-3">{drawerDecisionNode}</div>
-        ) : (
-          <p className="text-sm text-white/70">No active decision</p>
-        )
-      }
-      tradeDrawerContent={(
-        <section className="space-y-3 text-sm text-white/85">
-          <div className="rounded-lg border border-white/10 bg-white/5 p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-white/60">Trade</p>
-            <p className="mt-1 text-xs text-white/70">Send offers or respond to pending incoming trades.</p>
-            {availableTradeCounterparties.length === 0 ? (
-              <p className="mt-3 rounded-md border border-white/10 bg-white/5 px-2.5 py-2 text-xs text-white/60">
-                No eligible counterparty is available right now.
+        }
+        boardViewport={
+          <BoardViewport
+            boardPackId={gameMeta?.board_pack_id ?? null}
+            players={players}
+            ownershipByTile={ownershipByTile}
+            currentPlayerId={turnPlayerId}
+            selectedTileIndex={selectedTileIndex}
+            onSelectTileIndex={(tileIndex) => {
+              setSelectedTileIndex(tileIndex);
+              setLeftDrawerMode("info");
+              setIsLeftDrawerOpen(true);
+            }}
+            onRecenterReady={(handler) => {
+              recenterBoardRef.current = handler;
+            }}
+          />
+        }
+        debugPanel={
+          <div className="space-y-4">
+            <h1 className="text-xl font-semibold">Play V2 Debug</h1>
+            <section className="rounded border p-4 text-sm">
+              <p>
+                <strong>gameId:</strong> {routeGameId ?? "—"}
+              </p>
+              <p>
+                <strong>current user id:</strong> {session?.user.id ?? "—"}
+              </p>
+              <p>
+                <strong>gameMeta.status:</strong> {gameMeta?.status ?? "—"}
+              </p>
+              <p>
+                <strong>turnPlayerId (game_state.current_player_id):</strong>{" "}
+                {turnPlayerId ?? "—"}
+              </p>
+              <p>
+                <strong>current turn player:</strong>{" "}
+                {currentTurnPlayer
+                  ? `${currentTurnPlayer.id} / ${currentTurnPlayer.display_name}`
+                  : "—"}
+              </p>
+              {turnPlayerMissingFromPlayers ? (
+                <p className="text-red-600">
+                  <strong>warning:</strong> Turn player id {turnPlayerId} not
+                  found in players list
+                </p>
+              ) : null}
+              <p>
+                <strong>gameState.version:</strong> {gameState?.version ?? "—"}
+              </p>
+              <p>
+                <strong>ownership rows:</strong>{" "}
+                {Object.keys(ownershipByTile).length}
+              </p>
+              <p>
+                <strong>trade proposals:</strong> {tradeProposals.length}
+              </p>
+              <p>
+                <strong>loans:</strong> {playerLoans.length}
+              </p>
+              <p>
+                <strong>mortgages:</strong> {purchaseMortgages.length}
+              </p>
+            </section>
+
+            <section className="rounded border p-4 text-sm">
+              <h2 className="font-semibold">Players</h2>
+              <ul className="mt-2 list-disc space-y-1 pl-5">
+                {players.map((player) => (
+                  <li key={player.id}>
+                    {player.display_name} — id: {player.id} — cash:{" "}
+                    {gameState?.balances?.[player.id] ?? "—"}
+                  </li>
+                ))}
+              </ul>
+            </section>
+
+            <section className="rounded border p-4 text-sm">
+              <h2 className="font-semibold">Last 5 game events</h2>
+              <ul className="mt-2 list-disc space-y-1 pl-5">
+                {lastFiveEvents.map((event) => (
+                  <li key={event.id}>
+                    {event.event_type} — {event.created_at}
+                  </li>
+                ))}
+              </ul>
+            </section>
+
+            <button
+              type="button"
+              onClick={() => void onRefetch()}
+              className="rounded bg-black px-3 py-2 text-sm text-white"
+            >
+              Refetch all slices
+            </button>
+          </div>
+        }
+      />
+      {gameOverState && !gameOverOverlayDismissed ? (
+        <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl border border-white/15 bg-neutral-950/95 p-6 text-center shadow-2xl">
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-white/55">
+              Game Over
+            </p>
+            <h2 className="mt-3 text-3xl font-semibold text-white">
+              {gameOverState.isCurrentUserWinner ? "You won" : "You lost"}
+            </h2>
+            <p className="mt-2 text-sm text-white/75">
+              Winner:{" "}
+              <span className="font-semibold text-white">
+                {gameOverState.winnerName}
+              </span>
+            </p>
+            {gameOverState.reasonLabel ? (
+              <p className="mt-4 rounded-2xl border border-emerald-300/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-50">
+                Game ended due to {gameOverState.reasonLabel}.
               </p>
             ) : null}
-          </div>
-
-          <div className="rounded-lg border border-indigo-300/30 bg-indigo-500/10 p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-indigo-100">Compose proposal</p>
-            <div className="mt-3 space-y-3">
-              <label className="block text-xs text-white/75">
-                Counterparty
-                <select
-                  className="mt-1 w-full rounded-md border border-white/15 bg-neutral-900/90 px-2.5 py-2 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
-                  value={tradeCounterpartyId}
-                  onChange={(event) => {
-                    setTradeCounterpartyId(event.target.value);
-                    setTradeRequestTiles([]);
-                  }}
-                  disabled={actionLoading === "PROPOSE_TRADE" || availableTradeCounterparties.length === 0}
-                >
-                  {availableTradeCounterparties.map((player) => (
-                    <option key={player.id} value={player.id}>
-                      {player.displayName}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <div className="grid grid-cols-1 gap-3">
-                <div className="rounded-md border border-white/10 bg-black/20 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-white/60">Offer</p>
-                  <label className="mt-2 block text-xs text-white/75">
-                    Cash
-                    <input
-                      className="mt-1 w-full rounded-md border border-white/15 bg-neutral-900/90 px-2.5 py-2 text-sm text-white"
-                      type="number"
-                      min={0}
-                      max={Math.max(0, currentUserCash ?? 0)}
-                      value={tradeOfferCash}
-                      onChange={(event) =>
-                        setTradeOfferCash(
-                          Math.min(Math.max(0, Number(event.target.value)), Math.max(0, currentUserCash ?? 0)),
-                        )
-                      }
-                    />
-                  </label>
-                  <div className="mt-2 space-y-1">
-                    <p className="text-xs text-white/70">Properties</p>
-                    {ownTradePropertyOptions.length === 0 ? (
-                      <p className="text-xs text-white/50">No owned properties to offer.</p>
-                    ) : (
-                      <div className="max-h-36 space-y-1 overflow-y-auto pr-1 text-xs">
-                        {ownTradePropertyOptions.map((tile) => (
-                          <label key={`offer-${tile.tileIndex}`} className="flex items-center gap-2 text-white/90">
-                            <input
-                              type="checkbox"
-                              checked={tradeOfferTiles.includes(tile.tileIndex)}
-                              onChange={(event) => toggleOfferTile(tile.tileIndex, event.target.checked)}
-                            />
-                            <span>
-                              {tile.tileName}
-                              {tile.houses > 0 ? ` · ${tile.houses} ${tile.houses === 1 ? "house" : "houses"}` : ""}
-                            </span>
-                          </label>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="rounded-md border border-white/10 bg-black/20 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-white/60">Request</p>
-                  <label className="mt-2 block text-xs text-white/75">
-                    Cash
-                    <input
-                      className="mt-1 w-full rounded-md border border-white/15 bg-neutral-900/90 px-2.5 py-2 text-sm text-white"
-                      type="number"
-                      min={0}
-                      value={tradeRequestCash}
-                      onChange={(event) => setTradeRequestCash(Math.max(0, Number(event.target.value)))}
-                    />
-                  </label>
-                  <div className="mt-2 space-y-1">
-                    <p className="text-xs text-white/70">Properties</p>
-                    {!tradeCounterpartyId ? (
-                      <p className="text-xs text-white/50">Select a counterparty first.</p>
-                    ) : counterpartyOwnedProperties.length === 0 ? (
-                      <p className="text-xs text-white/50">No properties owned by the selected player.</p>
-                    ) : (
-                      <div className="max-h-36 space-y-1 overflow-y-auto pr-1 text-xs">
-                        {counterpartyOwnedProperties.map((tile) => (
-                          <label key={`request-${tile.tileIndex}`} className="flex items-center gap-2 text-white/90">
-                            <input
-                              type="checkbox"
-                              checked={tradeRequestTiles.includes(tile.tileIndex)}
-                              onChange={(event) => toggleRequestTile(tile.tileIndex, event.target.checked)}
-                            />
-                            <span>
-                              {tile.tileName}
-                              {tile.houses > 0 ? ` · ${tile.houses} ${tile.houses === 1 ? "house" : "houses"}` : ""}
-                            </span>
-                          </label>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  className="rounded-md border border-indigo-300/40 bg-indigo-500/20 px-3 py-1.5 text-xs font-semibold text-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={
-                    actionLoading === "PROPOSE_TRADE" ||
-                    availableTradeCounterparties.length === 0 ||
-                    !canSubmitTradeProposal
-                  }
-                  onClick={() => void handleSubmitTradeProposal()}
-                >
-                  {actionLoading === "PROPOSE_TRADE" ? "Sending…" : "Send trade"}
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {incomingTradeProposal ? (
-            <div className="rounded-lg border border-emerald-300/30 bg-emerald-500/10 p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-100">Incoming from {incomingTradeCounterpartyName}</p>
-              <div className="mt-2 grid gap-2 text-xs text-emerald-50 md:grid-cols-2">
-                <div className="rounded-md border border-emerald-200/30 bg-emerald-950/20 p-2">
-                  <p className="font-semibold">You give</p>
-                  <ul className="mt-1 space-y-1 text-emerald-100/95">
-                    {incomingTradeProposal.request_cash > 0 ? (
-                      <li>Cash: {formatTradeMoney(incomingTradeProposal.request_cash)}</li>
-                    ) : null}
-                    {incomingTradeProposal.request_tile_indices.length > 0 ? (
-                      incomingTradeProposal.request_tile_indices.map((tileIndex) => {
-                        const snapshot = incomingTradeSnapshotTiles.find((entry) => entry.tile_index === tileIndex);
-                        const houses = snapshot?.houses ?? 0;
-                        return (
-                          <li key={`incoming-give-${tileIndex}`}>
-                            {getTileNameByIndex(tileIndex)}
-                            {houses > 0 ? ` · ${houses} ${houses === 1 ? "house" : "houses"}` : ""}
-                          </li>
-                        );
-                      })
-                    ) : incomingTradeProposal.request_cash === 0 ? (
-                      <li className="text-emerald-100/70">No properties</li>
-                    ) : null}
-                  </ul>
-                </div>
-                <div className="rounded-md border border-emerald-200/30 bg-emerald-950/20 p-2">
-                  <p className="font-semibold">You receive</p>
-                  <ul className="mt-1 space-y-1 text-emerald-100/95">
-                    {incomingTradeProposal.offer_cash > 0 ? (
-                      <li>Cash: {formatTradeMoney(incomingTradeProposal.offer_cash)}</li>
-                    ) : null}
-                    {incomingTradeProposal.offer_tile_indices.length > 0 ? (
-                      incomingTradeProposal.offer_tile_indices.map((tileIndex) => {
-                        const snapshot = incomingTradeSnapshotTiles.find((entry) => entry.tile_index === tileIndex);
-                        const houses = snapshot?.houses ?? 0;
-                        return (
-                          <li key={`incoming-receive-${tileIndex}`}>
-                            {getTileNameByIndex(tileIndex)}
-                            {houses > 0 ? ` · ${houses} ${houses === 1 ? "house" : "houses"}` : ""}
-                          </li>
-                        );
-                      })
-                    ) : incomingTradeProposal.offer_cash === 0 ? (
-                      <li className="text-emerald-100/70">No properties</li>
-                    ) : null}
-                  </ul>
-                </div>
-              </div>
-              <div className="mt-3 grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  className="rounded-md border border-emerald-300/40 px-2.5 py-1.5 text-xs font-semibold text-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={actionLoading === "REJECT_TRADE"}
-                  onClick={() => handleRejectTrade(incomingTradeProposal.id)}
-                >
-                  {actionLoading === "REJECT_TRADE" ? "Rejecting…" : "Reject"}
-                </button>
-                <button
-                  type="button"
-                  className="rounded-md border border-emerald-200/30 bg-emerald-100/10 px-2.5 py-1.5 text-xs font-semibold text-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={actionLoading === "ACCEPT_TRADE"}
-                  onClick={() => handleAcceptTrade(incomingTradeProposal.id)}
-                >
-                  {actionLoading === "ACCEPT_TRADE" ? "Accepting…" : "Accept"}
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="rounded-lg border border-white/10 bg-white/5 p-3 text-xs text-white/60">
-              No incoming trade offer right now.
-            </div>
-          )}
-
-          {outgoingPendingTrade ? (
-            <div className="rounded-lg border border-amber-300/35 bg-amber-500/10 p-3">
-              <p className="text-xs text-amber-100">Outgoing proposal pending</p>
-              <p className="mt-1 text-xs text-white/70">
-                Waiting on {getPlayerNameById(outgoingPendingTrade.counterparty_player_id)}
-              </p>
+            <p className="mt-4 text-sm text-white/65">
+              All other players have been eliminated. The final board remains
+              visible behind this overlay.
+            </p>
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-center">
               <button
                 type="button"
-                className="mt-2 rounded-md border border-amber-300/45 px-2.5 py-1 text-xs font-semibold text-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={actionLoading === "CANCEL_TRADE"}
-                onClick={() => handleCancelOutgoingTrade(outgoingPendingTrade.id)}
+                onClick={() => setGameOverOverlayDismissed(true)}
+                className="inline-flex min-w-40 items-center justify-center rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/15"
               >
-                {actionLoading === "CANCEL_TRADE" ? "Cancelling…" : "Cancel proposal"}
+                View Final Standings
+              </button>
+              <button
+                type="button"
+                onClick={handleReturnHomeFromGameOver}
+                className="inline-flex min-w-40 items-center justify-center rounded-2xl border border-white/15 bg-white px-4 py-3 text-sm font-semibold text-neutral-950 transition hover:bg-white/90"
+              >
+                Return Home
               </button>
             </div>
-          ) : null}
-        </section>
-      )}
-      macroDrawerContent={(
-        <section className="space-y-3 text-sm text-white/85">
-          <div className="rounded-lg border border-sky-300/20 bg-sky-500/10 p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-sky-100">Active macro effects</p>
-            <p className="mt-1 text-xs text-white/70">
-              Current macro factors affecting this game.
-            </p>
           </div>
-
-          {activeMacroDisplayItems.length === 0 ? (
-            <div className="rounded-lg border border-white/10 bg-white/5 p-3 text-xs text-white/60">
-              No active macro effects right now.
-            </div>
-          ) : (
-            activeMacroDisplayItems.map((effect) => (
-              <article key={effect.id} className="rounded-lg border border-sky-300/25 bg-white/5 p-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-sm font-semibold text-white">{effect.title}</p>
-                  {effect.rarityLabel ? (
-                    <span className="rounded-full bg-sky-100/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-100">
-                      {effect.rarityLabel}
-                    </span>
-                  ) : null}
-                </div>
-                {effect.rulesText ? (
-                  <p className="mt-2 text-xs text-white/85">{effect.rulesText}</p>
-                ) : null}
-                {effect.summary && effect.summary !== effect.rulesText ? (
-                  <p className="mt-2 text-xs text-white/65">{effect.summary}</p>
-                ) : null}
-                <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-white/65">
-                  {effect.turnsRemaining !== null ? (
-                    <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">
-                      {effect.turnsRemaining} turn{effect.turnsRemaining === 1 ? "" : "s"} remaining
-                    </span>
-                  ) : null}
-                  {effect.roundsApplied !== null ? (
-                    <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">
-                      Applied for {effect.roundsApplied} round{effect.roundsApplied === 1 ? "" : "s"}
-                    </span>
-                  ) : null}
-                </div>
-              </article>
-            ))
-          )}
-        </section>
-      )}
-      boardViewport={(
-        <BoardViewport
-          boardPackId={gameMeta?.board_pack_id ?? null}
-          players={players}
-          ownershipByTile={ownershipByTile}
-          currentPlayerId={turnPlayerId}
-          selectedTileIndex={selectedTileIndex}
-          onSelectTileIndex={(tileIndex) => {
-            setSelectedTileIndex(tileIndex);
-            setLeftDrawerMode("info");
-            setIsLeftDrawerOpen(true);
-          }}
-          onRecenterReady={(handler) => {
-            recenterBoardRef.current = handler;
-          }}
+        </div>
+      ) : null}
+      {gameOverState && gameOverOverlayDismissed ? (
+        <EndedGameResultsPanel
+          standings={finalStandings}
+          formatMoney={formatMoney}
+          onReturnHome={handleReturnHomeFromGameOver}
+          onShowSummary={() => setGameOverOverlayDismissed(false)}
         />
-      )}
-      debugPanel={(
-        <div className="space-y-4">
-          <h1 className="text-xl font-semibold">Play V2 Debug</h1>
-          <section className="rounded border p-4 text-sm">
-            <p><strong>gameId:</strong> {routeGameId ?? "—"}</p>
-            <p><strong>current user id:</strong> {session?.user.id ?? "—"}</p>
-            <p><strong>gameMeta.status:</strong> {gameMeta?.status ?? "—"}</p>
-            <p><strong>turnPlayerId (game_state.current_player_id):</strong> {turnPlayerId ?? "—"}</p>
-            <p><strong>current turn player:</strong> {currentTurnPlayer ? `${currentTurnPlayer.id} / ${currentTurnPlayer.display_name}` : "—"}</p>
-            {turnPlayerMissingFromPlayers ? (
-              <p className="text-red-600"><strong>warning:</strong> Turn player id {turnPlayerId} not found in players list</p>
-            ) : null}
-            <p><strong>gameState.version:</strong> {gameState?.version ?? "—"}</p>
-            <p><strong>ownership rows:</strong> {Object.keys(ownershipByTile).length}</p>
-            <p><strong>trade proposals:</strong> {tradeProposals.length}</p>
-            <p><strong>loans:</strong> {playerLoans.length}</p>
-            <p><strong>mortgages:</strong> {purchaseMortgages.length}</p>
-          </section>
-
-          <section className="rounded border p-4 text-sm">
-            <h2 className="font-semibold">Players</h2>
-            <ul className="mt-2 list-disc space-y-1 pl-5">
-              {players.map((player) => (
-                <li key={player.id}>
-                  {player.display_name} — id: {player.id} — cash: {gameState?.balances?.[player.id] ?? "—"}
-                </li>
-              ))}
-            </ul>
-          </section>
-
-          <section className="rounded border p-4 text-sm">
-            <h2 className="font-semibold">Last 5 game events</h2>
-            <ul className="mt-2 list-disc space-y-1 pl-5">
-              {lastFiveEvents.map((event) => (
-                <li key={event.id}>{event.event_type} — {event.created_at}</li>
-              ))}
-            </ul>
-          </section>
-
-          <button
-            type="button"
-            onClick={() => void onRefetch()}
-            className="rounded bg-black px-3 py-2 text-sm text-white"
-          >
-            Refetch all slices
-          </button>
-        </div>
-      )}
-    />
-    {gameOverState ? (
-      <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm">
-        <div className="w-full max-w-md rounded-3xl border border-white/15 bg-neutral-950/95 p-6 text-center shadow-2xl">
-          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-white/55">Game Over</p>
-          <h2 className="mt-3 text-3xl font-semibold text-white">
-            {gameOverState.isCurrentUserWinner ? "You won" : "You lost"}
-          </h2>
-          <p className="mt-2 text-sm text-white/75">
-            Winner: <span className="font-semibold text-white">{gameOverState.winnerName}</span>
-          </p>
-          {gameOverState.reasonLabel ? (
-            <p className="mt-4 rounded-2xl border border-emerald-300/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-50">
-              Game ended due to {gameOverState.reasonLabel}.
-            </p>
-          ) : null}
-          <p className="mt-4 text-sm text-white/65">All other players have been eliminated. The final board remains visible behind this overlay.</p>
-          <div className="mt-6 flex justify-center">
-            <button
-              type="button"
-              onClick={handleReturnHomeFromGameOver}
-              className="inline-flex min-w-40 items-center justify-center rounded-2xl border border-white/15 bg-white px-4 py-3 text-sm font-semibold text-neutral-950 transition hover:bg-white/90"
-            >
-              Return Home
-            </button>
+      ) : null}
+      {fullscreenEventNode ? (
+        <div className="fixed inset-0 z-[200]">
+          <div className="absolute inset-0 bg-black/60" />
+          <div className="relative flex h-full w-full items-center justify-center p-4">
+            <div className="w-full max-w-xl rounded-3xl border border-white/20 bg-neutral-900/95 p-4 shadow-2xl backdrop-blur">
+              {fullscreenEventNode}
+            </div>
           </div>
         </div>
-      </div>
-    ) : null}
-    {fullscreenEventNode ? (
-      <div className="fixed inset-0 z-[200]">
-        <div className="absolute inset-0 bg-black/60" />
-        <div className="relative flex h-full w-full items-center justify-center p-4">
-          <div className="w-full max-w-xl rounded-3xl border border-white/20 bg-neutral-900/95 p-4 shadow-2xl backdrop-blur">
-            {fullscreenEventNode}
-          </div>
-        </div>
-      </div>
-    ) : null}
-    <button
-      type="button"
-      onClick={() => setShowActivityPopup((open) => !open)}
-      className="fixed bottom-1 left-1 z-[20] inline-flex h-8 items-center justify-center rounded-full border border-white/20 bg-neutral-900/90 px-3 text-xs font-semibold leading-none text-white shadow-lg backdrop-blur transition hover:bg-neutral-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
-      aria-label="Open activity and wallet transactions"
-      aria-expanded={showActivityPopup}
-    >
-      Log
-    </button>
-    <ActivityPopupV2
-      isOpen={showActivityPopup}
-      onClose={() => setShowActivityPopup(false)}
-      events={events}
-      players={players}
-      boardPack={selectedBoardPack}
-      currencySymbol={currencySymbol}
-      currentPlayerId={currentUserPlayerId}
-    />
-    {showMenuOverlay ? (
-      <div
-        className="fixed inset-0 z-40 flex items-center justify-center bg-black/55 p-4"
-        onClick={closeMenuOverlay}
+      ) : null}
+      <button
+        type="button"
+        onClick={() => setShowActivityPopup((open) => !open)}
+        className="fixed bottom-1 left-1 z-[20] inline-flex h-8 items-center justify-center rounded-full border border-white/20 bg-neutral-900/90 px-3 text-xs font-semibold leading-none text-white shadow-lg backdrop-blur transition hover:bg-neutral-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+        aria-label="Open activity and wallet transactions"
+        aria-expanded={showActivityPopup}
       >
+        Log
+      </button>
+      <ActivityPopupV2
+        isOpen={showActivityPopup}
+        onClose={() => setShowActivityPopup(false)}
+        events={events}
+        players={players}
+        boardPack={selectedBoardPack}
+        currencySymbol={currencySymbol}
+        currentPlayerId={currentUserPlayerId}
+      />
+      {showMenuOverlay ? (
         <div
-          className="relative z-[41] w-full max-w-sm rounded-2xl border border-white/15 bg-neutral-900/95 p-4 shadow-2xl backdrop-blur"
-          onClick={(event) => event.stopPropagation()}
+          className="fixed inset-0 z-40 flex items-center justify-center bg-black/55 p-4"
+          onClick={closeMenuOverlay}
         >
-          <p className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-white/60">Menu</p>
-          <div className="space-y-2">
-            <button
-              type="button"
-              onClick={handleBackToHomeIntent}
-              disabled={backHomeDisabled}
-              className="w-full rounded-xl border border-white/15 bg-white/5 px-4 py-2.5 text-left text-sm font-semibold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {backHomeDisabled
-                ? actionLoading === "END_GAME"
-                  ? "Ending…"
-                  : "Leaving…"
-                : "Back to Home"}
-            </button>
-            {inGame ? (
+          <div
+            className="relative z-[41] w-full max-w-sm rounded-2xl border border-white/15 bg-neutral-900/95 p-4 shadow-2xl backdrop-blur"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <p className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-white/60">
+              Menu
+            </p>
+            <div className="space-y-2">
               <button
                 type="button"
-                onClick={handleLeaveIntent}
-                disabled={leaveMenuDisabled}
+                onClick={handleBackToHomeIntent}
+                disabled={backHomeDisabled}
                 className="w-full rounded-xl border border-white/15 bg-white/5 px-4 py-2.5 text-left text-sm font-semibold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {leaveMenuDisabled ? "Leaving…" : "Leave Table"}
+                {backHomeDisabled
+                  ? actionLoading === "END_GAME"
+                    ? "Ending…"
+                    : "Leaving…"
+                  : "Back to Home"}
               </button>
-            ) : null}
-            {isHost && inGame ? (
+              {inGame ? (
+                <button
+                  type="button"
+                  onClick={handleLeaveIntent}
+                  disabled={leaveMenuDisabled}
+                  className="w-full rounded-xl border border-white/15 bg-white/5 px-4 py-2.5 text-left text-sm font-semibold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {leaveMenuDisabled ? "Leaving…" : "Leave Table"}
+                </button>
+              ) : null}
+              {isHost && inGame ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    closeMenuOverlay();
+                    setShowEndSessionConfirm(true);
+                  }}
+                  disabled={endMenuDisabled}
+                  className="w-full rounded-xl border border-red-300/50 bg-red-500/20 px-4 py-2.5 text-left text-sm font-semibold text-red-100 transition hover:bg-red-500/30 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {endMenuDisabled ? "Ending…" : "End Session"}
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+      <ConfirmActionModalV2
+        open={showEndSessionConfirm}
+        title="End session for everyone?"
+        description="This will end the game and send all players back to Home."
+        confirmLabel={actionLoading === "END_GAME" ? "Ending…" : "End Session"}
+        cancelLabel="Cancel"
+        isConfirming={isActionInFlight}
+        onConfirm={() => {
+          if (isActionInFlight) {
+            return;
+          }
+          setShowEndSessionConfirm(false);
+          void handleEndSessionV2();
+        }}
+        onCancel={() => {
+          if (isActionInFlight) {
+            return;
+          }
+          setShowEndSessionConfirm(false);
+        }}
+      />
+      <ConfirmActionModalV2
+        open={showLeaveConfirm}
+        title="Leave table?"
+        description="You will leave the game and return Home."
+        confirmLabel={actionLoading === "LEAVE_GAME" ? "Leaving…" : "Leave"}
+        cancelLabel="Cancel"
+        isConfirming={isActionInFlight}
+        onConfirm={() => {
+          if (isActionInFlight) {
+            return;
+          }
+          setShowLeaveConfirm(false);
+          void handleLeaveTableV2();
+        }}
+        onCancel={() => {
+          if (isActionInFlight) {
+            return;
+          }
+          setShowLeaveConfirm(false);
+        }}
+      />
+      {showHostLeaveGuard ? (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-md rounded-3xl border border-amber-200 bg-white/95 p-5 shadow-2xl ring-1 ring-black/10 backdrop-blur">
+            <p className="text-xs font-semibold uppercase tracking-wide text-amber-600">
+              Host action required
+            </p>
+            <p className="mt-1 text-lg font-semibold text-neutral-900">
+              You’re the host
+            </p>
+            <p className="mt-2 text-sm text-neutral-700">
+              Leaving without ending can orphan the table. What do you want to
+              do?
+            </p>
+            <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
               <button
                 type="button"
+                className="rounded-2xl border border-neutral-300 px-4 py-2 text-sm font-semibold text-neutral-700 disabled:opacity-50"
                 onClick={() => {
-                  closeMenuOverlay();
-                  setShowEndSessionConfirm(true);
+                  if (isActionInFlight) {
+                    return;
+                  }
+                  setShowHostLeaveGuard(false);
                 }}
-                disabled={endMenuDisabled}
-                className="w-full rounded-xl border border-red-300/50 bg-red-500/20 px-4 py-2.5 text-left text-sm font-semibold text-red-100 transition hover:bg-red-500/30 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={isActionInFlight}
               >
-                {endMenuDisabled ? "Ending…" : "End Session"}
+                Cancel
               </button>
-            ) : null}
+              <button
+                type="button"
+                className="rounded-2xl bg-red-600 px-4 py-2 text-sm font-semibold text-white disabled:bg-red-200"
+                onClick={() => {
+                  if (isActionInFlight) {
+                    return;
+                  }
+                  setShowHostLeaveGuard(false);
+                  void handleEndSessionV2();
+                }}
+                disabled={isActionInFlight}
+              >
+                {actionLoading === "END_GAME" ? "Ending…" : "End Session"}
+              </button>
+            </div>
           </div>
         </div>
-      </div>
-    ) : null}
-    <ConfirmActionModalV2
-      open={showEndSessionConfirm}
-      title="End session for everyone?"
-      description="This will end the game and send all players back to Home."
-      confirmLabel={actionLoading === "END_GAME" ? "Ending…" : "End Session"}
-      cancelLabel="Cancel"
-      isConfirming={isActionInFlight}
-      onConfirm={() => {
-        if (isActionInFlight) {
-          return;
+      ) : null}
+      <ConfirmActionModalV2
+        open={sellToMarketTileIndex !== null}
+        title="Sell property to market?"
+        description="You will receive 70% of listed price."
+        confirmLabel="Confirm"
+        isConfirming={actionLoading === "SELL_TO_MARKET"}
+        onConfirm={handleConfirmSellToMarket}
+        onCancel={() => setSellToMarketTileIndex(null)}
+      />
+      <AuctionOverlayV2
+        auctionActive={auctionActive}
+        auctionTile={auctionTile}
+        highestBid={auctionHighestBid}
+        highestBidderName={auctionHighestBidderName}
+        turnPlayerId={auctionTurnPlayerId}
+        turnPlayerName={auctionTurnPlayerName}
+        auctionCountdownLabel={auctionCountdownLabel}
+        canAct={canActInAuction}
+        minIncrement={auctionMinIncrement}
+        bidderCash={currentBidderCash}
+        actionLoading={actionLoading}
+        boardPackEconomy={
+          selectedBoardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY
         }
-        setShowEndSessionConfirm(false);
-        void handleEndSessionV2();
-      }}
-      onCancel={() => {
-        if (isActionInFlight) {
-          return;
-        }
-        setShowEndSessionConfirm(false);
-      }}
-    />
-    <ConfirmActionModalV2
-      open={showLeaveConfirm}
-      title="Leave table?"
-      description="You will leave the game and return Home."
-      confirmLabel={actionLoading === "LEAVE_GAME" ? "Leaving…" : "Leave"}
-      cancelLabel="Cancel"
-      isConfirming={isActionInFlight}
-      onConfirm={() => {
-        if (isActionInFlight) {
-          return;
-        }
-        setShowLeaveConfirm(false);
-        void handleLeaveTableV2();
-      }}
-      onCancel={() => {
-        if (isActionInFlight) {
-          return;
-        }
-        setShowLeaveConfirm(false);
-      }}
-    />
-    {showHostLeaveGuard ? (
-      <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
-        <div className="w-full max-w-md rounded-3xl border border-amber-200 bg-white/95 p-5 shadow-2xl ring-1 ring-black/10 backdrop-blur">
-          <p className="text-xs font-semibold uppercase tracking-wide text-amber-600">Host action required</p>
-          <p className="mt-1 text-lg font-semibold text-neutral-900">You’re the host</p>
-          <p className="mt-2 text-sm text-neutral-700">Leaving without ending can orphan the table. What do you want to do?</p>
-          <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <button
-              type="button"
-              className="rounded-2xl border border-neutral-300 px-4 py-2 text-sm font-semibold text-neutral-700 disabled:opacity-50"
-              onClick={() => {
-                if (isActionInFlight) {
-                  return;
-                }
-                setShowHostLeaveGuard(false);
-              }}
-              disabled={isActionInFlight}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="rounded-2xl bg-red-600 px-4 py-2 text-sm font-semibold text-white disabled:bg-red-200"
-              onClick={() => {
-                if (isActionInFlight) {
-                  return;
-                }
-                setShowHostLeaveGuard(false);
-                void handleEndSessionV2();
-              }}
-              disabled={isActionInFlight}
-            >
-              {actionLoading === "END_GAME" ? "Ending…" : "End Session"}
-            </button>
-          </div>
-        </div>
-      </div>
-    ) : null}
-    <ConfirmActionModalV2
-      open={sellToMarketTileIndex !== null}
-      title="Sell property to market?"
-      description="You will receive 70% of listed price."
-      confirmLabel="Confirm"
-      isConfirming={actionLoading === "SELL_TO_MARKET"}
-      onConfirm={handleConfirmSellToMarket}
-      onCancel={() => setSellToMarketTileIndex(null)}
-    />
-    <AuctionOverlayV2
-      auctionActive={auctionActive}
-      auctionTile={auctionTile}
-      highestBid={auctionHighestBid}
-      highestBidderName={auctionHighestBidderName}
-      turnPlayerId={auctionTurnPlayerId}
-      turnPlayerName={auctionTurnPlayerName}
-      auctionCountdownLabel={auctionCountdownLabel}
-      canAct={canActInAuction}
-      minIncrement={auctionMinIncrement}
-      bidderCash={currentBidderCash}
-      actionLoading={actionLoading}
-      boardPackEconomy={selectedBoardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY}
-      onBid={handleAuctionBid}
-      onPass={handleAuctionPass}
-    />
+        onBid={handleAuctionBid}
+        onPass={handleAuctionPass}
+      />
       {/*
         Verification checklist:
         - Landing on property shows decision modal.
