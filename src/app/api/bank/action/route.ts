@@ -1843,6 +1843,7 @@ const createInsolvencyPendingAction = ({
   tileIndex = null,
   tileId = null,
   label = null,
+  taxKind,
 }: {
   playerId: string;
   reason: InsolvencyReason;
