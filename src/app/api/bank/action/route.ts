@@ -1382,6 +1382,92 @@ const getEventDeckForTile = (
   return null;
 };
 
+type EventDeckState = {
+  nextChanceIndex: number;
+  nextCommunityIndex: number;
+  nextChanceOrder: number[] | null;
+  nextCommunityOrder: number[] | null;
+  nextChanceDrawPtr: number;
+  nextCommunityDrawPtr: number;
+  nextChanceSeed: number | null;
+  nextCommunitySeed: number | null;
+  nextChanceReshuffleCount: number;
+  nextCommunityReshuffleCount: number;
+  chanceStateChanged: boolean;
+  communityStateChanged: boolean;
+};
+
+const drawEventCardForLanding = ({
+  landingTile,
+  boardPack,
+  gameId,
+  state,
+}: {
+  landingTile: TileInfo;
+  boardPack: ReturnType<typeof getBoardPackById> | null;
+  gameId: string;
+  state: EventDeckState;
+}) => {
+  const eventDeck =
+    landingTile.type === "EVENT"
+      ? getEventDeckForTile(landingTile, boardPack)
+      : null;
+  if (!eventDeck) {
+    return null;
+  }
+
+  const currentIndex =
+    eventDeck.indexKey === "chance_index"
+      ? state.nextChanceIndex
+      : state.nextCommunityIndex;
+  const drawResult =
+    eventDeck.indexKey === "chance_index"
+      ? prepareDeckDraw({
+          deckLength: eventDeck.cards.length,
+          deckLabel: "chance",
+          gameId,
+          state: {
+            order: state.nextChanceOrder,
+            drawPtr: state.nextChanceDrawPtr,
+            seed: state.nextChanceSeed,
+            reshuffleCount: state.nextChanceReshuffleCount,
+          },
+        })
+      : prepareDeckDraw({
+          deckLength: eventDeck.cards.length,
+          deckLabel: "community",
+          gameId,
+          state: {
+            order: state.nextCommunityOrder,
+            drawPtr: state.nextCommunityDrawPtr,
+            seed: state.nextCommunitySeed,
+            reshuffleCount: state.nextCommunityReshuffleCount,
+          },
+        });
+  const card = eventDeck.cards[drawResult.cardIndex];
+  if (!card) {
+    throw new Error("Drawn card index out of range.");
+  }
+
+  if (eventDeck.indexKey === "chance_index") {
+    state.nextChanceIndex = currentIndex + 1;
+    state.nextChanceOrder = drawResult.order;
+    state.nextChanceDrawPtr = drawResult.drawPtr;
+    state.nextChanceSeed = drawResult.seed;
+    state.nextChanceReshuffleCount = drawResult.reshuffleCount;
+    state.chanceStateChanged = true;
+  } else {
+    state.nextCommunityIndex = currentIndex + 1;
+    state.nextCommunityOrder = drawResult.order;
+    state.nextCommunityDrawPtr = drawResult.drawPtr;
+    state.nextCommunitySeed = drawResult.seed;
+    state.nextCommunityReshuffleCount = drawResult.reshuffleCount;
+    state.communityStateChanged = true;
+  }
+
+  return { eventDeck, drawResult, card };
+};
+
 const getNumberPayload = (
   payload: Record<string, unknown>,
   key: string,
@@ -6292,6 +6378,20 @@ export async function POST(request: Request) {
       const rollTotal =
         typeof gameState.last_roll === "number" ? gameState.last_roll : null;
       const ownershipByTile = await loadOwnershipByTile(gameId);
+      const eventDeckState: EventDeckState = {
+        nextChanceIndex: gameState?.chance_index ?? 0,
+        nextCommunityIndex: gameState?.community_index ?? 0,
+        nextChanceOrder: gameState?.chance_order ?? null,
+        nextCommunityOrder: gameState?.community_order ?? null,
+        nextChanceDrawPtr: gameState?.chance_draw_ptr ?? 0,
+        nextCommunityDrawPtr: gameState?.community_draw_ptr ?? 0,
+        nextChanceSeed: gameState?.chance_seed ?? null,
+        nextCommunitySeed: gameState?.community_seed ?? null,
+        nextChanceReshuffleCount: gameState?.chance_reshuffle_count ?? 0,
+        nextCommunityReshuffleCount: gameState?.community_reshuffle_count ?? 0,
+        chanceStateChanged: false,
+        communityStateChanged: false,
+      };
       let cardTriggeredGoToJail = false;
       let cardUtilityRollOverride:
         | { total: number; dice: [number, number] }
@@ -6342,6 +6442,135 @@ export async function POST(request: Request) {
         cardTriggeredGoToJail,
       } = cardResult);
 
+      if (activeLandingTile.type === "EVENT") {
+        const drawOutcome = drawEventCardForLanding({
+          landingTile: activeLandingTile,
+          boardPack,
+          gameId,
+          state: eventDeckState,
+        });
+        if (!drawOutcome) {
+          return NextResponse.json(
+            { error: "Unable to resolve event deck for tile." },
+            { status: 500 },
+          );
+        }
+
+        events.push({
+          event_type: "DRAW_CARD",
+          payload: {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.display_name,
+            deck: drawOutcome.eventDeck.deck,
+            card_id: drawOutcome.card.id,
+            card_title: drawOutcome.card.title,
+            card_kind: drawOutcome.card.kind,
+            draw_index: drawOutcome.drawResult.drawIndex,
+          },
+        });
+        events.push({
+          event_type: "CARD_REVEALED",
+          payload: {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.display_name,
+            deck: drawOutcome.eventDeck.deck,
+            card_id: drawOutcome.card.id,
+            card_title: drawOutcome.card.title,
+            card_kind: drawOutcome.card.kind,
+          },
+        });
+
+        const finalVersion = currentVersion + events.length;
+        const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+          `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+          {
+            method: "PATCH",
+            headers: {
+              Prefer: "return=representation",
+            },
+            body: JSON.stringify({
+              version: finalVersion,
+              ...(balancesChanged ? { balances: updatedBalances } : {}),
+              ...(eventDeckState.nextChanceIndex !== (gameState?.chance_index ?? 0)
+                ? { chance_index: eventDeckState.nextChanceIndex }
+                : {}),
+              ...(eventDeckState.nextCommunityIndex !== (gameState?.community_index ?? 0)
+                ? { community_index: eventDeckState.nextCommunityIndex }
+                : {}),
+              ...(eventDeckState.chanceStateChanged
+                ? {
+                    chance_order: eventDeckState.nextChanceOrder,
+                    chance_draw_ptr: eventDeckState.nextChanceDrawPtr,
+                    chance_seed: eventDeckState.nextChanceSeed,
+                    chance_reshuffle_count: eventDeckState.nextChanceReshuffleCount,
+                  }
+                : {}),
+              ...(eventDeckState.communityStateChanged
+                ? {
+                    community_order: eventDeckState.nextCommunityOrder,
+                    community_draw_ptr: eventDeckState.nextCommunityDrawPtr,
+                    community_seed: eventDeckState.nextCommunitySeed,
+                    community_reshuffle_count:
+                      eventDeckState.nextCommunityReshuffleCount,
+                  }
+                : {}),
+              pending_card_active: true,
+              pending_card_deck: drawOutcome.eventDeck.deck,
+              pending_card_id: drawOutcome.card.id,
+              pending_card_title: drawOutcome.card.title,
+              pending_card_kind: drawOutcome.card.kind,
+              pending_card_payload:
+                typeof drawOutcome.card.payload === "object" &&
+                drawOutcome.card.payload
+                  ? drawOutcome.card.payload
+                  : null,
+              pending_card_drawn_by_player_id: currentPlayer.id,
+              pending_card_drawn_at: new Date().toISOString(),
+              pending_card_source_tile_index: activeResolvedTile.index,
+              turn_phase: "AWAITING_CARD_CONFIRM",
+              pending_action: null,
+              updated_at: new Date().toISOString(),
+            }),
+          },
+        )) ?? [];
+
+        if (!updatedState) {
+          return NextResponse.json(
+            { error: "Version mismatch." },
+            { status: 409 },
+          );
+        }
+
+        const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
+          `players?id=eq.${currentPlayer.id}`,
+          {
+            method: "PATCH",
+            headers: {
+              Prefer: "return=representation",
+            },
+            body: JSON.stringify({
+              position: finalPosition,
+              is_in_jail: Boolean(shouldSendToJail && jailTile),
+              jail_turns_remaining: shouldSendToJail && jailTile ? 3 : 0,
+              ...(getOutOfJailFreeCountChanged
+                ? { get_out_of_jail_free_count: nextGetOutOfJailFreeCount }
+                : {}),
+            }),
+          },
+        )) ?? [];
+
+        if (!updatedPlayer) {
+          return NextResponse.json(
+            { error: "Unable to update player position." },
+            { status: 500 },
+          );
+        }
+
+        await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+
+        return NextResponse.json({ gameState: updatedState });
+      }
+
       return await finalizeMoveResolution({
         gameId,
         gameState,
@@ -6374,18 +6603,18 @@ export async function POST(request: Request) {
           gameState?.active_macro_effects_v1,
           rules.macroEnabled,
         ),
-        nextChanceIndex: gameState.chance_index ?? 0,
-        nextCommunityIndex: gameState.community_index ?? 0,
-        nextChanceOrder: gameState.chance_order ?? null,
-        nextCommunityOrder: gameState.community_order ?? null,
-        nextChanceDrawPtr: gameState.chance_draw_ptr ?? 0,
-        nextCommunityDrawPtr: gameState.community_draw_ptr ?? 0,
-        nextChanceSeed: gameState.chance_seed ?? null,
-        nextCommunitySeed: gameState.community_seed ?? null,
-        nextChanceReshuffleCount: gameState.chance_reshuffle_count ?? 0,
-        nextCommunityReshuffleCount: gameState.community_reshuffle_count ?? 0,
-        chanceStateChanged: false,
-        communityStateChanged: false,
+        nextChanceIndex: eventDeckState.nextChanceIndex,
+        nextCommunityIndex: eventDeckState.nextCommunityIndex,
+        nextChanceOrder: eventDeckState.nextChanceOrder,
+        nextCommunityOrder: eventDeckState.nextCommunityOrder,
+        nextChanceDrawPtr: eventDeckState.nextChanceDrawPtr,
+        nextCommunityDrawPtr: eventDeckState.nextCommunityDrawPtr,
+        nextChanceSeed: eventDeckState.nextChanceSeed,
+        nextCommunitySeed: eventDeckState.nextCommunitySeed,
+        nextChanceReshuffleCount: eventDeckState.nextChanceReshuffleCount,
+        nextCommunityReshuffleCount: eventDeckState.nextCommunityReshuffleCount,
+        chanceStateChanged: eventDeckState.chanceStateChanged,
+        communityStateChanged: eventDeckState.communityStateChanged,
         nextGetOutOfJailFreeCount,
         getOutOfJailFreeCountChanged,
         extraGameStatePatch: {
@@ -6756,69 +6985,50 @@ export async function POST(request: Request) {
       let cardUtilityRollOverride:
         | { total: number; dice: [number, number] }
         | null = null;
-      const eventDeck =
-        landingTile.type === "EVENT"
-          ? getEventDeckForTile(landingTile, boardPack)
-          : null;
-      if (eventDeck) {
-        const currentIndex =
-          eventDeck.indexKey === "chance_index"
-            ? nextChanceIndex
-            : nextCommunityIndex;
-        const drawResult =
-          eventDeck.indexKey === "chance_index"
-            ? prepareDeckDraw({
-                deckLength: eventDeck.cards.length,
-                deckLabel: "chance",
-                gameId,
-                state: {
-                  order: nextChanceOrder,
-                  drawPtr: nextChanceDrawPtr,
-                  seed: nextChanceSeed,
-                  reshuffleCount: nextChanceReshuffleCount,
-                },
-              })
-            : prepareDeckDraw({
-                deckLength: eventDeck.cards.length,
-                deckLabel: "community",
-                gameId,
-                state: {
-                  order: nextCommunityOrder,
-                  drawPtr: nextCommunityDrawPtr,
-                  seed: nextCommunitySeed,
-                  reshuffleCount: nextCommunityReshuffleCount,
-                },
-              });
-        const card = eventDeck.cards[drawResult.cardIndex];
-        if (!card) {
-          throw new Error("Drawn card index out of range.");
-        }
-        if (eventDeck.indexKey === "chance_index") {
-          nextChanceIndex = currentIndex + 1;
-          nextChanceOrder = drawResult.order;
-          nextChanceDrawPtr = drawResult.drawPtr;
-          nextChanceSeed = drawResult.seed;
-          nextChanceReshuffleCount = drawResult.reshuffleCount;
-          chanceStateChanged = true;
-        } else {
-          nextCommunityIndex = currentIndex + 1;
-          nextCommunityOrder = drawResult.order;
-          nextCommunityDrawPtr = drawResult.drawPtr;
-          nextCommunitySeed = drawResult.seed;
-          nextCommunityReshuffleCount = drawResult.reshuffleCount;
-          communityStateChanged = true;
-        }
+      const eventDeckState: EventDeckState = {
+        nextChanceIndex,
+        nextCommunityIndex,
+        nextChanceOrder,
+        nextCommunityOrder,
+        nextChanceDrawPtr,
+        nextCommunityDrawPtr,
+        nextChanceSeed,
+        nextCommunitySeed,
+        nextChanceReshuffleCount,
+        nextCommunityReshuffleCount,
+        chanceStateChanged,
+        communityStateChanged,
+      };
+      const drawOutcome = drawEventCardForLanding({
+        landingTile,
+        boardPack,
+        gameId,
+        state: eventDeckState,
+      });
+      if (drawOutcome) {
+        nextChanceIndex = eventDeckState.nextChanceIndex;
+        nextCommunityIndex = eventDeckState.nextCommunityIndex;
+        nextChanceOrder = eventDeckState.nextChanceOrder;
+        nextCommunityOrder = eventDeckState.nextCommunityOrder;
+        nextChanceDrawPtr = eventDeckState.nextChanceDrawPtr;
+        nextCommunityDrawPtr = eventDeckState.nextCommunityDrawPtr;
+        nextChanceSeed = eventDeckState.nextChanceSeed;
+        nextCommunitySeed = eventDeckState.nextCommunitySeed;
+        nextChanceReshuffleCount = eventDeckState.nextChanceReshuffleCount;
+        nextCommunityReshuffleCount = eventDeckState.nextCommunityReshuffleCount;
+        chanceStateChanged = eventDeckState.chanceStateChanged;
+        communityStateChanged = eventDeckState.communityStateChanged;
 
         events.push({
           event_type: "DRAW_CARD",
           payload: {
             player_id: currentPlayer.id,
             player_name: currentPlayer.display_name,
-            deck: eventDeck.deck,
-            card_id: card.id,
-            card_title: card.title,
-            card_kind: card.kind,
-            draw_index: drawResult.drawIndex,
+            deck: drawOutcome.eventDeck.deck,
+            card_id: drawOutcome.card.id,
+            card_title: drawOutcome.card.title,
+            card_kind: drawOutcome.card.kind,
+            draw_index: drawOutcome.drawResult.drawIndex,
           },
         });
         events.push({
@@ -6826,10 +7036,10 @@ export async function POST(request: Request) {
           payload: {
             player_id: currentPlayer.id,
             player_name: currentPlayer.display_name,
-            deck: eventDeck.deck,
-            card_id: card.id,
-            card_title: card.title,
-            card_kind: card.kind,
+            deck: drawOutcome.eventDeck.deck,
+            card_id: drawOutcome.card.id,
+            card_title: drawOutcome.card.title,
+            card_kind: drawOutcome.card.kind,
           },
         });
 
@@ -6869,13 +7079,13 @@ export async function POST(request: Request) {
                   }
                 : {}),
               pending_card_active: true,
-              pending_card_deck: eventDeck.deck,
-              pending_card_id: card.id,
-              pending_card_title: card.title,
-              pending_card_kind: card.kind,
+              pending_card_deck: drawOutcome.eventDeck.deck,
+              pending_card_id: drawOutcome.card.id,
+              pending_card_title: drawOutcome.card.title,
+              pending_card_kind: drawOutcome.card.kind,
               pending_card_payload:
-                typeof card.payload === "object" && card.payload
-                  ? card.payload
+                typeof drawOutcome.card.payload === "object" && drawOutcome.card.payload
+                  ? drawOutcome.card.payload
                   : null,
               pending_card_drawn_by_player_id: currentPlayer.id,
               pending_card_drawn_at: new Date().toISOString(),
