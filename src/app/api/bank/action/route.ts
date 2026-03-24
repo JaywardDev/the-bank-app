@@ -124,6 +124,7 @@ type BankActionRequest =
         | "JAIL_PAY_FINE"
         | "JAIL_ROLL_FOR_DOUBLES"
         | "USE_GET_OUT_OF_JAIL_FREE"
+        | "CONFIRM_GO_TO_JAIL"
         | "CONFIRM_PENDING_CARD"
         | "CONFIRM_MACRO_EVENT"
         | "CONFIRM_INSOLVENCY_PAYMENT"
@@ -277,6 +278,14 @@ type IncomeTaxPendingAction = {
   currency_code: string;
   currency_symbol: string;
   return_turn_phase: string;
+};
+
+type GoToJailPendingAction = {
+  type: "GO_TO_JAIL_CONFIRM";
+  player_id: string;
+  source: "tile" | "card" | "three_doubles" | "other";
+  from_tile_index: number;
+  to_jail_tile_index: number;
 };
 
 
@@ -2165,6 +2174,24 @@ const commitResolvedMoveState = async ({
   return updatedState;
 };
 
+const createGoToJailPendingAction = ({
+  currentPlayer,
+  jailTile,
+  source,
+  fromTileIndex,
+}: {
+  currentPlayer: PlayerRow;
+  jailTile: TileInfo;
+  source: GoToJailPendingAction["source"];
+  fromTileIndex: number;
+}): GoToJailPendingAction => ({
+  type: "GO_TO_JAIL_CONFIRM",
+  player_id: currentPlayer.id,
+  source,
+  from_tile_index: fromTileIndex,
+  to_jail_tile_index: jailTile.index,
+});
+
 const resolveBankruptcyIfNeeded = async ({
   gameId,
   gameState,
@@ -2768,7 +2795,8 @@ const applyCardEffect = ({
               name: "Jail",
             }
           : null;
-      const cardResolvedTile = cardJailTile ?? cardLandingTile;
+      const cardResolvedTile =
+        cardLandingTile.type === "GO_TO_JAIL" ? cardLandingTile : cardJailTile ?? cardLandingTile;
       jailTile = cardJailTile ?? jailTile;
       shouldSendToJail =
         cardLandingTile.type === "GO_TO_JAIL" && Boolean(cardJailTile);
@@ -2856,15 +2884,6 @@ const applyCardEffect = ({
 
       if (cardLandingTile.type === "GO_TO_JAIL" && cardJailTile) {
         cardTriggeredGoToJail = true;
-        events.push({
-          event_type: "GO_TO_JAIL",
-          payload: {
-            from_tile_index: cardLandingTile.index,
-            to_jail_tile_index: cardJailTile.index,
-            player_id: currentPlayer.id,
-            display_name: currentPlayer.display_name,
-          },
-        });
       }
     }
   }
@@ -2880,7 +2899,7 @@ const applyCardEffect = ({
       };
     activeLandingTile = cardJailTile;
     activeResolvedTile = cardJailTile;
-    finalPosition = cardJailTile.index;
+    finalPosition = cardFromIndex;
     shouldSendToJail = true;
     jailTile = cardJailTile;
     cardTriggeredGoToJail = true;
@@ -2898,47 +2917,6 @@ const applyCardEffect = ({
       },
     });
 
-    events.push(
-      {
-        event_type: "MOVE_PLAYER",
-        payload: {
-          player_id: currentPlayer.id,
-          from: cardFromIndex,
-          to: cardJailTile.index,
-          tile_id: cardJailTile.tile_id,
-          tile_name: cardJailTile.name,
-          reason: "CARD",
-          card_id: card.id,
-        },
-      },
-      {
-        event_type: "LAND_ON_TILE",
-        payload: {
-          player_id: currentPlayer.id,
-          tile_id: cardJailTile.tile_id,
-          tile_type: cardJailTile.type,
-          tile_index: cardJailTile.index,
-        },
-      },
-    );
-
-    const cardResolutionEvent = resolveTile(cardJailTile, currentPlayer);
-    if (cardResolutionEvent) {
-      events.push({
-        event_type: cardResolutionEvent.event_type,
-        payload: cardResolutionEvent.payload,
-      });
-    }
-
-    events.push({
-      event_type: "GO_TO_JAIL",
-      payload: {
-        from_tile_index: cardFromIndex,
-        to_jail_tile_index: cardJailTile.index,
-        player_id: currentPlayer.id,
-        display_name: currentPlayer.display_name,
-      },
-    });
   }
 
   return {
@@ -3190,22 +3168,6 @@ const finalizeMoveResolution = async ({
         })
       : null;
   const isFreeParking = activeLandingTile.type === "FREE_PARKING";
-
-  if (
-    activeLandingTile.type === "GO_TO_JAIL" &&
-    jailTile &&
-    !cardTriggeredGoToJail
-  ) {
-    events.push({
-      event_type: "GO_TO_JAIL",
-      payload: {
-        from_tile_index: activeLandingTile.index,
-        to_jail_tile_index: jailTile.index,
-        player_id: currentPlayer.id,
-        display_name: currentPlayer.display_name,
-      },
-    });
-  }
 
   if (isCollateralized && rentOwnerId && rentOwnerId !== currentPlayer.id) {
     shouldPayRent = false;
@@ -3464,149 +3426,6 @@ const finalizeMoveResolution = async ({
   }
 
   if (shouldSendToJail && jailTile) {
-    const nextPlayer = getNextActivePlayer(players, gameState.current_player_id);
-
-    if (!nextPlayer) {
-      return NextResponse.json(
-        { error: "No active players remaining." },
-        { status: 409 },
-      );
-    }
-
-    events.push({
-      event_type: "END_TURN",
-      payload: {
-        from_player_id: currentPlayer.id,
-        from_player_name: currentPlayer.display_name,
-        to_player_id: nextPlayer.id,
-        to_player_name: nextPlayer.display_name,
-      },
-    });
-
-    const firstActivePlayer = getFirstActivePlayer(players);
-    const tableRoundAdvanced = Boolean(
-      firstActivePlayer && nextPlayer.id === firstActivePlayer.id,
-    );
-    const nextRound =
-      (gameState.rounds_elapsed ?? 0) + (tableRoundAdvanced ? 1 : 0);
-    const macroEnabled = rules.macroEnabled;
-    let nextLastMacroEventId = gameState.last_macro_event_id ?? null;
-    const activeMacroEffectsV1 = normalizeActiveMacroEffectsV1(
-      gameState.active_macro_effects_v1,
-    );
-    let nextActiveMacroEffectsV1 = activeMacroEffectsV1;
-    let triggeredMacroEvent: {
-      id: string;
-      name: string;
-      durationRounds: number;
-      headline: string;
-      flavor: string;
-      rulesText: string;
-      tooltip?: string;
-      effects: MacroEffectsV1;
-      rarity?: "common" | "uncommon" | "black_swan";
-    } | null = null;
-
-    if (macroEnabled && tableRoundAdvanced) {
-      const { updated: tickedMacroEffects, expired: expiredMacroEffects } =
-        tickMacroEffectsV1(activeMacroEffectsV1);
-      nextActiveMacroEffectsV1 = tickedMacroEffects;
-
-      for (const expiredEffect of expiredMacroEffects) {
-        events.push({
-          event_type: "MACRO_EXPIRED",
-          payload: {
-            macro_id: expiredEffect.id,
-            macro_name: expiredEffect.name,
-            round_index: nextRound,
-          },
-        });
-      }
-
-      const macroDeck = resolveMacroDeck(boardPack);
-      if (
-        nextRound % MACRO_EVENT_INTERVAL_ROUNDS === 0 &&
-        macroDeck.cards.length > 0
-      ) {
-        const macroEvent = macroDeck.draw(nextLastMacroEventId ?? undefined);
-        nextLastMacroEventId = macroEvent.id;
-        triggeredMacroEvent = macroEvent;
-        events.push({
-          event_type: "MACRO_EVENT_TRIGGERED",
-          payload: {
-            deck_id: macroDeck.id,
-            deck_name: macroDeck.name,
-            event_id: macroEvent.id,
-            event_name: macroEvent.name,
-            duration_rounds: macroEvent.durationRounds,
-            effects: macroEvent.effects,
-            rarity: macroEvent.rarity ?? null,
-            mode: "weighted",
-            tooltip: macroEvent.tooltip ?? null,
-            round_index: nextRound,
-          },
-        });
-      }
-    }
-
-    const loanResult = await applyLoanPaymentsForPlayer({
-      gameId,
-      player: nextPlayer,
-      balances: updatedBalances,
-      startingCash,
-      macroInterestTrendAccumulator: getMacroInterestTrendAccumulatorV1(
-        macroEnabled ? nextActiveMacroEffectsV1 : [],
-      ),
-      macroMortgageFlatDelta: getMacroMortgageFlatDeltaV1(
-        macroEnabled ? nextActiveMacroEffectsV1 : [],
-      ),
-    });
-    updatedBalances = loanResult.balances;
-    balancesChanged = balancesChanged || loanResult.balancesChanged;
-    events.push(...loanResult.events);
-
-    if (loanResult.bankruptcyCandidate) {
-      const bankruptcyResult = await enterInsolvencyRecovery({
-        gameId,
-        gameState,
-        player: nextPlayer,
-        candidate: loanResult.bankruptcyCandidate,
-        events,
-        currentVersion,
-        userId,
-      });
-
-      if (bankruptcyResult.handled) {
-        if (bankruptcyResult.error) {
-          return NextResponse.json(
-            { error: bankruptcyResult.error },
-            { status: 409 },
-          );
-        }
-        return NextResponse.json({ gameState: bankruptcyResult.updatedState });
-      }
-    }
-
-    const nextTurnPhase = nextPlayer.is_in_jail
-      ? "AWAITING_JAIL_DECISION"
-      : "AWAITING_ROLL";
-    const nextPendingAction = triggeredMacroEvent
-      ? {
-          type: "MACRO_EVENT",
-          macro_id: triggeredMacroEvent.id,
-          macroCardId: triggeredMacroEvent.id,
-          name: triggeredMacroEvent.name,
-          rarity: triggeredMacroEvent.rarity ?? null,
-          durationRounds: triggeredMacroEvent.durationRounds,
-          headline: triggeredMacroEvent.headline,
-          flavor: triggeredMacroEvent.flavor,
-          rulesText: triggeredMacroEvent.rulesText,
-          tooltip: triggeredMacroEvent.tooltip ?? null,
-          effects: triggeredMacroEvent.effects,
-          return_turn_phase: nextTurnPhase,
-        }
-      : null;
-
     const finalVersion = currentVersion + events.length;
     const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
       `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
@@ -3617,17 +3436,42 @@ const finalizeMoveResolution = async ({
         },
         body: JSON.stringify({
           version: finalVersion,
-          current_player_id: nextPlayer.id,
-          last_roll: null,
-          doubles_count: 0,
-          rounds_elapsed: nextRound,
-          last_macro_event_id: nextLastMacroEventId,
-          active_macro_effects_v1: nextActiveMacroEffectsV1,
+          last_roll: rollTotal ?? null,
+          doubles_count: nextDoublesCount,
           ...(balancesChanged ? { balances: updatedBalances } : {}),
-          pending_action: nextPendingAction,
-          turn_phase: triggeredMacroEvent
-            ? "AWAITING_CONFIRMATION"
-            : nextTurnPhase,
+          ...(nextChanceIndex !== (gameState?.chance_index ?? 0)
+            ? { chance_index: nextChanceIndex }
+            : {}),
+          ...(nextCommunityIndex !== (gameState?.community_index ?? 0)
+            ? { community_index: nextCommunityIndex }
+            : {}),
+          ...(chanceStateChanged
+            ? {
+                chance_order: nextChanceOrder,
+                chance_draw_ptr: nextChanceDrawPtr,
+                chance_seed: nextChanceSeed,
+                chance_reshuffle_count: nextChanceReshuffleCount,
+              }
+            : {}),
+          ...(communityStateChanged
+            ? {
+                community_order: nextCommunityOrder,
+                community_draw_ptr: nextCommunityDrawPtr,
+                community_seed: nextCommunitySeed,
+                community_reshuffle_count: nextCommunityReshuffleCount,
+              }
+            : {}),
+          pending_action: createGoToJailPendingAction({
+            currentPlayer,
+            jailTile,
+            source: cardTriggeredGoToJail
+              ? "card"
+              : activeLandingTile.type === "GO_TO_JAIL"
+                ? "tile"
+                : "other",
+            fromTileIndex: activeLandingTile.index,
+          }),
+          turn_phase: "AWAITING_GO_TO_JAIL_CONFIRM",
           ...(extraGameStatePatch ?? {}),
           updated_at: new Date().toISOString(),
         }),
@@ -3649,9 +3493,9 @@ const finalizeMoveResolution = async ({
           Prefer: "return=representation",
         },
         body: JSON.stringify({
-          position: jailTile.index,
-          is_in_jail: true,
-          jail_turns_remaining: 3,
+          position: finalPosition,
+          is_in_jail: false,
+          jail_turns_remaining: 0,
           ...(getOutOfJailFreeCountChanged
             ? { get_out_of_jail_free_count: nextGetOutOfJailFreeCount }
             : {}),
@@ -6365,7 +6209,7 @@ export async function POST(request: Request) {
               name: "Jail",
             }
           : null;
-      const resolvedTile = jailTile ?? sourceTile;
+      const resolvedTile = sourceTile;
       let finalPosition = resolvedTile.index;
       let shouldSendToJail =
         sourceTile.type === "GO_TO_JAIL" && Boolean(jailTile);
@@ -6392,8 +6236,8 @@ export async function POST(request: Request) {
         chanceStateChanged: false,
         communityStateChanged: false,
       };
-      let cardTriggeredGoToJail = false;
-      let cardUtilityRollOverride:
+      const cardTriggeredGoToJail = false;
+      const cardUtilityRollOverride:
         | { total: number; dice: [number, number] }
         | null = null;
       let nextGetOutOfJailFreeCount =
@@ -6631,6 +6475,127 @@ export async function POST(request: Request) {
       });
     }
 
+    if (body.action === "CONFIRM_GO_TO_JAIL") {
+      if (gameState.turn_phase !== "AWAITING_GO_TO_JAIL_CONFIRM") {
+        return NextResponse.json(
+          { error: "Not waiting for GO_TO_JAIL confirmation." },
+          { status: 409 },
+        );
+      }
+
+      const pendingAction =
+        gameState.pending_action && typeof gameState.pending_action === "object"
+          ? (gameState.pending_action as Partial<GoToJailPendingAction>)
+          : null;
+      if (
+        !pendingAction ||
+        pendingAction.type !== "GO_TO_JAIL_CONFIRM" ||
+        pendingAction.player_id !== currentPlayer.id ||
+        typeof pendingAction.to_jail_tile_index !== "number"
+      ) {
+        return NextResponse.json(
+          { error: "GO_TO_JAIL confirmation is not available." },
+          { status: 409 },
+        );
+      }
+
+      const boardTiles = boardPack?.tiles ?? [];
+      const jailTile =
+        boardTiles.find((tile) => tile.index === pendingAction.to_jail_tile_index) ??
+        boardTiles.find((tile) => tile.type === "JAIL") ?? {
+          index: pendingAction.to_jail_tile_index,
+          tile_id: "jail",
+          type: "JAIL",
+          name: "Jail",
+        };
+      const fromTileIndex = Number.isFinite(currentPlayer.position)
+        ? currentPlayer.position
+        : pendingAction.from_tile_index ?? jailTile.index;
+
+      const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
+        `players?id=eq.${currentPlayer.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            position: jailTile.index,
+            is_in_jail: true,
+            jail_turns_remaining: 3,
+          }),
+        },
+      )) ?? [];
+
+      if (!updatedPlayer) {
+        return NextResponse.json(
+          { error: "Unable to update player position." },
+          { status: 500 },
+        );
+      }
+
+      return await advanceTurn({
+        gameId,
+        gameState: {
+          ...gameState,
+          pending_action: null,
+          turn_phase: "AWAITING_ROLL",
+        },
+        players,
+        currentPlayer,
+        currentVersion,
+        userId: user.id,
+        rules,
+        startingCash: startingCash,
+        boardPack,
+        extraEvents: [
+          {
+            event_type: "MOVE_PLAYER",
+            payload: {
+              player_id: currentPlayer.id,
+              from: fromTileIndex,
+              to: jailTile.index,
+              tile_id: jailTile.tile_id,
+              tile_name: jailTile.name,
+              reason: "GO_TO_JAIL_CONFIRM",
+            },
+          },
+          {
+            event_type: "LAND_ON_TILE",
+            payload: {
+              player_id: currentPlayer.id,
+              tile_id: jailTile.tile_id,
+              tile_type: jailTile.type,
+              tile_index: jailTile.index,
+            },
+          },
+          {
+            event_type: "LAND_JAIL",
+            payload: {
+              player_id: currentPlayer.id,
+              player_name: currentPlayer.display_name,
+              tile_id: jailTile.tile_id,
+              tile_name: jailTile.name,
+              tile_index: jailTile.index,
+            },
+          },
+          {
+            event_type: "GO_TO_JAIL",
+            payload: {
+              from_tile_index: fromTileIndex,
+              to_jail_tile_index: jailTile.index,
+              player_id: currentPlayer.id,
+              display_name: currentPlayer.display_name,
+              source: pendingAction.source ?? "other",
+            },
+          },
+        ],
+        extraGameStatePatch: {
+          pending_action: null,
+        },
+      });
+    }
+
     if (body.action === "ROLL_DICE") {
       if (gameState.pending_action) {
         return NextResponse.json(
@@ -6705,7 +6670,7 @@ export async function POST(request: Request) {
         name: `Tile ${newPosition}`,
       };
       const ownershipByTile = await loadOwnershipByTile(gameId);
-      let jailTile =
+      const jailTile =
         landingTile.type === "GO_TO_JAIL"
           ? boardTiles.find((tile) => tile.type === "JAIL") ?? {
               index: 10,
@@ -6714,15 +6679,15 @@ export async function POST(request: Request) {
               name: "Jail",
             }
           : null;
-      const resolvedTile = jailTile ?? landingTile;
-      let finalPosition = resolvedTile.index;
-      let shouldSendToJail = landingTile.type === "GO_TO_JAIL" && Boolean(jailTile);
-      let activeLandingTile = landingTile;
-      let activeResolvedTile = resolvedTile;
+      const resolvedTile = landingTile;
+      const finalPosition = resolvedTile.index;
+      const shouldSendToJail = landingTile.type === "GO_TO_JAIL" && Boolean(jailTile);
+      const activeLandingTile = landingTile;
+      const activeResolvedTile = resolvedTile;
       const balances = gameState?.balances ?? {};
       let updatedBalances = balances;
       let balancesChanged = false;
-      let bankruptcyCandidate: BankruptcyCandidate | null = null;
+      const bankruptcyCandidate: BankruptcyCandidate | null = null;
       let nextChanceIndex = gameState?.chance_index ?? 0;
       let nextCommunityIndex = gameState?.community_index ?? 0;
       let nextChanceOrder = gameState?.chance_order ?? null;
@@ -6735,9 +6700,9 @@ export async function POST(request: Request) {
       let nextCommunityReshuffleCount = gameState?.community_reshuffle_count ?? 0;
       let chanceStateChanged = false;
       let communityStateChanged = false;
-      let nextGetOutOfJailFreeCount =
+      const nextGetOutOfJailFreeCount =
         currentPlayer.get_out_of_jail_free_count ?? 0;
-      let getOutOfJailFreeCountChanged = false;
+      const getOutOfJailFreeCountChanged = false;
 
       if (isDouble && nextDoublesCount >= 3) {
         const jailTile =
@@ -6747,17 +6712,6 @@ export async function POST(request: Request) {
             type: "JAIL",
             name: "Jail",
           };
-        const nextPlayer = getNextActivePlayer(
-          players,
-          gameState.current_player_id,
-        );
-
-        if (!nextPlayer) {
-          return NextResponse.json(
-            { error: "No active players remaining." },
-            { status: 409 },
-          );
-        }
         const events: Array<{
           event_type: string;
           payload: Record<string, unknown>;
@@ -6781,73 +6735,7 @@ export async function POST(request: Request) {
               doubles_count: nextDoublesCount,
             } satisfies DiceEventPayload,
           },
-          {
-            event_type: "GO_TO_JAIL",
-            payload: {
-              player_id: currentPlayer.id,
-              player_name: currentPlayer.display_name,
-              tile_id: jailTile.tile_id,
-              tile_name: jailTile.name,
-              tile_index: jailTile.index,
-            },
-          },
-          {
-            event_type: "END_TURN",
-            payload: {
-              from_player_id: currentPlayer.id,
-              from_player_name: currentPlayer.display_name,
-              to_player_id: nextPlayer.id,
-              to_player_name: nextPlayer.display_name,
-            },
-          },
         ];
-        const balances = gameState.balances ?? {};
-        let updatedBalances = balances;
-        let balancesChanged = false;
-
-        const loanResult = await applyLoanPaymentsForPlayer({
-          gameId,
-          player: nextPlayer,
-          balances: updatedBalances,
-          startingCash: startingCash,
-          macroInterestTrendAccumulator: getMacroInterestTrendAccumulatorV1(
-            getActiveMacroEffectsV1ForRules(
-              gameState?.active_macro_effects_v1,
-              rules.macroEnabled,
-            ),
-          ),
-          macroMortgageFlatDelta: getMacroMortgageFlatDeltaV1(
-            getActiveMacroEffectsV1ForRules(
-              gameState?.active_macro_effects_v1,
-              rules.macroEnabled,
-            ),
-          ),
-        });
-        updatedBalances = loanResult.balances;
-        balancesChanged = balancesChanged || loanResult.balancesChanged;
-        events.push(...loanResult.events);
-
-        if (loanResult.bankruptcyCandidate) {
-          const bankruptcyResult = await enterInsolvencyRecovery({
-            gameId,
-            gameState,
-            player: nextPlayer,
-            candidate: loanResult.bankruptcyCandidate,
-            events,
-            currentVersion,
-            userId: user.id,
-          });
-
-          if (bankruptcyResult.handled) {
-            if (bankruptcyResult.error) {
-              return NextResponse.json(
-                { error: bankruptcyResult.error },
-                { status: 409 },
-              );
-            }
-            return NextResponse.json({ gameState: bankruptcyResult.updatedState });
-          }
-        }
 
         const finalVersion = currentVersion + events.length;
 
@@ -6860,15 +6748,17 @@ export async function POST(request: Request) {
             },
             body: JSON.stringify({
               version: finalVersion,
-              current_player_id: nextPlayer.id,
-              last_roll: null,
+              last_roll: rollTotal,
               doubles_count: 0,
-              ...(balancesChanged ? { balances: updatedBalances } : {}),
-              turn_phase: nextPlayer.is_in_jail
-                ? "AWAITING_JAIL_DECISION"
-                : "AWAITING_ROLL",
-              updated_at: new Date().toISOString(),
+              pending_action: createGoToJailPendingAction({
+                currentPlayer,
+                jailTile,
+                source: "three_doubles",
+                fromTileIndex: currentPosition,
               }),
+              turn_phase: "AWAITING_GO_TO_JAIL_CONFIRM",
+              updated_at: new Date().toISOString(),
+            }),
           },
         )) ?? [];
 
@@ -6887,9 +6777,9 @@ export async function POST(request: Request) {
               Prefer: "return=representation",
             },
             body: JSON.stringify({
-              position: jailTile.index,
-              is_in_jail: true,
-              jail_turns_remaining: 3,
+              position: currentPosition,
+              is_in_jail: false,
+              jail_turns_remaining: 0,
             }),
           },
         )) ?? [];
@@ -6981,8 +6871,8 @@ export async function POST(request: Request) {
           payload: resolutionEvent.payload,
         });
       }
-      let cardTriggeredGoToJail = false;
-      let cardUtilityRollOverride:
+      const cardTriggeredGoToJail = false;
+      const cardUtilityRollOverride:
         | { total: number; dice: [number, number] }
         | null = null;
       const eventDeckState: EventDeckState = {
@@ -7929,7 +7819,7 @@ export async function POST(request: Request) {
         typeof gameState.skip_next_roll_by_player === "object"
           ? (gameState.skip_next_roll_by_player as Record<string, boolean>)
           : {};
-      let nextSkipNextRollByPlayer = { ...skipNextRollByPlayer };
+      const nextSkipNextRollByPlayer = { ...skipNextRollByPlayer };
       const macroMetaBase = {
         macro_id: macroCardId,
         macro_name: macroName,
@@ -10213,7 +10103,7 @@ export async function POST(request: Request) {
         name: `Tile ${newPosition}`,
       };
       const ownershipByTile = await loadOwnershipByTile(gameId);
-      let jailTile =
+      const jailTile =
         landingTile.type === "GO_TO_JAIL"
           ? boardTiles.find((tile) => tile.type === "JAIL") ?? {
               index: 10,
@@ -10222,11 +10112,11 @@ export async function POST(request: Request) {
               name: "Jail",
             }
           : null;
-      const resolvedTile = jailTile ?? landingTile;
-      let finalPosition = resolvedTile.index;
-      let shouldSendToJail = landingTile.type === "GO_TO_JAIL" && Boolean(jailTile);
-      let activeLandingTile = landingTile;
-      let activeResolvedTile = resolvedTile;
+      const resolvedTile = landingTile;
+      const finalPosition = resolvedTile.index;
+      const shouldSendToJail = landingTile.type === "GO_TO_JAIL" && Boolean(jailTile);
+      const activeLandingTile = landingTile;
+      const activeResolvedTile = resolvedTile;
       const forcedFine = !isDouble;
       const balances = gameState?.balances ?? {};
       let updatedBalances = balances;
@@ -10264,9 +10154,9 @@ export async function POST(request: Request) {
       let nextCommunityReshuffleCount = gameState?.community_reshuffle_count ?? 0;
       let chanceStateChanged = false;
       let communityStateChanged = false;
-      let nextGetOutOfJailFreeCount =
+      const nextGetOutOfJailFreeCount =
         currentPlayer.get_out_of_jail_free_count ?? 0;
-      let getOutOfJailFreeCountChanged = false;
+      const getOutOfJailFreeCountChanged = false;
 
       const events: Array<{
         event_type: string;
@@ -10385,8 +10275,8 @@ export async function POST(request: Request) {
           payload: resolutionEvent.payload,
         });
       }
-      let cardTriggeredGoToJail = false;
-      let cardUtilityRollOverride:
+      const cardTriggeredGoToJail = false;
+      const cardUtilityRollOverride:
         | { total: number; dice: [number, number] }
         | null = null;
       const eventDeck =

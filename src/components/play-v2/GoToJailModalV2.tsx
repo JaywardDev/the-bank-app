@@ -1,19 +1,17 @@
-type PendingGoToJail = {
-  eventId: string;
-  eventVersion: number;
-  playerId: string;
-};
-
 type GoToJailModalV2Props = {
-  pendingGoToJail: PendingGoToJail | null;
-  onAcknowledge: () => void;
+  isOpen: boolean;
+  isActor: boolean;
+  actionLoading: boolean;
+  onConfirm: () => void;
 };
 
 export default function GoToJailModalV2({
-  pendingGoToJail,
-  onAcknowledge,
+  isOpen,
+  isActor,
+  actionLoading,
+  onConfirm,
 }: GoToJailModalV2Props) {
-  if (!pendingGoToJail) {
+  if (!isOpen) {
     return null;
   }
 
@@ -22,10 +20,11 @@ export default function GoToJailModalV2({
       <p className="text-2xl font-black tracking-wide text-neutral-900">GO TO JAIL</p>
       <button
         type="button"
-        onClick={onAcknowledge}
-        className="mt-5 w-full rounded-2xl bg-neutral-900 px-4 py-2 text-sm font-semibold text-white"
+        onClick={onConfirm}
+        disabled={!isActor || actionLoading}
+        className="mt-5 w-full rounded-2xl bg-neutral-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
       >
-        OK
+        {actionLoading ? "Sending..." : "OK"}
       </button>
     </div>
   );

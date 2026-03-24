@@ -185,6 +185,7 @@ type ActiveDecisionType =
 type BankAction =
   | "ROLL_DICE"
   | "END_TURN"
+  | "CONFIRM_GO_TO_JAIL"
   | "JAIL_PAY_FINE"
   | "JAIL_ROLL_FOR_DOUBLES"
   | "USE_GET_OUT_OF_JAIL_FREE"
@@ -317,9 +318,6 @@ export default function PlayV2Page() {
   const [rightDrawerMode, setRightDrawerMode] = useState<
     "decision" | "trade" | "macro"
   >("decision");
-  const [pendingGoToJailAckVersion, setPendingGoToJailAckVersion] = useState<
-    number | null
-  >(null);
   const [sellToMarketTileIndex, setSellToMarketTileIndex] = useState<
     number | null
   >(null);
@@ -390,7 +388,6 @@ export default function PlayV2Page() {
       setPurchaseMortgages([]);
       setNotice(null);
       setSelectedTileIndex(null);
-      setPendingGoToJailAckVersion(null);
       setSellToMarketTileIndex(null);
       setPayoffLoanId(null);
       setDefaultLoanTileIndex(null);
@@ -1095,31 +1092,17 @@ export default function PlayV2Page() {
     gameState?.pending_card_title,
   ]);
   const pendingGoToJail = useMemo(() => {
-    if (!currentUserPlayer?.id) {
+    if (!gameState?.pending_action || typeof gameState.pending_action !== "object") {
       return null;
     }
-    for (const event of events) {
-      if (event.event_type !== "LAND_GO_TO_JAIL") {
-        continue;
-      }
-      const payload = event.payload;
-      const playerId =
-        payload && typeof payload.player_id === "string"
-          ? payload.player_id
-          : null;
-      if (playerId === currentUserPlayer.id) {
-        if (pendingGoToJailAckVersion === event.version) {
-          return null;
-        }
-        return {
-          eventId: event.id,
-          eventVersion: event.version,
-          playerId,
-        };
-      }
+    const candidate = gameState.pending_action as Record<string, unknown>;
+    if (candidate.type !== "GO_TO_JAIL_CONFIRM") {
+      return null;
     }
-    return null;
-  }, [currentUserPlayer?.id, events, pendingGoToJailAckVersion]);
+    return {
+      playerId: typeof candidate.player_id === "string" ? candidate.player_id : null,
+    };
+  }, [gameState?.pending_action]);
   const latestRollEvent = useMemo(
     () => events.find((event) => event.event_type === "ROLL_DICE"),
     [events],
@@ -1169,10 +1152,12 @@ export default function PlayV2Page() {
     );
   }, [latestDiceValues, latestRolledDoubleConfirmed]);
   const shouldShowGoToJailConfirm = Boolean(
-    isMyTurn &&
-    currentUserPlayer?.id &&
-    gameState?.current_player_id === currentUserPlayer.id &&
-    pendingGoToJail,
+    gameState?.turn_phase === "AWAITING_GO_TO_JAIL_CONFIRM" && pendingGoToJail,
+  );
+  const isGoToJailActor = Boolean(
+    shouldShowGoToJailConfirm &&
+      currentUserPlayer?.id &&
+      pendingGoToJail?.playerId === currentUserPlayer.id,
   );
   const isAwaitingJailDecision =
     gameState?.turn_phase === "AWAITING_JAIL_DECISION";
@@ -1643,12 +1628,12 @@ export default function PlayV2Page() {
     });
   }, [handleBankAction, pendingPurchase]);
 
-  const handleAcknowledgeGoToJail = useCallback(() => {
-    if (!pendingGoToJail) {
+  const handleConfirmGoToJail = useCallback(() => {
+    if (!isGoToJailActor) {
       return;
     }
-    setPendingGoToJailAckVersion(pendingGoToJail.eventVersion);
-  }, [pendingGoToJail]);
+    void handleBankAction("CONFIRM_GO_TO_JAIL");
+  }, [handleBankAction, isGoToJailActor]);
 
   const handleAuctionBid = useCallback(
     (amount: number) => {
@@ -3341,8 +3326,10 @@ export default function PlayV2Page() {
       case "GO_TO_JAIL":
         return (
           <GoToJailModalV2
-            pendingGoToJail={pendingGoToJail}
-            onAcknowledge={handleAcknowledgeGoToJail}
+            isOpen={shouldShowGoToJailConfirm}
+            isActor={isGoToJailActor}
+            actionLoading={actionLoading === "CONFIRM_GO_TO_JAIL"}
+            onConfirm={handleConfirmGoToJail}
           />
         );
       case "PENDING_CARD":
@@ -3415,14 +3402,15 @@ export default function PlayV2Page() {
     auctionActive,
     currentTurnPlayer,
     currentUserPlayer,
-    handleAcknowledgeGoToJail,
+    handleConfirmGoToJail,
     handleConfirmMacroEvent,
     handleConfirmIncomeTax,
     handleConfirmSuperTax,
     handleConfirmPendingCard,
     isFullscreenEvent,
     pendingCard,
-    pendingGoToJail,
+    shouldShowGoToJailConfirm,
+    isGoToJailActor,
     pendingMacroEvent,
     pendingIncomeTax,
     pendingSuperTax,
