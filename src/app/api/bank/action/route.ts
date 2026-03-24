@@ -1389,8 +1389,8 @@ type EventDeckState = {
   nextCommunityOrder: number[] | null;
   nextChanceDrawPtr: number;
   nextCommunityDrawPtr: number;
-  nextChanceSeed: number | null;
-  nextCommunitySeed: number | null;
+  nextChanceSeed: string | null;
+  nextCommunitySeed: string | null;
   nextChanceReshuffleCount: number;
   nextCommunityReshuffleCount: number;
   chanceStateChanged: boolean;
