@@ -6236,8 +6236,8 @@ export async function POST(request: Request) {
         chanceStateChanged: false,
         communityStateChanged: false,
       };
-      const cardTriggeredGoToJail = false;
-      const cardUtilityRollOverride:
+      let cardTriggeredGoToJail = false;
+      let cardUtilityRollOverride:
         | { total: number; dice: [number, number] }
         | null = null;
       let nextGetOutOfJailFreeCount =
