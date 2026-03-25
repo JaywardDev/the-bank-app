@@ -67,7 +67,9 @@ export default function IncomeTaxModalV2({
       </div>
 
       <div className="mt-4 space-y-2 text-sm text-slate-600">
-        <p>Income Tax is calculated as 20% of the cash you gained since your last Income Tax checkpoint.</p>
+        <p className="text-xs text-neutral-500 leading-relaxed">
+          Income Tax is calculated on the increase in your cash since the last time you paid Income Tax.
+        </p>
         {!hasTaxableGain ? (
           <p className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-700">
             No taxable gain since the last checkpoint.
