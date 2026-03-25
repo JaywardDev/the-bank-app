@@ -22,9 +22,7 @@ type PendingPurchaseModalV2Props = {
   mortgageLtvPercent: number;
   mortgageDownPaymentPercent: number;
   priceLabel: string;
-  basePriceLabel?: string | null;
-  discountLabel?: string | null;
-  discountNote?: string | null;
+  discountSummary?: string | null;
   onBuy: () => void;
   onBuyWithMortgage: () => void;
   onAuction: () => void;
@@ -42,9 +40,7 @@ export default function PendingPurchaseModalV2({
   mortgageLtvPercent,
   mortgageDownPaymentPercent,
   priceLabel,
-  basePriceLabel,
-  discountLabel,
-  discountNote,
+  discountSummary,
   onBuy,
   onBuyWithMortgage,
   onAuction,
@@ -60,11 +56,8 @@ export default function PendingPurchaseModalV2({
         {pendingTile?.name ?? `Tile ${pendingPurchase.tile_index}`}
       </p>
       <p className="mt-1 text-sm text-neutral-600">Price: {priceLabel}</p>
-      {discountLabel ? (
-        <p className="mt-1 text-xs text-emerald-700">
-          {basePriceLabel ? `${basePriceLabel} → ${priceLabel}` : null} ({discountLabel} off)
-          {discountNote ? ` · ${discountNote}` : ""}
-        </p>
+      {discountSummary ? (
+        <p className="mt-1 text-xs text-neutral-500">{discountSummary}</p>
       ) : null}
 
       {isActor ? (

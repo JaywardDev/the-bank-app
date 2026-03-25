@@ -500,6 +500,12 @@ export const formatEventDescription = (
           : typeof payload?.price === "string"
             ? Number.parseInt(payload.price, 10)
             : null;
+      const basePrice =
+        typeof payload?.base_price === "number"
+          ? payload.base_price
+          : typeof payload?.base_price === "string"
+            ? Number.parseInt(payload.base_price, 10)
+            : null;
       const discountPctRaw =
         typeof payload?.property_purchase_discount_pct === "number"
           ? payload.property_purchase_discount_pct
@@ -510,11 +516,17 @@ export const formatEventDescription = (
         typeof discountPctRaw === "number" && Number.isFinite(discountPctRaw)
           ? Math.max(0, discountPctRaw)
           : 0;
-      const discountLabel =
-        discountPct > 0 ? ` (${Math.round(discountPct * 100)}% macro discount)` : "";
+      const macroName =
+        typeof payload?.property_purchase_discount_macro_name === "string"
+          ? payload.property_purchase_discount_macro_name
+          : "Macro event";
+
+      if (price !== null && discountPct > 0 && basePrice !== null) {
+        return `Offer: Buy ${tileLabel} for ${formatMoney(price, currencyCode, currencySymbol)} · ${macroName} active: price reduced from ${formatMoney(basePrice, currencyCode, currencySymbol)} to ${formatMoney(price, currencyCode, currencySymbol)}.`;
+      }
 
       return price !== null
-        ? `Offer: Buy ${tileLabel} for ${formatMoney(price, currencyCode, currencySymbol)}${discountLabel}`
+        ? `Offer: Buy ${tileLabel} for ${formatMoney(price, currencyCode, currencySymbol)}`
         : `Offer: Buy ${tileLabel}`;
     }
 

@@ -3163,22 +3163,11 @@ export default function PlayV2Page() {
             mortgageLtvPercent={mortgageLtvPercent}
             mortgageDownPaymentPercent={mortgageDownPaymentPercent}
             priceLabel={formatMoney(pendingPurchase?.price ?? 0)}
-            basePriceLabel={
-              typeof pendingPurchase?.base_price === "number"
-                ? formatMoney(pendingPurchase.base_price)
-                : null
-            }
-            discountLabel={
+            discountSummary={
               typeof pendingPurchase?.property_purchase_discount_pct === "number" &&
-              pendingPurchase.property_purchase_discount_pct > 0
-                ? `${Math.round(
-                    pendingPurchase.property_purchase_discount_pct * 100,
-                  )}%`
-                : null
-            }
-            discountNote={
-              pendingPurchase?.property_purchase_discount_macro_name
-                ? `Reduced by ${pendingPurchase.property_purchase_discount_macro_name}`
+              pendingPurchase.property_purchase_discount_pct > 0 &&
+              typeof pendingPurchase?.base_price === "number"
+                ? `${pendingPurchase.property_purchase_discount_macro_name ?? "Macro event"} active: Bank price reduced from ${formatMoney(pendingPurchase.base_price)} to ${formatMoney(pendingPurchase.price)}.`
                 : null
             }
             onBuy={handleBuyProperty}
