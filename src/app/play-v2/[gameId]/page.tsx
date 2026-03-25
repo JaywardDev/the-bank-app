@@ -123,6 +123,9 @@ type PendingPurchaseAction = {
   player_id: string | null;
   tile_index: number;
   price: number;
+  base_price?: number;
+  property_purchase_discount_pct?: number;
+  property_purchase_discount_macro_name?: string | null;
 };
 
 type InsolvencyRecoveryAction = {
@@ -896,6 +899,9 @@ export default function PlayV2Page() {
       player_id?: unknown;
       tile_index?: unknown;
       price?: unknown;
+      base_price?: unknown;
+      property_purchase_discount_pct?: unknown;
+      property_purchase_discount_macro_name?: unknown;
     };
 
     if (candidate.type !== "BUY_PROPERTY") {
@@ -924,6 +930,21 @@ export default function PlayV2Page() {
       player_id: pendingPlayerId,
       tile_index: candidate.tile_index,
       price: candidate.price,
+      ...(typeof candidate.base_price === "number"
+        ? { base_price: candidate.base_price }
+        : {}),
+      ...(typeof candidate.property_purchase_discount_pct === "number"
+        ? {
+            property_purchase_discount_pct:
+              candidate.property_purchase_discount_pct,
+          }
+        : {}),
+      ...(typeof candidate.property_purchase_discount_macro_name === "string"
+        ? {
+            property_purchase_discount_macro_name:
+              candidate.property_purchase_discount_macro_name,
+          }
+        : {}),
     };
   }, [gameState?.current_player_id, gameState?.pending_action]);
   const pendingSuperTax = useMemo<SuperTaxPendingAction | null>(() => {
@@ -3141,6 +3162,25 @@ export default function PlayV2Page() {
             mortgageDownPaymentLabel={formatMoney(pendingMortgageDownPayment)}
             mortgageLtvPercent={mortgageLtvPercent}
             mortgageDownPaymentPercent={mortgageDownPaymentPercent}
+            priceLabel={formatMoney(pendingPurchase?.price ?? 0)}
+            basePriceLabel={
+              typeof pendingPurchase?.base_price === "number"
+                ? formatMoney(pendingPurchase.base_price)
+                : null
+            }
+            discountLabel={
+              typeof pendingPurchase?.property_purchase_discount_pct === "number" &&
+              pendingPurchase.property_purchase_discount_pct > 0
+                ? `${Math.round(
+                    pendingPurchase.property_purchase_discount_pct * 100,
+                  )}%`
+                : null
+            }
+            discountNote={
+              pendingPurchase?.property_purchase_discount_macro_name
+                ? `Reduced by ${pendingPurchase.property_purchase_discount_macro_name}`
+                : null
+            }
             onBuy={handleBuyProperty}
             onBuyWithMortgage={handleBuyPropertyWithMortgage}
             onAuction={handleDeclineProperty}

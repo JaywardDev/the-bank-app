@@ -500,9 +500,21 @@ export const formatEventDescription = (
           : typeof payload?.price === "string"
             ? Number.parseInt(payload.price, 10)
             : null;
+      const discountPctRaw =
+        typeof payload?.property_purchase_discount_pct === "number"
+          ? payload.property_purchase_discount_pct
+          : typeof payload?.property_purchase_discount_pct === "string"
+            ? Number.parseFloat(payload.property_purchase_discount_pct)
+            : null;
+      const discountPct =
+        typeof discountPctRaw === "number" && Number.isFinite(discountPctRaw)
+          ? Math.max(0, discountPctRaw)
+          : 0;
+      const discountLabel =
+        discountPct > 0 ? ` (${Math.round(discountPct * 100)}% macro discount)` : "";
 
       return price !== null
-        ? `Offer: Buy ${tileLabel} for ${formatMoney(price, currencyCode, currencySymbol)}`
+        ? `Offer: Buy ${tileLabel} for ${formatMoney(price, currencyCode, currencySymbol)}${discountLabel}`
         : `Offer: Buy ${tileLabel}`;
     }
 

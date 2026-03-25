@@ -5,6 +5,9 @@ type PendingPurchase = {
   player_id: string | null;
   tile_index: number;
   price: number;
+  base_price?: number;
+  property_purchase_discount_pct?: number;
+  property_purchase_discount_macro_name?: string | null;
 };
 
 type PendingPurchaseModalV2Props = {
@@ -18,6 +21,10 @@ type PendingPurchaseModalV2Props = {
   mortgageDownPaymentLabel: string;
   mortgageLtvPercent: number;
   mortgageDownPaymentPercent: number;
+  priceLabel: string;
+  basePriceLabel?: string | null;
+  discountLabel?: string | null;
+  discountNote?: string | null;
   onBuy: () => void;
   onBuyWithMortgage: () => void;
   onAuction: () => void;
@@ -34,6 +41,10 @@ export default function PendingPurchaseModalV2({
   mortgageDownPaymentLabel,
   mortgageLtvPercent,
   mortgageDownPaymentPercent,
+  priceLabel,
+  basePriceLabel,
+  discountLabel,
+  discountNote,
   onBuy,
   onBuyWithMortgage,
   onAuction,
@@ -48,7 +59,13 @@ export default function PendingPurchaseModalV2({
       <p className="mt-1 text-lg font-semibold text-neutral-900">
         {pendingTile?.name ?? `Tile ${pendingPurchase.tile_index}`}
       </p>
-      <p className="mt-1 text-sm text-neutral-600">Price: ${pendingPurchase.price}</p>
+      <p className="mt-1 text-sm text-neutral-600">Price: {priceLabel}</p>
+      {discountLabel ? (
+        <p className="mt-1 text-xs text-emerald-700">
+          {basePriceLabel ? `${basePriceLabel} → ${priceLabel}` : null} ({discountLabel} off)
+          {discountNote ? ` · ${discountNote}` : ""}
+        </p>
+      ) : null}
 
       {isActor ? (
         <div className="mt-4 grid gap-2">

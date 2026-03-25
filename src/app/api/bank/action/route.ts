@@ -696,6 +696,33 @@ const getMacroInterestTrendAccumulatorV1 = (
 const getMacroLoanMortgageBlockedV1 = (activeEffects: ActiveMacroEffectV1[]) =>
   activeEffects.some((effect) => effect.effects.loan_mortgage_new_blocked === true);
 
+const getMacroPropertyPurchaseDiscountPctV1 = (
+  activeEffects: ActiveMacroEffectV1[],
+) =>
+  activeEffects.reduce((maxDiscount, effect) => {
+    const discountPct = effect.effects.property_purchase_discount_pct;
+    if (typeof discountPct !== "number" || !Number.isFinite(discountPct)) {
+      return maxDiscount;
+    }
+    return Math.max(maxDiscount, discountPct);
+  }, 0);
+
+const calculateDirectBankPropertyPurchasePrice = (
+  basePrice: number,
+  activeEffects: ActiveMacroEffectV1[],
+) => {
+  // Intentionally non-stacking: when overlapping macros apply purchase discounts,
+  // only the single highest discount is used (e.g. 20% + 70% => 70% total).
+  const discountPctRaw = getMacroPropertyPurchaseDiscountPctV1(activeEffects);
+  const discountPct = Math.min(Math.max(discountPctRaw, 0), 1);
+  const discountedPrice = Math.round(basePrice * (1 - discountPct));
+  return {
+    basePrice,
+    discountPct,
+    finalPrice: Math.max(0, discountedPrice),
+  };
+};
+
 const hasMacroOneOffEffects = (effects: MacroEffectsV1 | null) => {
   if (!effects) {
     return false;
@@ -3300,7 +3327,33 @@ const finalizeMoveResolution = async ({
           type: "BUY_PROPERTY",
           player_id: currentPlayer.id,
           tile_index: activeLandingTile.index,
-          price: activeLandingTile.price ?? 0,
+          ...(() => {
+            const basePrice = activeLandingTile.price ?? 0;
+            const activeMacroEffectsV1 = getActiveMacroEffectsV1ForRules(
+              gameState.active_macro_effects_v1,
+              rules.macroEnabled,
+            );
+            const discountedPurchase = calculateDirectBankPropertyPurchasePrice(
+              basePrice,
+              activeMacroEffectsV1,
+            );
+            const discountMacro =
+              discountedPurchase.discountPct > 0
+                ? activeMacroEffectsV1.find(
+                    (effect) =>
+                      effect.effects.property_purchase_discount_pct ===
+                      discountedPurchase.discountPct,
+                  ) ?? null
+                : null;
+            return {
+              price: discountedPurchase.finalPrice,
+              base_price: discountedPurchase.basePrice,
+              property_purchase_discount_pct: discountedPurchase.discountPct,
+              ...(discountMacro
+                ? { property_purchase_discount_macro_name: discountMacro.name }
+                : {}),
+            };
+          })(),
         }
       : null;
 
@@ -3313,6 +3366,23 @@ const finalizeMoveResolution = async ({
         tile_name: activeLandingTile.name,
         tile_index: activeLandingTile.index,
         price: pendingPurchaseAction.price,
+        ...(typeof pendingPurchaseAction.base_price === "number"
+          ? { base_price: pendingPurchaseAction.base_price }
+          : {}),
+        ...(typeof pendingPurchaseAction.property_purchase_discount_pct ===
+        "number"
+          ? {
+              property_purchase_discount_pct:
+                pendingPurchaseAction.property_purchase_discount_pct,
+            }
+          : {}),
+        ...(typeof pendingPurchaseAction.property_purchase_discount_macro_name ===
+        "string"
+          ? {
+              property_purchase_discount_macro_name:
+                pendingPurchaseAction.property_purchase_discount_macro_name,
+            }
+          : {}),
       },
     });
   }
@@ -8566,16 +8636,21 @@ export async function POST(request: Request) {
         );
       }
 
-      const price = landingTile.price ?? 0;
+      const basePrice = landingTile.price ?? 0;
+      const activeMacroEffects = getActiveMacroEffectsV1ForRules(
+        gameState.active_macro_effects_v1,
+        rules.macroEnabled,
+      );
+      const discountedPurchase = calculateDirectBankPropertyPurchasePrice(
+        basePrice,
+        activeMacroEffects,
+      );
+      const price = discountedPurchase.finalPrice;
       const balances = gameState.balances ?? {};
       const currentBalance =
         balances[currentPlayer.id] ?? startingCash;
       const usingMortgage = body.financing === "MORTGAGE";
       if (usingMortgage) {
-        const activeMacroEffects = getActiveMacroEffectsV1ForRules(
-          gameState.active_macro_effects_v1,
-          rules.macroEnabled,
-        );
         if (getMacroLoanMortgageBlockedV1(activeMacroEffects)) {
           return NextResponse.json(
             { error: "New loans and mortgages are currently blocked." },
@@ -8689,6 +8764,8 @@ export async function POST(request: Request) {
           payload: {
             tile_index: tileIndex,
             price,
+            base_price: basePrice,
+            property_purchase_discount_pct: discountedPurchase.discountPct,
             owner_player_id: currentPlayer.id,
             ...(usingMortgage ? { financing: "mortgage" } : {}),
           },

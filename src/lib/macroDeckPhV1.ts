@@ -2,6 +2,7 @@ export type MacroRarity = "common" | "uncommon" | "black_swan";
 
 export type MacroEffectsV1 = {
   rent_multiplier?: number; // e.g. 1.1, 0.8 (applies to property rents)
+  property_purchase_discount_pct?: number; // applies only to direct property purchases from the bank
   rail_rent_multiplier?: number; // e.g. 1.5
   build_cost_multiplier?: number; // e.g. 1.25, 0.75
   cash_delta?: number; // one-off applied to each player at trigger (+/-)
@@ -119,6 +120,22 @@ export const MACRO_DECK_PH_V1: MacroCardV1[] = [
     rulesText: "Property rent is reduced by 20% for 5 rounds.",
     effects: {
       rent_multiplier: 0.8,
+    },
+  },
+  {
+    id: "market-correction",
+    name: "Market Correction",
+    rarity: "common",
+    weight: 8,
+    durationRounds: 2,
+    headline: "The market cools as buyers pull back.",
+    flavor:
+      "Sellers lower prices to attract demand, creating short-lived buying opportunities.",
+    rulesText: "Property purchases from the bank cost 20% less for 2 rounds.",
+    tooltip:
+      "Applies only to direct bank property purchases. Does not affect auctions, trades, rent, taxes, or building costs.",
+    effects: {
+      property_purchase_discount_pct: 0.2,
     },
   },
   {
@@ -246,6 +263,22 @@ export const MACRO_DECK_PH_V1: MacroCardV1[] = [
     rulesText: "Property rent dropped. Pay only 30% of normal rent for 3 rounds.",
     effects: {
       rent_multiplier: 0.3,
+    },
+  },
+  {
+    id: "real-estate-crash",
+    name: "Real Estate Crash",
+    rarity: "black_swan",
+    weight: 1,
+    durationRounds: 3,
+    headline: "A severe property collapse shakes the economy.",
+    flavor:
+      "Distress selling and collapsing confidence create once-in-a-generation buying opportunities.",
+    rulesText: "Property purchases from the bank cost 70% less for 3 rounds.",
+    tooltip:
+      "Applies only to direct bank property purchases. Does not affect auctions, trades, rent, taxes, or building costs.",
+    effects: {
+      property_purchase_discount_pct: 0.7,
     },
   },
   {

@@ -72,6 +72,22 @@ export const NZ_MACRO_DECK: MacroCardV1[] = [
     },
   },
   {
+    id: "market-correction",
+    name: "Market Correction",
+    rarity: "common",
+    weight: 8,
+    durationRounds: 2,
+    headline: "The market cools as buyers pull back.",
+    flavor:
+      "Sellers lower prices to attract demand, creating short-lived buying opportunities.",
+    rulesText: "Property purchases from the bank cost 20% less for 2 rounds.",
+    tooltip:
+      "Applies only to direct bank property purchases. Does not affect auctions, trades, rent, taxes, or building costs.",
+    effects: {
+      property_purchase_discount_pct: 0.2,
+    },
+  },
+  {
     id: "credit-tightening",
     name: "OCR Rate Hike",
     rarity: "uncommon",
@@ -196,6 +212,22 @@ export const NZ_MACRO_DECK: MacroCardV1[] = [
     rulesText: "Property rent dropped. Pay only 30% of normal rent for 3 rounds.",
     effects: {
       rent_multiplier: 0.3,
+    },
+  },
+  {
+    id: "real-estate-crash",
+    name: "Real Estate Crash",
+    rarity: "black_swan",
+    weight: 1,
+    durationRounds: 3,
+    headline: "A severe property collapse shakes the economy.",
+    flavor:
+      "Distress selling and collapsing confidence create once-in-a-generation buying opportunities.",
+    rulesText: "Property purchases from the bank cost 70% less for 3 rounds.",
+    tooltip:
+      "Applies only to direct bank property purchases. Does not affect auctions, trades, rent, taxes, or building costs.",
+    effects: {
+      property_purchase_discount_pct: 0.7,
     },
   },
   {
