@@ -14,6 +14,7 @@ type IncomeTaxPendingAction = {
   tax_amount: number;
   currency_code: string;
   currency_symbol: string;
+  tax_exemption_pass_count: number;
 };
 
 type IncomeTaxModalV2Props = {
@@ -22,6 +23,7 @@ type IncomeTaxModalV2Props = {
   isActor: boolean;
   actionLoading: string | null;
   onConfirm: () => void;
+  onUseTaxExemptionPass: () => void;
 };
 
 export default function IncomeTaxModalV2({
@@ -30,6 +32,7 @@ export default function IncomeTaxModalV2({
   isActor,
   actionLoading,
   onConfirm,
+  onUseTaxExemptionPass,
 }: IncomeTaxModalV2Props) {
   if (!pendingIncomeTax) return null;
 
@@ -40,6 +43,7 @@ export default function IncomeTaxModalV2({
   const formatMoney = (value: number) => formatCurrency(value, currency);
   const hasTaxableGain = pendingIncomeTax.taxable_gain > 0;
   const actionLabel = hasTaxableGain ? "Pay Tax" : "Continue";
+  const hasTaxExemptionPass = pendingIncomeTax.tax_exemption_pass_count > 0;
 
   return (
     <div className="w-full max-w-xl rounded-[2rem] border border-emerald-200/70 bg-white/95 p-5 shadow-2xl ring-1 ring-black/10 backdrop-blur sm:p-7">
@@ -87,6 +91,26 @@ export default function IncomeTaxModalV2({
           >
             {actionLoading === "CONFIRM_INCOME_TAX" ? "Processing…" : actionLabel}
           </button>
+          {hasTaxExemptionPass ? (
+            <>
+              <button
+                type="button"
+                onClick={onUseTaxExemptionPass}
+                disabled={actionLoading === "USE_TAX_EXEMPTION_PASS"}
+                className="w-full rounded-2xl border border-emerald-300 bg-white px-4 py-3 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {actionLoading === "USE_TAX_EXEMPTION_PASS"
+                  ? "Using pass…"
+                  : "Use Tax Exemption Pass"}
+              </button>
+              <p className="text-center text-xs text-slate-500">
+                Use this card to avoid paying this tax. The card will be consumed.
+              </p>
+              <p className="text-center text-xs text-slate-500">
+                Tax Exemption Pass available: {pendingIncomeTax.tax_exemption_pass_count}
+              </p>
+            </>
+          ) : null}
           <p className="text-center text-xs text-slate-500">This action will continue your turn.</p>
         </div>
       ) : (

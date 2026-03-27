@@ -56,6 +56,7 @@ type Player = {
   is_in_jail: boolean;
   jail_turns_remaining: number;
   get_out_of_jail_free_count: number;
+  tax_exemption_pass_count: number;
   is_eliminated: boolean;
   eliminated_at: string | null;
 };
@@ -157,6 +158,7 @@ type SuperTaxPendingAction = {
   uses_custom_formula: boolean;
   currency_code: string;
   currency_symbol: string;
+  tax_exemption_pass_count: number;
 };
 
 type IncomeTaxPendingAction = {
@@ -173,6 +175,7 @@ type IncomeTaxPendingAction = {
   tax_amount: number;
   currency_code: string;
   currency_symbol: string;
+  tax_exemption_pass_count: number;
 };
 
 type ActiveDecisionType =
@@ -196,6 +199,7 @@ type BankAction =
   | "CONFIRM_MACRO_EVENT"
   | "CONFIRM_INCOME_TAX"
   | "CONFIRM_SUPER_TAX"
+  | "USE_TAX_EXEMPTION_PASS"
   | "CONFIRM_INSOLVENCY_PAYMENT"
   | "DECLARE_BANKRUPTCY"
   | "BUY_PROPERTY"
@@ -419,7 +423,7 @@ export default function PlayV2Page() {
   const loadPlayers = useCallback(
     async (gameId: string, accessToken?: string) => {
       const rows = await supabaseClient.fetchFromSupabase<Player[]>(
-        `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,is_eliminated,eliminated_at&game_id=eq.${gameId}&order=created_at.asc`,
+        `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,is_eliminated,eliminated_at&game_id=eq.${gameId}&order=created_at.asc`,
         { method: "GET" },
         accessToken,
       );
@@ -970,7 +974,8 @@ export default function PlayV2Page() {
       typeof candidate.tax_amount !== "number" ||
       typeof candidate.uses_custom_formula !== "boolean" ||
       typeof candidate.currency_code !== "string" ||
-      typeof candidate.currency_symbol !== "string"
+      typeof candidate.currency_symbol !== "string" ||
+      typeof candidate.tax_exemption_pass_count !== "number"
     ) {
       return null;
     }
@@ -995,6 +1000,7 @@ export default function PlayV2Page() {
       uses_custom_formula: candidate.uses_custom_formula,
       currency_code: candidate.currency_code,
       currency_symbol: candidate.currency_symbol,
+      tax_exemption_pass_count: candidate.tax_exemption_pass_count,
     };
   }, [gameState?.pending_action]);
   const pendingIncomeTax = useMemo<IncomeTaxPendingAction | null>(() => {
@@ -1012,7 +1018,8 @@ export default function PlayV2Page() {
       typeof candidate.tax_rate !== "number" ||
       typeof candidate.tax_amount !== "number" ||
       typeof candidate.currency_code !== "string" ||
-      typeof candidate.currency_symbol !== "string"
+      typeof candidate.currency_symbol !== "string" ||
+      typeof candidate.tax_exemption_pass_count !== "number"
     ) {
       return null;
     }
@@ -1034,6 +1041,7 @@ export default function PlayV2Page() {
       tax_amount: candidate.tax_amount,
       currency_code: candidate.currency_code,
       currency_symbol: candidate.currency_symbol,
+      tax_exemption_pass_count: candidate.tax_exemption_pass_count,
     };
   }, [gameState?.pending_action]);
 
@@ -1605,6 +1613,10 @@ export default function PlayV2Page() {
 
   const handleConfirmSuperTax = useCallback(() => {
     void handleBankAction("CONFIRM_SUPER_TAX");
+  }, [handleBankAction]);
+
+  const handleUseTaxExemptionPass = useCallback(() => {
+    void handleBankAction("USE_TAX_EXEMPTION_PASS");
   }, [handleBankAction]);
 
   const handleConfirmInsolvencyPayment = useCallback(() => {
@@ -3406,6 +3418,7 @@ export default function PlayV2Page() {
             )}
             actionLoading={actionLoading}
             onConfirm={handleConfirmIncomeTax}
+            onUseTaxExemptionPass={handleUseTaxExemptionPass}
           />
         );
       case "SUPER_TAX_CONFIRM":
@@ -3420,6 +3433,7 @@ export default function PlayV2Page() {
             )}
             actionLoading={actionLoading}
             onConfirm={handleConfirmSuperTax}
+            onUseTaxExemptionPass={handleUseTaxExemptionPass}
           />
         );
       default:
@@ -3435,6 +3449,7 @@ export default function PlayV2Page() {
     handleConfirmMacroEvent,
     handleConfirmIncomeTax,
     handleConfirmSuperTax,
+    handleUseTaxExemptionPass,
     handleConfirmPendingCard,
     isFullscreenEvent,
     pendingCard,

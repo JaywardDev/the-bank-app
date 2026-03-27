@@ -133,6 +133,7 @@ type BankActionRequest =
         | "PAYOFF_PURCHASE_MORTGAGE"
         | "CONFIRM_INCOME_TAX"
         | "CONFIRM_SUPER_TAX"
+        | "USE_TAX_EXEMPTION_PASS"
         | "BUILD_HOUSE"
         | "SELL_HOUSE"
         | "SELL_HOTEL"
@@ -173,7 +174,8 @@ type BankActionRequest =
         | "CONFIRM_INSOLVENCY_PAYMENT"
         | "DECLARE_BANKRUPTCY"
         | "CONFIRM_SUPER_TAX"
-        | "CONFIRM_INCOME_TAX";
+        | "CONFIRM_INCOME_TAX"
+        | "USE_TAX_EXEMPTION_PASS";
     });
 
 type SupabaseUser = {
@@ -200,6 +202,7 @@ type PlayerRow = {
   is_in_jail: boolean;
   jail_turns_remaining: number;
   get_out_of_jail_free_count: number;
+  tax_exemption_pass_count: number;
   is_eliminated: boolean;
   eliminated_at: string | null;
 };
@@ -261,6 +264,7 @@ type SuperTaxPendingAction = {
   currency_code: string;
   currency_symbol: string;
   return_turn_phase: string;
+  tax_exemption_pass_count: number;
 };
 
 type IncomeTaxPendingAction = {
@@ -278,6 +282,7 @@ type IncomeTaxPendingAction = {
   currency_code: string;
   currency_symbol: string;
   return_turn_phase: string;
+  tax_exemption_pass_count: number;
 };
 
 type GoToJailPendingAction = {
@@ -1808,7 +1813,8 @@ const parsePendingSuperTaxAction = (
     typeof pendingAction.uses_custom_formula !== "boolean" ||
     typeof pendingAction.currency_code !== "string" ||
     typeof pendingAction.currency_symbol !== "string" ||
-    typeof pendingAction.return_turn_phase !== "string"
+    typeof pendingAction.return_turn_phase !== "string" ||
+    typeof pendingAction.tax_exemption_pass_count !== "number"
   ) {
     return null;
   }
@@ -1831,6 +1837,7 @@ const parsePendingSuperTaxAction = (
     currency_code: pendingAction.currency_code,
     currency_symbol: pendingAction.currency_symbol,
     return_turn_phase: pendingAction.return_turn_phase,
+    tax_exemption_pass_count: pendingAction.tax_exemption_pass_count,
   };
 };
 
@@ -1853,7 +1860,8 @@ const parsePendingIncomeTaxAction = (
     typeof pendingAction.tax_amount !== "number" ||
     typeof pendingAction.currency_code !== "string" ||
     typeof pendingAction.currency_symbol !== "string" ||
-    typeof pendingAction.return_turn_phase !== "string"
+    typeof pendingAction.return_turn_phase !== "string" ||
+    typeof pendingAction.tax_exemption_pass_count !== "number"
   ) {
     return null;
   }
@@ -1874,6 +1882,7 @@ const parsePendingIncomeTaxAction = (
     currency_code: pendingAction.currency_code,
     currency_symbol: pendingAction.currency_symbol,
     return_turn_phase: pendingAction.return_turn_phase,
+    tax_exemption_pass_count: pendingAction.tax_exemption_pass_count,
   };
 };
 
@@ -1917,6 +1926,7 @@ const createSuperTaxPendingAction = ({
   currency_code: boardPackEconomy.currency.code,
   currency_symbol: boardPackEconomy.currency.symbol,
   return_turn_phase: returnTurnPhase,
+  tax_exemption_pass_count: player.tax_exemption_pass_count ?? 0,
 });
 
 const createIncomeTaxPendingAction = ({
@@ -1954,6 +1964,7 @@ const createIncomeTaxPendingAction = ({
   currency_code: boardPackEconomy.currency.code,
   currency_symbol: boardPackEconomy.currency.symbol,
   return_turn_phase: returnTurnPhase,
+  tax_exemption_pass_count: player.tax_exemption_pass_count ?? 0,
 });
 
 const createInsolvencyPendingAction = ({
@@ -2082,6 +2093,8 @@ const commitResolvedMoveState = async ({
   jailTile,
   nextGetOutOfJailFreeCount,
   getOutOfJailFreeCountChanged,
+  nextTaxExemptionPassCount,
+  taxExemptionPassCountChanged,
   rollTotal,
   nextDoublesCount,
   updatedBalances,
@@ -2111,6 +2124,8 @@ const commitResolvedMoveState = async ({
   jailTile: TileInfo | null;
   nextGetOutOfJailFreeCount: number;
   getOutOfJailFreeCountChanged: boolean;
+  nextTaxExemptionPassCount: number;
+  taxExemptionPassCountChanged: boolean;
   rollTotal: number | null;
   nextDoublesCount: number;
   updatedBalances: Record<string, number>;
@@ -2189,6 +2204,9 @@ const commitResolvedMoveState = async ({
         jail_turns_remaining: shouldSendToJail && jailTile ? 3 : 0,
         ...(getOutOfJailFreeCountChanged
           ? { get_out_of_jail_free_count: nextGetOutOfJailFreeCount }
+          : {}),
+        ...(taxExemptionPassCountChanged
+          ? { tax_exemption_pass_count: nextTaxExemptionPassCount }
           : {}),
       }),
     },
@@ -2687,6 +2705,8 @@ const applyCardEffect = ({
   bankruptcyCandidate,
   nextGetOutOfJailFreeCount,
   getOutOfJailFreeCountChanged,
+  nextTaxExemptionPassCount,
+  taxExemptionPassCountChanged,
   cardUtilityRollOverride,
   cardTriggeredGoToJail,
   startingCash,
@@ -2710,6 +2730,8 @@ const applyCardEffect = ({
     | null;
   nextGetOutOfJailFreeCount: number;
   getOutOfJailFreeCountChanged: boolean;
+  nextTaxExemptionPassCount: number;
+  taxExemptionPassCountChanged: boolean;
   cardUtilityRollOverride:
     | { total: number; dice: [number, number] }
     | null;
@@ -2774,6 +2796,22 @@ const applyCardEffect = ({
         card_title: card.title,
         card_kind: card.kind,
         total_cards: nextGetOutOfJailFreeCount,
+      },
+    });
+  }
+
+  if (card.kind === "TAX_EXEMPTION_PASS") {
+    nextTaxExemptionPassCount += 1;
+    taxExemptionPassCountChanged = true;
+    events.push({
+      event_type: "CARD_TAX_EXEMPTION_PASS_RECEIVED",
+      payload: {
+        player_id: currentPlayer.id,
+        player_name: currentPlayer.display_name,
+        card_id: card.id,
+        card_title: card.title,
+        card_kind: card.kind,
+        total_cards: nextTaxExemptionPassCount,
       },
     });
   }
@@ -2957,6 +2995,8 @@ const applyCardEffect = ({
     bankruptcyCandidate,
     nextGetOutOfJailFreeCount,
     getOutOfJailFreeCountChanged,
+    nextTaxExemptionPassCount,
+    taxExemptionPassCountChanged,
     cardUtilityRollOverride,
     cardTriggeredGoToJail,
   };
@@ -3005,6 +3045,8 @@ const finalizeMoveResolution = async ({
   communityStateChanged,
   nextGetOutOfJailFreeCount,
   getOutOfJailFreeCountChanged,
+  nextTaxExemptionPassCount,
+  taxExemptionPassCountChanged,
   extraGameStatePatch,
 }: {
   gameId: string;
@@ -3053,6 +3095,8 @@ const finalizeMoveResolution = async ({
   communityStateChanged: boolean;
   nextGetOutOfJailFreeCount: number;
   getOutOfJailFreeCountChanged: boolean;
+  nextTaxExemptionPassCount: number;
+  taxExemptionPassCountChanged: boolean;
   extraGameStatePatch?: Record<string, unknown>;
 }) => {
   const ownership = ownershipByTile[activeLandingTile.index];
@@ -3436,6 +3480,8 @@ const finalizeMoveResolution = async ({
         jailTile,
         nextGetOutOfJailFreeCount,
         getOutOfJailFreeCountChanged,
+        nextTaxExemptionPassCount,
+        taxExemptionPassCountChanged,
         rollTotal,
         nextDoublesCount,
         updatedBalances,
@@ -3569,6 +3615,9 @@ const finalizeMoveResolution = async ({
           ...(getOutOfJailFreeCountChanged
             ? { get_out_of_jail_free_count: nextGetOutOfJailFreeCount }
             : {}),
+          ...(taxExemptionPassCountChanged
+            ? { tax_exemption_pass_count: nextTaxExemptionPassCount }
+            : {}),
         }),
       },
     )) ?? [];
@@ -3647,6 +3696,9 @@ const finalizeMoveResolution = async ({
         jail_turns_remaining: shouldSendToJail && jailTile ? 3 : 0,
         ...(getOutOfJailFreeCountChanged
           ? { get_out_of_jail_free_count: nextGetOutOfJailFreeCount }
+          : {}),
+        ...(taxExemptionPassCountChanged
+          ? { tax_exemption_pass_count: nextTaxExemptionPassCount }
           : {}),
       }),
     },
@@ -4302,7 +4354,7 @@ export async function POST(request: Request) {
       }
 
       const [hostPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
-        "players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,is_eliminated,eliminated_at",
+        "players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,is_eliminated,eliminated_at",
         {
           method: "POST",
           headers: {
@@ -4389,7 +4441,7 @@ export async function POST(request: Request) {
       }
 
       const [player] = (await fetchFromSupabaseWithService<PlayerRow[]>(
-        "players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,is_eliminated,eliminated_at&on_conflict=game_id,user_id",
+        "players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,is_eliminated,eliminated_at&on_conflict=game_id,user_id",
         {
           method: "POST",
           headers: {
@@ -4411,7 +4463,7 @@ export async function POST(request: Request) {
       }
 
       const players = (await fetchFromSupabaseWithService<PlayerRow[]>(
-        `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,is_eliminated,eliminated_at&game_id=eq.${game.id}&order=created_at.asc`,
+        `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,is_eliminated,eliminated_at&game_id=eq.${game.id}&order=created_at.asc`,
         { method: "GET" },
       )) ?? [];
       const ownershipByTile = await loadOwnershipByTile(game.id);
@@ -4446,7 +4498,7 @@ export async function POST(request: Request) {
       }
 
       const [leavingPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
-        `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,is_eliminated,eliminated_at&game_id=eq.${gameId}&user_id=eq.${user.id}&limit=1`,
+        `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,is_eliminated,eliminated_at&game_id=eq.${gameId}&user_id=eq.${user.id}&limit=1`,
         { method: "GET" },
       )) ?? [];
 
@@ -4614,7 +4666,7 @@ export async function POST(request: Request) {
     const jailFineAmount = boardPackEconomy.jailFineAmount ?? 50;
 
     const players = (await fetchFromSupabaseWithService<PlayerRow[]>(
-      `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,is_eliminated,eliminated_at&game_id=eq.${gameId}&order=created_at.asc`,
+      `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,is_eliminated,eliminated_at&game_id=eq.${gameId}&order=created_at.asc`,
       { method: "GET" },
     )) ?? [];
 
@@ -5748,9 +5800,9 @@ export async function POST(request: Request) {
       const isSuperTaxActor =
         typeof pendingSuperTaxAction.player_id === "string" &&
         pendingSuperTaxAction.player_id === currentUserPlayer.id;
-      if (!isSuperTaxActor || body.action !== "CONFIRM_SUPER_TAX") {
+      if (!isSuperTaxActor || (body.action !== "CONFIRM_SUPER_TAX" && body.action !== "USE_TAX_EXEMPTION_PASS")) {
         return NextResponse.json(
-          { error: "Acknowledge Super Tax before continuing." },
+          { error: "Resolve Super Tax before continuing." },
           { status: 409 },
         );
       }
@@ -5761,7 +5813,7 @@ export async function POST(request: Request) {
       const isIncomeTaxActor =
         typeof pendingIncomeTaxAction.player_id === "string" &&
         pendingIncomeTaxAction.player_id === currentUserPlayer.id;
-      if (!isIncomeTaxActor || body.action !== "CONFIRM_INCOME_TAX") {
+      if (!isIncomeTaxActor || (body.action !== "CONFIRM_INCOME_TAX" && body.action !== "USE_TAX_EXEMPTION_PASS")) {
         return NextResponse.json(
           { error: "Resolve Income Tax before continuing." },
           { status: 409 },
@@ -6313,6 +6365,9 @@ export async function POST(request: Request) {
       let nextGetOutOfJailFreeCount =
         currentPlayer.get_out_of_jail_free_count ?? 0;
       let getOutOfJailFreeCountChanged = false;
+      let nextTaxExemptionPassCount =
+        currentPlayer.tax_exemption_pass_count ?? 0;
+      let taxExemptionPassCountChanged = false;
       const events: Array<{
         event_type: string;
         payload: Record<string, unknown>;
@@ -6334,6 +6389,8 @@ export async function POST(request: Request) {
         bankruptcyCandidate,
         nextGetOutOfJailFreeCount,
         getOutOfJailFreeCountChanged,
+        nextTaxExemptionPassCount,
+        taxExemptionPassCountChanged,
         cardUtilityRollOverride,
         cardTriggeredGoToJail,
         startingCash: startingCash,
@@ -6352,6 +6409,8 @@ export async function POST(request: Request) {
         bankruptcyCandidate,
         nextGetOutOfJailFreeCount,
         getOutOfJailFreeCountChanged,
+        nextTaxExemptionPassCount,
+        taxExemptionPassCountChanged,
         cardUtilityRollOverride,
         cardTriggeredGoToJail,
       } = cardResult);
@@ -6469,6 +6528,9 @@ export async function POST(request: Request) {
               ...(getOutOfJailFreeCountChanged
                 ? { get_out_of_jail_free_count: nextGetOutOfJailFreeCount }
                 : {}),
+              ...(taxExemptionPassCountChanged
+                ? { tax_exemption_pass_count: nextTaxExemptionPassCount }
+                : {}),
             }),
           },
         )) ?? [];
@@ -6531,6 +6593,8 @@ export async function POST(request: Request) {
         communityStateChanged: eventDeckState.communityStateChanged,
         nextGetOutOfJailFreeCount,
         getOutOfJailFreeCountChanged,
+        nextTaxExemptionPassCount,
+        taxExemptionPassCountChanged,
         extraGameStatePatch: {
           pending_card_active: false,
           pending_card_deck: null,
@@ -6773,6 +6837,9 @@ export async function POST(request: Request) {
       const nextGetOutOfJailFreeCount =
         currentPlayer.get_out_of_jail_free_count ?? 0;
       const getOutOfJailFreeCountChanged = false;
+      const nextTaxExemptionPassCount =
+        currentPlayer.tax_exemption_pass_count ?? 0;
+      const taxExemptionPassCountChanged = false;
 
       if (isDouble && nextDoublesCount >= 3) {
         const jailTile =
@@ -7078,6 +7145,9 @@ export async function POST(request: Request) {
               ...(getOutOfJailFreeCountChanged
                 ? { get_out_of_jail_free_count: nextGetOutOfJailFreeCount }
                 : {}),
+              ...(taxExemptionPassCountChanged
+                ? { tax_exemption_pass_count: nextTaxExemptionPassCount }
+                : {}),
             }),
           },
         )) ?? [];
@@ -7140,6 +7210,8 @@ export async function POST(request: Request) {
         communityStateChanged,
         nextGetOutOfJailFreeCount,
         getOutOfJailFreeCountChanged,
+        nextTaxExemptionPassCount,
+        taxExemptionPassCountChanged,
       });
     }
 
@@ -7604,6 +7676,115 @@ export async function POST(request: Request) {
       if (events.length > 0) {
         await emitGameEvents(gameId, currentVersion + 1, events, user.id);
       }
+      return NextResponse.json({ gameState: updatedState });
+    }
+
+    if (body.action === "USE_TAX_EXEMPTION_PASS") {
+      const pendingIncomeTax = parsePendingIncomeTaxAction(gameState.pending_action);
+      const pendingSuperTax = parsePendingSuperTaxAction(gameState.pending_action);
+      const pendingAction = pendingIncomeTax ?? pendingSuperTax;
+
+      if (!pendingAction) {
+        return NextResponse.json(
+          { error: "No pending tax action to exempt." },
+          { status: 409 },
+        );
+      }
+
+      if (gameState.turn_phase !== "AWAITING_DECISION") {
+        return NextResponse.json(
+          { error: "Not ready to use Tax Exemption Pass yet." },
+          { status: 409 },
+        );
+      }
+
+      if (pendingAction.player_id !== currentPlayer.id) {
+        return NextResponse.json(
+          { error: "Only the acting player can use Tax Exemption Pass." },
+          { status: 403 },
+        );
+      }
+
+      const currentCount = currentPlayer.tax_exemption_pass_count ?? 0;
+      if (currentCount <= 0) {
+        return NextResponse.json(
+          { error: "No Tax Exemption Pass available." },
+          { status: 409 },
+        );
+      }
+
+      const nextCount = currentCount - 1;
+      const taxKind =
+        pendingAction.type === "INCOME_TAX_CONFIRM" ? "INCOME_TAX" : "SUPER_TAX";
+      const nextIncomeTaxBaselineCashByPlayer =
+        pendingAction.type === "INCOME_TAX_CONFIRM" && pendingAction.taxable_gain > 0
+          ? {
+              ...(gameState.income_tax_baseline_cash_by_player ?? {}),
+              [currentPlayer.id]: pendingAction.current_cash,
+            }
+          : gameState.income_tax_baseline_cash_by_player ?? {};
+
+      const events = [
+        {
+          event_type: "CARD_TAX_EXEMPTION_PASS_USED",
+          payload: {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.display_name,
+            tax_kind: taxKind,
+            tile_index: pendingAction.tile_index,
+            tile_id: pendingAction.tile_id,
+            tile_name: pendingAction.tile_name,
+            prevented_amount: pendingAction.tax_amount,
+            remaining_cards: nextCount,
+          },
+        },
+      ] as Array<{ event_type: string; payload: Record<string, unknown> }>;
+
+      const finalVersion = currentVersion + events.length;
+      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            version: finalVersion,
+            pending_action: null,
+            ...(pendingAction.type === "INCOME_TAX_CONFIRM"
+              ? { income_tax_baseline_cash_by_player: nextIncomeTaxBaselineCashByPlayer }
+              : {}),
+            turn_phase: pendingAction.return_turn_phase,
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      )) ?? [];
+
+      if (!updatedState) {
+        return NextResponse.json({ error: "Version mismatch." }, { status: 409 });
+      }
+
+      const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
+        `players?id=eq.${currentPlayer.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            tax_exemption_pass_count: nextCount,
+          }),
+        },
+      )) ?? [];
+
+      if (!updatedPlayer) {
+        return NextResponse.json(
+          { error: "Unable to consume Tax Exemption Pass." },
+          { status: 500 },
+        );
+      }
+
+      await emitGameEvents(gameId, currentVersion + 1, events, user.id);
       return NextResponse.json({ gameState: updatedState });
     }
 
@@ -10234,6 +10415,9 @@ export async function POST(request: Request) {
       const nextGetOutOfJailFreeCount =
         currentPlayer.get_out_of_jail_free_count ?? 0;
       const getOutOfJailFreeCountChanged = false;
+      const nextTaxExemptionPassCount =
+        currentPlayer.tax_exemption_pass_count ?? 0;
+      const taxExemptionPassCountChanged = false;
 
       const events: Array<{
         event_type: string;
@@ -10508,6 +10692,9 @@ export async function POST(request: Request) {
               ...(getOutOfJailFreeCountChanged
                 ? { get_out_of_jail_free_count: nextGetOutOfJailFreeCount }
                 : {}),
+              ...(taxExemptionPassCountChanged
+                ? { tax_exemption_pass_count: nextTaxExemptionPassCount }
+                : {}),
             }),
           },
         )) ?? [];
@@ -10570,6 +10757,8 @@ export async function POST(request: Request) {
         communityStateChanged,
         nextGetOutOfJailFreeCount,
         getOutOfJailFreeCountChanged,
+        nextTaxExemptionPassCount,
+        taxExemptionPassCountChanged,
       });
     }
 

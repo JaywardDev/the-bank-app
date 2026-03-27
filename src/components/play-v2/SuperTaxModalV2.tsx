@@ -16,6 +16,7 @@ type SuperTaxPendingAction = {
   uses_custom_formula: boolean;
   currency_code: string;
   currency_symbol: string;
+  tax_exemption_pass_count: number;
 };
 
 type SuperTaxModalV2Props = {
@@ -24,6 +25,7 @@ type SuperTaxModalV2Props = {
   isActor: boolean;
   actionLoading: string | null;
   onConfirm: () => void;
+  onUseTaxExemptionPass: () => void;
 };
 
 export default function SuperTaxModalV2({
@@ -32,6 +34,7 @@ export default function SuperTaxModalV2({
   isActor,
   actionLoading,
   onConfirm,
+  onUseTaxExemptionPass,
 }: SuperTaxModalV2Props) {
   if (!pendingSuperTax) {
     return null;
@@ -43,6 +46,7 @@ export default function SuperTaxModalV2({
   };
   const formatMoney = (value: number) => formatCurrency(value, currency);
   const taxRatePercent = Math.round(pendingSuperTax.tax_rate * 100);
+  const hasTaxExemptionPass = pendingSuperTax.tax_exemption_pass_count > 0;
 
   return (
     <div className="w-full max-w-xl rounded-[2rem] border border-violet-200/70 bg-white/95 p-5 shadow-2xl ring-1 ring-black/10 backdrop-blur sm:p-7">
@@ -113,6 +117,26 @@ export default function SuperTaxModalV2({
           >
             {actionLoading === "CONFIRM_SUPER_TAX" ? "Paying…" : "Pay Tax"}
           </button>
+          {hasTaxExemptionPass ? (
+            <>
+              <button
+                type="button"
+                onClick={onUseTaxExemptionPass}
+                disabled={actionLoading === "USE_TAX_EXEMPTION_PASS"}
+                className="w-full rounded-2xl border border-violet-300 bg-white px-4 py-3 text-sm font-semibold text-violet-700 transition hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {actionLoading === "USE_TAX_EXEMPTION_PASS"
+                  ? "Using pass…"
+                  : "Use Tax Exemption Pass"}
+              </button>
+              <p className="text-center text-xs text-slate-500">
+                Use this card to avoid paying this tax. The card will be consumed.
+              </p>
+              <p className="text-center text-xs text-slate-500">
+                Tax Exemption Pass available: {pendingSuperTax.tax_exemption_pass_count}
+              </p>
+            </>
+          ) : null}
           <p className="text-center text-xs text-slate-500">This action will continue your turn.</p>
         </div>
       ) : (

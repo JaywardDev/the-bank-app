@@ -476,6 +476,58 @@ export const formatEventDescription = (
         : `${playerName} used a Get Out of Jail Free card`;
     }
 
+    if (event.event_type === "CARD_TAX_EXEMPTION_PASS_RECEIVED") {
+      const cardTitle =
+        typeof payload?.card_title === "string"
+          ? payload.card_title
+          : "Tax Exemption Pass";
+      const playerName =
+        typeof payload?.player_name === "string"
+          ? payload.player_name
+          : "Player";
+      const totalCards =
+        typeof payload?.total_cards === "number"
+          ? payload.total_cards
+          : typeof payload?.total_cards === "string"
+            ? Number.parseInt(payload.total_cards, 10)
+            : null;
+      return totalCards !== null
+        ? `${playerName} received a ${cardTitle} (${totalCards} total)`
+        : `${playerName} received a ${cardTitle}`;
+    }
+
+    if (event.event_type === "CARD_TAX_EXEMPTION_PASS_USED") {
+      const playerName =
+        typeof payload?.player_name === "string"
+          ? payload.player_name
+          : "Player";
+      const taxKind =
+        payload?.tax_kind === "INCOME_TAX"
+          ? "Income Tax"
+          : payload?.tax_kind === "SUPER_TAX"
+            ? "Super Tax"
+            : "tax";
+      const preventedAmount =
+        typeof payload?.prevented_amount === "number"
+          ? payload.prevented_amount
+          : typeof payload?.prevented_amount === "string"
+            ? Number.parseInt(payload.prevented_amount, 10)
+            : null;
+      const remainingCards =
+        typeof payload?.remaining_cards === "number"
+          ? payload.remaining_cards
+          : typeof payload?.remaining_cards === "string"
+            ? Number.parseInt(payload.remaining_cards, 10)
+            : null;
+      const savedLabel =
+        preventedAmount !== null
+          ? ` and skipped ${formatMoney(preventedAmount, currencyCode, currencySymbol)}`
+          : "";
+      return remainingCards !== null
+        ? `${playerName} used a Tax Exemption Pass for ${taxKind}${savedLabel} (${remainingCards} left)`
+        : `${playerName} used a Tax Exemption Pass for ${taxKind}${savedLabel}`;
+    }
+
     if (event.event_type === "OFFER_PURCHASE") {
       const tileIndexRaw = payload?.tile_index;
       const tileIndex =

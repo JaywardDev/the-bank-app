@@ -169,6 +169,20 @@ export const classicUkChanceCards: CardDefinition[] = [
     kind: "GET_OUT_OF_JAIL_FREE",
     payload: {},
   },
+  {
+    id: "classic-uk-chance-tax-exemption-pass-1",
+    title: "Tax Exemption Pass",
+    text: "Keep this card until needed. Use it to avoid paying Income Tax or Super Tax when you land on a tax tile.",
+    kind: "TAX_EXEMPTION_PASS",
+    payload: {},
+  },
+  {
+    id: "classic-uk-chance-tax-exemption-pass-2",
+    title: "Tax Exemption Pass",
+    text: "Keep this card until needed. Use it to avoid paying Income Tax or Super Tax when you land on a tax tile.",
+    kind: "TAX_EXEMPTION_PASS",
+    payload: {},
+  },
 ];
 
 export const classicUkCommunityCards: CardDefinition[] = [

@@ -90,6 +90,9 @@ export const getPendingCardDescription = (
   if (kind === "GET_OUT_OF_JAIL_FREE") {
     return "Keep this card to use later.";
   }
+  if (kind === "TAX_EXEMPTION_PASS") {
+    return "Keep this card to skip paying Income Tax or Super Tax once.";
+  }
   if (kind === "GO_TO_JAIL") {
     return "Go directly to jail.";
   }
