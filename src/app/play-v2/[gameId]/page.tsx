@@ -19,6 +19,7 @@ import ConfirmActionModalV2 from "@/components/play-v2/ConfirmActionModalV2";
 import RotateToLandscapeOverlay from "@/components/play-v2/RotateToLandscapeOverlay";
 import ActivityPopupV2 from "@/components/play-v2/ActivityPopupV2";
 import EndedGameResultsPanel from "@/components/play-v2/EndedGameResultsPanel";
+import TileInfoPanelV2 from "@/components/play-v2/TileInfoPanelV2";
 import InvestPanel from "@/app/components/InvestPanel";
 import { TitleDeedPreview } from "@/app/components/TitleDeedPreview";
 import { getDevelopmentLevelLabel } from "@/components/play-v2/utils/developmentLabels";
@@ -29,7 +30,11 @@ import {
   computeTaxableAssetValueForLuxuryTax,
 } from "@/lib/assetValue";
 import { getRules } from "@/lib/rules";
-import { getCurrentTileRent, ownsFullColorSet } from "@/lib/rent";
+import {
+  getCurrentTileRent,
+  getPropertyRentWithDevelopment,
+  ownsFullColorSet,
+} from "@/lib/rent";
 import { formatCurrency, getCurrencyMetaFromBoardPack } from "@/lib/currency";
 import {
   calculateAmortizedPaymentPerTurn,
@@ -364,6 +369,7 @@ export default function PlayV2Page() {
   const [showEndSessionConfirm, setShowEndSessionConfirm] = useState(false);
   const [showHostLeaveGuard, setShowHostLeaveGuard] = useState(false);
   const [showMenuOverlay, setShowMenuOverlay] = useState(false);
+  const [showTileTitleCardModal, setShowTileTitleCardModal] = useState(false);
   const [showActivityPopup, setShowActivityPopup] = useState(false);
   const [investPanelCollapsed, setInvestPanelCollapsed] = useState(true);
 
@@ -2238,6 +2244,16 @@ export default function PlayV2Page() {
     return "None";
   }, [ownershipByTile, selectedTileIndex]);
 
+  const selectedTileStatusLabel = useMemo(() => {
+    if (!selectedOwnerId) {
+      return "Available";
+    }
+    if (selectedTileStatus === "None") {
+      return "Owned";
+    }
+    return selectedTileStatus;
+  }, [selectedOwnerId, selectedTileStatus]);
+
   const selectedTileCurrentRent = useMemo(() => {
     if (!selectedTile || !selectedBoardPack) {
       return null;
@@ -2249,6 +2265,50 @@ export default function PlayV2Page() {
       economy: selectedBoardPack.economy,
     });
   }, [ownershipByTile, selectedBoardPack, selectedTile]);
+
+  const selectedTileDevelopmentCount = useMemo(() => {
+    if (selectedTileIndex === null) {
+      return 0;
+    }
+    return ownershipByTile[selectedTileIndex]?.houses ?? 0;
+  }, [ownershipByTile, selectedTileIndex]);
+
+  const selectedTileIsUpgradeable = useMemo(() => {
+    if (!selectedTile || selectedTile.type !== "PROPERTY") {
+      return false;
+    }
+    return typeof selectedTile.houseCost === "number";
+  }, [selectedTile]);
+
+  const selectedTileMaxUpgradeLevel = useMemo(() => {
+    if (!selectedTileIsUpgradeable || !selectedTile?.rentByHouses?.length) {
+      return 0;
+    }
+    return Math.max(selectedTile.rentByHouses.length - 1, 0);
+  }, [selectedTile, selectedTileIsUpgradeable]);
+
+  const selectedTileIsFullyUpgraded =
+    selectedTileIsUpgradeable &&
+    selectedTileDevelopmentCount >= selectedTileMaxUpgradeLevel;
+
+  const selectedTileNextRent = useMemo(() => {
+    if (
+      !selectedTile ||
+      !selectedTileIsUpgradeable ||
+      selectedTileIsFullyUpgraded
+    ) {
+      return null;
+    }
+    return getPropertyRentWithDevelopment(
+      selectedTile,
+      selectedTileDevelopmentCount + 1,
+    );
+  }, [
+    selectedTile,
+    selectedTileDevelopmentCount,
+    selectedTileIsFullyUpgraded,
+    selectedTileIsUpgradeable,
+  ]);
 
   const selectedOwnerRailCount = useMemo(() => {
     if (!selectedOwnerId) {
@@ -3767,32 +3827,30 @@ export default function PlayV2Page() {
               </p>
               {selectedTile ? (
                 <>
-                  <TitleDeedPreview
+                  <TileInfoPanelV2
                     tile={selectedTile}
                     bandColor={getTileBandColor(selectedTile)}
-                    boardPackEconomy={
-                      selectedBoardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY
+                    ownerLabel={selectedOwnerLabel || "Unowned"}
+                    statusLabel={selectedTileStatusLabel}
+                    purchasePriceLabel={formatMoney(selectedTile.price ?? null)}
+                    currentRentLabel={formatMoney(selectedTileCurrentRent)}
+                    upgradeCostLabel={
+                      selectedTileIsUpgradeable
+                        ? formatMoney(selectedTile.houseCost ?? null)
+                        : null
                     }
-                    price={selectedTile.price}
-                    ownedRailCount={selectedOwnerRailCount}
-                    ownedUtilityCount={selectedOwnerUtilityCount}
-                    mode="readonly"
-                    size="compact"
+                    nextRentLabel={
+                      selectedTileNextRent !== null
+                        ? formatMoney(selectedTileNextRent)
+                        : null
+                    }
+                    isFullyUpgraded={selectedTileIsFullyUpgraded}
+                    onViewTitleCard={() => setShowTileTitleCardModal(true)}
                   />
-                  <div className="rounded-lg border border-white/15 bg-white/10 px-3 py-2 text-xs text-white/90">
-                    <p>
-                      Current Rent:{" "}
-                      {selectedTileCurrentRent !== null
-                        ? formatMoney(selectedTileCurrentRent)
-                        : "—"}
-                    </p>
-                    <p>Owner: {selectedOwnerLabel}</p>
-                    <p>Status: {selectedTileStatus}</p>
-                  </div>
                 </>
               ) : (
                 <p className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/70">
-                  Select a tile to view the title deed
+                  Select a tile to view details.
                 </p>
               )}
             </section>
@@ -4395,6 +4453,42 @@ export default function PlayV2Page() {
                 </button>
               ) : null}
             </div>
+          </div>
+        </div>
+      ) : null}
+      {showTileTitleCardModal && selectedTile ? (
+        <div
+          className="fixed inset-0 z-40 flex items-center justify-center bg-black/65 p-4"
+          onClick={() => setShowTileTitleCardModal(false)}
+        >
+          <div
+            className="relative w-full max-w-md rounded-2xl border border-white/15 bg-neutral-900/90 p-3 shadow-2xl backdrop-blur"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              aria-label="Close title card"
+              className="absolute right-3 top-3 rounded-full border border-white/20 bg-white/10 px-2 py-0.5 text-xs font-semibold text-white transition hover:bg-white/20"
+              onClick={() => setShowTileTitleCardModal(false)}
+            >
+              ✕
+            </button>
+            <TitleDeedPreview
+              tile={selectedTile}
+              bandColor={getTileBandColor(selectedTile)}
+              boardPackEconomy={
+                selectedBoardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY
+              }
+              price={selectedTile.price}
+              ownedRailCount={selectedOwnerRailCount}
+              ownedUtilityCount={selectedOwnerUtilityCount}
+              mode="readonly"
+              showDevelopment
+              developmentCount={selectedTileDevelopmentCount}
+              ownerPlayerId={selectedOwnerId}
+              ownershipByTile={ownershipByTile}
+              boardTiles={selectedBoardPack?.tiles ?? []}
+            />
           </div>
         </div>
       ) : null}

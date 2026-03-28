@@ -10,6 +10,7 @@ import {
 } from "@/lib/rent";
 import { getBoardTileIconSrc } from "@/lib/tileIcons";
 import { getDevelopmentLevelLabel } from "@/components/play-v2/utils/developmentLabels";
+import { formatCurrency, getCurrencyMetaFromEconomy } from "@/lib/currency";
 
 const getCanonicalTileType = (tileType: string) => {
   const normalized = tileType.toUpperCase();
@@ -139,7 +140,7 @@ const PropertyRentTable = ({
   hotelIncrement,
   currentRent,
   monopolyActive = false,
-  currencySymbol = "$",
+  currency,
   className,
 }: {
   rentRows: RentRow[];
@@ -147,7 +148,7 @@ const PropertyRentTable = ({
   hotelIncrement: number | null;
   currentRent?: number | null;
   monopolyActive?: boolean;
-  currencySymbol?: string;
+  currency: { code?: string | null; symbol?: string | null };
   className?: string;
 }) => (
   <div
@@ -165,21 +166,21 @@ const PropertyRentTable = ({
           className="flex items-center justify-between text-neutral-600"
         >
           <span>{row.label}</span>
-          <span className="font-semibold text-neutral-900">
-            {row.value !== null ? formatMoney(row.value, currencySymbol) : "—"}
+            <span className="font-semibold text-neutral-900">
+            {row.value !== null ? formatMoney(row.value, currency) : "—"}
           </span>
         </div>
       ))}
       <div className="flex items-center justify-between text-neutral-600">
         <span>Hotel increment</span>
         <span className="font-semibold text-neutral-900">
-          {hotelIncrement !== null ? `${formatSignedMoney(hotelIncrement, currencySymbol)} per hotel` : "—"}
+          {hotelIncrement !== null ? `${formatSignedMoney(hotelIncrement, currency)} per hotel` : "—"}
         </span>
       </div>
       <div className="flex items-center justify-between text-neutral-600">
         <span>House cost</span>
         <span className="font-semibold text-neutral-900">
-          {houseCost !== null ? `${formatMoney(houseCost, currencySymbol)} each` : "—"}
+          {houseCost !== null ? `${formatMoney(houseCost, currency)} each` : "—"}
         </span>
       </div>
       {monopolyActive ? (
@@ -189,7 +190,7 @@ const PropertyRentTable = ({
       ) : null}
       {currentRent !== undefined && currentRent !== null ? (
         <div className="mt-2 rounded-lg border border-neutral-200 bg-white px-2 py-1 text-[11px] font-semibold text-neutral-700">
-          Current rent: {formatMoney(currentRent, currencySymbol)}
+          Current rent: {formatMoney(currentRent, currency)}
         </div>
       ) : null}
     </div>
@@ -200,13 +201,13 @@ const RailRentTable = ({
   rentRows,
   ownedCount,
   currentRent,
-  currencySymbol = "$",
+  currency,
   className,
 }: {
   rentRows: RentRow[];
   ownedCount: number;
   currentRent: number | null;
-  currencySymbol?: string;
+  currency: { code?: string | null; symbol?: string | null };
   className?: string;
 }) => (
   <div
@@ -224,8 +225,8 @@ const RailRentTable = ({
           className="flex items-center justify-between text-neutral-600"
         >
           <span>{row.label}</span>
-          <span className="font-semibold text-neutral-900">
-            {row.value !== null ? formatMoney(row.value, currencySymbol) : "—"}
+            <span className="font-semibold text-neutral-900">
+            {row.value !== null ? formatMoney(row.value, currency) : "—"}
           </span>
         </div>
       ))}
@@ -233,7 +234,7 @@ const RailRentTable = ({
     <p className="mt-2 text-[11px] text-neutral-500">Currently owned: {ownedCount} railroads.</p>
     {currentRent !== null ? (
       <p className="mt-1 text-[11px] font-semibold text-neutral-700">
-        Current rent: {formatMoney(currentRent, currencySymbol)}
+        Current rent: {formatMoney(currentRent, currency)}
       </p>
     ) : null}
   </div>
@@ -244,14 +245,14 @@ const UtilityRentTable = ({
   lastRoll,
   currentRent,
   rentMultipliers,
-  currencySymbol = "$",
+  currency,
   className,
 }: {
   ownedCount: number;
   lastRoll: number | null;
   currentRent: number | null;
   rentMultipliers: BoardPackEconomy["utilityRentMultipliers"];
-  currencySymbol?: string;
+  currency: { code?: string | null; symbol?: string | null };
   className?: string;
 }) => (
   <div
@@ -286,7 +287,7 @@ const UtilityRentTable = ({
     </p>
     {lastRoll !== null && currentRent !== null ? (
       <p className="mt-1 text-[11px] font-semibold text-neutral-700">
-        Current rent (last roll {lastRoll}): {formatMoney(currentRent, currencySymbol)}
+        Current rent (last roll {lastRoll}): {formatMoney(currentRent, currency)}
       </p>
     ) : null}
   </div>
@@ -318,11 +319,15 @@ type OwnershipByTile = Record<
   }
 >;
 
-const formatMoney = (amount: number, currencySymbol = "$") =>
-  `${currencySymbol}${amount.toLocaleString()}`;
+const formatMoney = (
+  amount: number,
+  currency: { code?: string | null; symbol?: string | null },
+) => formatCurrency(amount, currency);
 
-const formatSignedMoney = (amount: number, currencySymbol = "$") =>
-  `${amount < 0 ? "-" : "+"}${formatMoney(Math.abs(amount), currencySymbol)}`;
+const formatSignedMoney = (
+  amount: number,
+  currency: { code?: string | null; symbol?: string | null },
+) => `${amount < 0 ? "-" : "+"}${formatMoney(Math.abs(amount), currency)}`;
 
 const getDevBreakdown = (dev: number) => {
   const normalizedDev = Number.isFinite(dev) ? Math.max(0, Math.floor(dev)) : 0;
@@ -459,7 +464,7 @@ export const TitleDeedPreview = ({
   footer,
   showDevelopment = false,
   developmentCount = null,
-  currencySymbol = "$",
+  currencySymbol,
   ownerPlayerId = null,
   ownershipByTile = {},
   boardTiles = [],
@@ -498,6 +503,10 @@ export const TitleDeedPreview = ({
     tile.type === "PROPERTY" && resolvedDevelopment !== null
       ? getPropertyRentWithDev(tile, resolvedDevelopment)
       : null;
+  const resolvedCurrency = getCurrencyMetaFromEconomy(boardPackEconomy);
+  const currency = currencySymbol
+    ? { ...resolvedCurrency, symbol: currencySymbol }
+    : resolvedCurrency;
 
   return (
     <TitleDeedCard
@@ -523,7 +532,7 @@ export const TitleDeedPreview = ({
             </p>
             {priceValue !== null ? (
               <p className={`${size === "compact" ? "text-[11px]" : "text-xs"} font-medium text-neutral-500`}>
-                Price {formatMoney(priceValue, currencySymbol)}
+                Price {formatMoney(priceValue, currency)}
               </p>
             ) : null}
           </div>
@@ -545,7 +554,7 @@ export const TitleDeedPreview = ({
             </p>
             {priceValue !== null ? (
               <p className={`${size === "compact" ? "text-[11px]" : "text-xs"} font-medium text-neutral-500`}>
-                Price {formatMoney(priceValue, currencySymbol)}
+                Price {formatMoney(priceValue, currency)}
               </p>
             ) : null}
           </div>
@@ -558,7 +567,7 @@ export const TitleDeedPreview = ({
       subheader={
         tile.type === "PROPERTY" && priceValue !== null ? (
           <p className={`${size === "compact" ? "text-[11px]" : "text-xs"} font-medium text-neutral-500`}>
-            Price {formatMoney(priceValue, currencySymbol)}
+            Price {formatMoney(priceValue, currency)}
           </p>
         ) : null
       }
@@ -569,7 +578,7 @@ export const TitleDeedPreview = ({
             rentRows={railRentRows}
             ownedCount={ownedRailCount}
             currentRent={null}
-            currencySymbol={currencySymbol}
+            currency={currency}
           />
         ) : tile.type === "UTILITY" ? (
           <UtilityRentTable
@@ -578,7 +587,7 @@ export const TitleDeedPreview = ({
             lastRoll={null}
             currentRent={null}
             rentMultipliers={utilityRentMultipliers}
-            currencySymbol={currencySymbol}
+            currency={currency}
           />
         ) : (
           <div className={size === "compact" ? "space-y-1.5" : "mt-1 space-y-2"}>
@@ -598,7 +607,7 @@ export const TitleDeedPreview = ({
               hotelIncrement={propertyRent.hotelIncrement}
               currentRent={resolvedDevelopment !== null ? currentRent : undefined}
               monopolyActive={propertyRent.monopolyActive}
-              currencySymbol={currencySymbol}
+              currency={currency}
             />
           </div>
         )
