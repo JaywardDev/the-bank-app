@@ -6403,7 +6403,11 @@ export async function POST(request: Request) {
         cardTriggeredGoToJail,
       } = cardResult);
 
-      if (activeLandingTile.type === "EVENT") {
+      const movedToDifferentTile = activeResolvedTile.index !== sourceTile.index;
+      const shouldDrawChainedEventCard =
+        movedToDifferentTile && activeLandingTile.type === "EVENT";
+
+      if (shouldDrawChainedEventCard) {
         const drawOutcome = drawEventCardForLanding({
           landingTile: activeLandingTile,
           boardPack,
