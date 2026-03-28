@@ -1237,6 +1237,8 @@ export default function PlayV2Page() {
     return (
       type === "BUY_PROPERTY" ||
       type === "JAIL_DECISION" ||
+      type === "INCOME_TAX_CONFIRM" ||
+      type === "SUPER_TAX_CONFIRM" ||
       type === "INSOLVENCY_RECOVERY"
     );
   }, []);
@@ -1246,9 +1248,7 @@ export default function PlayV2Page() {
     return (
       type === "PENDING_CARD" ||
       type === "MACRO_EVENT" ||
-      type === "GO_TO_JAIL" ||
-      type === "SUPER_TAX_CONFIRM" ||
-      type === "INCOME_TAX_CONFIRM"
+      type === "GO_TO_JAIL"
     );
   }, []);
 
@@ -3378,6 +3378,36 @@ export default function PlayV2Page() {
           </div>
         );
       }
+      case "INCOME_TAX_CONFIRM":
+        return (
+          <IncomeTaxModalV2
+            pendingIncomeTax={pendingIncomeTax}
+            actorName={currentTurnPlayer?.display_name ?? null}
+            isActor={Boolean(
+              currentUserPlayer &&
+              currentTurnPlayer &&
+              currentUserPlayer.id === currentTurnPlayer.id,
+            )}
+            actionLoading={actionLoading}
+            onConfirm={handleConfirmIncomeTax}
+            onUseTaxExemptionPass={handleUseTaxExemptionPass}
+          />
+        );
+      case "SUPER_TAX_CONFIRM":
+        return (
+          <SuperTaxModalV2
+            pendingSuperTax={pendingSuperTax}
+            actorName={currentTurnPlayer?.display_name ?? null}
+            isActor={Boolean(
+              currentUserPlayer &&
+              currentTurnPlayer &&
+              currentUserPlayer.id === currentTurnPlayer.id,
+            )}
+            actionLoading={actionLoading}
+            onConfirm={handleConfirmSuperTax}
+            onUseTaxExemptionPass={handleUseTaxExemptionPass}
+          />
+        );
       default:
         return null;
     }
@@ -3393,12 +3423,15 @@ export default function PlayV2Page() {
     handleBuyProperty,
     handleBuyPropertyWithMortgage,
     handleConfirmInsolvencyPayment,
+    handleConfirmIncomeTax,
+    handleConfirmSuperTax,
     handleDecreaseMortgageDownPaymentPercent,
     handleDeclareBankruptcy,
     handleDeclineProperty,
     handleIncreaseMortgageDownPaymentPercent,
     handlePayJailFine,
     handleRollForDoubles,
+    handleUseTaxExemptionPass,
     handleUseGetOutOfJailFree,
     hasGetOutOfJailFree,
     insolvencyAmountDue,
@@ -3412,7 +3445,9 @@ export default function PlayV2Page() {
     pendingMortgagePerTurnPayment,
     pendingMortgagePrincipal,
     pendingInsolvencyRecovery,
+    pendingIncomeTax,
     pendingPurchase,
+    pendingSuperTax,
     selectedMortgageDownPaymentPercent,
     selectedBoardPack?.tiles,
     formatMoney,
@@ -3473,36 +3508,6 @@ export default function PlayV2Page() {
             onConfirm={handleConfirmMacroEvent}
           />
         );
-      case "INCOME_TAX_CONFIRM":
-        return (
-          <IncomeTaxModalV2
-            pendingIncomeTax={pendingIncomeTax}
-            actorName={currentTurnPlayer?.display_name ?? null}
-            isActor={Boolean(
-              currentUserPlayer &&
-              currentTurnPlayer &&
-              currentUserPlayer.id === currentTurnPlayer.id,
-            )}
-            actionLoading={actionLoading}
-            onConfirm={handleConfirmIncomeTax}
-            onUseTaxExemptionPass={handleUseTaxExemptionPass}
-          />
-        );
-      case "SUPER_TAX_CONFIRM":
-        return (
-          <SuperTaxModalV2
-            pendingSuperTax={pendingSuperTax}
-            actorName={currentTurnPlayer?.display_name ?? null}
-            isActor={Boolean(
-              currentUserPlayer &&
-              currentTurnPlayer &&
-              currentUserPlayer.id === currentTurnPlayer.id,
-            )}
-            actionLoading={actionLoading}
-            onConfirm={handleConfirmSuperTax}
-            onUseTaxExemptionPass={handleUseTaxExemptionPass}
-          />
-        );
       default:
         return null;
     }
@@ -3514,17 +3519,12 @@ export default function PlayV2Page() {
     currentUserPlayer,
     handleConfirmGoToJail,
     handleConfirmMacroEvent,
-    handleConfirmIncomeTax,
-    handleConfirmSuperTax,
-    handleUseTaxExemptionPass,
     handleConfirmPendingCard,
     isFullscreenEvent,
     pendingCard,
     shouldShowGoToJailConfirm,
     isGoToJailActor,
     pendingMacroEvent,
-    pendingIncomeTax,
-    pendingSuperTax,
     players,
     selectedBoardPack,
     currencySymbol,
