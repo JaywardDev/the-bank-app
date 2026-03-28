@@ -1927,6 +1927,23 @@ export default function PlayV2Page() {
     },
     [currency],
   );
+  const sellToMarketSelection = useMemo(() => {
+    if (sellToMarketTileIndex === null || !selectedBoardPack?.tiles) {
+      return null;
+    }
+    const tile = selectedBoardPack.tiles.find(
+      (boardTile) => boardTile.index === sellToMarketTileIndex,
+    );
+    if (!tile) {
+      return null;
+    }
+    const marketValue = tile.price ?? 0;
+    return {
+      name: tile.name,
+      marketValue,
+      payout: Math.floor(marketValue * 0.7),
+    };
+  }, [sellToMarketTileIndex, selectedBoardPack?.tiles]);
 
   const macroTooltipById = useMemo(() => {
     const lookup = new Map<string, string>();
@@ -2272,6 +2289,7 @@ export default function PlayV2Page() {
         const ownership = ownershipByTile[tile.index];
         const isMyTurn = canAct;
         const isRecoveryTurn = canUseRecoveryActions;
+        const canUseWalletPropertyActions = isMyTurn || isRecoveryTurn;
         const isCollateralized = Boolean(ownership?.collateral_loan_id);
         const isPurchaseMortgaged = Boolean(ownership?.purchase_mortgage_id);
         const housesCount = ownership?.houses ?? 0;
@@ -2310,7 +2328,7 @@ export default function PlayV2Page() {
           : housesCount < 5
             ? "Need top level first"
             : null;
-        const collateralDisabledReason = !isRecoveryTurn
+        const collateralDisabledReason = !canUseWalletPropertyActions
           ? "Not your turn"
           : isCollateralized
             ? "Already collateralized"
@@ -2321,7 +2339,7 @@ export default function PlayV2Page() {
                 : !rules.loanCollateralEnabled
                   ? "Collateral loans disabled"
                   : null;
-        const sellToMarketDisabledReason = !isRecoveryTurn
+        const sellToMarketDisabledReason = !canUseWalletPropertyActions
           ? "Not your turn"
           : housesCount > 0
             ? "Remove upgrades first"
@@ -4468,10 +4486,24 @@ export default function PlayV2Page() {
         </div>
       ) : null}
       <ConfirmActionModalV2
-        open={sellToMarketTileIndex !== null}
-        title="Sell property to market?"
-        description="You will receive 70% of listed price."
-        confirmLabel="Confirm"
+        open={sellToMarketSelection !== null}
+        title={
+          sellToMarketSelection
+            ? `Sell ${sellToMarketSelection.name} to the Bank?`
+            : "Sell property to the Bank?"
+        }
+        description={
+          sellToMarketSelection ? (
+            <div className="space-y-1">
+              <p>Market value: {formatMoney(sellToMarketSelection.marketValue)}</p>
+              <p>Bank payout (70%): {formatMoney(sellToMarketSelection.payout)}</p>
+            </div>
+          ) : (
+            "Review sale details before confirming."
+          )
+        }
+        confirmLabel="Sell Property"
+        cancelLabel="Cancel"
         isConfirming={actionLoading === "SELL_TO_MARKET"}
         onConfirm={handleConfirmSellToMarket}
         onCancel={() => setSellToMarketTileIndex(null)}
