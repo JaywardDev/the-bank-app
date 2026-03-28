@@ -18,11 +18,17 @@ type PendingPurchaseModalV2Props = {
   actionLoading: string | null;
   canAffordPurchase: boolean;
   canAffordMortgage: boolean;
-  mortgageDownPaymentLabel: string;
-  mortgageLtvPercent: number;
+  selectedDownPaymentPercent: number;
+  minDownPaymentPercent: number;
+  maxDownPaymentPercent: number;
   mortgageDownPaymentPercent: number;
+  downPaymentAmountLabel: string;
+  mortgageAmountLabel: string;
+  perTurnPaymentLabel: string;
   priceLabel: string;
   discountSummary?: string | null;
+  onDecreaseDownPayment: () => void;
+  onIncreaseDownPayment: () => void;
   onBuy: () => void;
   onBuyWithMortgage: () => void;
   onAuction: () => void;
@@ -36,11 +42,17 @@ export default function PendingPurchaseModalV2({
   actionLoading,
   canAffordPurchase,
   canAffordMortgage,
-  mortgageDownPaymentLabel,
-  mortgageLtvPercent,
+  selectedDownPaymentPercent,
+  minDownPaymentPercent,
+  maxDownPaymentPercent,
   mortgageDownPaymentPercent,
+  downPaymentAmountLabel,
+  mortgageAmountLabel,
+  perTurnPaymentLabel,
   priceLabel,
   discountSummary,
+  onDecreaseDownPayment,
+  onIncreaseDownPayment,
   onBuy,
   onBuyWithMortgage,
   onAuction,
@@ -78,14 +90,47 @@ export default function PendingPurchaseModalV2({
             className="rounded-2xl border border-neutral-300 px-4 py-2 text-sm font-semibold text-neutral-900 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-400"
             title={
               canAffordMortgage
-                ? `Financing: ${mortgageLtvPercent}% (Down: ${mortgageDownPaymentPercent}%)`
+                ? `Financing: ${mortgageDownPaymentPercent}% mortgage (${selectedDownPaymentPercent}% down)`
                 : "Not enough cash for down payment"
             }
           >
             {actionLoading === "BUY_PROPERTY"
               ? "Buying…"
-              : `Buy with Mortgage (${mortgageDownPaymentLabel} down)`}
+              : "Buy with Mortgage"}
           </button>
+          <div className="rounded-2xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-700">
+            <div className="flex items-center justify-between gap-2">
+              <p className="font-semibold text-neutral-900">Down payment %</p>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={onDecreaseDownPayment}
+                  disabled={selectedDownPaymentPercent <= minDownPaymentPercent}
+                  className="flex h-7 w-7 items-center justify-center rounded-full border border-neutral-300 bg-white text-sm font-semibold text-neutral-800 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-400"
+                  aria-label="Decrease down payment percentage"
+                >
+                  −
+                </button>
+                <span className="min-w-10 text-center text-sm font-semibold text-neutral-900">
+                  {selectedDownPaymentPercent}%
+                </span>
+                <button
+                  type="button"
+                  onClick={onIncreaseDownPayment}
+                  disabled={selectedDownPaymentPercent >= maxDownPaymentPercent}
+                  className="flex h-7 w-7 items-center justify-center rounded-full border border-neutral-300 bg-white text-sm font-semibold text-neutral-800 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-400"
+                  aria-label="Increase down payment percentage"
+                >
+                  +
+                </button>
+              </div>
+            </div>
+            <div className="mt-2 space-y-1 text-[11px] text-neutral-600">
+              <p>Cash required now: {downPaymentAmountLabel}</p>
+              <p>Mortgage amount: {mortgageAmountLabel}</p>
+              <p>Per-turn payment: {perTurnPaymentLabel}</p>
+            </div>
+          </div>
           <button
             type="button"
             onClick={onAuction}

@@ -28,6 +28,14 @@ import {
   computeSuperTaxBreakdown,
   isCustomTaxBoardPack,
 } from "@/lib/tax";
+import {
+  calculateAmortizedPaymentPerTurn,
+  calculateDownPaymentAmount,
+  calculateMortgagePrincipalFromDownPayment,
+  defaultPurchaseDownPaymentPercentFromMortgageLtv,
+  isValidPurchaseDownPaymentPercent,
+  type PurchaseDownPaymentPercent,
+} from "@/lib/loanMath";
 
 const supabaseUrl = (process.env.SUPABASE_URL ?? SUPABASE_URL ?? "").trim();
 const supabaseAnonKey = (
@@ -44,27 +52,6 @@ const bankHeaders = {
   apikey: supabaseServiceRoleKey,
   Authorization: `Bearer ${supabaseServiceRoleKey}`,
   "Content-Type": "application/json",
-};
-
-const calculateAmortizedPaymentPerTurn = (
-  principal: number,
-  ratePerTurn: number,
-  termTurns: number,
-) => {
-  if (principal <= 0 || termTurns <= 0) {
-    return 0;
-  }
-
-  if (ratePerTurn <= 0) {
-    return Math.round(principal / termTurns);
-  }
-
-  const denominator = 1 - (1 + ratePerTurn) ** (-termTurns);
-  if (denominator <= 0) {
-    return Math.round(principal / termTurns);
-  }
-
-  return Math.round((principal * ratePerTurn) / denominator);
 };
 
 const DEFAULT_MACRO_DECK = {
@@ -149,6 +136,7 @@ type BankActionRequest =
       action: "DECLINE_PROPERTY" | "BUY_PROPERTY";
       tileIndex: number;
       financing?: "MORTGAGE";
+      downPaymentPercent?: PurchaseDownPaymentPercent;
     })
   | (BaseActionRequest & {
       action: "AUCTION_BID";
@@ -8831,6 +8819,12 @@ export async function POST(request: Request) {
       const currentBalance =
         balances[currentPlayer.id] ?? startingCash;
       const usingMortgage = body.financing === "MORTGAGE";
+      if (!usingMortgage && body.downPaymentPercent !== undefined) {
+        return NextResponse.json(
+          { error: "downPaymentPercent is only allowed with mortgage financing." },
+          { status: 400 },
+        );
+      }
       if (usingMortgage) {
         if (getMacroLoanMortgageBlockedV1(activeMacroEffects)) {
           return NextResponse.json(
@@ -8839,10 +8833,30 @@ export async function POST(request: Request) {
           );
         }
       }
+      let mortgageDownPaymentPercent: PurchaseDownPaymentPercent =
+        defaultPurchaseDownPaymentPercentFromMortgageLtv(rules.mortgageLtv);
+      if (usingMortgage) {
+        if (
+          body.downPaymentPercent !== undefined &&
+          !isValidPurchaseDownPaymentPercent(body.downPaymentPercent)
+        ) {
+          return NextResponse.json(
+            {
+              error:
+                "Invalid downPaymentPercent. Must be one of 30, 40, 50, 60, 70, 80.",
+            },
+            { status: 400 },
+          );
+        }
+        mortgageDownPaymentPercent =
+          body.downPaymentPercent ?? mortgageDownPaymentPercent;
+      }
+      const downPayment = usingMortgage
+        ? calculateDownPaymentAmount(price, mortgageDownPaymentPercent)
+        : price;
       const principal = usingMortgage
-        ? Math.round(price * rules.mortgageLtv)
+        ? calculateMortgagePrincipalFromDownPayment(price, mortgageDownPaymentPercent)
         : 0;
-      const downPayment = usingMortgage ? price - principal : price;
 
       if (currentBalance < downPayment) {
         return NextResponse.json(
@@ -8948,7 +8962,12 @@ export async function POST(request: Request) {
             base_price: basePrice,
             property_purchase_discount_pct: discountedPurchase.discountPct,
             owner_player_id: currentPlayer.id,
-            ...(usingMortgage ? { financing: "mortgage" } : {}),
+            ...(usingMortgage
+              ? {
+                  financing: "mortgage",
+                  down_payment_percent: mortgageDownPaymentPercent,
+                }
+              : {}),
           },
         },
         {
@@ -8970,6 +8989,7 @@ export async function POST(request: Request) {
             tile_index: tileIndex,
             principal,
             down_payment: downPayment,
+            down_payment_percent: mortgageDownPaymentPercent,
             rate_per_turn: mortgageRatePerTurn,
             term_turns: mortgageTermTurns,
             payment_per_turn: mortgagePaymentPerTurn,

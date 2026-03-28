@@ -31,6 +31,14 @@ import {
 import { getRules } from "@/lib/rules";
 import { getCurrentTileRent, ownsFullColorSet } from "@/lib/rent";
 import { formatCurrency, getCurrencyMetaFromBoardPack } from "@/lib/currency";
+import {
+  calculateAmortizedPaymentPerTurn,
+  calculateDownPaymentAmount,
+  calculateMortgagePrincipalFromDownPayment,
+  defaultPurchaseDownPaymentPercentFromMortgageLtv,
+  PURCHASE_DOWN_PAYMENT_PERCENTS,
+  type PurchaseDownPaymentPercent,
+} from "@/lib/loanMath";
 import { useMarketInvestController } from "@/features/market-invest/useMarketInvestController";
 import {
   hasTradeValue,
@@ -224,6 +232,7 @@ type BankActionRequest = {
   tileIndex?: number;
   amount?: number;
   financing?: "MORTGAGE";
+  downPaymentPercent?: PurchaseDownPaymentPercent;
   loanId?: string;
   mortgageId?: string;
   tradeId?: string;
@@ -312,6 +321,8 @@ export default function PlayV2Page() {
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [selectedMortgageDownPaymentPercent, setSelectedMortgageDownPaymentPercent] =
+    useState<PurchaseDownPaymentPercent>(50);
   const [needsAuth, setNeedsAuth] = useState(false);
   const [gameMetaError, setGameMetaError] = useState<string | null>(null);
   const [selectedTileIndex, setSelectedTileIndex] = useState<number | null>(
@@ -1266,14 +1277,26 @@ export default function PlayV2Page() {
     typeof rules.mortgageLtv === "number" && Number.isFinite(rules.mortgageLtv)
       ? rules.mortgageLtv
       : 0.5;
-  const mortgageDownPaymentRate = 1 - mortgageLtv;
-  const mortgageLtvPercent = Math.round(mortgageLtv * 100);
-  const mortgageDownPaymentPercent = Math.round(mortgageDownPaymentRate * 100);
-  const pendingMortgagePrincipal = pendingPurchase
-    ? Math.round(pendingPurchase.price * mortgageLtv)
-    : 0;
+  const defaultMortgageDownPaymentPercent =
+    defaultPurchaseDownPaymentPercentFromMortgageLtv(mortgageLtv);
   const pendingMortgageDownPayment = pendingPurchase
-    ? pendingPurchase.price - pendingMortgagePrincipal
+    ? calculateDownPaymentAmount(
+        pendingPurchase.price,
+        selectedMortgageDownPaymentPercent,
+      )
+    : 0;
+  const pendingMortgagePrincipal = pendingPurchase
+    ? calculateMortgagePrincipalFromDownPayment(
+        pendingPurchase.price,
+        selectedMortgageDownPaymentPercent,
+      )
+    : 0;
+  const pendingMortgagePerTurnPayment = pendingPurchase
+    ? calculateAmortizedPaymentPerTurn(
+        pendingMortgagePrincipal,
+        rules.mortgageRatePerTurn,
+        rules.mortgageTermTurns,
+      )
     : 0;
   const canAffordPendingPurchase = pendingPurchase
     ? (currentUserCash ?? 0) >= pendingPurchase.price
@@ -1281,6 +1304,13 @@ export default function PlayV2Page() {
   const canAffordPendingMortgage = pendingPurchase
     ? (currentUserCash ?? 0) >= pendingMortgageDownPayment
     : false;
+  useEffect(() => {
+    if (!pendingPurchase) {
+      return;
+    }
+    setSelectedMortgageDownPaymentPercent(defaultMortgageDownPaymentPercent);
+  }, [defaultMortgageDownPaymentPercent, pendingPurchase]);
+
   const canAct =
     isMyTurn && !isEliminated && !auctionActive && !hasBlockingPendingAction;
   const canUseRecoveryActions =
@@ -1489,6 +1519,9 @@ export default function PlayV2Page() {
             : {}),
           ...(request.amount !== undefined ? { amount: request.amount } : {}),
           ...(request.financing ? { financing: request.financing } : {}),
+          ...(request.downPaymentPercent !== undefined
+            ? { downPaymentPercent: request.downPaymentPercent }
+            : {}),
           ...(request.loanId ? { loanId: request.loanId } : {}),
           ...(request.mortgageId ? { mortgageId: request.mortgageId } : {}),
           ...(request.tradeId ? { tradeId: request.tradeId } : {}),
@@ -1649,8 +1682,9 @@ export default function PlayV2Page() {
     void handleBankAction("BUY_PROPERTY", {
       tileIndex: pendingPurchase.tile_index,
       financing: "MORTGAGE",
+      downPaymentPercent: selectedMortgageDownPaymentPercent,
     });
-  }, [handleBankAction, pendingPurchase]);
+  }, [handleBankAction, pendingPurchase, selectedMortgageDownPaymentPercent]);
 
   const handleDeclineProperty = useCallback(() => {
     if (!pendingPurchase) {
@@ -1660,6 +1694,26 @@ export default function PlayV2Page() {
       tileIndex: pendingPurchase.tile_index,
     });
   }, [handleBankAction, pendingPurchase]);
+
+  const handleDecreaseMortgageDownPaymentPercent = useCallback(() => {
+    setSelectedMortgageDownPaymentPercent((current) => {
+      const index = PURCHASE_DOWN_PAYMENT_PERCENTS.indexOf(current);
+      if (index <= 0) {
+        return current;
+      }
+      return PURCHASE_DOWN_PAYMENT_PERCENTS[index - 1];
+    });
+  }, []);
+
+  const handleIncreaseMortgageDownPaymentPercent = useCallback(() => {
+    setSelectedMortgageDownPaymentPercent((current) => {
+      const index = PURCHASE_DOWN_PAYMENT_PERCENTS.indexOf(current);
+      if (index < 0 || index >= PURCHASE_DOWN_PAYMENT_PERCENTS.length - 1) {
+        return current;
+      }
+      return PURCHASE_DOWN_PAYMENT_PERCENTS[index + 1];
+    });
+  }, []);
 
   const handleConfirmGoToJail = useCallback(() => {
     if (!isGoToJailActor) {
@@ -3171,9 +3225,17 @@ export default function PlayV2Page() {
             actionLoading={actionLoading}
             canAffordPurchase={canAffordPendingPurchase}
             canAffordMortgage={canAffordPendingMortgage}
-            mortgageDownPaymentLabel={formatMoney(pendingMortgageDownPayment)}
-            mortgageLtvPercent={mortgageLtvPercent}
-            mortgageDownPaymentPercent={mortgageDownPaymentPercent}
+            selectedDownPaymentPercent={selectedMortgageDownPaymentPercent}
+            minDownPaymentPercent={PURCHASE_DOWN_PAYMENT_PERCENTS[0]}
+            maxDownPaymentPercent={
+              PURCHASE_DOWN_PAYMENT_PERCENTS[
+                PURCHASE_DOWN_PAYMENT_PERCENTS.length - 1
+              ]
+            }
+            mortgageDownPaymentPercent={100 - selectedMortgageDownPaymentPercent}
+            downPaymentAmountLabel={formatMoney(pendingMortgageDownPayment)}
+            mortgageAmountLabel={formatMoney(pendingMortgagePrincipal)}
+            perTurnPaymentLabel={formatMoney(pendingMortgagePerTurnPayment)}
             priceLabel={formatMoney(pendingPurchase?.price ?? 0)}
             discountSummary={
               typeof pendingPurchase?.property_purchase_discount_pct === "number" &&
@@ -3182,6 +3244,8 @@ export default function PlayV2Page() {
                 ? `${pendingPurchase.property_purchase_discount_macro_name ?? "Macro event"} active: Bank price reduced from ${formatMoney(pendingPurchase.base_price)} to ${formatMoney(pendingPurchase.price)}.`
                 : null
             }
+            onDecreaseDownPayment={handleDecreaseMortgageDownPaymentPercent}
+            onIncreaseDownPayment={handleIncreaseMortgageDownPaymentPercent}
             onBuy={handleBuyProperty}
             onBuyWithMortgage={handleBuyPropertyWithMortgage}
             onAuction={handleDeclineProperty}
@@ -3329,8 +3393,10 @@ export default function PlayV2Page() {
     handleBuyProperty,
     handleBuyPropertyWithMortgage,
     handleConfirmInsolvencyPayment,
+    handleDecreaseMortgageDownPaymentPercent,
     handleDeclareBankruptcy,
     handleDeclineProperty,
+    handleIncreaseMortgageDownPaymentPercent,
     handlePayJailFine,
     handleRollForDoubles,
     handleUseGetOutOfJailFree,
@@ -3342,11 +3408,12 @@ export default function PlayV2Page() {
     isDrawerDecision,
     isJailDecisionActor,
     jailFineAmount,
-    mortgageDownPaymentPercent,
-    mortgageLtvPercent,
     pendingMortgageDownPayment,
+    pendingMortgagePerTurnPayment,
+    pendingMortgagePrincipal,
     pendingInsolvencyRecovery,
     pendingPurchase,
+    selectedMortgageDownPaymentPercent,
     selectedBoardPack?.tiles,
     formatMoney,
     getPlayerNameById,
