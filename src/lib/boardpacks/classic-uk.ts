@@ -52,6 +52,10 @@ export const CLASSIC_UK_ECONOMY: BoardPackEconomy = {
     code: "GBP",
     symbol: "£",
   },
+  bettingMarket: {
+    minStakePerBet: 10,
+    maxTotalStakePerRoll: 1_000,
+  },
   houseRentMultipliersByGroup: {
     brown: [1, 5, 15, 45, 80],
     "light-blue": [1, 5, 14, 40, 70],

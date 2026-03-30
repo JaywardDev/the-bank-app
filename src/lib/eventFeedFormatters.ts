@@ -119,6 +119,22 @@ export const formatEventDescription = (
       return "Rolled for utility rent (card effect)";
     }
 
+    if (event.event_type === "BETTING_MARKET_BET_PLACED") {
+      const playerName =
+        typeof payload?.player_name === "string" ? payload.player_name : "Player";
+      const betLabel =
+        typeof payload?.bet_label === "string" ? payload.bet_label : "dice";
+      return `${playerName} placed a bet on ${betLabel}`;
+    }
+
+    if (event.event_type === "BETTING_MARKET_BET_WON") {
+      const playerName =
+        typeof payload?.player_name === "string" ? payload.player_name : "Player";
+      const betLabel =
+        typeof payload?.bet_label === "string" ? payload.bet_label : "dice";
+      return `${playerName} won on ${betLabel}`;
+    }
+
     if (event.event_type === "ROLLED_DOUBLE") {
       return doublesCount !== null
         ? `Double rolled (streak ${doublesCount})`

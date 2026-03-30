@@ -11,6 +11,10 @@ import {
 
 const PHILIPPINES_HARD_ECONOMY: BoardPackEconomy = {
   ...classicPhBoardPack.economy,
+  bettingMarket: {
+    minStakePerBet: 1_000,
+    maxTotalStakePerRoll: 100_000,
+  },
   startingBalance: 5_000_000,
   passGoAmount: 600_000,
 };

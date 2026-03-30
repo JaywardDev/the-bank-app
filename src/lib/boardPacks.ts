@@ -29,6 +29,10 @@ export type BoardPackEconomy = {
     code: string;
     symbol: string;
   };
+  bettingMarket?: {
+    minStakePerBet: number;
+    maxTotalStakePerRoll: number;
+  };
   houseRentMultipliersByGroup: Record<string, number[]>;
   hotelIncrementMultiplier: number;
   railRentByCount: number[];

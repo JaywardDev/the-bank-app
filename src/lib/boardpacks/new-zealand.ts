@@ -52,6 +52,10 @@ export const NEW_ZEALAND_ECONOMY: BoardPackEconomy = {
     code: "NZD",
     symbol: "$",
   },
+  bettingMarket: {
+    minStakePerBet: 1_000,
+    maxTotalStakePerRoll: 100_000,
+  },
   houseRentMultipliersByGroup: {
     brown: [1, 12, 25, 55, 80],
     "light-blue": [1, 11, 23, 50, 70],

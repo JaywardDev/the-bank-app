@@ -36,6 +36,15 @@ import {
   isValidPurchaseDownPaymentPercent,
   type PurchaseDownPaymentPercent,
 } from "@/lib/loanMath";
+import {
+  doesBetWin,
+  formatBetLabel,
+  getBetPayoutMultiplier,
+  normalizeBettingMarketState,
+  validateBetSelection,
+  type BettingMarketBet,
+  type BettingMarketBetKind,
+} from "@/lib/bettingMarket";
 
 const supabaseUrl = (process.env.SUPABASE_URL ?? SUPABASE_URL ?? "").trim();
 const supabaseAnonKey = (
@@ -148,6 +157,16 @@ type BankActionRequest =
   | (BaseActionRequest & {
       action: "TAKE_COLLATERAL_LOAN";
       tileIndex: number;
+    })
+  | (BaseActionRequest & {
+      action: "PLACE_BETTING_MARKET_BET";
+      kind: BettingMarketBetKind;
+      stake: number;
+      selection: Record<string, unknown>;
+    })
+  | (BaseActionRequest & {
+      action: "CANCEL_BETTING_MARKET_BET";
+      betId: string;
     })
   | (BaseActionRequest & {
       action: "PAYOFF_COLLATERAL_LOAN";
@@ -341,6 +360,7 @@ type GameStateRow = {
   pending_card_source_tile_index: number | null;
   skip_next_roll_by_player: Record<string, boolean> | null;
   income_tax_baseline_cash_by_player: Record<string, number> | null;
+  betting_market_state: Record<string, unknown> | null;
 };
 
 type OwnershipRow = {
@@ -1090,12 +1110,14 @@ const prepareDeckDraw = ({
   gameId: string;
   state: DeckShuffleState;
 }) => {
-  let { order, drawPtr, seed, reshuffleCount } = ensureDeckOrder({
+  const deckOrderState = ensureDeckOrder({
     deckLength,
     deckLabel,
     gameId,
     state,
   });
+  let { order, drawPtr, reshuffleCount } = deckOrderState;
+  const { seed } = deckOrderState;
 
   const resetOrder = () => {
     order = buildShuffledOrder(deckLength, seed, reshuffleCount);
@@ -4364,7 +4386,7 @@ export async function POST(request: Request) {
       }
 
       await fetchFromSupabaseWithService<GameStateRow[]>(
-        "game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment",
+        "game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,betting_market_state,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment",
         {
           method: "POST",
           headers: {
@@ -4659,7 +4681,7 @@ export async function POST(request: Request) {
     )) ?? [];
 
     const [gameState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
-      `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
+      `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,betting_market_state,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
       { method: "GET" },
     )) ?? [];
 
@@ -4801,7 +4823,7 @@ export async function POST(request: Request) {
       );
 
       const upsertResponse = await fetch(
-        `${supabaseUrl}/rest/v1/game_state?on_conflict=game_id&select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment`,
+        `${supabaseUrl}/rest/v1/game_state?on_conflict=game_id&select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,betting_market_state,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment`,
         {
           method: "POST",
           headers: {
@@ -5173,7 +5195,7 @@ export async function POST(request: Request) {
         const finalVersion = currentVersion + events.length;
         const [updatedState] =
           (await fetchFromSupabaseWithService<GameStateRow[]>(
-            `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
+            `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,betting_market_state,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
             {
               method: "PATCH",
               headers: {
@@ -5262,7 +5284,7 @@ export async function POST(request: Request) {
         const finalVersion = currentVersion + events.length;
         const [updatedState] =
           (await fetchFromSupabaseWithService<GameStateRow[]>(
-            `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
+            `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,betting_market_state,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
             {
               method: "PATCH",
               headers: {
@@ -5356,7 +5378,7 @@ export async function POST(request: Request) {
         const finalVersion = currentVersion + events.length;
         const [updatedState] =
           (await fetchFromSupabaseWithService<GameStateRow[]>(
-            `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
+            `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,betting_market_state,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
             {
               method: "PATCH",
               headers: {
@@ -5710,7 +5732,7 @@ export async function POST(request: Request) {
       const finalVersion = currentVersion + events.length;
       const [updatedState] =
         (await fetchFromSupabaseWithService<GameStateRow[]>(
-          `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
+          `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,betting_market_state,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
           {
             method: "PATCH",
             headers: {
@@ -5825,6 +5847,214 @@ export async function POST(request: Request) {
           { status: 409 },
         );
       }
+    }
+
+    if (body.action === "PLACE_BETTING_MARKET_BET") {
+      const bettingConfig = boardPackEconomy.bettingMarket;
+      if (!bettingConfig) {
+        return NextResponse.json(
+          { error: "Betting market is not enabled for this board pack." },
+          { status: 409 },
+        );
+      }
+
+      const kind = body.kind;
+      const stakeRaw = body.stake;
+      if (!Number.isInteger(stakeRaw) || stakeRaw <= 0) {
+        return NextResponse.json(
+          { error: "Stake must be a positive integer." },
+          { status: 400 },
+        );
+      }
+      const stake = stakeRaw;
+      if (stake < bettingConfig.minStakePerBet) {
+        return NextResponse.json(
+          { error: "Stake is below board minimum." },
+          { status: 400 },
+        );
+      }
+
+      const selectionResult = validateBetSelection(kind, body.selection);
+      if (!selectionResult.ok) {
+        return NextResponse.json(
+          { error: selectionResult.error },
+          { status: 400 },
+        );
+      }
+
+      const balances = gameState.balances ?? {};
+      const currentCash = balances[currentUserPlayer.id] ?? 0;
+      if (currentCash < stake) {
+        return NextResponse.json(
+          { error: "Insufficient cash to place this bet." },
+          { status: 409 },
+        );
+      }
+
+      const bettingState = normalizeBettingMarketState(gameState.betting_market_state);
+      const targetRollSeq = bettingState.next_roll_seq;
+      const currentStakeForRoll = bettingState.bets
+        .filter(
+          (bet) =>
+            bet.player_id === currentUserPlayer.id &&
+            bet.target_roll_seq === targetRollSeq,
+        )
+        .reduce((sum, bet) => sum + bet.stake, 0);
+      if (currentStakeForRoll + stake > bettingConfig.maxTotalStakePerRoll) {
+        return NextResponse.json(
+          { error: "Total stake limit for the next roll exceeded." },
+          { status: 409 },
+        );
+      }
+
+      const bet: BettingMarketBet = {
+        id: crypto.randomUUID(),
+        player_id: currentUserPlayer.id,
+        target_roll_seq: targetRollSeq,
+        kind,
+        stake,
+        selection: selectionResult.value,
+        created_at: new Date().toISOString(),
+      };
+      const nextBets = [...bettingState.bets, bet];
+      const nextBettingState = {
+        ...bettingState,
+        bets: nextBets,
+        total_stake_by_player: {
+          ...bettingState.total_stake_by_player,
+          [currentUserPlayer.id]: currentStakeForRoll + stake,
+        },
+      };
+      const nextBalances = {
+        ...balances,
+        [currentUserPlayer.id]: currentCash - stake,
+      };
+
+      const eventPayload = {
+        player_id: currentUserPlayer.id,
+        player_name: currentUserPlayer.display_name,
+        bet_id: bet.id,
+        kind: bet.kind,
+        selection: bet.selection,
+        bet_label: formatBetLabel(bet.kind, bet.selection),
+        target_roll_seq: targetRollSeq,
+      } satisfies Record<string, unknown>;
+      const finalVersion = currentVersion + 1;
+      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            version: finalVersion,
+            balances: nextBalances,
+            betting_market_state: nextBettingState,
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      )) ?? [];
+      if (!updatedState) {
+        return NextResponse.json(
+          { error: "Version mismatch." },
+          { status: 409 },
+        );
+      }
+
+      await emitGameEvents(
+        gameId,
+        currentVersion + 1,
+        [
+          {
+            event_type: "BETTING_MARKET_BET_PLACED",
+            payload: eventPayload,
+          },
+        ],
+        user.id,
+      );
+
+      return NextResponse.json({ gameState: updatedState });
+    }
+
+    if (body.action === "CANCEL_BETTING_MARKET_BET") {
+      const betId = body.betId;
+      if (!betId || typeof betId !== "string") {
+        return NextResponse.json(
+          { error: "betId is required." },
+          { status: 400 },
+        );
+      }
+      const bettingState = normalizeBettingMarketState(gameState.betting_market_state);
+      const bet = bettingState.bets.find((entry) => entry.id === betId);
+      if (!bet) {
+        return NextResponse.json(
+          { error: "Bet not found." },
+          { status: 404 },
+        );
+      }
+      if (bet.player_id !== currentUserPlayer.id) {
+        return NextResponse.json(
+          { error: "You can only cancel your own bet." },
+          { status: 403 },
+        );
+      }
+      if (bet.target_roll_seq !== bettingState.next_roll_seq) {
+        return NextResponse.json(
+          { error: "Bet can no longer be canceled." },
+          { status: 409 },
+        );
+      }
+
+      const nextBets = bettingState.bets.filter((entry) => entry.id !== bet.id);
+      const nextStakeForPlayer = nextBets
+        .filter(
+          (entry) =>
+            entry.player_id === currentUserPlayer.id &&
+            entry.target_roll_seq === bettingState.next_roll_seq,
+        )
+        .reduce((sum, entry) => sum + entry.stake, 0);
+      const nextTotalStakeByPlayer = { ...bettingState.total_stake_by_player };
+      if (nextStakeForPlayer > 0) {
+        nextTotalStakeByPlayer[currentUserPlayer.id] = nextStakeForPlayer;
+      } else {
+        delete nextTotalStakeByPlayer[currentUserPlayer.id];
+      }
+      const nextBettingState = {
+        ...bettingState,
+        bets: nextBets,
+        total_stake_by_player: nextTotalStakeByPlayer,
+      };
+      const balances = gameState.balances ?? {};
+      const currentCash = balances[currentUserPlayer.id] ?? 0;
+      const nextBalances = {
+        ...balances,
+        [currentUserPlayer.id]: currentCash + bet.stake,
+      };
+      const finalVersion = currentVersion + 1;
+      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            version: finalVersion,
+            balances: nextBalances,
+            betting_market_state: nextBettingState,
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      )) ?? [];
+      if (!updatedState) {
+        return NextResponse.json(
+          { error: "Version mismatch." },
+          { status: 409 },
+        );
+      }
+
+      return NextResponse.json({ gameState: updatedState });
     }
 
     if (isAuctionAction) {
@@ -6813,6 +7043,61 @@ export async function POST(request: Request) {
       const balances = gameState?.balances ?? {};
       let updatedBalances = balances;
       let balancesChanged = false;
+      const bettingState = normalizeBettingMarketState(gameState.betting_market_state);
+      const qualifyingRollSeq = bettingState.next_roll_seq;
+      const betsForThisRoll = bettingState.bets.filter(
+        (bet) => bet.target_roll_seq === qualifyingRollSeq,
+      );
+      const futureBets = bettingState.bets.filter(
+        (bet) => bet.target_roll_seq !== qualifyingRollSeq,
+      );
+      const nextBettingTotals = futureBets.reduce<Record<string, number>>((acc, bet) => {
+        acc[bet.player_id] = (acc[bet.player_id] ?? 0) + bet.stake;
+        return acc;
+      }, {});
+      const bettingWinEvents: Array<{ event_type: string; payload: Record<string, unknown> }> =
+        [];
+      for (const bet of betsForThisRoll) {
+        if (!doesBetWin(bet.kind, bet.selection, [dieOne, dieTwo])) {
+          continue;
+        }
+        const multiplier = getBetPayoutMultiplier(bet.kind, bet.selection);
+        const payout = Math.floor(bet.stake * multiplier);
+        const winnerBalance = updatedBalances[bet.player_id] ?? 0;
+        updatedBalances = {
+          ...updatedBalances,
+          [bet.player_id]: winnerBalance + payout,
+        };
+        balancesChanged = true;
+        bettingWinEvents.push({
+          event_type: "BETTING_MARKET_BET_WON",
+          payload: {
+            player_id: bet.player_id,
+            player_name:
+              players.find((player) => player.id === bet.player_id)?.display_name ?? "Player",
+            bet_id: bet.id,
+            kind: bet.kind,
+            selection: bet.selection,
+            bet_label: formatBetLabel(bet.kind, bet.selection),
+            target_roll_seq: qualifyingRollSeq,
+          },
+        });
+      }
+      const resolvedBettingState = {
+        ...bettingState,
+        next_roll_seq: qualifyingRollSeq + 1,
+        bets: futureBets,
+        total_stake_by_player: nextBettingTotals,
+        last_resolution: {
+          roll_seq: qualifyingRollSeq,
+          dice: [dieOne, dieTwo] as [number, number],
+          resolved_bet_count: betsForThisRoll.length,
+          winner_count: bettingWinEvents.filter(
+            (event) => event.event_type === "BETTING_MARKET_BET_WON",
+          ).length,
+          resolved_at: new Date().toISOString(),
+        },
+      };
       const bankruptcyCandidate: BankruptcyCandidate | null = null;
       let nextChanceIndex = gameState?.chance_index ?? 0;
       let nextCommunityIndex = gameState?.community_index ?? 0;
@@ -6854,6 +7139,7 @@ export async function POST(request: Request) {
               dice,
             } satisfies DiceEventPayload,
           },
+          ...bettingWinEvents,
           {
             event_type: "ROLLED_DOUBLE",
             payload: {
@@ -6879,6 +7165,8 @@ export async function POST(request: Request) {
               version: finalVersion,
               last_roll: rollTotal,
               doubles_count: 0,
+              ...(balancesChanged ? { balances: updatedBalances } : {}),
+              betting_market_state: resolvedBettingState,
               pending_action: createGoToJailPendingAction({
                 currentPlayer,
                 jailTile,
@@ -6938,6 +7226,7 @@ export async function POST(request: Request) {
             dice,
           } satisfies DiceEventPayload,
         },
+        ...bettingWinEvents,
       ];
 
       if (isDouble) {
@@ -7075,6 +7364,7 @@ export async function POST(request: Request) {
               last_roll: rollTotal,
               doubles_count: nextDoublesCount,
               ...(balancesChanged ? { balances: updatedBalances } : {}),
+              betting_market_state: resolvedBettingState,
               ...(nextChanceIndex !== (gameState?.chance_index ?? 0)
                 ? { chance_index: nextChanceIndex }
                 : {}),
@@ -7204,6 +7494,9 @@ export async function POST(request: Request) {
         getOutOfJailFreeCountChanged,
         nextTaxExemptionPassCount,
         taxExemptionPassCountChanged,
+        extraGameStatePatch: {
+          betting_market_state: resolvedBettingState,
+        },
       });
     }
 

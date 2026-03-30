@@ -54,6 +54,10 @@ const CLASSIC_PH_ECONOMY: BoardPackEconomy = {
     code: "PHP",
     symbol: "₱",
   },
+  bettingMarket: {
+    minStakePerBet: 1_000,
+    maxTotalStakePerRoll: 100_000,
+  },
   startingBalance: 12000000,
   passGoAmount: 1600000,
   jailFineAmount: 400000,
