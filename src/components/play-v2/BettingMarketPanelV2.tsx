@@ -136,7 +136,7 @@ export default function BettingMarketPanelV2({
       return "Insufficient cash to place this bet.";
     }
     if (stake > remainingStakeRoom) {
-      return "This stake exceeds your remaining room for the next roll.";
+      return "This bet would exceed your limit for the next roll.";
     }
     return null;
   }, [
@@ -156,39 +156,14 @@ export default function BettingMarketPanelV2({
       : null;
 
   return (
-    <section className="space-y-3 text-sm text-white/85">
-      <div className="rounded-lg border border-white/10 bg-white/5 p-3">
+    <section className="space-y-2.5 text-sm text-white/85">
+      <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2">
         <p className="text-xs font-semibold uppercase tracking-wide text-white/60">
           Betting Market
         </p>
-        <p className="mt-1 text-xs text-white/70">Place optional bets on the next roll.</p>
-        <p className="text-xs text-white/70">Bets resolve automatically on the next normal dice roll.</p>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 rounded-lg border border-white/10 bg-white/5 p-3 text-xs sm:grid-cols-4">
-        <p className="space-y-1">
-          <span className="block text-white/60">Minimum bet</span>
-          <span className="font-semibold text-white">
-            {bettingConfig ? formatMoney(bettingConfig.minStakePerBet) : "—"}
-          </span>
-        </p>
-        <p className="space-y-1">
-          <span className="block text-white/60">Max per next roll</span>
-          <span className="font-semibold text-white">
-            {bettingConfig ? formatMoney(bettingConfig.maxTotalStakePerRoll) : "—"}
-          </span>
-        </p>
-        <p className="space-y-1">
-          <span className="block text-white/60">Your committed</span>
-          <span className="font-semibold text-white">{formatMoney(committedStake)}</span>
-        </p>
-        <p className="space-y-1">
-          <span className="block text-white/60">Remaining room</span>
-          <span className="font-semibold text-white">{formatMoney(remainingStakeRoom)}</span>
-        </p>
-      </div>
-
-      <div className="space-y-3 rounded-lg border border-white/10 bg-white/5 p-3">
+      <div className="space-y-2.5 rounded-lg border border-white/10 bg-white/5 p-3">
         <div className="grid grid-cols-3 gap-1.5 text-xs">
           {[
             { value: "TOTAL", label: "Total" },
@@ -300,13 +275,13 @@ export default function BettingMarketPanelV2({
           />
         </label>
 
-        <div className="rounded-md border border-white/10 bg-black/20 px-2.5 py-2 text-xs text-white/80">
-          <p className="flex items-center justify-between gap-2">
-            <span>Payout multiplier</span>
+        <div className="rounded-md border border-white/10 bg-black/20 px-2 py-1.5 text-xs text-white/75">
+          <p className="flex items-center justify-between gap-2 leading-tight">
+            <span>Payout</span>
             <span className="font-semibold text-white">{payoutMultiplier ? `${payoutMultiplier}x` : "—"}</span>
           </p>
-          <p className="mt-1 flex items-center justify-between gap-2">
-            <span>Projected payout</span>
+          <p className="mt-1 flex items-center justify-between gap-2 leading-tight">
+            <span>Win</span>
             <span className="font-semibold text-emerald-200">
               {projectedPayout !== null ? formatMoney(projectedPayout) : "—"}
             </span>
@@ -326,6 +301,7 @@ export default function BettingMarketPanelV2({
               return;
             }
             onPlaceBet({ kind: draft.kind, selection: draft.selection, stake });
+            setStakeInput("");
           }}
           disabled={!canSubmit}
           className="w-full rounded-md border border-emerald-300/50 bg-emerald-500/20 px-3 py-2 text-sm font-semibold text-emerald-100 transition enabled:hover:bg-emerald-500/30 disabled:cursor-not-allowed disabled:opacity-50"
@@ -334,18 +310,18 @@ export default function BettingMarketPanelV2({
         </button>
       </div>
 
-      <div className="space-y-2 rounded-lg border border-white/10 bg-white/5 p-3">
+      <div className="space-y-1.5 rounded-lg border border-white/10 bg-white/5 p-2.5">
         <p className="text-xs font-semibold uppercase tracking-wide text-white/60">Your Bets for Next Roll</p>
         {yourPendingBets.length === 0 ? (
-          <p className="text-xs text-white/65">No pending bets for roll #{bettingState.next_roll_seq}.</p>
+          <p className="text-xs text-white/65">No pending bets for the next roll.</p>
         ) : (
-          <ul className="space-y-2">
+          <ul className="space-y-1.5">
             {yourPendingBets.map((bet) => {
               const multiplier = getBetPayoutMultiplier(bet.kind, bet.selection);
               const projected = Math.floor(bet.stake * multiplier);
               const isCancellable = bet.target_roll_seq === bettingState.next_roll_seq;
               return (
-                <li key={bet.id} className="rounded-md border border-white/10 bg-black/20 p-2.5 text-xs">
+                <li key={bet.id} className="rounded-md border border-white/10 bg-black/20 p-2 text-xs">
                   <div className="flex items-start justify-between gap-2">
                     <div>
                       <p className="font-semibold text-white">{formatBetLabel(bet.kind, bet.selection)}</p>
@@ -372,8 +348,10 @@ export default function BettingMarketPanelV2({
         )}
       </div>
 
+      <p className="px-1 text-[11px] text-white/55">Total bets this roll: {formatMoney(committedStake)}</p>
+
       {bettingState.last_resolution ? (
-        <div className="rounded-lg border border-white/10 bg-white/5 p-3 text-xs text-white/75">
+        <div className="rounded-lg border border-white/10 bg-white/5 p-2.5 text-xs text-white/75">
           <p className="font-semibold uppercase tracking-wide text-white/60">Last resolved result</p>
           <div className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-1 sm:grid-cols-4">
             <p>
