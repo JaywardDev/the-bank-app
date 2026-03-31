@@ -20,7 +20,7 @@ import RotateToLandscapeOverlay from "@/components/play-v2/RotateToLandscapeOver
 import ActivityPopupV2 from "@/components/play-v2/ActivityPopupV2";
 import EndedGameResultsPanel from "@/components/play-v2/EndedGameResultsPanel";
 import TileInfoPanelV2 from "@/components/play-v2/TileInfoPanelV2";
-import InvestPanel from "@/app/components/InvestPanel";
+import BettingMarketPanelV2 from "@/components/play-v2/BettingMarketPanelV2";
 import { TitleDeedPreview } from "@/app/components/TitleDeedPreview";
 import { getDevelopmentLevelLabel } from "@/components/play-v2/utils/developmentLabels";
 import { DEFAULT_BOARD_PACK_ECONOMY, getBoardPackById } from "@/lib/boardPacks";
@@ -44,7 +44,11 @@ import {
   PURCHASE_DOWN_PAYMENT_PERCENTS,
   type PurchaseDownPaymentPercent,
 } from "@/lib/loanMath";
-import { useMarketInvestController } from "@/features/market-invest/useMarketInvestController";
+import {
+  normalizeBettingMarketState,
+  type BettingMarketBetKind,
+  type BettingMarketBetSelection,
+} from "@/lib/bettingMarket";
 import {
   hasTradeValue,
   normalizeTradeSnapshot,
@@ -122,6 +126,7 @@ type GameState = {
   auction_min_increment: number | null;
   active_macro_effects_v1: ActiveMacroEffectV1[] | null;
   skip_next_roll_by_player: Record<string, boolean> | null;
+  betting_market_state: Record<string, unknown> | null;
 };
 
 type GameEvent = {
@@ -227,6 +232,8 @@ type BankAction =
   | "PAYOFF_COLLATERAL_LOAN"
   | "DEFAULT_PROPERTY"
   | "PAYOFF_PURCHASE_MORTGAGE"
+  | "PLACE_BETTING_MARKET_BET"
+  | "CANCEL_BETTING_MARKET_BET"
   | "PROPOSE_TRADE"
   | "ACCEPT_TRADE"
   | "REJECT_TRADE"
@@ -246,6 +253,10 @@ type BankActionRequest = {
   offerTiles?: number[];
   requestCash?: number;
   requestTiles?: number[];
+  kind?: BettingMarketBetKind;
+  selection?: BettingMarketBetSelection;
+  stake?: number;
+  betId?: string;
 };
 
 type OwnershipRow = {
@@ -371,7 +382,13 @@ export default function PlayV2Page() {
   const [showMenuOverlay, setShowMenuOverlay] = useState(false);
   const [showTileTitleCardModal, setShowTileTitleCardModal] = useState(false);
   const [showActivityPopup, setShowActivityPopup] = useState(false);
-  const [investPanelCollapsed, setInvestPanelCollapsed] = useState(true);
+  const [bettingInlineError, setBettingInlineError] = useState<string | null>(
+    null,
+  );
+  const [bettingSuccessMessage, setBettingSuccessMessage] = useState<
+    string | null
+  >(null);
+  const [cancelingBetId, setCancelingBetId] = useState<string | null>(null);
 
   const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
   const ownedReasonTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
@@ -454,7 +471,7 @@ export default function PlayV2Page() {
   const loadGameState = useCallback(
     async (gameId: string, accessToken?: string) => {
       const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
-        `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,active_macro_effects_v1,skip_next_roll_by_player,income_tax_baseline_cash_by_player,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
+        `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,active_macro_effects_v1,skip_next_roll_by_player,betting_market_state,income_tax_baseline_cash_by_player,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
         { method: "GET" },
         accessToken,
       );
@@ -1503,9 +1520,10 @@ export default function PlayV2Page() {
     async (
       actionOrRequest: BankAction | BankActionRequest,
       options?: Omit<BankActionRequest, "action">,
-    ) => {
+      uiOptions?: { suppressNotice?: boolean },
+    ): Promise<{ ok: boolean; error?: string }> => {
       if (!routeGameId || !session?.access_token) {
-        return;
+        return { ok: false, error: "Missing game session." };
       }
 
       const request =
@@ -1544,6 +1562,10 @@ export default function PlayV2Page() {
           ...(request.requestTiles
             ? { requestTiles: request.requestTiles }
             : {}),
+          ...(request.kind ? { kind: request.kind } : {}),
+          ...(request.selection ? { selection: request.selection } : {}),
+          ...(request.stake !== undefined ? { stake: request.stake } : {}),
+          ...(request.betId ? { betId: request.betId } : {}),
         };
 
         const runActionRequest = async (accessToken: string) => {
@@ -1596,8 +1618,10 @@ export default function PlayV2Page() {
           const refreshedSession = await supabaseClient.refreshSession();
           if (!refreshedSession?.access_token) {
             setNeedsAuth(true);
-            setNotice(SESSION_EXPIRED_MESSAGE);
-            return;
+            if (!uiOptions?.suppressNotice) {
+              setNotice(SESSION_EXPIRED_MESSAGE);
+            }
+            return { ok: false, error: SESSION_EXPIRED_MESSAGE };
           }
           setSession(refreshedSession);
           accessToken = refreshedSession.access_token;
@@ -1606,25 +1630,35 @@ export default function PlayV2Page() {
 
         if (result.response.status === 409) {
           await loadAllSlices(routeGameId, accessToken);
-          setNotice("Game state updated. Please try again.");
-          return;
+          const message = "Game state updated. Please try again.";
+          if (!uiOptions?.suppressNotice) {
+            setNotice(message);
+          }
+          return { ok: false, error: message };
         }
 
         if (!result.response.ok) {
           if (result.response.status === 401) {
             setNeedsAuth(true);
           }
-          setNotice(getErrorMessage(result.response.status, result.payload));
-          return;
+          const message = getErrorMessage(result.response.status, result.payload);
+          if (!uiOptions?.suppressNotice) {
+            setNotice(message);
+          }
+          return { ok: false, error: message };
         }
 
         await refetchActionSlices(routeGameId, accessToken);
+        return { ok: true };
       } catch (error) {
-        setNotice(
+        const message =
           error instanceof Error
             ? error.message
-            : "Action failed. Please try again.",
-        );
+            : "Action failed. Please try again.";
+        if (!uiOptions?.suppressNotice) {
+          setNotice(message);
+        }
+        return { ok: false, error: message };
       } finally {
         setActionLoading(null);
       }
@@ -1924,8 +1958,6 @@ export default function PlayV2Page() {
   );
   const currency = getCurrencyMetaFromBoardPack(selectedBoardPack);
   const currencySymbol = currency.symbol ?? "$";
-  const investCurrencySymbol = currency.symbol ?? "$";
-  const investCurrencyCode = currency.code ?? "USD";
   const formatMoney = useCallback(
     (value: number | null) => {
       if (value === null) return "—";
@@ -1933,6 +1965,95 @@ export default function PlayV2Page() {
     },
     [currency],
   );
+  const bettingConfig = selectedBoardPack?.economy.bettingMarket ?? null;
+  const bettingMarketState = useMemo(
+    () => normalizeBettingMarketState(gameState?.betting_market_state),
+    [gameState?.betting_market_state],
+  );
+  const bettingDisabledReason = useMemo(() => {
+    if (!bettingConfig) {
+      return "Betting is unavailable for this board pack.";
+    }
+    if (!isInProgress) {
+      return "Betting is unavailable right now.";
+    }
+    if (!currentUserPlayer) {
+      return "Betting is unavailable for spectators.";
+    }
+    if (isEliminated) {
+      return "Eliminated players cannot place bets.";
+    }
+    if (!isMyTurn) {
+      return "Betting is only available during your turn.";
+    }
+    if (hasBlockingPendingAction) {
+      return "Resolve the current pending decision before placing a bet.";
+    }
+    if (auctionActive) {
+      return "Betting is unavailable during an auction.";
+    }
+    return null;
+  }, [
+    auctionActive,
+    bettingConfig,
+    currentUserPlayer,
+    hasBlockingPendingAction,
+    isEliminated,
+    isInProgress,
+    isMyTurn,
+  ]);
+  const canInteractWithBetting = bettingDisabledReason === null;
+
+  const handlePlaceBet = useCallback(
+    async (payload: {
+      kind: BettingMarketBetKind;
+      selection: BettingMarketBetSelection;
+      stake: number;
+    }) => {
+      setBettingInlineError(null);
+      setBettingSuccessMessage(null);
+      const result = await handleBankAction(
+        {
+          action: "PLACE_BETTING_MARKET_BET",
+          kind: payload.kind,
+          selection: payload.selection,
+          stake: payload.stake,
+        },
+        undefined,
+        { suppressNotice: true },
+      );
+      if (!result.ok) {
+        setBettingInlineError(result.error ?? "Unable to place bet.");
+        return;
+      }
+      setBettingSuccessMessage("Bet placed for the next roll.");
+    },
+    [handleBankAction],
+  );
+
+  const handleCancelBet = useCallback(
+    async (betId: string) => {
+      setCancelingBetId(betId);
+      setBettingInlineError(null);
+      setBettingSuccessMessage(null);
+      const result = await handleBankAction(
+        {
+          action: "CANCEL_BETTING_MARKET_BET",
+          betId,
+        },
+        undefined,
+        { suppressNotice: true },
+      );
+      setCancelingBetId(null);
+      if (!result.ok) {
+        setBettingInlineError(result.error ?? "Unable to cancel bet.");
+        return;
+      }
+      setBettingSuccessMessage("Bet canceled.");
+    },
+    [handleBankAction],
+  );
+
   const sellToMarketSelection = useMemo(() => {
     if (sellToMarketTileIndex === null || !selectedBoardPack?.tiles) {
       return null;
@@ -3215,50 +3336,6 @@ export default function PlayV2Page() {
     await loadAllSlices(routeGameId, session.access_token);
   }, [loadAllSlices, routeGameId, session]);
 
-  const {
-    marketPrices,
-    investFxRate,
-    playerHoldings,
-    isTradeSubmitting,
-    tradeError,
-    isMarketRefreshSubmitting,
-    loadMarketPrices,
-    loadInvestFxRate,
-    loadPlayerHoldings,
-    handleMarketTrade,
-    handleManualMarketRefresh,
-  } = useMarketInvestController({
-    gameId: routeGameId ?? null,
-    boardPackId: gameMeta?.board_pack_id,
-    playerId: currentUserPlayer?.id,
-    accessToken: session?.access_token,
-    onSessionUpdated: setSession,
-    onReloadGameData: async (activeGameId, nextAccessToken) => {
-      await Promise.all([
-        loadAllSlices(activeGameId, nextAccessToken),
-        loadMarketPrices(nextAccessToken),
-        loadInvestFxRate(gameMeta?.board_pack_id, nextAccessToken),
-      ]);
-    },
-  });
-
-  useEffect(() => {
-    if (!session?.access_token) {
-      return;
-    }
-
-    void loadMarketPrices(session.access_token);
-    void loadInvestFxRate(gameMeta?.board_pack_id, session.access_token);
-    void loadPlayerHoldings(currentUserPlayer?.id, session.access_token);
-  }, [
-    currentUserPlayer?.id,
-    gameMeta?.board_pack_id,
-    loadInvestFxRate,
-    loadMarketPrices,
-    loadPlayerHoldings,
-    session?.access_token,
-  ]);
-
   const drawerDecisionNode = useMemo(() => {
     if (
       auctionActive ||
@@ -3794,30 +3871,25 @@ export default function PlayV2Page() {
         rightDrawerLocked={fullscreenEventNode !== null}
         auctionActive={auctionActive}
         marketDrawerContent={
-          <section className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-white/60">
-              Invest in Market
-            </p>
-            <div className="rounded-xl border border-white/10 bg-white/95 p-2 text-neutral-900">
-              <InvestPanel
-                currencySymbol={investCurrencySymbol}
-                currencyCode={investCurrencyCode}
-                cashLocal={currentUserCash ?? 0}
-                fxRate={investFxRate}
-                prices={marketPrices}
-                holdings={playerHoldings}
-                collapsed={investPanelCollapsed}
-                onToggleCollapsed={() =>
-                  setInvestPanelCollapsed((previous) => !previous)
-                }
-                isTrading={isTradeSubmitting}
-                isRefreshingMarket={isMarketRefreshSubmitting}
-                tradeError={tradeError}
-                onRefreshMarket={handleManualMarketRefresh}
-                onTrade={handleMarketTrade}
-              />
-            </div>
-          </section>
+          <BettingMarketPanelV2
+            bettingConfig={bettingConfig}
+            bettingState={bettingMarketState}
+            currentPlayerId={currentUserPlayer?.id ?? null}
+            currentCash={currentUserCash ?? 0}
+            canInteract={canInteractWithBetting}
+            disabledReason={bettingDisabledReason}
+            isPlacing={actionLoading === "PLACE_BETTING_MARKET_BET"}
+            cancelingBetId={cancelingBetId}
+            inlineError={bettingInlineError}
+            successMessage={bettingSuccessMessage}
+            onPlaceBet={(payload) => {
+              void handlePlaceBet(payload);
+            }}
+            onCancelBet={(betId) => {
+              void handleCancelBet(betId);
+            }}
+            formatMoney={formatMoney}
+          />
         }
         leftDrawerContent={
           <div className="h-full space-y-4">
