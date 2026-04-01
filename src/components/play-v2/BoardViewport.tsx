@@ -5,6 +5,7 @@ import { DEFAULT_BOARD_PACK_ECONOMY } from "@/lib/boardPacks";
 import BoardSquare from "@/app/components/BoardSquare";
 import BoardTrack from "@/app/components/BoardTrack";
 import { getBoardPackById } from "@/lib/boardPacks";
+import type { InteriorCellSelection } from "@/app/components/BoardTrack";
 
 type BoardViewportPlayer = {
   id: string;
@@ -29,6 +30,9 @@ type BoardViewportProps = {
   currentPlayerId: string | null;
   selectedTileIndex: number | null;
   onSelectTileIndex: (tileIndex: number) => void;
+  selectedInteriorCell: InteriorCellSelection | null;
+  exploredInteriorCellKeys: Set<string>;
+  onSelectInteriorCell: (cell: InteriorCellSelection) => void;
   onRecenterReady?: (handler: () => void) => void;
 };
 
@@ -58,6 +62,9 @@ export default function BoardViewport({
   currentPlayerId,
   selectedTileIndex,
   onSelectTileIndex,
+  selectedInteriorCell,
+  exploredInteriorCellKeys,
+  onSelectInteriorCell,
   onRecenterReady,
 }: BoardViewportProps) {
   const boardPack = useMemo(() => getBoardPackById(boardPackId), [boardPackId]);
@@ -333,11 +340,19 @@ export default function BoardViewport({
                   playerColorsById={playerColorsById}
                   currentPlayerId={currentPlayerId}
                   selectedTileIndex={selectedTileIndex}
+                  selectedInteriorCell={selectedInteriorCell}
+                  exploredInteriorCellKeys={exploredInteriorCellKeys}
                   onTileClick={(tileIndex) => {
                     if (suppressTileInteractionRef.current) {
                       return;
                     }
                     onSelectTileIndex(tileIndex);
+                  }}
+                  onInteriorCellClick={(cell) => {
+                    if (suppressTileInteractionRef.current) {
+                      return;
+                    }
+                    onSelectInteriorCell(cell);
                   }}
                 />
               </BoardSquare>

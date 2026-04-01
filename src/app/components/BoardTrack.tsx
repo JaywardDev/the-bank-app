@@ -27,6 +27,10 @@ type OwnershipByTile = Record<
 type BoardTrackDensity = "default" | "compact";
 type BoardTrackTileFace = "default" | "map";
 type InteriorCellState = "FOREST" | "CLEARED";
+export type InteriorCellSelection = {
+  row: number;
+  col: number;
+};
 
 type BoardTrackProps = {
   tiles?: BoardTile[];
@@ -40,8 +44,11 @@ type BoardTrackProps = {
   lastMovedTileIndex?: number | null;
   selectedTileIndex?: number | null;
   onTileClick?: (tileIndex: number) => void;
+  onInteriorCellClick?: (cell: InteriorCellSelection) => void;
   onTilePointerDown?: (tileIndex: number, tileRect: DOMRect) => void;
   onTilePointerRelease?: () => void;
+  selectedInteriorCell?: InteriorCellSelection | null;
+  exploredInteriorCellKeys?: Set<string>;
   density?: BoardTrackDensity;
   tileFace?: BoardTrackTileFace;
 };
@@ -63,6 +70,7 @@ const FOREST_VARIANTS = [
   "/assets/forest-3.png",
 ];
 const MAP_TILE_WARM_WHITE = "#f3f0e6";
+const getInteriorCellKey = (row: number, col: number) => `${row}:${col}`;
 
 const getRowCol = (tileIndex: number, boardWidth: number, boardHeight: number) => {
   const topRowEndIndex = 2 * boardWidth + boardHeight - 3;
@@ -116,8 +124,11 @@ export default function BoardTrack({
   lastMovedTileIndex,
   selectedTileIndex,
   onTileClick,
+  onInteriorCellClick,
   onTilePointerDown,
   onTilePointerRelease,
+  selectedInteriorCell,
+  exploredInteriorCellKeys,
   economy,
   lastRoll,
   density = "default",
@@ -141,7 +152,14 @@ export default function BoardTrack({
   const bottomLeftCorner = bottomLen - 1;
   const topLeftCorner = bottomLen + leftLen - 1;
   const topRightCorner = bottomLen + leftLen + topLen - 1;
-  const interiorCells = getInteriorCells(boardWidth, boardHeight);
+  const interiorCells = getInteriorCells(boardWidth, boardHeight).map((cell) => {
+    const key = getInteriorCellKey(cell.row, cell.col);
+    return {
+      ...cell,
+      state: exploredInteriorCellKeys?.has(key) ? "CLEARED" : "FOREST",
+      key,
+    };
+  });
 
   const playersByTile = players.reduce<Record<number, BoardPlayer[]>>(
     (acc, player) => {
@@ -164,12 +182,8 @@ export default function BoardTrack({
           gridTemplateRows: `repeat(${boardHeight}, minmax(0, 1fr))`,
         }}
       >
-        <div className="pointer-events-none absolute inset-0 z-0">
+        <div className="absolute inset-0 z-0">
           {interiorCells.map((cell) => {
-            if (cell.state !== "FOREST") {
-              return null;
-            }
-
             return (
               <div
                 key={`interior-${cell.row}-${cell.col}`}
@@ -182,14 +196,29 @@ export default function BoardTrack({
                   zIndex: cell.row * 100 + cell.col,
                 }}
               >
-                <Image
-                  src={FOREST_VARIANTS[getForestVariantIndex(cell.row, cell.col)]}
-                  alt=""
-                  width={192}
-                  height={192}
-                  aria-hidden
-                  className="pointer-events-none absolute bottom-0 left-1/2 h-[160%] w-[160%] max-w-none -translate-x-1/2 object-contain"
-                />
+                {cell.state === "FOREST" ? (
+                  <Image
+                    src={FOREST_VARIANTS[getForestVariantIndex(cell.row, cell.col)]}
+                    alt=""
+                    width={192}
+                    height={192}
+                    aria-hidden
+                    className="pointer-events-none absolute bottom-0 left-1/2 h-[160%] w-[160%] max-w-none -translate-x-1/2 object-contain"
+                  />
+                ) : null}
+                {onInteriorCellClick ? (
+                  <button
+                    type="button"
+                    aria-label={`Inland forest tile row ${cell.row} col ${cell.col}`}
+                    onClick={() => onInteriorCellClick({ row: cell.row, col: cell.col })}
+                    className={`absolute inset-0 z-[1] rounded-[2px] transition ${
+                      selectedInteriorCell?.row === cell.row &&
+                      selectedInteriorCell?.col === cell.col
+                        ? "bg-emerald-300/25 outline outline-1 outline-emerald-200/70"
+                        : "bg-transparent hover:bg-emerald-200/10"
+                    }`}
+                  />
+                ) : null}
               </div>
             );
           })}

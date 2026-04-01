@@ -37,6 +37,12 @@ import {
 } from "@/lib/rent";
 import { formatCurrency, getCurrencyMetaFromBoardPack } from "@/lib/currency";
 import {
+  INLAND_EXPLORATION_COST,
+  canExploreInlandCell,
+  normalizeInlandExploredCellKeys,
+  type InlandCell,
+} from "@/lib/inlandExploration";
+import {
   calculateAmortizedPaymentPerTurn,
   calculateDownPaymentAmount,
   calculateMortgagePrincipalFromDownPayment,
@@ -127,6 +133,7 @@ type GameState = {
   active_macro_effects_v1: ActiveMacroEffectV1[] | null;
   skip_next_roll_by_player: Record<string, boolean> | null;
   betting_market_state: Record<string, unknown> | null;
+  inland_explored_cells: string[] | null;
 };
 
 type GameEvent = {
@@ -234,6 +241,7 @@ type BankAction =
   | "PAYOFF_PURCHASE_MORTGAGE"
   | "PLACE_BETTING_MARKET_BET"
   | "CANCEL_BETTING_MARKET_BET"
+  | "EXPLORE_INTERIOR"
   | "PROPOSE_TRADE"
   | "ACCEPT_TRADE"
   | "REJECT_TRADE"
@@ -257,6 +265,7 @@ type BankActionRequest = {
   selection?: BettingMarketBetSelection;
   stake?: number;
   betId?: string;
+  interiorCell?: InlandCell;
 };
 
 type OwnershipRow = {
@@ -344,6 +353,8 @@ export default function PlayV2Page() {
   const [selectedTileIndex, setSelectedTileIndex] = useState<number | null>(
     null,
   );
+  const [selectedInteriorCell, setSelectedInteriorCell] = useState<InlandCell | null>(null);
+  const [showInlandRevealOverlay, setShowInlandRevealOverlay] = useState(false);
   const [isLeftDrawerOpen, setIsLeftDrawerOpen] = useState(false);
   const [leftDrawerMode, setLeftDrawerMode] = useState<
     "info" | "wallet" | "market"
@@ -429,6 +440,8 @@ export default function PlayV2Page() {
       setPurchaseMortgages([]);
       setNotice(null);
       setSelectedTileIndex(null);
+      setSelectedInteriorCell(null);
+      setShowInlandRevealOverlay(false);
       setSellToMarketTileIndex(null);
       setPayoffLoanId(null);
       setDefaultLoanTileIndex(null);
@@ -471,7 +484,7 @@ export default function PlayV2Page() {
   const loadGameState = useCallback(
     async (gameId: string, accessToken?: string) => {
       const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
-        `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,active_macro_effects_v1,skip_next_roll_by_player,betting_market_state,income_tax_baseline_cash_by_player,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
+        `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,active_macro_effects_v1,skip_next_roll_by_player,betting_market_state,inland_explored_cells,income_tax_baseline_cash_by_player,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
         { method: "GET" },
         accessToken,
       );
@@ -1566,6 +1579,7 @@ export default function PlayV2Page() {
           ...(request.selection ? { selection: request.selection } : {}),
           ...(request.stake !== undefined ? { stake: request.stake } : {}),
           ...(request.betId ? { betId: request.betId } : {}),
+          ...(request.interiorCell ? { interiorCell: request.interiorCell } : {}),
         };
 
         const runActionRequest = async (accessToken: string) => {
@@ -2054,6 +2068,24 @@ export default function PlayV2Page() {
     [handleBankAction],
   );
 
+  const handleExploreInterior = useCallback(async () => {
+    if (!selectedInteriorCell) {
+      return;
+    }
+    const result = await handleBankAction(
+      {
+        action: "EXPLORE_INTERIOR",
+        interiorCell: selectedInteriorCell,
+      },
+      undefined,
+      { suppressNotice: false },
+    );
+    if (!result.ok) {
+      return;
+    }
+    setShowInlandRevealOverlay(true);
+  }, [handleBankAction, selectedInteriorCell]);
+
   const sellToMarketSelection = useMemo(() => {
     if (sellToMarketTileIndex === null || !selectedBoardPack?.tiles) {
       return null;
@@ -2332,6 +2364,50 @@ export default function PlayV2Page() {
     const boardTiles = selectedBoardPack?.tiles ?? [];
     return boardTiles.find((tile) => tile.index === selectedTileIndex) ?? null;
   }, [selectedBoardPack, selectedTileIndex]);
+
+  const exploredInteriorCellKeys = useMemo(
+    () => normalizeInlandExploredCellKeys(gameState?.inland_explored_cells),
+    [gameState?.inland_explored_cells],
+  );
+
+  const currentUserOwnedTileIndices = useMemo(() => {
+    if (!currentUserPlayerId) {
+      return [] as number[];
+    }
+    return Object.entries(ownershipByTile)
+      .filter(([, ownership]) => ownership.owner_player_id === currentUserPlayerId)
+      .map(([tileIndex]) => Number(tileIndex))
+      .filter((tileIndex) => Number.isInteger(tileIndex));
+  }, [currentUserPlayerId, ownershipByTile]);
+
+  const canExploreSelectedInteriorCell = useMemo(() => {
+    if (!selectedInteriorCell) {
+      return false;
+    }
+    if (
+      !currentUserPlayerId ||
+      currentUserPlayerId !== turnPlayerId ||
+      gameState?.pending_action ||
+      gameState?.pending_card_active ||
+      gameState?.auction_active
+    ) {
+      return false;
+    }
+    return canExploreInlandCell({
+      cell: selectedInteriorCell,
+      exploredKeys: exploredInteriorCellKeys,
+      ownedTileIndices: currentUserOwnedTileIndices,
+    });
+  }, [
+    currentUserOwnedTileIndices,
+    currentUserPlayerId,
+    exploredInteriorCellKeys,
+    gameState?.auction_active,
+    gameState?.pending_action,
+    gameState?.pending_card_active,
+    selectedInteriorCell,
+    turnPlayerId,
+  ]);
 
   const selectedOwnerId =
     selectedTileIndex === null
@@ -4307,10 +4383,17 @@ export default function PlayV2Page() {
             ownershipByTile={ownershipByTile}
             currentPlayerId={turnPlayerId}
             selectedTileIndex={selectedTileIndex}
+            selectedInteriorCell={selectedInteriorCell}
+            exploredInteriorCellKeys={exploredInteriorCellKeys}
             onSelectTileIndex={(tileIndex) => {
+              setSelectedInteriorCell(null);
               setSelectedTileIndex(tileIndex);
               setLeftDrawerMode("info");
               setIsLeftDrawerOpen(true);
+            }}
+            onSelectInteriorCell={(cell) => {
+              setSelectedTileIndex(null);
+              setSelectedInteriorCell(cell);
             }}
             onRecenterReady={(handler) => {
               recenterBoardRef.current = handler;
@@ -4455,6 +4538,31 @@ export default function PlayV2Page() {
             <div className="w-full max-w-xl rounded-3xl border border-white/20 bg-neutral-900/95 p-4 shadow-2xl backdrop-blur">
               {fullscreenEventNode}
             </div>
+          </div>
+        </div>
+      ) : null}
+      {selectedInteriorCell ? (
+        <div className="fixed bottom-3 left-1/2 z-[45] w-[min(460px,calc(100vw-1rem))] -translate-x-1/2 rounded-xl border border-emerald-200/30 bg-neutral-950/90 p-2 shadow-2xl backdrop-blur">
+          <div className="flex items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                void handleExploreInterior();
+              }}
+              disabled={!canExploreSelectedInteriorCell || actionLoading === "EXPLORE_INTERIOR"}
+              className="inline-flex flex-1 items-center justify-center rounded-lg border border-emerald-200/30 bg-emerald-400/20 px-3 py-2 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-400/30 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {actionLoading === "EXPLORE_INTERIOR"
+                ? "Exploring…"
+                : `Explore for $${INLAND_EXPLORATION_COST}`}
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedInteriorCell(null)}
+              className="inline-flex items-center justify-center rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-sm font-semibold text-white transition hover:bg-white/20"
+            >
+              Cancel
+            </button>
           </div>
         </div>
       ) : null}
@@ -4692,6 +4800,29 @@ export default function PlayV2Page() {
         onBid={handleAuctionBid}
         onPass={handleAuctionPass}
       />
+      {showInlandRevealOverlay ? (
+        <div className="fixed inset-0 z-[220] flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-sm rounded-2xl border border-emerald-200/25 bg-neutral-900/95 p-5 text-white shadow-2xl">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-200/80">
+              Exploration
+            </p>
+            <p className="mt-2 text-lg font-semibold">Clearing complete</p>
+            <p className="mt-2 text-sm text-white/75">
+              Placeholder reveal: this inland tile is now explored land.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setShowInlandRevealOverlay(false);
+                setSelectedInteriorCell(null);
+              }}
+              className="mt-4 inline-flex w-full items-center justify-center rounded-xl border border-white/20 bg-white/10 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/20"
+            >
+              Continue
+            </button>
+          </div>
+        </div>
+      ) : null}
       {/*
         Verification checklist:
         - Landing on property shows decision modal.

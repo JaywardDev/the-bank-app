@@ -45,6 +45,12 @@ import {
   type BettingMarketBet,
   type BettingMarketBetKind,
 } from "@/lib/bettingMarket";
+import {
+  INLAND_EXPLORATION_COST,
+  canExploreInlandCell,
+  normalizeInlandExploredCellKeys,
+  toInlandCellKey,
+} from "@/lib/inlandExploration";
 
 const supabaseUrl = (process.env.SUPABASE_URL ?? SUPABASE_URL ?? "").trim();
 const supabaseAnonKey = (
@@ -134,12 +140,14 @@ type BankActionRequest =
         | "SELL_HOUSE"
         | "SELL_HOTEL"
         | "SELL_TO_MARKET"
+        | "EXPLORE_INTERIOR"
         | "DEFAULT_PROPERTY",
         "DECLINE_PROPERTY" | "BUY_PROPERTY"
       >;
       tileIndex?: number;
       loanId?: string;
       mortgageId?: string;
+      interiorCell?: { row?: unknown; col?: unknown };
     })
   | (BaseActionRequest & {
       action: "DECLINE_PROPERTY" | "BUY_PROPERTY";
@@ -361,6 +369,7 @@ type GameStateRow = {
   skip_next_roll_by_player: Record<string, boolean> | null;
   income_tax_baseline_cash_by_player: Record<string, number> | null;
   betting_market_state: Record<string, unknown> | null;
+  inland_explored_cells: string[] | null;
 };
 
 type OwnershipRow = {
@@ -4386,7 +4395,7 @@ export async function POST(request: Request) {
       }
 
       await fetchFromSupabaseWithService<GameStateRow[]>(
-        "game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,betting_market_state,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment",
+        "game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,betting_market_state,inland_explored_cells,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment",
         {
           method: "POST",
           headers: {
@@ -4681,7 +4690,7 @@ export async function POST(request: Request) {
     )) ?? [];
 
     const [gameState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
-      `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,betting_market_state,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
+      `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,betting_market_state,inland_explored_cells,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
       { method: "GET" },
     )) ?? [];
 
@@ -4823,7 +4832,7 @@ export async function POST(request: Request) {
       );
 
       const upsertResponse = await fetch(
-        `${supabaseUrl}/rest/v1/game_state?on_conflict=game_id&select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,betting_market_state,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment`,
+        `${supabaseUrl}/rest/v1/game_state?on_conflict=game_id&select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,betting_market_state,inland_explored_cells,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment`,
         {
           method: "POST",
           headers: {
@@ -5195,7 +5204,7 @@ export async function POST(request: Request) {
         const finalVersion = currentVersion + events.length;
         const [updatedState] =
           (await fetchFromSupabaseWithService<GameStateRow[]>(
-            `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,betting_market_state,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
+            `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,betting_market_state,inland_explored_cells,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
             {
               method: "PATCH",
               headers: {
@@ -5284,7 +5293,7 @@ export async function POST(request: Request) {
         const finalVersion = currentVersion + events.length;
         const [updatedState] =
           (await fetchFromSupabaseWithService<GameStateRow[]>(
-            `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,betting_market_state,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
+            `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,betting_market_state,inland_explored_cells,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
             {
               method: "PATCH",
               headers: {
@@ -5378,7 +5387,7 @@ export async function POST(request: Request) {
         const finalVersion = currentVersion + events.length;
         const [updatedState] =
           (await fetchFromSupabaseWithService<GameStateRow[]>(
-            `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,betting_market_state,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
+            `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,betting_market_state,inland_explored_cells,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
             {
               method: "PATCH",
               headers: {
@@ -5732,7 +5741,7 @@ export async function POST(request: Request) {
       const finalVersion = currentVersion + events.length;
       const [updatedState] =
         (await fetchFromSupabaseWithService<GameStateRow[]>(
-          `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,betting_market_state,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
+          `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,betting_market_state,inland_explored_cells,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}`,
           {
             method: "PATCH",
             headers: {
@@ -5847,6 +5856,115 @@ export async function POST(request: Request) {
           { status: 409 },
         );
       }
+    }
+
+    if (body.action === "EXPLORE_INTERIOR") {
+      if (gameState.pending_action) {
+        return NextResponse.json(
+          { error: "Resolve the current pending action before exploring inland." },
+          { status: 409 },
+        );
+      }
+      const interiorCell = body.interiorCell;
+      const row =
+        interiorCell && typeof interiorCell.row === "number"
+          ? interiorCell.row
+          : Number.NaN;
+      const col =
+        interiorCell && typeof interiorCell.col === "number"
+          ? interiorCell.col
+          : Number.NaN;
+      if (!Number.isInteger(row) || !Number.isInteger(col)) {
+        return NextResponse.json(
+          { error: "A valid interiorCell is required." },
+          { status: 400 },
+        );
+      }
+
+      const ownershipByTile = await loadOwnershipByTile(gameId);
+      const ownedTileIndices = Object.entries(ownershipByTile)
+        .filter(([, ownership]) => ownership.owner_player_id === currentUserPlayer.id)
+        .map(([tileIndex]) => Number(tileIndex))
+        .filter((tileIndex) => Number.isInteger(tileIndex));
+      if (ownedTileIndices.length === 0) {
+        return NextResponse.json(
+          { error: "You must own at least one property to explore inland." },
+          { status: 409 },
+        );
+      }
+
+      const exploredKeys = normalizeInlandExploredCellKeys(
+        gameState.inland_explored_cells,
+      );
+      const targetCell = { row, col };
+      if (
+        !canExploreInlandCell({
+          cell: targetCell,
+          exploredKeys,
+          ownedTileIndices,
+        })
+      ) {
+        return NextResponse.json(
+          { error: "This forest tile is not currently explorable." },
+          { status: 409 },
+        );
+      }
+
+      const balances = gameState.balances ?? {};
+      const currentCash = balances[currentUserPlayer.id] ?? 0;
+      if (currentCash < INLAND_EXPLORATION_COST) {
+        return NextResponse.json(
+          { error: "Insufficient cash to explore this tile." },
+          { status: 409 },
+        );
+      }
+
+      const finalVersion = currentVersion + 1;
+      const nextExplored = [...exploredKeys, toInlandCellKey(targetCell)];
+      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            version: finalVersion,
+            balances: {
+              ...balances,
+              [currentUserPlayer.id]: currentCash - INLAND_EXPLORATION_COST,
+            },
+            inland_explored_cells: nextExplored,
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      )) ?? [];
+      if (!updatedState) {
+        return NextResponse.json(
+          { error: "Version mismatch." },
+          { status: 409 },
+        );
+      }
+
+      await emitGameEvents(
+        gameId,
+        currentVersion + 1,
+        [
+          {
+            event_type: "INTERIOR_EXPLORED",
+            payload: {
+              player_id: currentUserPlayer.id,
+              player_name: currentUserPlayer.display_name,
+              row,
+              col,
+              cost: INLAND_EXPLORATION_COST,
+            },
+          },
+        ],
+        user.id,
+      );
+
+      return NextResponse.json({ gameState: updatedState });
     }
 
     if (body.action === "PLACE_BETTING_MARKET_BET") {
