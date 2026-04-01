@@ -48,7 +48,13 @@ import {
 import {
   INLAND_EXPLORATION_COST,
   canExploreInlandCell,
+  getInlandResourceConfig,
+  isDevelopableResource,
+  isInstantSellResource,
+  normalizeInlandCellRecords,
   normalizeInlandExploredCellKeys,
+  rollInlandResourceType,
+  serializeInlandCellRecords,
   toInlandCellKey,
 } from "@/lib/inlandExploration";
 
@@ -141,6 +147,9 @@ type BankActionRequest =
         | "SELL_HOTEL"
         | "SELL_TO_MARKET"
         | "EXPLORE_INTERIOR"
+        | "SELL_INTERIOR_RESOURCE"
+        | "DEVELOP_INTERIOR_SITE"
+        | "DEFER_INTERIOR_RESOURCE_DECISION"
         | "DEFAULT_PROPERTY",
         "DECLINE_PROPERTY" | "BUY_PROPERTY"
       >;
@@ -369,7 +378,7 @@ type GameStateRow = {
   skip_next_roll_by_player: Record<string, boolean> | null;
   income_tax_baseline_cash_by_player: Record<string, number> | null;
   betting_market_state: Record<string, unknown> | null;
-  inland_explored_cells: string[] | null;
+  inland_explored_cells: unknown[] | null;
 };
 
 type OwnershipRow = {
@@ -5920,7 +5929,19 @@ export async function POST(request: Request) {
       }
 
       const finalVersion = currentVersion + 1;
-      const nextExplored = [...exploredKeys, toInlandCellKey(targetCell)];
+      const exploredCellsByKey = normalizeInlandCellRecords(gameState.inland_explored_cells);
+      const targetKey = toInlandCellKey(targetCell);
+      const discoveredResourceType = rollInlandResourceType();
+      exploredCellsByKey.set(targetKey, {
+        key: targetKey,
+        row,
+        col,
+        status: "DISCOVERED_RESOURCE",
+        discoveredResourceType,
+        developedSiteType: null,
+        ownerPlayerId: currentUserPlayer.id,
+      });
+      const nextExplored = serializeInlandCellRecords(exploredCellsByKey);
       const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
         `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
         {
@@ -5958,12 +5979,198 @@ export async function POST(request: Request) {
               row,
               col,
               cost: INLAND_EXPLORATION_COST,
+              resource_type: discoveredResourceType,
             },
           },
         ],
         user.id,
       );
 
+      return NextResponse.json({ gameState: updatedState });
+    }
+
+    if (
+      body.action === "SELL_INTERIOR_RESOURCE" ||
+      body.action === "DEVELOP_INTERIOR_SITE" ||
+      body.action === "DEFER_INTERIOR_RESOURCE_DECISION"
+    ) {
+      const interiorCell = body.interiorCell;
+      const row =
+        interiorCell && typeof interiorCell.row === "number" ? interiorCell.row : Number.NaN;
+      const col =
+        interiorCell && typeof interiorCell.col === "number" ? interiorCell.col : Number.NaN;
+      if (!Number.isInteger(row) || !Number.isInteger(col)) {
+        return NextResponse.json({ error: "A valid interiorCell is required." }, { status: 400 });
+      }
+
+      const key = toInlandCellKey({ row, col });
+      const inlandCells = normalizeInlandCellRecords(gameState.inland_explored_cells);
+      const targetCell = inlandCells.get(key);
+      if (!targetCell || targetCell.status !== "DISCOVERED_RESOURCE" || !targetCell.discoveredResourceType) {
+        return NextResponse.json(
+          { error: "No discovered inland resource is awaiting decision on this cell." },
+          { status: 409 },
+        );
+      }
+      if (targetCell.ownerPlayerId && targetCell.ownerPlayerId !== currentUserPlayer.id) {
+        return NextResponse.json(
+          { error: "Only the discovering player can decide this inland resource." },
+          { status: 409 },
+        );
+      }
+
+      const resourceConfig = getInlandResourceConfig(targetCell.discoveredResourceType);
+      const balances = gameState.balances ?? {};
+      const currentCash = balances[currentUserPlayer.id] ?? 0;
+      const finalVersion = currentVersion + 1;
+      const nowIso = new Date().toISOString();
+
+      if (body.action === "DEFER_INTERIOR_RESOURCE_DECISION") {
+        const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+          `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+          {
+            method: "PATCH",
+            headers: { Prefer: "return=representation" },
+            body: JSON.stringify({
+              version: finalVersion,
+              inland_explored_cells: serializeInlandCellRecords(inlandCells),
+              updated_at: nowIso,
+            }),
+          },
+        )) ?? [];
+        if (!updatedState) {
+          return NextResponse.json({ error: "Version mismatch." }, { status: 409 });
+        }
+        await emitGameEvents(
+          gameId,
+          finalVersion,
+          [
+            {
+              event_type: "INTERIOR_RESOURCE_DECISION_DEFERRED",
+              payload: {
+                player_id: currentUserPlayer.id,
+                player_name: currentUserPlayer.display_name,
+                row,
+                col,
+                resource_type: targetCell.discoveredResourceType,
+              },
+            },
+          ],
+          user.id,
+        );
+        return NextResponse.json({ gameState: updatedState });
+      }
+
+      if (body.action === "SELL_INTERIOR_RESOURCE") {
+        if (!isInstantSellResource(targetCell.discoveredResourceType)) {
+          return NextResponse.json(
+            { error: "This resource cannot be sold instantly. Develop it instead." },
+            { status: 409 },
+          );
+        }
+        const payout = resourceConfig.sellValue ?? 0;
+        inlandCells.set(key, {
+          ...targetCell,
+          status: "EXPLORED_EMPTY",
+          discoveredResourceType: null,
+          developedSiteType: null,
+        });
+        const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+          `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+          {
+            method: "PATCH",
+            headers: { Prefer: "return=representation" },
+            body: JSON.stringify({
+              version: finalVersion,
+              balances: {
+                ...balances,
+                [currentUserPlayer.id]: currentCash + payout,
+              },
+              inland_explored_cells: serializeInlandCellRecords(inlandCells),
+              updated_at: nowIso,
+            }),
+          },
+        )) ?? [];
+        if (!updatedState) {
+          return NextResponse.json({ error: "Version mismatch." }, { status: 409 });
+        }
+        await emitGameEvents(
+          gameId,
+          finalVersion,
+          [
+            {
+              event_type: "INTERIOR_RESOURCE_SOLD",
+              payload: {
+                player_id: currentUserPlayer.id,
+                player_name: currentUserPlayer.display_name,
+                row,
+                col,
+                resource_type: targetCell.discoveredResourceType,
+                payout,
+              },
+            },
+          ],
+          user.id,
+        );
+        return NextResponse.json({ gameState: updatedState });
+      }
+
+      if (!isDevelopableResource(targetCell.discoveredResourceType)) {
+        return NextResponse.json(
+          { error: "This discovered resource is not developable." },
+          { status: 409 },
+        );
+      }
+      const developmentCost = resourceConfig.developmentCost ?? 0;
+      if (currentCash < developmentCost) {
+        return NextResponse.json(
+          { error: "Insufficient cash to develop this inland site." },
+          { status: 409 },
+        );
+      }
+      inlandCells.set(key, {
+        ...targetCell,
+        status: "DEVELOPED_SITE",
+        discoveredResourceType: null,
+        developedSiteType: targetCell.discoveredResourceType,
+      });
+      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+        {
+          method: "PATCH",
+          headers: { Prefer: "return=representation" },
+          body: JSON.stringify({
+            version: finalVersion,
+            balances: {
+              ...balances,
+              [currentUserPlayer.id]: currentCash - developmentCost,
+            },
+            inland_explored_cells: serializeInlandCellRecords(inlandCells),
+            updated_at: nowIso,
+          }),
+        },
+      )) ?? [];
+      if (!updatedState) {
+        return NextResponse.json({ error: "Version mismatch." }, { status: 409 });
+      }
+      await emitGameEvents(
+        gameId,
+        finalVersion,
+        [
+          {
+            event_type: "INTERIOR_SITE_DEVELOPED",
+            payload: {
+              player_id: currentUserPlayer.id,
+              player_name: currentUserPlayer.display_name,
+              row,
+              col,
+              resource_type: targetCell.discoveredResourceType,
+              development_cost: developmentCost,
+            },
+          },
+        ],
+        user.id,
+      );
       return NextResponse.json({ gameState: updatedState });
     }
 

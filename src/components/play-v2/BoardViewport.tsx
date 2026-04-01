@@ -6,6 +6,7 @@ import BoardSquare from "@/app/components/BoardSquare";
 import BoardTrack from "@/app/components/BoardTrack";
 import { getBoardPackById } from "@/lib/boardPacks";
 import type { InteriorCellSelection } from "@/app/components/BoardTrack";
+import type { InlandCellRecord } from "@/lib/inlandExploration";
 
 type BoardViewportPlayer = {
   id: string;
@@ -32,6 +33,7 @@ type BoardViewportProps = {
   onSelectTileIndex: (tileIndex: number) => void;
   selectedInteriorCell: InteriorCellSelection | null;
   exploredInteriorCellKeys: Set<string>;
+  inlandCellsByKey: Map<string, InlandCellRecord>;
   onSelectInteriorCell: (cell: InteriorCellSelection) => void;
   onRecenterReady?: (handler: () => void) => void;
 };
@@ -64,6 +66,7 @@ export default function BoardViewport({
   onSelectTileIndex,
   selectedInteriorCell,
   exploredInteriorCellKeys,
+  inlandCellsByKey,
   onSelectInteriorCell,
   onRecenterReady,
 }: BoardViewportProps) {
@@ -342,6 +345,7 @@ export default function BoardViewport({
                   selectedTileIndex={selectedTileIndex}
                   selectedInteriorCell={selectedInteriorCell}
                   exploredInteriorCellKeys={exploredInteriorCellKeys}
+                  inlandCellsByKey={inlandCellsByKey}
                   onTileClick={(tileIndex) => {
                     if (suppressTileInteractionRef.current) {
                       return;

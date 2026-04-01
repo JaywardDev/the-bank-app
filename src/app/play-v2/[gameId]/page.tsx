@@ -39,7 +39,12 @@ import { formatCurrency, getCurrencyMetaFromBoardPack } from "@/lib/currency";
 import {
   INLAND_EXPLORATION_COST,
   canExploreInlandCell,
+  getInlandResourceConfig,
+  isDevelopableResource,
+  isInstantSellResource,
+  normalizeInlandCellRecords,
   normalizeInlandExploredCellKeys,
+  toInlandCellKey,
   type InlandCell,
 } from "@/lib/inlandExploration";
 import {
@@ -133,7 +138,7 @@ type GameState = {
   active_macro_effects_v1: ActiveMacroEffectV1[] | null;
   skip_next_roll_by_player: Record<string, boolean> | null;
   betting_market_state: Record<string, unknown> | null;
-  inland_explored_cells: string[] | null;
+  inland_explored_cells: unknown[] | null;
 };
 
 type GameEvent = {
@@ -242,6 +247,9 @@ type BankAction =
   | "PLACE_BETTING_MARKET_BET"
   | "CANCEL_BETTING_MARKET_BET"
   | "EXPLORE_INTERIOR"
+  | "SELL_INTERIOR_RESOURCE"
+  | "DEVELOP_INTERIOR_SITE"
+  | "DEFER_INTERIOR_RESOURCE_DECISION"
   | "PROPOSE_TRADE"
   | "ACCEPT_TRADE"
   | "REJECT_TRADE"
@@ -354,7 +362,7 @@ export default function PlayV2Page() {
     null,
   );
   const [selectedInteriorCell, setSelectedInteriorCell] = useState<InlandCell | null>(null);
-  const [showInlandRevealOverlay, setShowInlandRevealOverlay] = useState(false);
+  const [openInlandDecisionCellKey, setOpenInlandDecisionCellKey] = useState<string | null>(null);
   const [isLeftDrawerOpen, setIsLeftDrawerOpen] = useState(false);
   const [leftDrawerMode, setLeftDrawerMode] = useState<
     "info" | "wallet" | "market"
@@ -441,7 +449,7 @@ export default function PlayV2Page() {
       setNotice(null);
       setSelectedTileIndex(null);
       setSelectedInteriorCell(null);
-      setShowInlandRevealOverlay(false);
+      setOpenInlandDecisionCellKey(null);
       setSellToMarketTileIndex(null);
       setPayoffLoanId(null);
       setDefaultLoanTileIndex(null);
@@ -2083,8 +2091,32 @@ export default function PlayV2Page() {
     if (!result.ok) {
       return;
     }
-    setShowInlandRevealOverlay(true);
+    setOpenInlandDecisionCellKey(toInlandCellKey(selectedInteriorCell));
   }, [handleBankAction, selectedInteriorCell]);
+
+  const handleInlandResourceDecision = useCallback(
+    async (
+      action:
+        | "SELL_INTERIOR_RESOURCE"
+        | "DEVELOP_INTERIOR_SITE"
+        | "DEFER_INTERIOR_RESOURCE_DECISION",
+      cell: InlandCell,
+    ) => {
+      const result = await handleBankAction(
+        {
+          action,
+          interiorCell: cell,
+        },
+        undefined,
+        { suppressNotice: false },
+      );
+      if (!result.ok) {
+        return;
+      }
+      setOpenInlandDecisionCellKey(null);
+    },
+    [handleBankAction],
+  );
 
   const sellToMarketSelection = useMemo(() => {
     if (sellToMarketTileIndex === null || !selectedBoardPack?.tiles) {
@@ -2365,10 +2397,27 @@ export default function PlayV2Page() {
     return boardTiles.find((tile) => tile.index === selectedTileIndex) ?? null;
   }, [selectedBoardPack, selectedTileIndex]);
 
+  const inlandCellsByKey = useMemo(
+    () => normalizeInlandCellRecords(gameState?.inland_explored_cells),
+    [gameState?.inland_explored_cells],
+  );
+
   const exploredInteriorCellKeys = useMemo(
     () => normalizeInlandExploredCellKeys(gameState?.inland_explored_cells),
     [gameState?.inland_explored_cells],
   );
+
+  const selectedInteriorCellKey = useMemo(
+    () => (selectedInteriorCell ? toInlandCellKey(selectedInteriorCell) : null),
+    [selectedInteriorCell],
+  );
+
+  const selectedInlandCellRecord = useMemo(() => {
+    if (!selectedInteriorCellKey) {
+      return null;
+    }
+    return inlandCellsByKey.get(selectedInteriorCellKey) ?? null;
+  }, [inlandCellsByKey, selectedInteriorCellKey]);
 
   const currentUserOwnedTileIndices = useMemo(() => {
     if (!currentUserPlayerId) {
@@ -4385,8 +4434,10 @@ export default function PlayV2Page() {
             selectedTileIndex={selectedTileIndex}
             selectedInteriorCell={selectedInteriorCell}
             exploredInteriorCellKeys={exploredInteriorCellKeys}
+            inlandCellsByKey={inlandCellsByKey}
             onSelectTileIndex={(tileIndex) => {
               setSelectedInteriorCell(null);
+              setOpenInlandDecisionCellKey(null);
               setSelectedTileIndex(tileIndex);
               setLeftDrawerMode("info");
               setIsLeftDrawerOpen(true);
@@ -4394,6 +4445,13 @@ export default function PlayV2Page() {
             onSelectInteriorCell={(cell) => {
               setSelectedTileIndex(null);
               setSelectedInteriorCell(cell);
+              const key = toInlandCellKey(cell);
+              const inlandCell = inlandCellsByKey.get(key);
+              if (inlandCell?.status === "DISCOVERED_RESOURCE") {
+                setOpenInlandDecisionCellKey(key);
+              } else {
+                setOpenInlandDecisionCellKey(null);
+              }
             }}
             onRecenterReady={(handler) => {
               recenterBoardRef.current = handler;
@@ -4541,7 +4599,7 @@ export default function PlayV2Page() {
           </div>
         </div>
       ) : null}
-      {selectedInteriorCell ? (
+      {selectedInteriorCell && !selectedInlandCellRecord ? (
         <div className="fixed bottom-3 left-1/2 z-[45] w-[min(460px,calc(100vw-1rem))] -translate-x-1/2 rounded-xl border border-emerald-200/30 bg-neutral-950/90 p-2 shadow-2xl backdrop-blur">
           <div className="flex items-center justify-between gap-2">
             <button
@@ -4564,6 +4622,18 @@ export default function PlayV2Page() {
               Cancel
             </button>
           </div>
+        </div>
+      ) : null}
+      {selectedInteriorCell &&
+      selectedInlandCellRecord?.status === "DEVELOPED_SITE" &&
+      selectedInlandCellRecord.developedSiteType ? (
+        <div className="fixed bottom-3 left-1/2 z-[45] w-[min(460px,calc(100vw-1rem))] -translate-x-1/2 rounded-xl border border-sky-200/30 bg-neutral-950/90 p-3 shadow-2xl backdrop-blur">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-100/70">
+            Inland site
+          </p>
+          <p className="mt-1 text-sm font-semibold text-white">
+            {getInlandResourceConfig(selectedInlandCellRecord.developedSiteType).label} developed
+          </p>
         </div>
       ) : null}
       <button
@@ -4800,26 +4870,65 @@ export default function PlayV2Page() {
         onBid={handleAuctionBid}
         onPass={handleAuctionPass}
       />
-      {showInlandRevealOverlay ? (
+      {openInlandDecisionCellKey &&
+      selectedInteriorCell &&
+      selectedInlandCellRecord?.status === "DISCOVERED_RESOURCE" &&
+      selectedInlandCellRecord.discoveredResourceType ? (
         <div className="fixed inset-0 z-[220] flex items-center justify-center bg-black/60 p-4">
           <div className="w-full max-w-sm rounded-2xl border border-emerald-200/25 bg-neutral-900/95 p-5 text-white shadow-2xl">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-200/80">
               Exploration
             </p>
-            <p className="mt-2 text-lg font-semibold">Clearing complete</p>
-            <p className="mt-2 text-sm text-white/75">
-              Placeholder reveal: this inland tile is now explored land.
+            <p className="mt-2 text-lg font-semibold">
+              {getInlandResourceConfig(selectedInlandCellRecord.discoveredResourceType!).icon}{" "}
+              {getInlandResourceConfig(selectedInlandCellRecord.discoveredResourceType!).label}
             </p>
-            <button
-              type="button"
-              onClick={() => {
-                setShowInlandRevealOverlay(false);
-                setSelectedInteriorCell(null);
-              }}
-              className="mt-4 inline-flex w-full items-center justify-center rounded-xl border border-white/20 bg-white/10 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/20"
-            >
-              Continue
-            </button>
+            {isInstantSellResource(selectedInlandCellRecord.discoveredResourceType!) ? (
+              <p className="mt-2 text-sm text-white/75">
+                Sell now for{" "}
+                {formatMoney(
+                  getInlandResourceConfig(selectedInlandCellRecord.discoveredResourceType!).sellValue ?? 0,
+                )}
+                .
+              </p>
+            ) : (
+              <p className="mt-2 text-sm text-white/75">
+                Develop this site for{" "}
+                {formatMoney(
+                  getInlandResourceConfig(selectedInlandCellRecord.discoveredResourceType!).developmentCost ??
+                    0,
+                )}
+                .
+              </p>
+            )}
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                    void handleInlandResourceDecision(
+                    isInstantSellResource(selectedInlandCellRecord.discoveredResourceType!)
+                      ? "SELL_INTERIOR_RESOURCE"
+                      : "DEVELOP_INTERIOR_SITE",
+                    selectedInteriorCell,
+                  )
+                }
+                className="inline-flex w-full items-center justify-center rounded-xl border border-emerald-200/25 bg-emerald-500/20 px-4 py-2.5 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-500/30"
+              >
+                {isDevelopableResource(selectedInlandCellRecord.discoveredResourceType!) ? "Develop" : "Sell"}
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  void handleInlandResourceDecision(
+                    "DEFER_INTERIOR_RESOURCE_DECISION",
+                    selectedInteriorCell,
+                  )
+                }
+                className="inline-flex w-full items-center justify-center rounded-xl border border-white/20 bg-white/10 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/20"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

@@ -7,6 +7,7 @@ import { getTileBandColor } from "@/lib/boardTileStyles";
 import { getBoardTileIconSrc, isIconOnlySpecialTile } from "@/lib/tileIcons";
 import type { BoardPackEconomy } from "@/lib/boardPacks";
 import { formatCurrencyCompact, getCurrentTileRent } from "@/lib/rent";
+import type { InlandCellRecord } from "@/lib/inlandExploration";
 
 type BoardPlayer = {
   id: string;
@@ -26,7 +27,7 @@ type OwnershipByTile = Record<
 
 type BoardTrackDensity = "default" | "compact";
 type BoardTrackTileFace = "default" | "map";
-type InteriorCellState = "FOREST" | "CLEARED";
+type InteriorCellState = "FOREST" | "EXPLORED_EMPTY" | "DISCOVERED_RESOURCE" | "DEVELOPED_SITE";
 export type InteriorCellSelection = {
   row: number;
   col: number;
@@ -49,6 +50,7 @@ type BoardTrackProps = {
   onTilePointerRelease?: () => void;
   selectedInteriorCell?: InteriorCellSelection | null;
   exploredInteriorCellKeys?: Set<string>;
+  inlandCellsByKey?: Map<string, InlandCellRecord>;
   density?: BoardTrackDensity;
   tileFace?: BoardTrackTileFace;
 };
@@ -129,6 +131,7 @@ export default function BoardTrack({
   onTilePointerRelease,
   selectedInteriorCell,
   exploredInteriorCellKeys,
+  inlandCellsByKey,
   economy,
   lastRoll,
   density = "default",
@@ -154,9 +157,12 @@ export default function BoardTrack({
   const topRightCorner = bottomLen + leftLen + topLen - 1;
   const interiorCells = getInteriorCells(boardWidth, boardHeight).map((cell) => {
     const key = getInteriorCellKey(cell.row, cell.col);
+    const inlandCellRecord = inlandCellsByKey?.get(key);
     return {
       ...cell,
-      state: exploredInteriorCellKeys?.has(key) ? "CLEARED" : "FOREST",
+      state: (inlandCellRecord?.status ??
+        (exploredInteriorCellKeys?.has(key) ? "EXPLORED_EMPTY" : "FOREST")) as InteriorCellState,
+      inlandCellRecord,
       key,
     };
   });
@@ -206,16 +212,32 @@ export default function BoardTrack({
                     className="pointer-events-none absolute bottom-0 left-1/2 h-[160%] w-[160%] max-w-none -translate-x-1/2 object-contain"
                   />
                 ) : null}
+                {cell.state === "DISCOVERED_RESOURCE" ? (
+                  <span className="pointer-events-none absolute right-0.5 top-0.5 z-[2] rounded-full bg-amber-200/90 px-1 text-[10px] font-bold text-amber-950">
+                    ?
+                  </span>
+                ) : null}
+                {cell.state === "DEVELOPED_SITE" ? (
+                  <span className="pointer-events-none absolute right-0.5 top-0.5 z-[2] rounded-full bg-sky-200/90 px-1 text-[10px] font-bold text-sky-950">
+                    ⚒
+                  </span>
+                ) : null}
                 {onInteriorCellClick ? (
                   <button
                     type="button"
-                    aria-label={`Inland forest tile row ${cell.row} col ${cell.col}`}
+                    aria-label={`Inland tile row ${cell.row} col ${cell.col}`}
                     onClick={() => onInteriorCellClick({ row: cell.row, col: cell.col })}
                     className={`absolute inset-0 z-[1] rounded-[2px] transition ${
                       selectedInteriorCell?.row === cell.row &&
                       selectedInteriorCell?.col === cell.col
                         ? "bg-emerald-300/25 outline outline-1 outline-emerald-200/70"
-                        : "bg-transparent hover:bg-emerald-200/10"
+                        : cell.state === "DEVELOPED_SITE"
+                          ? "bg-sky-300/15 hover:bg-sky-300/25"
+                          : cell.state === "DISCOVERED_RESOURCE"
+                            ? "bg-amber-300/15 hover:bg-amber-300/25"
+                            : cell.state === "EXPLORED_EMPTY"
+                              ? "bg-white/5 hover:bg-white/10"
+                              : "bg-transparent hover:bg-emerald-200/10"
                     }`}
                   />
                 ) : null}

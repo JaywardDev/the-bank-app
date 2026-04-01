@@ -7,6 +7,80 @@ export type InlandCell = {
   col: number;
 };
 
+export type InlandCellStatus =
+  | "UNEXPLORED"
+  | "EXPLORED_EMPTY"
+  | "DISCOVERED_RESOURCE"
+  | "DEVELOPED_SITE";
+
+export type InlandResourceType = "GOLD" | "BRONZE" | "DIAMOND" | "OIL" | "TIMBER";
+export type InlandResourceCategory = "INSTANT_SELL" | "DEVELOPABLE";
+
+export type InlandResourceConfig = {
+  type: InlandResourceType;
+  label: string;
+  icon: string;
+  category: InlandResourceCategory;
+  weight: number;
+  sellValue?: number;
+  developmentCost?: number;
+};
+
+export type InlandCellRecord = {
+  key: string;
+  row: number;
+  col: number;
+  status: Exclude<InlandCellStatus, "UNEXPLORED">;
+  discoveredResourceType: InlandResourceType | null;
+  developedSiteType: InlandResourceType | null;
+  ownerPlayerId: string | null;
+};
+
+export const INLAND_RESOURCE_CONFIG: Record<InlandResourceType, InlandResourceConfig> = {
+  GOLD: {
+    type: "GOLD",
+    label: "Gold Vein",
+    icon: "🥇",
+    category: "INSTANT_SELL",
+    weight: 24,
+    sellValue: 280,
+  },
+  BRONZE: {
+    type: "BRONZE",
+    label: "Bronze Deposit",
+    icon: "🥉",
+    category: "INSTANT_SELL",
+    weight: 26,
+    sellValue: 190,
+  },
+  DIAMOND: {
+    type: "DIAMOND",
+    label: "Diamond Pocket",
+    icon: "💎",
+    category: "INSTANT_SELL",
+    weight: 12,
+    sellValue: 420,
+  },
+  OIL: {
+    type: "OIL",
+    label: "Oil Field",
+    icon: "🛢️",
+    category: "DEVELOPABLE",
+    weight: 20,
+    developmentCost: 180,
+  },
+  TIMBER: {
+    type: "TIMBER",
+    label: "Timber Stand",
+    icon: "🪵",
+    category: "DEVELOPABLE",
+    weight: 18,
+    developmentCost: 140,
+  },
+};
+
+const RESOURCE_ROLL_TABLE = Object.values(INLAND_RESOURCE_CONFIG);
+
 export const toInlandCellKey = ({ row, col }: InlandCell) => `${row}:${col}`;
 
 export const parseInlandCellKey = (key: string): InlandCell | null => {
@@ -51,22 +125,97 @@ const getOrthogonalNeighbors = ({ row, col }: InlandCell) =>
     col: col + offset.col,
   }));
 
-export const normalizeInlandExploredCellKeys = (value: unknown): Set<string> => {
+const normalizeInlandCellRecord = (entry: unknown): InlandCellRecord | null => {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+
+  const row = Number.parseInt(String((entry as { row?: unknown }).row ?? ""), 10);
+  const col = Number.parseInt(String((entry as { col?: unknown }).col ?? ""), 10);
+  if (!Number.isInteger(row) || !Number.isInteger(col) || !isInlandCellInBounds({ row, col })) {
+    return null;
+  }
+
+  const key = toInlandCellKey({ row, col });
+  const statusRaw = (entry as { status?: unknown }).status;
+  const status: InlandCellRecord["status"] =
+    statusRaw === "DEVELOPED_SITE" || statusRaw === "DISCOVERED_RESOURCE"
+      ? statusRaw
+      : "EXPLORED_EMPTY";
+
+  const discoveredResourceType = (entry as { discoveredResourceType?: unknown }).discoveredResourceType;
+  const developedSiteType = (entry as { developedSiteType?: unknown }).developedSiteType;
+
+  return {
+    key,
+    row,
+    col,
+    status,
+    discoveredResourceType:
+      typeof discoveredResourceType === "string" && discoveredResourceType in INLAND_RESOURCE_CONFIG
+        ? (discoveredResourceType as InlandResourceType)
+        : null,
+    developedSiteType:
+      typeof developedSiteType === "string" && developedSiteType in INLAND_RESOURCE_CONFIG
+        ? (developedSiteType as InlandResourceType)
+        : null,
+    ownerPlayerId:
+      typeof (entry as { ownerPlayerId?: unknown }).ownerPlayerId === "string"
+        ? ((entry as { ownerPlayerId?: string }).ownerPlayerId ?? null)
+        : null,
+  };
+};
+
+export const normalizeInlandCellRecords = (value: unknown): Map<string, InlandCellRecord> => {
+  const byKey = new Map<string, InlandCellRecord>();
   if (!Array.isArray(value)) {
-    return new Set();
+    return byKey;
   }
-  const keys = new Set<string>();
+
   for (const entry of value) {
-    if (typeof entry !== "string") {
+    if (typeof entry === "string") {
+      const parsed = parseInlandCellKey(entry);
+      if (!parsed || !isInlandCellInBounds(parsed)) {
+        continue;
+      }
+      const key = toInlandCellKey(parsed);
+      byKey.set(key, {
+        key,
+        row: parsed.row,
+        col: parsed.col,
+        status: "EXPLORED_EMPTY",
+        discoveredResourceType: null,
+        developedSiteType: null,
+        ownerPlayerId: null,
+      });
       continue;
     }
-    const parsed = parseInlandCellKey(entry);
-    if (!parsed || !isInlandCellInBounds(parsed)) {
+
+    const normalized = normalizeInlandCellRecord(entry);
+    if (!normalized) {
       continue;
     }
-    keys.add(toInlandCellKey(parsed));
+    byKey.set(normalized.key, normalized);
   }
-  return keys;
+
+  return byKey;
+};
+
+export const serializeInlandCellRecords = (recordsByKey: Map<string, InlandCellRecord>) => {
+  return Array.from(recordsByKey.values())
+    .sort((a, b) => (a.row === b.row ? a.col - b.col : a.row - b.row))
+    .map((record) => ({
+      row: record.row,
+      col: record.col,
+      status: record.status,
+      discoveredResourceType: record.discoveredResourceType,
+      developedSiteType: record.developedSiteType,
+      ownerPlayerId: record.ownerPlayerId,
+    }));
+};
+
+export const normalizeInlandExploredCellKeys = (value: unknown): Set<string> => {
+  return new Set(Array.from(normalizeInlandCellRecords(value).keys()));
 };
 
 export const canExploreInlandCell = ({
@@ -101,3 +250,25 @@ export const canExploreInlandCell = ({
     neighbors.some((neighbor) => neighbor.row === ownedCell.row && neighbor.col === ownedCell.col),
   );
 };
+
+export const rollInlandResourceType = (rng: () => number = Math.random): InlandResourceType => {
+  const totalWeight = RESOURCE_ROLL_TABLE.reduce((sum, resource) => sum + resource.weight, 0);
+  const rolled = rng() * totalWeight;
+  let cursor = 0;
+  for (const resource of RESOURCE_ROLL_TABLE) {
+    cursor += resource.weight;
+    if (rolled <= cursor) {
+      return resource.type;
+    }
+  }
+  return RESOURCE_ROLL_TABLE[RESOURCE_ROLL_TABLE.length - 1].type;
+};
+
+export const getInlandResourceConfig = (resourceType: InlandResourceType) =>
+  INLAND_RESOURCE_CONFIG[resourceType];
+
+export const isInstantSellResource = (resourceType: InlandResourceType) =>
+  getInlandResourceConfig(resourceType).category === "INSTANT_SELL";
+
+export const isDevelopableResource = (resourceType: InlandResourceType) =>
+  getInlandResourceConfig(resourceType).category === "DEVELOPABLE";
