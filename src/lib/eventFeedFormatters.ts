@@ -145,6 +145,15 @@ export const formatEventDescription = (
       return `Turn → ${payload.to_player_name}`;
     }
 
+    if (event.event_type === "INLAND_PASSIVE_INCOME") {
+      const playerName =
+        typeof payload?.player_name === "string" ? payload.player_name : "Player";
+      const amount = parseNumber(payload?.amount);
+      const amountLabel =
+        amount !== null ? formatMoney(amount, currencyCode, currencySymbol) : "income";
+      return `${playerName} collected inland passive income (${amountLabel})`;
+    }
+
     if (event.event_type === "TRADE_PROPOSED") {
       const proposerId =
         typeof payload?.proposer_player_id === "string"

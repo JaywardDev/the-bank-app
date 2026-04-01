@@ -46,6 +46,7 @@ import {
   type BettingMarketBetKind,
 } from "@/lib/bettingMarket";
 import {
+  computeInlandPassiveIncomeForPlayer,
   INLAND_EXPLORATION_COST,
   canExploreInlandCell,
   getInlandResourceConfig,
@@ -4112,6 +4113,34 @@ const advanceTurn = async ({
       },
     },
   ];
+
+  const inlandCells = normalizeInlandCellRecords(gameState.inland_explored_cells);
+  const inlandIncome = computeInlandPassiveIncomeForPlayer({
+    recordsByKey: inlandCells,
+    playerId: nextPlayer.id,
+  });
+  if (inlandIncome.total > 0) {
+    const nextPlayerCash = updatedBalances[nextPlayer.id] ?? 0;
+    updatedBalances = {
+      ...updatedBalances,
+      [nextPlayer.id]: nextPlayerCash + inlandIncome.total,
+    };
+    balancesChanged = true;
+    events.push({
+      event_type: "INLAND_PASSIVE_INCOME",
+      payload: {
+        player_id: nextPlayer.id,
+        player_name: nextPlayer.display_name,
+        amount: inlandIncome.total,
+        breakdown: inlandIncome.breakdown.map((entry) => ({
+          resource_type: entry.resourceType,
+          count: entry.count,
+          per_site_income: entry.perSiteIncome,
+          subtotal: entry.subtotal,
+        })),
+      },
+    });
+  }
 
   const firstActivePlayer = getFirstActivePlayer(players);
   const tableRoundAdvanced = Boolean(

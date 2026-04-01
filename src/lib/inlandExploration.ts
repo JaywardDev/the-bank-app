@@ -24,6 +24,7 @@ export type InlandResourceConfig = {
   weight: number;
   sellValue?: number;
   developmentCost?: number;
+  passiveIncomePerTurn?: number;
 };
 
 export type InlandCellRecord = {
@@ -68,6 +69,7 @@ export const INLAND_RESOURCE_CONFIG: Record<InlandResourceType, InlandResourceCo
     category: "DEVELOPABLE",
     weight: 20,
     developmentCost: 180,
+    passiveIncomePerTurn: 85,
   },
   TIMBER: {
     type: "TIMBER",
@@ -76,6 +78,7 @@ export const INLAND_RESOURCE_CONFIG: Record<InlandResourceType, InlandResourceCo
     category: "DEVELOPABLE",
     weight: 18,
     developmentCost: 140,
+    passiveIncomePerTurn: 55,
   },
 };
 
@@ -272,3 +275,47 @@ export const isInstantSellResource = (resourceType: InlandResourceType) =>
 
 export const isDevelopableResource = (resourceType: InlandResourceType) =>
   getInlandResourceConfig(resourceType).category === "DEVELOPABLE";
+
+export const computeInlandPassiveIncomeForPlayer = ({
+  recordsByKey,
+  playerId,
+}: {
+  recordsByKey: Map<string, InlandCellRecord>;
+  playerId: string;
+}) => {
+  const siteCounts: Partial<Record<InlandResourceType, number>> = {};
+  let total = 0;
+
+  for (const record of recordsByKey.values()) {
+    if (record.status !== "DEVELOPED_SITE") {
+      continue;
+    }
+    if (record.ownerPlayerId !== playerId || !record.developedSiteType) {
+      continue;
+    }
+    const config = getInlandResourceConfig(record.developedSiteType);
+    const payout = config.passiveIncomePerTurn ?? 0;
+    if (payout <= 0) {
+      continue;
+    }
+    total += payout;
+    siteCounts[record.developedSiteType] = (siteCounts[record.developedSiteType] ?? 0) + 1;
+  }
+
+  const breakdown = Object.entries(siteCounts).map(([resourceType, count]) => {
+    const typedResourceType = resourceType as InlandResourceType;
+    const config = getInlandResourceConfig(typedResourceType);
+    const passiveIncomePerTurn = config.passiveIncomePerTurn ?? 0;
+    return {
+      resourceType: typedResourceType,
+      count,
+      perSiteIncome: passiveIncomePerTurn,
+      subtotal: passiveIncomePerTurn * count,
+    };
+  });
+
+  return {
+    total,
+    breakdown,
+  };
+};
