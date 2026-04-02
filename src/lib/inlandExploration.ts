@@ -445,12 +445,19 @@ export const computeOilRailSynergyPayouts = ({
     recordsByKey,
     resourceType: "OIL",
   });
+  const totalRefineryCount = Object.values(oilRefineryCountsByPlayer).reduce(
+    (sum, count) => sum + count,
+    0,
+  );
+  const oilBonusPool = Math.round(rentPaid * 0.25);
+  const perRefineryShare =
+    totalRefineryCount > 0 ? Math.round(oilBonusPool / totalRefineryCount) : 0;
   const refineryPayoutsByPlayer: Record<string, number> = {};
 
   for (const [playerId, refineryCount] of Object.entries(
     oilRefineryCountsByPlayer,
   )) {
-    const payout = Math.floor(rentPaid * 0.15 * refineryCount);
+    const payout = perRefineryShare * refineryCount;
     if (payout <= 0) {
       continue;
     }
