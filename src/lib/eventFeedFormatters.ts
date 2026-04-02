@@ -885,6 +885,41 @@ export const formatEventDescription = (
         : `${ownerName} received Vertical Integration Bonus`;
     }
 
+    if (event.event_type === "COAL_UTILITY_SYNERGY_PAYOUT") {
+      const playerId =
+        typeof payload?.player_id === "string" ? payload.player_id : null;
+      const playerName =
+        players.find((player) => player.id === playerId)?.display_name ??
+        "Player";
+      const payout = parseNumber(payload?.payout);
+      const coalSiteCount = parseNumber(payload?.coal_site_count);
+      const payoutLabel =
+        payout !== null ? formatMoney(payout, currencyCode, currencySymbol) : null;
+      const coalSiteLabel =
+        coalSiteCount !== null
+          ? ` (${coalSiteCount} power plant site${coalSiteCount === 1 ? "" : "s"})`
+          : "";
+      return payoutLabel
+        ? `${playerName} received ${payoutLabel} Coal ↔ Electric Utility synergy${coalSiteLabel}`
+        : `${playerName} received Coal ↔ Electric Utility synergy${coalSiteLabel}`;
+    }
+
+    if (event.event_type === "COAL_VERTICAL_INTEGRATION_BONUS") {
+      const ownerId =
+        typeof payload?.electric_utility_owner_player_id === "string"
+          ? payload.electric_utility_owner_player_id
+          : null;
+      const ownerName =
+        players.find((player) => player.id === ownerId)?.display_name ??
+        "Player";
+      const payout = parseNumber(payload?.payout);
+      const payoutLabel =
+        payout !== null ? formatMoney(payout, currencyCode, currencySymbol) : null;
+      return payoutLabel
+        ? `${ownerName} received ${payoutLabel} Coal Vertical Integration Bonus`
+        : `${ownerName} received Coal Vertical Integration Bonus`;
+    }
+
     if (event.event_type === "COLLATERAL_LOAN_TAKEN") {
       const tileIndexRaw = payload?.tile_index;
       const tileIndex =

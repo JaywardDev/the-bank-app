@@ -6,7 +6,7 @@ import {
   defaultBoardPackId,
   getBoardPackById,
 } from "@/lib/boardPacks";
-import type { BoardPackEconomy, BoardTile, BoardTileType } from "@/lib/boardPacks";
+import type { BoardPackEconomy, BoardTile, BoardTileType, UtilityKind } from "@/lib/boardPacks";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "@/lib/env";
 import {
   MACRO_EVENT_INTERVAL_ROUNDS,
@@ -46,6 +46,7 @@ import {
   type BettingMarketBetKind,
 } from "@/lib/bettingMarket";
 import {
+  computeCoalUtilitySynergyPayouts,
   computeOilRailSynergyPayouts,
   computeInlandPassiveIncomeForPlayer,
   canExploreInlandCell,
@@ -469,6 +470,7 @@ type TileInfo = {
   colorGroup?: string;
   houseCost?: number;
   rentByHouses?: number[];
+  utilityKind?: UtilityKind;
 };
 
 type DiceEventPayload = {
@@ -3386,6 +3388,73 @@ const finalizeMoveResolution = async ({
               railroad_owner_player_id: rentOwnerId,
               rent_paid: rentAmount,
               payout: verticalIntegrationBonus,
+            },
+          });
+        }
+      }
+
+      if (
+        activeLandingTile.type === "UTILITY" &&
+        activeLandingTile.utilityKind === "ELECTRIC"
+      ) {
+        const inlandCells = normalizeInlandCellRecords(
+          gameState.inland_explored_cells,
+        );
+        const {
+          coalSiteCountsByPlayer,
+          coalSitePayoutsByPlayer,
+          verticalIntegrationBonus,
+        } = computeCoalUtilitySynergyPayouts({
+          recordsByKey: inlandCells,
+          rentPaid: rentAmount,
+          electricUtilityOwnerPlayerId: rentOwnerId,
+        });
+
+        for (const playerId of Object.keys(coalSitePayoutsByPlayer).sort()) {
+          const payout = coalSitePayoutsByPlayer[playerId] ?? 0;
+          if (payout <= 0) {
+            continue;
+          }
+          const currentBalance = updatedBalances[playerId] ?? startingCash;
+          updatedBalances = {
+            ...updatedBalances,
+            [playerId]: currentBalance + payout,
+          };
+          balancesChanged = true;
+          events.push({
+            event_type: "COAL_UTILITY_SYNERGY_PAYOUT",
+            payload: {
+              trigger_tile_index: activeLandingTile.index,
+              trigger_tile_id: activeLandingTile.tile_id,
+              trigger_tile_type: activeLandingTile.type,
+              utility_kind: activeLandingTile.utilityKind,
+              electric_utility_owner_player_id: rentOwnerId,
+              rent_paid: rentAmount,
+              player_id: playerId,
+              payout,
+              coal_site_count: coalSiteCountsByPlayer[playerId] ?? 0,
+            },
+          });
+        }
+
+        if (verticalIntegrationBonus > 0) {
+          const utilityOwnerBalance = updatedBalances[rentOwnerId] ?? startingCash;
+          updatedBalances = {
+            ...updatedBalances,
+            [rentOwnerId]: utilityOwnerBalance + verticalIntegrationBonus,
+          };
+          balancesChanged = true;
+          events.push({
+            event_type: "COAL_VERTICAL_INTEGRATION_BONUS",
+            payload: {
+              trigger_tile_index: activeLandingTile.index,
+              trigger_tile_id: activeLandingTile.tile_id,
+              trigger_tile_type: activeLandingTile.type,
+              utility_kind: activeLandingTile.utilityKind,
+              electric_utility_owner_player_id: rentOwnerId,
+              rent_paid: rentAmount,
+              payout: verticalIntegrationBonus,
+              coal_site_count: coalSiteCountsByPlayer[rentOwnerId] ?? 0,
             },
           });
         }

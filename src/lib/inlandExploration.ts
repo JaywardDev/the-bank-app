@@ -475,3 +475,45 @@ export const computeOilRailSynergyPayouts = ({
     verticalIntegrationBonus,
   };
 };
+
+export const computeCoalUtilitySynergyPayouts = ({
+  recordsByKey,
+  rentPaid,
+  electricUtilityOwnerPlayerId,
+}: {
+  recordsByKey: Map<string, InlandCellRecord>;
+  rentPaid: number;
+  electricUtilityOwnerPlayerId: string;
+}) => {
+  const coalSiteCountsByPlayer = computeDevelopedSiteCountsByPlayerAndType({
+    recordsByKey,
+    resourceType: "COAL",
+  });
+  const totalCoalSiteCount = Object.values(coalSiteCountsByPlayer).reduce(
+    (sum, count) => sum + count,
+    0,
+  );
+  const coalBonusPool = Math.round(rentPaid * 0.25);
+  const perCoalSiteShare =
+    totalCoalSiteCount > 0 ? Math.round(coalBonusPool / totalCoalSiteCount) : 0;
+  const coalSitePayoutsByPlayer: Record<string, number> = {};
+
+  for (const [playerId, coalSiteCount] of Object.entries(coalSiteCountsByPlayer)) {
+    const payout = perCoalSiteShare * coalSiteCount;
+    if (payout <= 0) {
+      continue;
+    }
+    coalSitePayoutsByPlayer[playerId] = payout;
+  }
+
+  const electricUtilityOwnerCoalSiteCount =
+    coalSiteCountsByPlayer[electricUtilityOwnerPlayerId] ?? 0;
+  const verticalIntegrationBonus =
+    electricUtilityOwnerCoalSiteCount > 0 ? Math.floor(rentPaid * 0.25) : 0;
+
+  return {
+    coalSiteCountsByPlayer,
+    coalSitePayoutsByPlayer,
+    verticalIntegrationBonus,
+  };
+};
