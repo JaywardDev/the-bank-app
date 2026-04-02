@@ -48,6 +48,7 @@ import {
 import {
   computeCoalUtilitySynergyPayouts,
   computeOilRailSynergyPayouts,
+  computeWaterUtilitySynergyPayouts,
   computeInlandPassiveIncomeForPlayer,
   canExploreInlandCell,
   getInlandDevelopmentCost,
@@ -3455,6 +3456,73 @@ const finalizeMoveResolution = async ({
               rent_paid: rentAmount,
               payout: verticalIntegrationBonus,
               coal_site_count: coalSiteCountsByPlayer[rentOwnerId] ?? 0,
+            },
+          });
+        }
+      }
+
+      if (
+        activeLandingTile.type === "UTILITY" &&
+        activeLandingTile.utilityKind === "WATER"
+      ) {
+        const inlandCells = normalizeInlandCellRecords(
+          gameState.inland_explored_cells,
+        );
+        const {
+          waterSiteCountsByPlayer,
+          waterSitePayoutsByPlayer,
+          verticalIntegrationBonus,
+        } = computeWaterUtilitySynergyPayouts({
+          recordsByKey: inlandCells,
+          rentPaid: rentAmount,
+          waterUtilityOwnerPlayerId: rentOwnerId,
+        });
+
+        for (const playerId of Object.keys(waterSitePayoutsByPlayer).sort()) {
+          const payout = waterSitePayoutsByPlayer[playerId] ?? 0;
+          if (payout <= 0) {
+            continue;
+          }
+          const currentBalance = updatedBalances[playerId] ?? startingCash;
+          updatedBalances = {
+            ...updatedBalances,
+            [playerId]: currentBalance + payout,
+          };
+          balancesChanged = true;
+          events.push({
+            event_type: "WATER_UTILITY_SYNERGY_PAYOUT",
+            payload: {
+              trigger_tile_index: activeLandingTile.index,
+              trigger_tile_id: activeLandingTile.tile_id,
+              trigger_tile_type: activeLandingTile.type,
+              utility_kind: activeLandingTile.utilityKind,
+              water_utility_owner_player_id: rentOwnerId,
+              rent_paid: rentAmount,
+              player_id: playerId,
+              payout,
+              water_site_count: waterSiteCountsByPlayer[playerId] ?? 0,
+            },
+          });
+        }
+
+        if (verticalIntegrationBonus > 0) {
+          const utilityOwnerBalance = updatedBalances[rentOwnerId] ?? startingCash;
+          updatedBalances = {
+            ...updatedBalances,
+            [rentOwnerId]: utilityOwnerBalance + verticalIntegrationBonus,
+          };
+          balancesChanged = true;
+          events.push({
+            event_type: "WATER_VERTICAL_INTEGRATION_BONUS",
+            payload: {
+              trigger_tile_index: activeLandingTile.index,
+              trigger_tile_id: activeLandingTile.tile_id,
+              trigger_tile_type: activeLandingTile.type,
+              utility_kind: activeLandingTile.utilityKind,
+              water_utility_owner_player_id: rentOwnerId,
+              rent_paid: rentAmount,
+              payout: verticalIntegrationBonus,
+              water_site_count: waterSiteCountsByPlayer[rentOwnerId] ?? 0,
             },
           });
         }

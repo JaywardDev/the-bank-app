@@ -920,6 +920,41 @@ export const formatEventDescription = (
         : `${ownerName} received Coal Vertical Integration Bonus`;
     }
 
+    if (event.event_type === "WATER_UTILITY_SYNERGY_PAYOUT") {
+      const playerId =
+        typeof payload?.player_id === "string" ? payload.player_id : null;
+      const playerName =
+        players.find((player) => player.id === playerId)?.display_name ??
+        "Player";
+      const payout = parseNumber(payload?.payout);
+      const waterSiteCount = parseNumber(payload?.water_site_count);
+      const payoutLabel =
+        payout !== null ? formatMoney(payout, currencyCode, currencySymbol) : null;
+      const waterSiteLabel =
+        waterSiteCount !== null
+          ? ` (${waterSiteCount} water reservoir site${waterSiteCount === 1 ? "" : "s"})`
+          : "";
+      return payoutLabel
+        ? `${playerName} received ${payoutLabel} Water ↔ Water Utility synergy${waterSiteLabel}`
+        : `${playerName} received Water ↔ Water Utility synergy${waterSiteLabel}`;
+    }
+
+    if (event.event_type === "WATER_VERTICAL_INTEGRATION_BONUS") {
+      const ownerId =
+        typeof payload?.water_utility_owner_player_id === "string"
+          ? payload.water_utility_owner_player_id
+          : null;
+      const ownerName =
+        players.find((player) => player.id === ownerId)?.display_name ??
+        "Player";
+      const payout = parseNumber(payload?.payout);
+      const payoutLabel =
+        payout !== null ? formatMoney(payout, currencyCode, currencySymbol) : null;
+      return payoutLabel
+        ? `${ownerName} received ${payoutLabel} Water Vertical Integration Bonus`
+        : `${ownerName} received Water Vertical Integration Bonus`;
+    }
+
     if (event.event_type === "COLLATERAL_LOAN_TAKEN") {
       const tileIndexRaw = payload?.tile_index;
       const tileIndex =

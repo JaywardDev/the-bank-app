@@ -517,3 +517,47 @@ export const computeCoalUtilitySynergyPayouts = ({
     verticalIntegrationBonus,
   };
 };
+
+export const computeWaterUtilitySynergyPayouts = ({
+  recordsByKey,
+  rentPaid,
+  waterUtilityOwnerPlayerId,
+}: {
+  recordsByKey: Map<string, InlandCellRecord>;
+  rentPaid: number;
+  waterUtilityOwnerPlayerId: string;
+}) => {
+  const waterSiteCountsByPlayer = computeDevelopedSiteCountsByPlayerAndType({
+    recordsByKey,
+    resourceType: "DEEP_WELL",
+  });
+  const totalWaterSiteCount = Object.values(waterSiteCountsByPlayer).reduce(
+    (sum, count) => sum + count,
+    0,
+  );
+  const waterBonusPool = Math.round(rentPaid * 0.25);
+  const perWaterSiteShare =
+    totalWaterSiteCount > 0 ? Math.round(waterBonusPool / totalWaterSiteCount) : 0;
+  const waterSitePayoutsByPlayer: Record<string, number> = {};
+
+  for (const [playerId, waterSiteCount] of Object.entries(
+    waterSiteCountsByPlayer,
+  )) {
+    const payout = perWaterSiteShare * waterSiteCount;
+    if (payout <= 0) {
+      continue;
+    }
+    waterSitePayoutsByPlayer[playerId] = payout;
+  }
+
+  const waterUtilityOwnerWaterSiteCount =
+    waterSiteCountsByPlayer[waterUtilityOwnerPlayerId] ?? 0;
+  const verticalIntegrationBonus =
+    waterUtilityOwnerWaterSiteCount > 0 ? Math.floor(rentPaid * 0.25) : 0;
+
+  return {
+    waterSiteCountsByPlayer,
+    waterSitePayoutsByPlayer,
+    verticalIntegrationBonus,
+  };
+};
