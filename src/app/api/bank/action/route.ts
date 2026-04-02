@@ -47,9 +47,12 @@ import {
 } from "@/lib/bettingMarket";
 import {
   computeInlandPassiveIncomeForPlayer,
-  INLAND_EXPLORATION_COST,
   canExploreInlandCell,
-  getInlandResourceConfig,
+  getInlandDevelopmentCost,
+  getInlandExplorationCost,
+  getInlandSellValue,
+  getInlandVoucherReward,
+  isBonusResource,
   isDevelopableResource,
   isInstantSellResource,
   normalizeInlandCellRecords,
@@ -158,6 +161,7 @@ type BankActionRequest =
       loanId?: string;
       mortgageId?: string;
       interiorCell?: { row?: unknown; col?: unknown };
+      useConstructionVoucher?: unknown;
     })
   | (BaseActionRequest & {
       action: "DECLINE_PROPERTY" | "BUY_PROPERTY";
@@ -228,6 +232,8 @@ type PlayerRow = {
   jail_turns_remaining: number;
   get_out_of_jail_free_count: number;
   tax_exemption_pass_count: number;
+  free_build_tokens: number;
+  free_upgrade_tokens: number;
   is_eliminated: boolean;
   eliminated_at: string | null;
 };
@@ -4118,6 +4124,7 @@ const advanceTurn = async ({
   const inlandIncome = computeInlandPassiveIncomeForPlayer({
     recordsByKey: inlandCells,
     playerId: nextPlayer.id,
+    goSalary: boardPack?.economy?.passGoAmount ?? DEFAULT_BOARD_PACK_ECONOMY.passGoAmount ?? 0,
   });
   if (inlandIncome.total > 0) {
     const nextPlayerCash = updatedBalances[nextPlayer.id] ?? 0;
@@ -4411,7 +4418,7 @@ export async function POST(request: Request) {
       }
 
       const [hostPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
-        "players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,is_eliminated,eliminated_at",
+        "players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at",
         {
           method: "POST",
           headers: {
@@ -4498,7 +4505,7 @@ export async function POST(request: Request) {
       }
 
       const [player] = (await fetchFromSupabaseWithService<PlayerRow[]>(
-        "players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,is_eliminated,eliminated_at&on_conflict=game_id,user_id",
+        "players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at&on_conflict=game_id,user_id",
         {
           method: "POST",
           headers: {
@@ -4520,7 +4527,7 @@ export async function POST(request: Request) {
       }
 
       const players = (await fetchFromSupabaseWithService<PlayerRow[]>(
-        `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,is_eliminated,eliminated_at&game_id=eq.${game.id}&order=created_at.asc`,
+        `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at&game_id=eq.${game.id}&order=created_at.asc`,
         { method: "GET" },
       )) ?? [];
       const ownershipByTile = await loadOwnershipByTile(game.id);
@@ -4555,7 +4562,7 @@ export async function POST(request: Request) {
       }
 
       const [leavingPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
-        `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,is_eliminated,eliminated_at&game_id=eq.${gameId}&user_id=eq.${user.id}&limit=1`,
+        `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at&game_id=eq.${gameId}&user_id=eq.${user.id}&limit=1`,
         { method: "GET" },
       )) ?? [];
 
@@ -4723,7 +4730,7 @@ export async function POST(request: Request) {
     const jailFineAmount = boardPackEconomy.jailFineAmount ?? 50;
 
     const players = (await fetchFromSupabaseWithService<PlayerRow[]>(
-      `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,is_eliminated,eliminated_at&game_id=eq.${gameId}&order=created_at.asc`,
+      `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at&game_id=eq.${gameId}&order=created_at.asc`,
       { method: "GET" },
     )) ?? [];
 
@@ -5948,9 +5955,11 @@ export async function POST(request: Request) {
         );
       }
 
+      const goSalary = boardPackEconomy.passGoAmount ?? DEFAULT_BOARD_PACK_ECONOMY.passGoAmount ?? 0;
+      const explorationCost = getInlandExplorationCost(goSalary);
       const balances = gameState.balances ?? {};
       const currentCash = balances[currentUserPlayer.id] ?? 0;
-      if (currentCash < INLAND_EXPLORATION_COST) {
+      if (currentCash < explorationCost) {
         return NextResponse.json(
           { error: "Insufficient cash to explore this tile." },
           { status: 409 },
@@ -5982,7 +5991,7 @@ export async function POST(request: Request) {
             version: finalVersion,
             balances: {
               ...balances,
-              [currentUserPlayer.id]: currentCash - INLAND_EXPLORATION_COST,
+              [currentUserPlayer.id]: currentCash - explorationCost,
             },
             inland_explored_cells: nextExplored,
             updated_at: new Date().toISOString(),
@@ -6007,7 +6016,7 @@ export async function POST(request: Request) {
               player_name: currentUserPlayer.display_name,
               row,
               col,
-              cost: INLAND_EXPLORATION_COST,
+              cost: explorationCost,
               resource_type: discoveredResourceType,
             },
           },
@@ -6048,7 +6057,7 @@ export async function POST(request: Request) {
         );
       }
 
-      const resourceConfig = getInlandResourceConfig(targetCell.discoveredResourceType);
+      const goSalary = boardPackEconomy.passGoAmount ?? DEFAULT_BOARD_PACK_ECONOMY.passGoAmount ?? 0;
       const balances = gameState.balances ?? {};
       const currentCash = balances[currentUserPlayer.id] ?? 0;
       const finalVersion = currentVersion + 1;
@@ -6091,13 +6100,27 @@ export async function POST(request: Request) {
       }
 
       if (body.action === "SELL_INTERIOR_RESOURCE") {
-        if (!isInstantSellResource(targetCell.discoveredResourceType)) {
+        if (isDevelopableResource(targetCell.discoveredResourceType)) {
           return NextResponse.json(
             { error: "This resource cannot be sold instantly. Develop it instead." },
             { status: 409 },
           );
         }
-        const payout = resourceConfig.sellValue ?? 0;
+
+        const isSellResource = isInstantSellResource(targetCell.discoveredResourceType);
+        const isBonus = isBonusResource(targetCell.discoveredResourceType);
+
+        const sellPayout = isSellResource
+          ? (getInlandSellValue(targetCell.discoveredResourceType, goSalary) ?? 0)
+          : 0;
+        const voucherReward = isBonus
+          ? getInlandVoucherReward(targetCell.discoveredResourceType)
+          : null;
+        const nextFreeBuildTokens =
+          (currentUserPlayer.free_build_tokens ?? 0) + (voucherReward?.freeBuildTokens ?? 0);
+        const nextFreeUpgradeTokens =
+          (currentUserPlayer.free_upgrade_tokens ?? 0) + (voucherReward?.freeUpgradeTokens ?? 0);
+
         inlandCells.set(key, {
           ...targetCell,
           status: "EXPLORED_EMPTY",
@@ -6113,7 +6136,7 @@ export async function POST(request: Request) {
               version: finalVersion,
               balances: {
                 ...balances,
-                [currentUserPlayer.id]: currentCash + payout,
+                [currentUserPlayer.id]: currentCash + sellPayout,
               },
               inland_explored_cells: serializeInlandCellRecords(inlandCells),
               updated_at: nowIso,
@@ -6123,22 +6146,72 @@ export async function POST(request: Request) {
         if (!updatedState) {
           return NextResponse.json({ error: "Version mismatch." }, { status: 409 });
         }
+
+        if (isBonus) {
+          const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
+            `players?id=eq.${currentUserPlayer.id}`,
+            {
+              method: "PATCH",
+              headers: {
+                Prefer: "return=representation",
+              },
+              body: JSON.stringify({
+                free_build_tokens: nextFreeBuildTokens,
+                free_upgrade_tokens: nextFreeUpgradeTokens,
+              }),
+            },
+          )) ?? [];
+          if (!updatedPlayer) {
+            return NextResponse.json(
+              { error: "Unable to grant inland bonus vouchers." },
+              { status: 500 },
+            );
+          }
+        }
+
+        const resolutionEvent =
+          isSellResource
+            ? {
+                event_type: "INTERIOR_RESOURCE_SOLD",
+                payload: {
+                  player_id: currentUserPlayer.id,
+                  player_name: currentUserPlayer.display_name,
+                  row,
+                  col,
+                  resource_type: targetCell.discoveredResourceType,
+                  payout: sellPayout,
+                },
+              }
+            : isBonus
+              ? {
+                  event_type: "INTERIOR_RESOURCE_BONUS_GRANTED",
+                  payload: {
+                    player_id: currentUserPlayer.id,
+                    player_name: currentUserPlayer.display_name,
+                    row,
+                    col,
+                    resource_type: targetCell.discoveredResourceType,
+                    free_build_tokens_granted: voucherReward?.freeBuildTokens ?? 0,
+                    free_upgrade_tokens_granted: voucherReward?.freeUpgradeTokens ?? 0,
+                    free_build_tokens_after: nextFreeBuildTokens,
+                    free_upgrade_tokens_after: nextFreeUpgradeTokens,
+                  },
+                }
+              : {
+                  event_type: "INTERIOR_RESOURCE_EMPTY",
+                  payload: {
+                    player_id: currentUserPlayer.id,
+                    player_name: currentUserPlayer.display_name,
+                    row,
+                    col,
+                    resource_type: targetCell.discoveredResourceType,
+                  },
+                };
+
         await emitGameEvents(
           gameId,
           finalVersion,
-          [
-            {
-              event_type: "INTERIOR_RESOURCE_SOLD",
-              payload: {
-                player_id: currentUserPlayer.id,
-                player_name: currentUserPlayer.display_name,
-                row,
-                col,
-                resource_type: targetCell.discoveredResourceType,
-                payout,
-              },
-            },
-          ],
+          [resolutionEvent],
           user.id,
         );
         return NextResponse.json({ gameState: updatedState });
@@ -6150,7 +6223,8 @@ export async function POST(request: Request) {
           { status: 409 },
         );
       }
-      const developmentCost = resourceConfig.developmentCost ?? 0;
+      const developmentCost =
+        getInlandDevelopmentCost(targetCell.discoveredResourceType, goSalary) ?? 0;
       if (currentCash < developmentCost) {
         return NextResponse.json(
           { error: "Insufficient cash to develop this inland site." },
@@ -9750,6 +9824,11 @@ export async function POST(request: Request) {
         action === "BUILD_HOUSE"
           ? Math.round(houseCost * macroDevelopmentMultiplier)
           : houseCost;
+      const requestedVoucherTypeRaw =
+        "useConstructionVoucher" in body &&
+        typeof body.useConstructionVoucher === "string"
+          ? body.useConstructionVoucher
+          : null;
 
       const isEvenBuildAfterChange = (nextHouses: number) => {
         const nextGroupHouses = groupTiles.map((entry) =>
@@ -9780,12 +9859,6 @@ export async function POST(request: Request) {
         const balances = gameState.balances ?? {};
         const currentBalance =
           balances[currentPlayer.id] ?? startingCash;
-        if (currentBalance < adjustedHouseCost) {
-          return NextResponse.json(
-            { error: "Not enough cash to build a house." },
-            { status: 409 },
-          );
-        }
 
         const nextHouses = houses + 1;
         if (!isEvenBuildAfterChange(nextHouses)) {
@@ -9797,9 +9870,58 @@ export async function POST(request: Request) {
             { status: 409 },
           );
         }
+        const eligibleVoucherType = houses === 0 ? "BUILD" : "UPGRADE";
+        const hasBuildVoucher = (currentPlayer.free_build_tokens ?? 0) > 0;
+        const hasUpgradeVoucher = (currentPlayer.free_upgrade_tokens ?? 0) > 0;
+
+        const wantsVoucher =
+          requestedVoucherTypeRaw === "BUILD" || requestedVoucherTypeRaw === "UPGRADE";
+        if (wantsVoucher && requestedVoucherTypeRaw !== eligibleVoucherType) {
+          return NextResponse.json(
+            {
+              error:
+                requestedVoucherTypeRaw === "BUILD"
+                  ? "Build vouchers can only be used on properties without existing houses."
+                  : "Upgrade vouchers can only be used on already developed properties.",
+            },
+            { status: 409 },
+          );
+        }
+        if (requestedVoucherTypeRaw === "BUILD" && !hasBuildVoucher) {
+          return NextResponse.json(
+            { error: "No free build vouchers available." },
+            { status: 409 },
+          );
+        }
+        if (requestedVoucherTypeRaw === "UPGRADE" && !hasUpgradeVoucher) {
+          return NextResponse.json(
+            { error: "No free upgrade vouchers available." },
+            { status: 409 },
+          );
+        }
+        const effectiveHouseCost = wantsVoucher ? 0 : adjustedHouseCost;
+        if (currentBalance < effectiveHouseCost) {
+          return NextResponse.json(
+            { error: "Not enough cash to build a house." },
+            { status: 409 },
+          );
+        }
+
+        const nextFreeBuildTokens =
+          requestedVoucherTypeRaw === "BUILD"
+            ? Math.max(0, (currentPlayer.free_build_tokens ?? 0) - 1)
+            : (currentPlayer.free_build_tokens ?? 0);
+        const nextFreeUpgradeTokens =
+          requestedVoucherTypeRaw === "UPGRADE"
+            ? Math.max(0, (currentPlayer.free_upgrade_tokens ?? 0) - 1)
+            : (currentPlayer.free_upgrade_tokens ?? 0);
+        const consumedVoucher =
+          requestedVoucherTypeRaw === "BUILD" || requestedVoucherTypeRaw === "UPGRADE"
+            ? requestedVoucherTypeRaw
+            : null;
         const updatedBalances = {
           ...balances,
-          [currentPlayer.id]: currentBalance - adjustedHouseCost,
+          [currentPlayer.id]: currentBalance - effectiveHouseCost,
         };
 
         const ownershipResponse = await fetchFromSupabaseWithService(
@@ -9833,20 +9955,37 @@ export async function POST(request: Request) {
               tile_index: tileIndex,
               tile_id: tile.tile_id,
               house_cost: adjustedHouseCost,
+              effective_charge: effectiveHouseCost,
+              voucher_used: consumedVoucher,
               houses_before: houses,
               houses_after: nextHouses,
             },
           },
-          {
+        ];
+        if (consumedVoucher) {
+          events.push({
+            event_type: "HOUSE_BUILD_VOUCHER_USED",
+            payload: {
+              player_id: currentPlayer.id,
+              player_name: currentPlayer.display_name,
+              tile_index: tileIndex,
+              voucher_type: consumedVoucher,
+              free_build_tokens_after: nextFreeBuildTokens,
+              free_upgrade_tokens_after: nextFreeUpgradeTokens,
+            },
+          });
+        }
+        if (effectiveHouseCost > 0) {
+          events.push({
             event_type: "CASH_DEBIT",
             payload: {
               player_id: currentPlayer.id,
-              amount: adjustedHouseCost,
+              amount: effectiveHouseCost,
               reason: "BUILD_HOUSE",
               tile_index: tileIndex,
             },
-          },
-        ];
+          });
+        }
 
         const finalVersion = currentVersion + events.length;
         const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
@@ -9869,6 +10008,29 @@ export async function POST(request: Request) {
             { error: "Version mismatch." },
             { status: 409 },
           );
+        }
+
+        if (consumedVoucher) {
+          const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
+            `players?id=eq.${currentPlayer.id}`,
+            {
+              method: "PATCH",
+              headers: {
+                Prefer: "return=representation",
+              },
+              body: JSON.stringify({
+                free_build_tokens: nextFreeBuildTokens,
+                free_upgrade_tokens: nextFreeUpgradeTokens,
+              }),
+            },
+          )) ?? [];
+
+          if (!updatedPlayer) {
+            return NextResponse.json(
+              { error: "Unable to apply construction voucher." },
+              { status: 500 },
+            );
+          }
         }
 
         await emitGameEvents(gameId, currentVersion + 1, events, user.id);

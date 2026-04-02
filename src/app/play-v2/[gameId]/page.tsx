@@ -37,11 +37,14 @@ import {
 } from "@/lib/rent";
 import { formatCurrency, getCurrencyMetaFromBoardPack } from "@/lib/currency";
 import {
-  INLAND_EXPLORATION_COST,
   canExploreInlandCell,
+  getInlandDevelopmentCost,
+  getInlandExplorationCost,
   getInlandResourceConfig,
+  getInlandSellValue,
   isDevelopableResource,
   isInstantSellResource,
+  isNoneResource,
   normalizeInlandCellRecords,
   normalizeInlandExploredCellKeys,
   toInlandCellKey,
@@ -85,6 +88,8 @@ type Player = {
   jail_turns_remaining: number;
   get_out_of_jail_free_count: number;
   tax_exemption_pass_count: number;
+  free_build_tokens: number;
+  free_upgrade_tokens: number;
   is_eliminated: boolean;
   eliminated_at: string | null;
 };
@@ -274,6 +279,7 @@ type BankActionRequest = {
   stake?: number;
   betId?: string;
   interiorCell?: InlandCell;
+  useConstructionVoucher?: "BUILD" | "UPGRADE";
 };
 
 type OwnershipRow = {
@@ -478,7 +484,7 @@ export default function PlayV2Page() {
   const loadPlayers = useCallback(
     async (gameId: string, accessToken?: string) => {
       const rows = await supabaseClient.fetchFromSupabase<Player[]>(
-        `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,is_eliminated,eliminated_at&game_id=eq.${gameId}&order=created_at.asc`,
+        `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at&game_id=eq.${gameId}&order=created_at.asc`,
         { method: "GET" },
         accessToken,
       );
@@ -1588,6 +1594,9 @@ export default function PlayV2Page() {
           ...(request.stake !== undefined ? { stake: request.stake } : {}),
           ...(request.betId ? { betId: request.betId } : {}),
           ...(request.interiorCell ? { interiorCell: request.interiorCell } : {}),
+          ...(request.useConstructionVoucher
+            ? { useConstructionVoucher: request.useConstructionVoucher }
+            : {}),
         };
 
         const runActionRequest = async (accessToken: string) => {
@@ -1980,6 +1989,13 @@ export default function PlayV2Page() {
   );
   const currency = getCurrencyMetaFromBoardPack(selectedBoardPack);
   const currencySymbol = currency.symbol ?? "$";
+  const inlandGoSalary =
+    selectedBoardPack?.economy.passGoAmount ??
+    DEFAULT_BOARD_PACK_ECONOMY.passGoAmount ??
+    0;
+  const inlandExplorationCost = getInlandExplorationCost(inlandGoSalary);
+  const currentPlayerFreeBuildTokens = currentUserPlayer?.free_build_tokens ?? 0;
+  const currentPlayerFreeUpgradeTokens = currentUserPlayer?.free_upgrade_tokens ?? 0;
   const formatMoney = useCallback(
     (value: number | null) => {
       if (value === null) return "—";
@@ -2963,6 +2979,9 @@ export default function PlayV2Page() {
 
     return (
       <div className="space-y-2">
+        <div className="rounded-lg border border-indigo-200/20 bg-indigo-500/10 px-2.5 py-2 text-[11px] text-indigo-100/90">
+          Vouchers · Build {currentPlayerFreeBuildTokens} · Upgrade {currentPlayerFreeUpgradeTokens}
+        </div>
         {ownedProperties.map((entry) => {
           const {
             tile,
@@ -2983,6 +3002,14 @@ export default function PlayV2Page() {
             ownedActionReason?.tileIndex === tile.index
               ? ownedActionReason
               : null;
+          const canUseBuildVoucher =
+            canBuildHouse &&
+            housesCount === 0 &&
+            currentPlayerFreeBuildTokens > 0;
+          const canUseUpgradeVoucher =
+            canBuildHouse &&
+            housesCount > 0 &&
+            currentPlayerFreeUpgradeTokens > 0;
 
           return (
             <div
@@ -3027,6 +3054,24 @@ export default function PlayV2Page() {
                     <p className="text-[10px] text-red-300">
                       {activeReasonForTile.reason}
                     </p>
+                  ) : null}
+                  {(canUseBuildVoucher || canUseUpgradeVoucher) ? (
+                    <button
+                      type="button"
+                      className="w-full rounded-md border border-indigo-300/40 bg-indigo-500/25 px-2 py-1 text-[11px] font-semibold text-indigo-100"
+                      disabled={actionLoading === "BUILD_HOUSE"}
+                      onClick={() =>
+                        void handleBankAction({
+                          action: "BUILD_HOUSE",
+                          tileIndex: tile.index,
+                          useConstructionVoucher: canUseBuildVoucher
+                            ? "BUILD"
+                            : "UPGRADE",
+                        })
+                      }
+                    >
+                      {canUseBuildVoucher ? "Use Build Voucher" : "Use Upgrade Voucher"}
+                    </button>
                   ) : null}
                 </div>
 
@@ -3167,6 +3212,8 @@ export default function PlayV2Page() {
     ownedActionReason,
     ownedProperties,
     selectedBoardPack,
+    currentPlayerFreeBuildTokens,
+    currentPlayerFreeUpgradeTokens,
     formatMoney,
   ]);
 
@@ -4612,7 +4659,7 @@ export default function PlayV2Page() {
             >
               {actionLoading === "EXPLORE_INTERIOR"
                 ? "Exploring…"
-                : `Explore for $${INLAND_EXPLORATION_COST}`}
+                : `Explore for ${formatMoney(inlandExplorationCost)}`}
             </button>
             <button
               type="button"
@@ -4887,18 +4934,35 @@ export default function PlayV2Page() {
               <p className="mt-2 text-sm text-white/75">
                 Sell now for{" "}
                 {formatMoney(
-                  getInlandResourceConfig(selectedInlandCellRecord.discoveredResourceType!).sellValue ?? 0,
+                  getInlandSellValue(
+                    selectedInlandCellRecord.discoveredResourceType!,
+                    inlandGoSalary,
+                  ) ?? 0,
                 )}
                 .
               </p>
-            ) : (
+            ) : isDevelopableResource(selectedInlandCellRecord.discoveredResourceType!) ? (
               <p className="mt-2 text-sm text-white/75">
                 Develop this site for{" "}
                 {formatMoney(
-                  getInlandResourceConfig(selectedInlandCellRecord.discoveredResourceType!).developmentCost ??
-                    0,
+                  getInlandDevelopmentCost(
+                    selectedInlandCellRecord.discoveredResourceType!,
+                    inlandGoSalary,
+                  ) ?? 0,
                 )}
                 .
+              </p>
+            ) : isNoneResource(selectedInlandCellRecord.discoveredResourceType!) ? (
+              <p className="mt-2 text-sm text-white/75">
+                This tile is empty land. Resolve it to continue.
+              </p>
+            ) : (
+              <p className="mt-2 text-sm text-white/75">
+                Claim voucher reward:
+                {" "}
+                {selectedInlandCellRecord.discoveredResourceType === "TIMBER"
+                  ? "+1 free build token"
+                  : "+1 free upgrade token"}
               </p>
             )}
             <div className="mt-4 grid grid-cols-2 gap-2">
@@ -4906,15 +4970,21 @@ export default function PlayV2Page() {
                 type="button"
                 onClick={() =>
                     void handleInlandResourceDecision(
-                    isInstantSellResource(selectedInlandCellRecord.discoveredResourceType!)
-                      ? "SELL_INTERIOR_RESOURCE"
-                      : "DEVELOP_INTERIOR_SITE",
+                    isDevelopableResource(selectedInlandCellRecord.discoveredResourceType!)
+                      ? "DEVELOP_INTERIOR_SITE"
+                      : "SELL_INTERIOR_RESOURCE",
                     selectedInteriorCell,
                   )
                 }
                 className="inline-flex w-full items-center justify-center rounded-xl border border-emerald-200/25 bg-emerald-500/20 px-4 py-2.5 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-500/30"
               >
-                {isDevelopableResource(selectedInlandCellRecord.discoveredResourceType!) ? "Develop" : "Sell"}
+                {isDevelopableResource(selectedInlandCellRecord.discoveredResourceType!)
+                  ? "Develop"
+                  : isInstantSellResource(selectedInlandCellRecord.discoveredResourceType!)
+                    ? "Sell"
+                    : isNoneResource(selectedInlandCellRecord.discoveredResourceType!)
+                      ? "Acknowledge"
+                      : "Claim"}
               </button>
               <button
                 type="button"

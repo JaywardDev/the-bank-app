@@ -1,6 +1,5 @@
 export const INLAND_BOARD_WIDTH = 13;
 export const INLAND_BOARD_HEIGHT = 9;
-export const INLAND_EXPLORATION_COST = 150;
 
 export type InlandCell = {
   row: number;
@@ -13,8 +12,16 @@ export type InlandCellStatus =
   | "DISCOVERED_RESOURCE"
   | "DEVELOPED_SITE";
 
-export type InlandResourceType = "GOLD" | "BRONZE" | "DIAMOND" | "OIL" | "TIMBER";
-export type InlandResourceCategory = "INSTANT_SELL" | "DEVELOPABLE";
+export type InlandResourceType =
+  | "OIL"
+  | "DEEP_WELL"
+  | "COAL"
+  | "TIMBER"
+  | "RARE_EARTH"
+  | "BRONZE"
+  | "GOLD"
+  | "EMPTY";
+export type InlandResourceCategory = "SELL" | "DEVELOP" | "BONUS" | "NONE";
 
 export type InlandResourceConfig = {
   type: InlandResourceType;
@@ -22,9 +29,13 @@ export type InlandResourceConfig = {
   icon: string;
   category: InlandResourceCategory;
   weight: number;
-  sellValue?: number;
-  developmentCost?: number;
-  passiveIncomePerTurn?: number;
+  sellMultiplier?: number;
+  developmentCostMultiplier?: number;
+  passiveIncomeMultiplierPerTurn?: number;
+  voucherReward?: {
+    freeBuildTokens?: number;
+    freeUpgradeTokens?: number;
+  };
 };
 
 export type InlandCellRecord = {
@@ -37,52 +48,126 @@ export type InlandCellRecord = {
   ownerPlayerId: string | null;
 };
 
+const roundInlandMoney = (amount: number) => Math.round(amount);
+
 export const INLAND_RESOURCE_CONFIG: Record<InlandResourceType, InlandResourceConfig> = {
-  GOLD: {
-    type: "GOLD",
-    label: "Gold Vein",
-    icon: "🥇",
-    category: "INSTANT_SELL",
-    weight: 24,
-    sellValue: 280,
+  OIL: {
+    type: "OIL",
+    label: "Oil Reserve",
+    icon: "🛢️",
+    category: "DEVELOP",
+    weight: 6.5,
+    developmentCostMultiplier: 3,
+    passiveIncomeMultiplierPerTurn: 0.15,
+  },
+  DEEP_WELL: {
+    type: "DEEP_WELL",
+    label: "Deep Well",
+    icon: "🕳️",
+    category: "DEVELOP",
+    weight: 6.5,
+    developmentCostMultiplier: 2.5,
+    passiveIncomeMultiplierPerTurn: 0.1,
+  },
+  COAL: {
+    type: "COAL",
+    label: "Coal Seam",
+    icon: "⚫",
+    category: "DEVELOP",
+    weight: 6.5,
+    developmentCostMultiplier: 3,
+    passiveIncomeMultiplierPerTurn: 0.12,
+  },
+  TIMBER: {
+    type: "TIMBER",
+    label: "Timber Grove",
+    icon: "🪵",
+    category: "BONUS",
+    weight: 22,
+    voucherReward: {
+      freeBuildTokens: 1,
+    },
+  },
+  RARE_EARTH: {
+    type: "RARE_EARTH",
+    label: "Rare Earth Cache",
+    icon: "🧪",
+    category: "BONUS",
+    weight: 18,
+    voucherReward: {
+      freeUpgradeTokens: 1,
+    },
   },
   BRONZE: {
     type: "BRONZE",
     label: "Bronze Deposit",
     icon: "🥉",
-    category: "INSTANT_SELL",
-    weight: 26,
-    sellValue: 190,
+    category: "SELL",
+    weight: 15,
+    sellMultiplier: 1.2,
   },
-  DIAMOND: {
-    type: "DIAMOND",
-    label: "Diamond Pocket",
-    icon: "💎",
-    category: "INSTANT_SELL",
-    weight: 12,
-    sellValue: 420,
+  GOLD: {
+    type: "GOLD",
+    label: "Gold Vein",
+    icon: "🥇",
+    category: "SELL",
+    weight: 9,
+    sellMultiplier: 5,
   },
-  OIL: {
-    type: "OIL",
-    label: "Oil Field",
-    icon: "🛢️",
-    category: "DEVELOPABLE",
-    weight: 20,
-    developmentCost: 180,
-    passiveIncomePerTurn: 85,
-  },
-  TIMBER: {
-    type: "TIMBER",
-    label: "Timber Stand",
-    icon: "🪵",
-    category: "DEVELOPABLE",
-    weight: 18,
-    developmentCost: 140,
-    passiveIncomePerTurn: 55,
+  EMPTY: {
+    type: "EMPTY",
+    label: "Empty Land",
+    icon: "🟫",
+    category: "NONE",
+    weight: 11,
   },
 };
 
 const RESOURCE_ROLL_TABLE = Object.values(INLAND_RESOURCE_CONFIG);
+
+const validateResourceWeightsTotal = () => {
+  const total = RESOURCE_ROLL_TABLE.reduce((sum, resource) => sum + resource.weight, 0);
+  if (Math.abs(total - 100) > 0.0001) {
+    throw new Error(`Inland resource weights must total 100; received ${total}.`);
+  }
+};
+
+validateResourceWeightsTotal();
+
+export const getInlandExplorationCost = (goSalary: number) => roundInlandMoney(goSalary * 1);
+
+export const getInlandSellValue = (resourceType: InlandResourceType, goSalary: number) => {
+  const multiplier = INLAND_RESOURCE_CONFIG[resourceType].sellMultiplier;
+  if (multiplier === undefined) {
+    return null;
+  }
+  return roundInlandMoney(goSalary * multiplier);
+};
+
+export const getInlandDevelopmentCost = (
+  resourceType: InlandResourceType,
+  goSalary: number,
+) => {
+  const multiplier = INLAND_RESOURCE_CONFIG[resourceType].developmentCostMultiplier;
+  if (multiplier === undefined) {
+    return null;
+  }
+  return roundInlandMoney(goSalary * multiplier);
+};
+
+export const getInlandPassiveIncomePerTurn = (
+  resourceType: InlandResourceType,
+  goSalary: number,
+) => {
+  const multiplier = INLAND_RESOURCE_CONFIG[resourceType].passiveIncomeMultiplierPerTurn;
+  if (multiplier === undefined) {
+    return null;
+  }
+  return roundInlandMoney(goSalary * multiplier);
+};
+
+export const getInlandVoucherReward = (resourceType: InlandResourceType) =>
+  INLAND_RESOURCE_CONFIG[resourceType].voucherReward ?? null;
 
 export const toInlandCellKey = ({ row, col }: InlandCell) => `${row}:${col}`;
 
@@ -271,17 +356,25 @@ export const getInlandResourceConfig = (resourceType: InlandResourceType) =>
   INLAND_RESOURCE_CONFIG[resourceType];
 
 export const isInstantSellResource = (resourceType: InlandResourceType) =>
-  getInlandResourceConfig(resourceType).category === "INSTANT_SELL";
+  getInlandResourceConfig(resourceType).category === "SELL";
 
 export const isDevelopableResource = (resourceType: InlandResourceType) =>
-  getInlandResourceConfig(resourceType).category === "DEVELOPABLE";
+  getInlandResourceConfig(resourceType).category === "DEVELOP";
+
+export const isBonusResource = (resourceType: InlandResourceType) =>
+  getInlandResourceConfig(resourceType).category === "BONUS";
+
+export const isNoneResource = (resourceType: InlandResourceType) =>
+  getInlandResourceConfig(resourceType).category === "NONE";
 
 export const computeInlandPassiveIncomeForPlayer = ({
   recordsByKey,
   playerId,
+  goSalary,
 }: {
   recordsByKey: Map<string, InlandCellRecord>;
   playerId: string;
+  goSalary: number;
 }) => {
   const siteCounts: Partial<Record<InlandResourceType, number>> = {};
   let total = 0;
@@ -293,8 +386,7 @@ export const computeInlandPassiveIncomeForPlayer = ({
     if (record.ownerPlayerId !== playerId || !record.developedSiteType) {
       continue;
     }
-    const config = getInlandResourceConfig(record.developedSiteType);
-    const payout = config.passiveIncomePerTurn ?? 0;
+    const payout = getInlandPassiveIncomePerTurn(record.developedSiteType, goSalary) ?? 0;
     if (payout <= 0) {
       continue;
     }
@@ -304,8 +396,7 @@ export const computeInlandPassiveIncomeForPlayer = ({
 
   const breakdown = Object.entries(siteCounts).map(([resourceType, count]) => {
     const typedResourceType = resourceType as InlandResourceType;
-    const config = getInlandResourceConfig(typedResourceType);
-    const passiveIncomePerTurn = config.passiveIncomePerTurn ?? 0;
+    const passiveIncomePerTurn = getInlandPassiveIncomePerTurn(typedResourceType, goSalary) ?? 0;
     return {
       resourceType: typedResourceType,
       count,

@@ -154,6 +154,36 @@ export const formatEventDescription = (
       return `${playerName} collected inland passive income (${amountLabel})`;
     }
 
+    if (event.event_type === "INTERIOR_RESOURCE_BONUS_GRANTED") {
+      const playerName =
+        typeof payload?.player_name === "string" ? payload.player_name : "Player";
+      const buildGranted = parseNumber(payload?.free_build_tokens_granted) ?? 0;
+      const upgradeGranted = parseNumber(payload?.free_upgrade_tokens_granted) ?? 0;
+      if (buildGranted > 0) {
+        return `${playerName} found timber and gained +${buildGranted} build voucher`;
+      }
+      if (upgradeGranted > 0) {
+        return `${playerName} found rare earth and gained +${upgradeGranted} upgrade voucher`;
+      }
+      return `${playerName} gained an inland voucher reward`;
+    }
+
+    if (event.event_type === "INTERIOR_RESOURCE_EMPTY") {
+      const playerName =
+        typeof payload?.player_name === "string" ? payload.player_name : "Player";
+      return `${playerName} explored inland but found empty land`;
+    }
+
+    if (event.event_type === "HOUSE_BUILD_VOUCHER_USED") {
+      const playerName =
+        typeof payload?.player_name === "string" ? payload.player_name : "Player";
+      const voucherType =
+        typeof payload?.voucher_type === "string"
+          ? payload.voucher_type.toLowerCase()
+          : "construction";
+      return `${playerName} used a ${voucherType} voucher to develop property`;
+    }
+
     if (event.event_type === "TRADE_PROPOSED") {
       const proposerId =
         typeof payload?.proposer_player_id === "string"
