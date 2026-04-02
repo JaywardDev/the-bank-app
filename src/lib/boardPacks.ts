@@ -95,6 +95,8 @@ export type BoardTileType =
   | "RAIL"
   | "UTILITY";
 
+export type UtilityKind = "ELECTRIC" | "WATER";
+
 export type BoardTile = {
   index: number;
   tile_id: string;
@@ -106,6 +108,7 @@ export type BoardTile = {
   colorGroup?: string;
   houseCost?: number;
   rentByHouses?: number[];
+  utilityKind?: UtilityKind;
 };
 
 type PropertyGroupConfig = {
@@ -602,6 +605,7 @@ export const boardPacks: BoardPack[] = [
         index: 12,
         tile_id: "electric-company",
         type: "UTILITY",
+        utilityKind: "ELECTRIC",
         name: "Electric Company",
         price: 150,
       },
@@ -718,6 +722,7 @@ export const boardPacks: BoardPack[] = [
         index: 28,
         tile_id: "water-works",
         type: "UTILITY",
+        utilityKind: "WATER",
         name: "Water Works",
         price: 150,
       },
