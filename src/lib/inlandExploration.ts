@@ -410,3 +410,61 @@ export const computeInlandPassiveIncomeForPlayer = ({
     breakdown,
   };
 };
+
+export const computeDevelopedSiteCountsByPlayerAndType = ({
+  recordsByKey,
+  resourceType,
+}: {
+  recordsByKey: Map<string, InlandCellRecord>;
+  resourceType: InlandResourceType;
+}) => {
+  const countsByPlayer: Record<string, number> = {};
+  for (const record of recordsByKey.values()) {
+    if (record.status !== "DEVELOPED_SITE") {
+      continue;
+    }
+    if (record.developedSiteType !== resourceType || !record.ownerPlayerId) {
+      continue;
+    }
+    countsByPlayer[record.ownerPlayerId] =
+      (countsByPlayer[record.ownerPlayerId] ?? 0) + 1;
+  }
+  return countsByPlayer;
+};
+
+export const computeOilRailSynergyPayouts = ({
+  recordsByKey,
+  rentPaid,
+  railroadOwnerPlayerId,
+}: {
+  recordsByKey: Map<string, InlandCellRecord>;
+  rentPaid: number;
+  railroadOwnerPlayerId: string;
+}) => {
+  const oilRefineryCountsByPlayer = computeDevelopedSiteCountsByPlayerAndType({
+    recordsByKey,
+    resourceType: "OIL",
+  });
+  const refineryPayoutsByPlayer: Record<string, number> = {};
+
+  for (const [playerId, refineryCount] of Object.entries(
+    oilRefineryCountsByPlayer,
+  )) {
+    const payout = Math.floor(rentPaid * 0.15 * refineryCount);
+    if (payout <= 0) {
+      continue;
+    }
+    refineryPayoutsByPlayer[playerId] = payout;
+  }
+
+  const railroadOwnerOilRefineryCount =
+    oilRefineryCountsByPlayer[railroadOwnerPlayerId] ?? 0;
+  const verticalIntegrationBonus =
+    railroadOwnerOilRefineryCount > 0 ? Math.floor(rentPaid * 0.25) : 0;
+
+  return {
+    oilRefineryCountsByPlayer,
+    refineryPayoutsByPlayer,
+    verticalIntegrationBonus,
+  };
+};

@@ -46,6 +46,7 @@ import {
   type BettingMarketBetKind,
 } from "@/lib/bettingMarket";
 import {
+  computeOilRailSynergyPayouts,
   computeInlandPassiveIncomeForPlayer,
   canExploreInlandCell,
   getInlandDevelopmentCost,
@@ -3328,6 +3329,67 @@ const finalizeMoveResolution = async ({
         event_type: "PAY_RENT",
         payload: rentPayload,
       });
+
+      if (activeLandingTile.type === "RAIL") {
+        const inlandCells = normalizeInlandCellRecords(
+          gameState.inland_explored_cells,
+        );
+        const {
+          oilRefineryCountsByPlayer,
+          refineryPayoutsByPlayer,
+          verticalIntegrationBonus,
+        } = computeOilRailSynergyPayouts({
+          recordsByKey: inlandCells,
+          rentPaid: rentAmount,
+          railroadOwnerPlayerId: rentOwnerId,
+        });
+
+        for (const playerId of Object.keys(refineryPayoutsByPlayer).sort()) {
+          const payout = refineryPayoutsByPlayer[playerId] ?? 0;
+          if (payout <= 0) {
+            continue;
+          }
+          const currentBalance = updatedBalances[playerId] ?? startingCash;
+          updatedBalances = {
+            ...updatedBalances,
+            [playerId]: currentBalance + payout,
+          };
+          balancesChanged = true;
+          events.push({
+            event_type: "OIL_RAIL_SYNERGY_PAYOUT",
+            payload: {
+              trigger_tile_index: activeLandingTile.index,
+              trigger_tile_id: activeLandingTile.tile_id,
+              trigger_tile_type: activeLandingTile.type,
+              railroad_owner_player_id: rentOwnerId,
+              rent_paid: rentAmount,
+              player_id: playerId,
+              payout,
+              oil_refinery_count: oilRefineryCountsByPlayer[playerId] ?? 0,
+            },
+          });
+        }
+
+        if (verticalIntegrationBonus > 0) {
+          const railroadOwnerBalance = updatedBalances[rentOwnerId] ?? startingCash;
+          updatedBalances = {
+            ...updatedBalances,
+            [rentOwnerId]: railroadOwnerBalance + verticalIntegrationBonus,
+          };
+          balancesChanged = true;
+          events.push({
+            event_type: "VERTICAL_INTEGRATION_BONUS",
+            payload: {
+              trigger_tile_index: activeLandingTile.index,
+              trigger_tile_id: activeLandingTile.tile_id,
+              trigger_tile_type: activeLandingTile.type,
+              railroad_owner_player_id: rentOwnerId,
+              rent_paid: rentAmount,
+              payout: verticalIntegrationBonus,
+            },
+          });
+        }
+      }
     }
   }
 

@@ -852,6 +852,39 @@ export const formatEventDescription = (
       return `Rent skipped on ${tileLabel} (collateralized)`;
     }
 
+    if (event.event_type === "OIL_RAIL_SYNERGY_PAYOUT") {
+      const playerId =
+        typeof payload?.player_id === "string" ? payload.player_id : null;
+      const playerName =
+        players.find((player) => player.id === playerId)?.display_name ??
+        "Player";
+      const payout = parseNumber(payload?.payout);
+      const refineryCount = parseNumber(payload?.oil_refinery_count);
+      const payoutLabel =
+        payout !== null ? formatMoney(payout, currencyCode, currencySymbol) : null;
+      const refineryLabel =
+        refineryCount !== null ? ` (${refineryCount} oil site${refineryCount === 1 ? "" : "s"})` : "";
+      return payoutLabel
+        ? `${playerName} received ${payoutLabel} Oil ↔ Railroad synergy${refineryLabel}`
+        : `${playerName} received Oil ↔ Railroad synergy${refineryLabel}`;
+    }
+
+    if (event.event_type === "VERTICAL_INTEGRATION_BONUS") {
+      const ownerId =
+        typeof payload?.railroad_owner_player_id === "string"
+          ? payload.railroad_owner_player_id
+          : null;
+      const ownerName =
+        players.find((player) => player.id === ownerId)?.display_name ??
+        "Player";
+      const payout = parseNumber(payload?.payout);
+      const payoutLabel =
+        payout !== null ? formatMoney(payout, currencyCode, currencySymbol) : null;
+      return payoutLabel
+        ? `${ownerName} received ${payoutLabel} Vertical Integration Bonus`
+        : `${ownerName} received Vertical Integration Bonus`;
+    }
+
     if (event.event_type === "COLLATERAL_LOAN_TAKEN") {
       const tileIndexRaw = payload?.tile_index;
       const tileIndex =
