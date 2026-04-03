@@ -1277,6 +1277,17 @@ export const deriveWalletTransactions = (
   };
 
   const transactions: TransactionRow[] = [];
+  const reasonLabelOverrides: Record<string, string> = {
+    INLAND_PASSIVE_INCOME: "industry passive income",
+    INDUSTRY_PASSIVE_INCOME: "industry passive income",
+    INTERIOR_EXPLORED: "resource exploration",
+    RESOURCE_EXPLORATION: "resource exploration",
+    INTERIOR_RESOURCE_SOLD: "resource sale",
+    RESOURCE_SOLD: "resource sale",
+    INTERIOR_RESOURCE_DEVELOPED: "resource development",
+    INTERIOR_SITE_DEVELOPED: "resource development",
+    RESOURCE_DEVELOPMENT: "resource development",
+  };
 
   for (const event of events) {
     const payload = event.payload && typeof event.payload === "object" ? event.payload : null;
@@ -1291,7 +1302,9 @@ export const deriveWalletTransactions = (
     const tileName = getTileName(parseNumber(payload.tile_index));
     const base = { id: event.id, ts: event.created_at ?? null, sourceEventVersion: event.version, sourceEventId: event.id };
     const actor = getPlayerName(playerId);
-    const reasonLabel = reason ? reason.replaceAll("_", " ").toLowerCase() : "cash movement";
+    const reasonLabel = reason
+      ? (reasonLabelOverrides[reason] ?? reason.replaceAll("_", " ").toLowerCase())
+      : "cash movement";
     transactions.push({
       ...base,
       title: `${actor} · ${debit ? 'Debit' : 'Credit'}`,

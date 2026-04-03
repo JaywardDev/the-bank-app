@@ -4468,7 +4468,7 @@ const advanceTurn = async ({
       payload: {
         player_id: nextPlayer.id,
         amount: inlandIncome.total,
-        reason: "INLAND_PASSIVE_INCOME",
+        reason: "INDUSTRY_PASSIVE_INCOME",
         source_event_type: "INLAND_PASSIVE_INCOME",
       },
     });
@@ -6339,7 +6339,7 @@ export async function POST(request: Request) {
             payload: {
               player_id: currentUserPlayer.id,
               amount: explorationCost,
-              reason: "INTERIOR_EXPLORED",
+              reason: "RESOURCE_EXPLORATION",
               source_event_type: "INTERIOR_EXPLORED",
             },
           },
@@ -6504,7 +6504,7 @@ export async function POST(request: Request) {
                   payload: {
                     player_id: currentUserPlayer.id,
                     amount: sellPayout,
-                    reason: "INTERIOR_RESOURCE_SOLD",
+                    reason: "RESOURCE_SOLD",
                     source_event_type: "INTERIOR_RESOURCE_SOLD",
                   },
                 },
@@ -6609,7 +6609,7 @@ export async function POST(request: Request) {
             payload: {
               player_id: currentUserPlayer.id,
               amount: developmentCost,
-              reason: "INTERIOR_SITE_DEVELOPED",
+              reason: "RESOURCE_DEVELOPMENT",
               source_event_type: "INTERIOR_SITE_DEVELOPED",
             },
           },
@@ -7888,6 +7888,16 @@ export async function POST(request: Request) {
           [bet.player_id]: winnerBalance + payout,
         };
         balancesChanged = true;
+        bettingWinEvents.push({
+          event_type: "CASH_CREDIT",
+          payload: {
+            player_id: bet.player_id,
+            amount: payout,
+            bet_id: bet.id,
+            reason: "BETTING_MARKET_BET_PAYOUT",
+            source_event_type: "BETTING_MARKET_BET_WON",
+          },
+        });
         bettingWinEvents.push({
           event_type: "BETTING_MARKET_BET_WON",
           payload: {
