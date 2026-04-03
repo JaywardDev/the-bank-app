@@ -278,6 +278,13 @@ const UtilityRentTable = ({
         </span>{" "}
         the dice roll.
       </p>
+      <p>
+        If three Utilities are owned, rent is{" "}
+        <span className="font-semibold text-neutral-900">
+          {rentMultipliers.triple ?? 16}×
+        </span>{" "}
+        the dice roll.
+      </p>
     </div>
     <p className="mt-2 text-[11px] text-neutral-500">
       Rent is based on the dice roll.

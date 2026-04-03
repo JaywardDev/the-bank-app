@@ -11,6 +11,7 @@ export type OwnershipByTile = Record<number, OwnershipEntry>;
 
 const DEFAULT_HOTEL_INCREMENT_MULTIPLIER = 1.25;
 const DEFAULT_UTILITY_ROLL = 7;
+const DEFAULT_UTILITY_TRIPLE_MULTIPLIER = 16;
 
 const getDevBreakdown = (dev: number) => {
   const normalizedDev = Number.isFinite(dev) ? Math.max(0, Math.floor(dev)) : 0;
@@ -165,10 +166,10 @@ export const getCurrentTileRent = ({
       boardTiles,
       "UTILITY",
     );
-    const multiplier =
-      utilityCount >= 2
-        ? economy.utilityRentMultipliers.double
-        : economy.utilityRentMultipliers.single;
+    const multiplier = getUtilityRentMultiplierForOwnedCount(
+      utilityCount,
+      economy.utilityRentMultipliers,
+    );
     const rentRoll = typeof lastRoll === "number" ? lastRoll : DEFAULT_UTILITY_ROLL;
     const utilityBaseAmount = economy.utilityBaseAmount ?? 1;
     return rentRoll * multiplier * utilityBaseAmount;
@@ -176,6 +177,23 @@ export const getCurrentTileRent = ({
 
   return null;
 };
+
+export function getUtilityRentMultiplierForOwnedCount(
+  utilityCount: number,
+  multipliers: {
+    single: number;
+    double: number;
+    triple?: number;
+  },
+) {
+  if (utilityCount >= 3) {
+    return multipliers.triple ?? DEFAULT_UTILITY_TRIPLE_MULTIPLIER;
+  }
+  if (utilityCount >= 2) {
+    return multipliers.double;
+  }
+  return multipliers.single;
+}
 
 export const formatCurrencyCompact = (
   amount: number,

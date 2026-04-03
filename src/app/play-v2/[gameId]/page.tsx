@@ -24,6 +24,7 @@ import BettingMarketPanelV2 from "@/components/play-v2/BettingMarketPanelV2";
 import { TitleDeedPreview } from "@/app/components/TitleDeedPreview";
 import { getDevelopmentLevelLabel } from "@/components/play-v2/utils/developmentLabels";
 import { DEFAULT_BOARD_PACK_ECONOMY, getBoardPackById } from "@/lib/boardPacks";
+import { resolveBoardTilesForRules } from "@/lib/resolvedBoardTiles";
 import { getTileBandColor } from "@/lib/boardTileStyles";
 import {
   computeOwnedAssetValue,
@@ -863,10 +864,12 @@ export default function PlayV2Page() {
   );
 
   const boardTilesByIndex = useMemo(() => {
-    const tiles =
-      getBoardPackById(gameMeta?.board_pack_id ?? null)?.tiles ?? [];
+    const tiles = resolveBoardTilesForRules({
+      boardPack: getBoardPackById(gameMeta?.board_pack_id ?? null),
+      rules: gameState?.rules,
+    });
     return new Map(tiles.map((tile) => [tile.index, tile]));
-  }, [gameMeta?.board_pack_id]);
+  }, [gameMeta?.board_pack_id, gameState?.rules]);
 
   void houseBuildBlockedByMacro;
   void loanBlockedByMacro;
@@ -1987,6 +1990,10 @@ export default function PlayV2Page() {
     () => getBoardPackById(gameMeta?.board_pack_id ?? null),
     [gameMeta?.board_pack_id],
   );
+  const resolvedBoardTiles = useMemo(
+    () => resolveBoardTilesForRules({ boardPack: selectedBoardPack, rules: gameState?.rules }),
+    [gameState?.rules, selectedBoardPack],
+  );
   const currency = getCurrencyMetaFromBoardPack(selectedBoardPack);
   const currencySymbol = currency.symbol ?? "$";
   const inlandGoSalary =
@@ -2135,10 +2142,10 @@ export default function PlayV2Page() {
   );
 
   const sellToMarketSelection = useMemo(() => {
-    if (sellToMarketTileIndex === null || !selectedBoardPack?.tiles) {
+    if (sellToMarketTileIndex === null || !resolvedBoardTiles) {
       return null;
     }
-    const tile = selectedBoardPack.tiles.find(
+    const tile = resolvedBoardTiles.find(
       (boardTile) => boardTile.index === sellToMarketTileIndex,
     );
     if (!tile) {
@@ -2150,7 +2157,7 @@ export default function PlayV2Page() {
       marketValue,
       payout: Math.floor(marketValue * 0.7),
     };
-  }, [sellToMarketTileIndex, selectedBoardPack?.tiles]);
+  }, [sellToMarketTileIndex, resolvedBoardTiles]);
 
   const macroTooltipById = useMemo(() => {
     const lookup = new Map<string, string>();
@@ -2214,16 +2221,16 @@ export default function PlayV2Page() {
   }, [activeMacroEffectsV1, macroCardById, macroTooltipById]);
 
   const currentUserOwnedTiles = useMemo(() => {
-    if (!selectedBoardPack?.tiles || !currentUserPlayer) {
+    if (!resolvedBoardTiles || !currentUserPlayer) {
       return [];
     }
 
-    return selectedBoardPack.tiles.filter(
+    return resolvedBoardTiles.filter(
       (tile) =>
         ["PROPERTY", "RAIL", "UTILITY"].includes(tile.type) &&
         ownershipByTile[tile.index]?.owner_player_id === currentUserPlayer.id,
     );
-  }, [currentUserPlayer, ownershipByTile, selectedBoardPack?.tiles]);
+  }, [currentUserPlayer, ownershipByTile, resolvedBoardTiles]);
 
   const ownedTileValue = useMemo(
     () => computeOwnedAssetValue(currentUserOwnedTiles),
@@ -2277,13 +2284,13 @@ export default function PlayV2Page() {
   ]);
 
   const finalStandings = useMemo(() => {
-    if (!gameOverState || !selectedBoardPack?.tiles.length) {
+    if (!gameOverState || !resolvedBoardTiles.length) {
       return [];
     }
 
     return players
       .map((player) => {
-        const ownedTiles = selectedBoardPack.tiles.filter(
+        const ownedTiles = resolvedBoardTiles.filter(
           (tile) =>
             ["PROPERTY", "RAIL", "UTILITY"].includes(tile.type) &&
             ownershipByTile[tile.index]?.owner_player_id === player.id,
@@ -2353,7 +2360,7 @@ export default function PlayV2Page() {
     playerLoans,
     players,
     purchaseMortgages,
-    selectedBoardPack?.tiles,
+    resolvedBoardTiles,
   ]);
 
   const collateralizedTileIndexes = useMemo(
@@ -2393,7 +2400,7 @@ export default function PlayV2Page() {
     Boolean(session?.access_token) &&
     Boolean(routeGameId) &&
     Boolean(gameMeta) &&
-    Boolean(selectedBoardPack?.tiles?.length) &&
+    Boolean(resolvedBoardTiles?.length) &&
     Boolean(gameState) &&
     playersLoaded;
   const isConfigured = Boolean(session?.access_token);
@@ -2409,7 +2416,7 @@ export default function PlayV2Page() {
     if (selectedTileIndex === null) {
       return null;
     }
-    const boardTiles = selectedBoardPack?.tiles ?? [];
+    const boardTiles = resolvedBoardTiles ?? [];
     return boardTiles.find((tile) => tile.index === selectedTileIndex) ?? null;
   }, [selectedBoardPack, selectedTileIndex]);
 
@@ -2523,7 +2530,7 @@ export default function PlayV2Page() {
     return getCurrentTileRent({
       tile: selectedTile,
       ownershipByTile,
-      boardTiles: selectedBoardPack.tiles,
+      boardTiles: resolvedBoardTiles,
       economy: selectedBoardPack.economy,
     });
   }, [ownershipByTile, selectedBoardPack, selectedTile]);
@@ -2576,7 +2583,7 @@ export default function PlayV2Page() {
     if (!selectedOwnerId) {
       return 0;
     }
-    const boardTiles = selectedBoardPack?.tiles ?? [];
+    const boardTiles = resolvedBoardTiles ?? [];
     return boardTiles.filter(
       (tile) =>
         tile.type === "RAIL" &&
@@ -2588,7 +2595,7 @@ export default function PlayV2Page() {
     if (!selectedOwnerId) {
       return 0;
     }
-    const boardTiles = selectedBoardPack?.tiles ?? [];
+    const boardTiles = resolvedBoardTiles ?? [];
     return boardTiles.filter(
       (tile) =>
         tile.type === "UTILITY" &&
@@ -2597,11 +2604,11 @@ export default function PlayV2Page() {
   }, [ownershipByTile, selectedBoardPack, selectedOwnerId]);
 
   const ownedProperties = useMemo(() => {
-    if (!selectedBoardPack?.tiles || !currentUserPlayer) {
+    if (!resolvedBoardTiles || !currentUserPlayer) {
       return [];
     }
 
-    return selectedBoardPack.tiles
+    return resolvedBoardTiles
       .filter(
         (tile) =>
           ["PROPERTY", "RAIL", "UTILITY"].includes(tile.type) &&
@@ -2621,7 +2628,7 @@ export default function PlayV2Page() {
         );
         const hasFullSet = ownsFullColorSet(
           tile,
-          selectedBoardPack.tiles,
+          resolvedBoardTiles,
           ownershipByTile,
           currentUserPlayer.id,
         );
@@ -2629,7 +2636,7 @@ export default function PlayV2Page() {
         const currentRent = getCurrentTileRent({
           tile,
           ownershipByTile,
-          boardTiles: selectedBoardPack.tiles,
+          boardTiles: resolvedBoardTiles,
           economy: selectedBoardPack.economy,
         });
 
@@ -2703,7 +2710,7 @@ export default function PlayV2Page() {
     ownershipByTile,
     rules.loanCollateralEnabled,
     selectedBoardPack?.economy,
-    selectedBoardPack?.tiles,
+    resolvedBoardTiles,
   ]);
 
   const availableTradeCounterparties = useMemo(() => {
@@ -2718,11 +2725,11 @@ export default function PlayV2Page() {
   }, [currentUserPlayer, players]);
 
   const counterpartyOwnedProperties = useMemo(() => {
-    if (!tradeCounterpartyId || !selectedBoardPack?.tiles) {
+    if (!tradeCounterpartyId || !resolvedBoardTiles) {
       return [];
     }
 
-    return selectedBoardPack.tiles
+    return resolvedBoardTiles
       .filter(
         (tile) =>
           ["PROPERTY", "RAIL", "UTILITY"].includes(tile.type) &&
@@ -2733,7 +2740,7 @@ export default function PlayV2Page() {
         tileName: tile.name,
         houses: ownershipByTile[tile.index]?.houses ?? 0,
       }));
-  }, [ownershipByTile, selectedBoardPack?.tiles, tradeCounterpartyId]);
+  }, [ownershipByTile, resolvedBoardTiles, tradeCounterpartyId]);
 
   const canSubmitTradeProposal = useMemo(() => {
     return (
@@ -3265,9 +3272,9 @@ export default function PlayV2Page() {
                   developmentCount={houses}
                   ownerPlayerId={currentUserPlayer?.id ?? null}
                   ownershipByTile={ownershipByTile}
-                  boardTiles={selectedBoardPack?.tiles ?? []}
+                  boardTiles={resolvedBoardTiles ?? []}
                   ownedRailCount={
-                    selectedBoardPack?.tiles.filter(
+                    resolvedBoardTiles.filter(
                       (boardTile) =>
                         boardTile.type === "RAIL" &&
                         ownershipByTile[boardTile.index]?.owner_player_id ===
@@ -3275,7 +3282,7 @@ export default function PlayV2Page() {
                     ).length ?? 0
                   }
                   ownedUtilityCount={
-                    selectedBoardPack?.tiles.filter(
+                    resolvedBoardTiles.filter(
                       (boardTile) =>
                         boardTile.type === "UTILITY" &&
                         ownershipByTile[boardTile.index]?.owner_player_id ===
@@ -3539,7 +3546,7 @@ export default function PlayV2Page() {
           <PendingPurchaseModalV2
             pendingPurchase={pendingPurchase}
             pendingTile={
-              selectedBoardPack?.tiles.find(
+              resolvedBoardTiles.find(
                 (tile) => tile.index === pendingPurchase?.tile_index,
               ) ?? null
             }
@@ -3776,7 +3783,7 @@ export default function PlayV2Page() {
     pendingPurchase,
     pendingSuperTax,
     selectedMortgageDownPaymentPercent,
-    selectedBoardPack?.tiles,
+    resolvedBoardTiles,
     formatMoney,
     getPlayerNameById,
     isInsolvencyReadyToPay,
@@ -4784,7 +4791,7 @@ export default function PlayV2Page() {
               developmentCount={selectedTileDevelopmentCount}
               ownerPlayerId={selectedOwnerId}
               ownershipByTile={ownershipByTile}
-              boardTiles={selectedBoardPack?.tiles ?? []}
+              boardTiles={resolvedBoardTiles ?? []}
             />
           </div>
         </div>

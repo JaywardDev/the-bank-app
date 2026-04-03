@@ -143,7 +143,7 @@ export default function BoardTrack({
     houseRentMultipliersByGroup: {},
     hotelIncrementMultiplier: 1.25,
     railRentByCount: [0, 25, 50, 100, 200],
-    utilityRentMultipliers: { single: 4, double: 10 },
+    utilityRentMultipliers: { single: 4, double: 10, triple: 16 },
   };
   const isCompact = density === "compact";
   const isMapTileFace = tileFace === "map";

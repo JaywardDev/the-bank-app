@@ -43,6 +43,9 @@ export const getBoardTileIconSrc = (tile: BoardTile | null): string | null => {
     if (tile.utilityKind === "WATER") {
       return "/icons/water_facility.svg";
     }
+    if (tile.utilityKind === "COMMUNICATION") {
+      return "/icons/board.svg";
+    }
 
     const tileLabel = `${tile.tile_id} ${tile.name}`.toLowerCase();
     if (tileLabel.includes("electric")) {

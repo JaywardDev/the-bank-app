@@ -39,6 +39,7 @@ export type BoardPackEconomy = {
   utilityRentMultipliers: {
     single: number;
     double: number;
+    triple?: number;
   };
   utilityBaseAmount?: number;
   startingBalance?: number;
@@ -95,7 +96,7 @@ export type BoardTileType =
   | "RAIL"
   | "UTILITY";
 
-export type UtilityKind = "ELECTRIC" | "WATER";
+export type UtilityKind = "ELECTRIC" | "WATER" | "COMMUNICATION";
 
 export type BoardTile = {
   index: number;
@@ -119,7 +120,7 @@ type PropertyGroupConfig = {
 
 const DEFAULT_HOUSE_RENT_MULTIPLIERS = [1, 5, 15, 45, 80];
 const DEFAULT_RAIL_RENT_BY_COUNT = [0, 25, 50, 100, 200];
-const DEFAULT_UTILITY_RENT_MULTIPLIERS = { single: 4, double: 10 };
+const DEFAULT_UTILITY_RENT_MULTIPLIERS = { single: 4, double: 10, triple: 16 };
 
 const buildRentByHouses = (
   baseRent: number,

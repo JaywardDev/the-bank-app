@@ -64,6 +64,13 @@ import {
   serializeInlandCellRecords,
   toInlandCellKey,
 } from "@/lib/inlandExploration";
+import { resolveBoardTilesForRules } from "@/lib/resolvedBoardTiles";
+import {
+  getRuntimeUnlocksFromRules,
+  mergeCommunicationUnlockIntoRules,
+  shouldUnlockCommunicationUtility,
+} from "@/lib/runtimeUnlocks";
+import { getUtilityRentMultiplierForOwnedCount } from "@/lib/rent";
 
 const supabaseUrl = (process.env.SUPABASE_URL ?? SUPABASE_URL ?? "").trim();
 const supabaseAnonKey = (
@@ -484,6 +491,40 @@ type DiceEventPayload = {
 };
 
 const OWNABLE_TILE_TYPES = new Set(["PROPERTY", "RAIL", "UTILITY"]);
+
+const maybeUnlockCommunicationUtility = ({
+  gameState,
+  boardPack,
+  ownershipByTile,
+  events,
+}: {
+  gameState: GameStateRow;
+  boardPack: ReturnType<typeof getBoardPackById>;
+  ownershipByTile: OwnershipByTile;
+  events: Array<{ event_type: string; payload: Record<string, unknown> }>;
+}) => {
+  const unlocks = getRuntimeUnlocksFromRules(gameState.rules);
+  const boardTiles = resolveBoardTilesForRules({ boardPack, rules: gameState.rules });
+  const shouldUnlock = shouldUnlockCommunicationUtility({
+    alreadyUnlocked: unlocks.communicationUtilityUnlocked,
+    boardTiles,
+    ownershipByTile,
+    inlandExploredCells: gameState.inland_explored_cells,
+  });
+  if (!shouldUnlock) {
+    return gameState.rules;
+  }
+
+  events.push({
+    event_type: "COMMUNICATION_UTILITY_UNLOCKED",
+    payload: {
+      tile_index: 20,
+      tile_id: "communication-network",
+      tile_name: "Communications Network",
+    },
+  });
+  return mergeCommunicationUnlockIntoRules(gameState.rules);
+};
 
 const isConfigured = () =>
   Boolean(supabaseUrl && supabaseAnonKey && supabaseServiceRoleKey);
@@ -2605,10 +2646,10 @@ const calculateRent = ({
       ownerId,
       "UTILITY",
     );
-    const multiplier =
-      utilityCount >= 2
-        ? boardPackEconomy.utilityRentMultipliers.double
-        : boardPackEconomy.utilityRentMultipliers.single;
+    const multiplier = getUtilityRentMultiplierForOwnedCount(
+      utilityCount,
+      boardPackEconomy.utilityRentMultipliers,
+    );
     const total = diceTotal ?? 0;
     const utilityBaseAmount = boardPackEconomy.utilityBaseAmount ?? 1;
     const baseAmount = multiplier * total * utilityBaseAmount;
@@ -6108,6 +6149,13 @@ export async function POST(request: Request) {
         });
       }
 
+      const refreshedOwnershipByTile = await loadOwnershipByTile(gameId);
+      const nextRules = maybeUnlockCommunicationUtility({
+        gameState,
+        boardPack,
+        ownershipByTile: refreshedOwnershipByTile,
+        events,
+      });
       const finalVersion = currentVersion + events.length;
       const [updatedState] =
         (await fetchFromSupabaseWithService<GameStateRow[]>(
@@ -6120,6 +6168,7 @@ export async function POST(request: Request) {
             body: JSON.stringify({
               version: finalVersion,
               balances: updatedBalances,
+              rules: nextRules,
               updated_at: new Date().toISOString(),
             }),
           },
@@ -6580,7 +6629,39 @@ export async function POST(request: Request) {
         discoveredResourceType: null,
         developedSiteType: targetCell.discoveredResourceType,
       });
-      const developmentFinalVersion = currentVersion + 2;
+      const developmentEvents: Array<{
+        event_type: string;
+        payload: Record<string, unknown>;
+      }> = [
+        {
+          event_type: "CASH_DEBIT",
+          payload: {
+            player_id: currentUserPlayer.id,
+            amount: developmentCost,
+            reason: "RESOURCE_DEVELOPMENT",
+            source_event_type: "INTERIOR_SITE_DEVELOPED",
+          },
+        },
+        {
+          event_type: "INTERIOR_SITE_DEVELOPED",
+          payload: {
+            player_id: currentUserPlayer.id,
+            player_name: currentUserPlayer.display_name,
+            row,
+            col,
+            resource_type: targetCell.discoveredResourceType,
+            development_cost: developmentCost,
+          },
+        },
+      ];
+      const ownershipByTile = await loadOwnershipByTile(gameId);
+      const nextRules = maybeUnlockCommunicationUtility({
+        gameState,
+        boardPack,
+        ownershipByTile,
+        events: developmentEvents,
+      });
+      const developmentFinalVersion = currentVersion + developmentEvents.length;
       const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
         `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
         {
@@ -6593,6 +6674,7 @@ export async function POST(request: Request) {
               [currentUserPlayer.id]: currentCash - developmentCost,
             },
             inland_explored_cells: serializeInlandCellRecords(inlandCells),
+            rules: nextRules,
             updated_at: nowIso,
           }),
         },
@@ -6603,28 +6685,7 @@ export async function POST(request: Request) {
       await emitGameEvents(
         gameId,
         currentVersion + 1,
-        [
-          {
-            event_type: "CASH_DEBIT",
-            payload: {
-              player_id: currentUserPlayer.id,
-              amount: developmentCost,
-              reason: "RESOURCE_DEVELOPMENT",
-              source_event_type: "INTERIOR_SITE_DEVELOPED",
-            },
-          },
-          {
-            event_type: "INTERIOR_SITE_DEVELOPED",
-            payload: {
-              player_id: currentUserPlayer.id,
-              player_name: currentUserPlayer.display_name,
-              row,
-              col,
-              resource_type: targetCell.discoveredResourceType,
-              development_cost: developmentCost,
-            },
-          },
-        ],
+        developmentEvents,
         user.id,
       );
       return NextResponse.json({ gameState: updatedState });
@@ -7083,6 +7144,14 @@ export async function POST(request: Request) {
               { status: 500 },
             );
           }
+
+          const refreshedOwnershipByTile = await loadOwnershipByTile(gameId);
+          patchPayload.rules = maybeUnlockCommunicationUtility({
+            gameState,
+            boardPack,
+            ownershipByTile: refreshedOwnershipByTile,
+            events,
+          });
         }
 
         const [updatedState] = (await fetchFromSupabaseWithService<
@@ -7345,7 +7414,7 @@ export async function POST(request: Request) {
         kind: cardKind,
         payload: cardPayload,
       };
-      const boardTiles = boardPack?.tiles ?? [];
+      const boardTiles = resolveBoardTilesForRules({ boardPack, rules: gameState.rules });
       const boardSize = boardTiles.length > 0 ? boardTiles.length : 40;
       const sourceIndex =
         typeof gameState.pending_card_source_tile_index === "number"
@@ -7674,7 +7743,7 @@ export async function POST(request: Request) {
         );
       }
 
-      const boardTiles = boardPack?.tiles ?? [];
+      const boardTiles = resolveBoardTilesForRules({ boardPack, rules: gameState.rules });
       const jailTile =
         boardTiles.find((tile) => tile.index === pendingAction.to_jail_tile_index) ??
         boardTiles.find((tile) => tile.type === "JAIL") ?? {
@@ -7831,7 +7900,7 @@ export async function POST(request: Request) {
       const [dieOne, dieTwo] = dice;
       const isDouble = dieOne === dieTwo;
       const nextDoublesCount = isDouble ? doublesCount + 1 : 0;
-      const boardTiles = boardPack?.tiles ?? [];
+      const boardTiles = resolveBoardTilesForRules({ boardPack, rules: gameState.rules });
       const boardSize = boardTiles.length > 0 ? boardTiles.length : 40;
       const currentPosition = Number.isFinite(currentPlayer.position)
         ? currentPlayer.position
@@ -8370,7 +8439,7 @@ export async function POST(request: Request) {
       }
 
       const boardPack = getBoardPackById(game.board_pack_id);
-      const boardTiles = boardPack?.tiles ?? [];
+      const boardTiles = resolveBoardTilesForRules({ boardPack, rules: gameState.rules });
       const landingTile = boardTiles.find(
         (tile) => tile.index === body.tileIndex,
       );
@@ -9217,7 +9286,7 @@ export async function POST(request: Request) {
       ) {
         const activePlayers = getActivePlayers(players);
         const boardPack = getBoardPackById(game.board_pack_id);
-        const boardTiles = boardPack?.tiles ?? [];
+        const boardTiles = resolveBoardTilesForRules({ boardPack, rules: gameState.rules });
         const boardPackEconomy = boardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY;
         const activeMacroEffectsForRules = getActiveMacroEffectsV1ForRules(
           gameState.active_macro_effects_v1,
@@ -9906,7 +9975,7 @@ export async function POST(request: Request) {
       }
 
       const boardPack = getBoardPackById(game.board_pack_id);
-      const boardTiles = boardPack?.tiles ?? [];
+      const boardTiles = resolveBoardTilesForRules({ boardPack, rules: gameState.rules });
       const landingTile = boardTiles.find((tile) => tile.index === tileIndex);
 
       if (!landingTile) {
@@ -10122,6 +10191,13 @@ export async function POST(request: Request) {
           },
         });
       }
+      const refreshedOwnershipByTile = await loadOwnershipByTile(gameId);
+      const nextRules = maybeUnlockCommunicationUtility({
+        gameState,
+        boardPack,
+        ownershipByTile: refreshedOwnershipByTile,
+        events,
+      });
       const finalVersion = currentVersion + events.length;
 
       const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
@@ -10136,6 +10212,7 @@ export async function POST(request: Request) {
             balances: updatedBalances,
             turn_phase: "AWAITING_ROLL",
             pending_action: null,
+            rules: nextRules,
             updated_at: new Date().toISOString(),
           }),
         },
@@ -10166,7 +10243,7 @@ export async function POST(request: Request) {
       const macroHouseSellMultiplier =
         getMacroHouseSellMultiplierV1(activeMacroEffects);
       const boardPack = getBoardPackById(game.board_pack_id);
-      const boardTiles = boardPack?.tiles ?? [];
+      const boardTiles = resolveBoardTilesForRules({ boardPack, rules: gameState.rules });
       const tile = boardTiles.find((entry) => entry.index === tileIndex);
 
       if (!tile) {
@@ -11581,7 +11658,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ gameState: updatedState });
       }
 
-      const boardTiles = boardPack?.tiles ?? [];
+      const boardTiles = resolveBoardTilesForRules({ boardPack, rules: gameState.rules });
       const boardSize = boardTiles.length > 0 ? boardTiles.length : 40;
       const currentPosition = Number.isFinite(currentPlayer.position)
         ? currentPlayer.position
