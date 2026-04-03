@@ -6394,10 +6394,23 @@ export async function POST(request: Request) {
       const goSalary = boardPackEconomy.passGoAmount ?? DEFAULT_BOARD_PACK_ECONOMY.passGoAmount ?? 0;
       const balances = gameState.balances ?? {};
       const currentCash = balances[currentUserPlayer.id] ?? 0;
-      const finalVersion = currentVersion + 1;
       const nowIso = new Date().toISOString();
 
       if (body.action === "DEFER_INTERIOR_RESOURCE_DECISION") {
+        const events = [
+          {
+            event_type: "INTERIOR_RESOURCE_DECISION_DEFERRED" as const,
+            payload: {
+              player_id: currentUserPlayer.id,
+              player_name: currentUserPlayer.display_name,
+              row,
+              col,
+              resource_type: targetCell.discoveredResourceType,
+            },
+          },
+        ];
+        const startVersion = currentVersion + 1;
+        const finalVersion = currentVersion + events.length;
         const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
           `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
           {
@@ -6413,23 +6426,7 @@ export async function POST(request: Request) {
         if (!updatedState) {
           return NextResponse.json({ error: "Version mismatch." }, { status: 409 });
         }
-        await emitGameEvents(
-          gameId,
-          finalVersion,
-          [
-            {
-              event_type: "INTERIOR_RESOURCE_DECISION_DEFERRED",
-              payload: {
-                player_id: currentUserPlayer.id,
-                player_name: currentUserPlayer.display_name,
-                row,
-                col,
-                resource_type: targetCell.discoveredResourceType,
-              },
-            },
-          ],
-          user.id,
-        );
+        await emitGameEvents(gameId, startVersion, events, user.id);
         return NextResponse.json({ gameState: updatedState });
       }
 
@@ -6461,6 +6458,63 @@ export async function POST(request: Request) {
           discoveredResourceType: null,
           developedSiteType: null,
         });
+        const resolutionEvent =
+          isSellResource
+            ? {
+                event_type: "INTERIOR_RESOURCE_SOLD" as const,
+                payload: {
+                  player_id: currentUserPlayer.id,
+                  player_name: currentUserPlayer.display_name,
+                  row,
+                  col,
+                  resource_type: targetCell.discoveredResourceType,
+                  payout: sellPayout,
+                },
+              }
+            : isBonus
+              ? {
+                  event_type: "INTERIOR_RESOURCE_BONUS_GRANTED" as const,
+                  payload: {
+                    player_id: currentUserPlayer.id,
+                    player_name: currentUserPlayer.display_name,
+                    row,
+                    col,
+                    resource_type: targetCell.discoveredResourceType,
+                    free_build_tokens_granted: voucherReward?.freeBuildTokens ?? 0,
+                    free_upgrade_tokens_granted: voucherReward?.freeUpgradeTokens ?? 0,
+                    free_build_tokens_after: nextFreeBuildTokens,
+                    free_upgrade_tokens_after: nextFreeUpgradeTokens,
+                  },
+                }
+              : {
+                  event_type: "INTERIOR_RESOURCE_EMPTY" as const,
+                  payload: {
+                    player_id: currentUserPlayer.id,
+                    player_name: currentUserPlayer.display_name,
+                    row,
+                    col,
+                    resource_type: targetCell.discoveredResourceType,
+                  },
+                };
+        const events = [
+          ...(isSellResource
+            ? [
+                {
+                  event_type: "CASH_CREDIT" as const,
+                  payload: {
+                    player_id: currentUserPlayer.id,
+                    amount: sellPayout,
+                    reason: "INTERIOR_RESOURCE_SOLD",
+                    source_event_type: "INTERIOR_RESOURCE_SOLD",
+                  },
+                },
+              ]
+            : []),
+          resolutionEvent,
+        ];
+        const startVersion = currentVersion + 1;
+        const finalVersion = currentVersion + events.length;
+
         const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
           `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
           {
@@ -6502,67 +6556,7 @@ export async function POST(request: Request) {
             );
           }
         }
-
-        const resolutionEvent =
-          isSellResource
-            ? {
-                event_type: "INTERIOR_RESOURCE_SOLD",
-                payload: {
-                  player_id: currentUserPlayer.id,
-                  player_name: currentUserPlayer.display_name,
-                  row,
-                  col,
-                  resource_type: targetCell.discoveredResourceType,
-                  payout: sellPayout,
-                },
-              }
-            : isBonus
-              ? {
-                  event_type: "INTERIOR_RESOURCE_BONUS_GRANTED",
-                  payload: {
-                    player_id: currentUserPlayer.id,
-                    player_name: currentUserPlayer.display_name,
-                    row,
-                    col,
-                    resource_type: targetCell.discoveredResourceType,
-                    free_build_tokens_granted: voucherReward?.freeBuildTokens ?? 0,
-                    free_upgrade_tokens_granted: voucherReward?.freeUpgradeTokens ?? 0,
-                    free_build_tokens_after: nextFreeBuildTokens,
-                    free_upgrade_tokens_after: nextFreeUpgradeTokens,
-                  },
-                }
-              : {
-                  event_type: "INTERIOR_RESOURCE_EMPTY",
-                  payload: {
-                    player_id: currentUserPlayer.id,
-                    player_name: currentUserPlayer.display_name,
-                    row,
-                    col,
-                    resource_type: targetCell.discoveredResourceType,
-                  },
-                };
-
-        await emitGameEvents(
-          gameId,
-          finalVersion,
-          [
-            ...(isSellResource
-              ? [
-                  {
-                    event_type: "CASH_CREDIT",
-                    payload: {
-                      player_id: currentUserPlayer.id,
-                      amount: sellPayout,
-                      reason: "INTERIOR_RESOURCE_SOLD",
-                      source_event_type: "INTERIOR_RESOURCE_SOLD",
-                    },
-                  },
-                ]
-              : []),
-            resolutionEvent,
-          ],
-          user.id,
-        );
+        await emitGameEvents(gameId, startVersion, events, user.id);
         return NextResponse.json({ gameState: updatedState });
       }
 
