@@ -39,6 +39,7 @@ import {
 } from "@/lib/currency";
 import Image from "next/image";
 import { getBoardTileIconSrc } from "@/lib/tileIcons";
+import { resolveBoardTilesForRules } from "@/lib/resolvedBoardTiles";
 import {
   getPendingCardDescription,
   resolvePendingCardText,
@@ -1185,12 +1186,16 @@ export default function PlayPage() {
     }
   }, [isGoToJailAcknowledging, pendingGoToJail]);
   const boardPack = getBoardPackById(gameMeta?.board_pack_id);
+  const resolvedBoardTiles = useMemo(
+    () => resolveBoardTilesForRules({ boardPack, rules: gameState?.rules }),
+    [boardPack, gameState?.rules],
+  );
   const boardPackEconomy = boardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY;
   const currencySymbol = boardPackEconomy?.currency?.symbol ?? "$";
   const currentPlayerId = gameState?.current_player_id ?? null;
   const expandedBoardTiles =
-    boardPack?.tiles && boardPack.tiles.length > 0
-      ? boardPack.tiles
+    resolvedBoardTiles.length > 0
+      ? resolvedBoardTiles
       : fallbackExpandedTiles;
   const expandedTilesByIndex = useMemo(() => {
     const lookup = new Map<number, BoardTile>();
@@ -2694,10 +2699,10 @@ export default function PlayPage() {
       return null;
     }
     return (
-      boardPack?.tiles?.find((tile) => tile.index === pendingPurchase.tile_index) ??
+      resolvedBoardTiles.find((tile) => tile.index === pendingPurchase.tile_index) ??
       null
     );
-  }, [boardPack?.tiles, pendingPurchase]);
+  }, [pendingPurchase, resolvedBoardTiles]);
   const pendingOwnerId = useMemo(() => {
     if (!pendingTile) {
       return null;
@@ -2709,25 +2714,25 @@ export default function PlayPage() {
     return currentUserPlayer?.id ?? null;
   }, [currentUserPlayer?.id, ownershipByTile, pendingTile]);
   const pendingOwnerRailCount = useMemo(() => {
-    if (!pendingOwnerId || !boardPack?.tiles) {
+    if (!pendingOwnerId) {
       return 0;
     }
-    return boardPack.tiles.filter(
+    return resolvedBoardTiles.filter(
       (tile) =>
         tile.type === "RAIL" &&
         ownershipByTile[tile.index]?.owner_player_id === pendingOwnerId,
     ).length;
-  }, [boardPack?.tiles, ownershipByTile, pendingOwnerId]);
+  }, [ownershipByTile, pendingOwnerId, resolvedBoardTiles]);
   const pendingOwnerUtilityCount = useMemo(() => {
-    if (!pendingOwnerId || !boardPack?.tiles) {
+    if (!pendingOwnerId) {
       return 0;
     }
-    return boardPack.tiles.filter(
+    return resolvedBoardTiles.filter(
       (tile) =>
         tile.type === "UTILITY" &&
         ownershipByTile[tile.index]?.owner_player_id === pendingOwnerId,
     ).length;
-  }, [boardPack?.tiles, ownershipByTile, pendingOwnerId]);
+  }, [ownershipByTile, pendingOwnerId, resolvedBoardTiles]);
   const pendingTileLabel =
     pendingTile?.name ??
     (pendingPurchase ? `Tile ${pendingPurchase.tile_index}` : null);
@@ -2919,10 +2924,10 @@ export default function PlayPage() {
     session && gameMeta?.created_by && session.user.id === gameMeta.created_by,
   );
   const ownedProperties = useMemo(() => {
-    if (!boardPack?.tiles || !currentUserPlayer) {
+    if (!currentUserPlayer) {
       return [];
     }
-    return boardPack.tiles
+    return resolvedBoardTiles
       .filter(
         (tile) =>
           ["PROPERTY", "RAIL", "UTILITY"].includes(tile.type) &&
@@ -2934,7 +2939,7 @@ export default function PlayPage() {
         const isPurchaseMortgaged = Boolean(ownership?.purchase_mortgage_id);
         const colorGroup = tile.colorGroup ?? null;
         const groupTiles = colorGroup
-          ? boardPack.tiles.filter(
+          ? resolvedBoardTiles.filter(
               (entry) =>
                 entry.type === "PROPERTY" && entry.colorGroup === colorGroup,
             )
@@ -2991,43 +2996,43 @@ export default function PlayPage() {
         };
       });
   }, [
-    boardPack?.tiles,
     canAct,
     currentUserPlayer,
     houseBuildBlockedByMacro,
     myPlayerBalance,
     ownershipByTile,
+    resolvedBoardTiles,
   ]);
   const ownedRailCount = useMemo(() => {
-    if (!boardPack?.tiles || !currentUserPlayer) {
+    if (!currentUserPlayer) {
       return 0;
     }
-    return boardPack.tiles.filter(
+    return resolvedBoardTiles.filter(
       (tile) =>
         tile.type === "RAIL" &&
         ownershipByTile[tile.index]?.owner_player_id === currentUserPlayer.id,
     ).length;
-  }, [boardPack?.tiles, currentUserPlayer, ownershipByTile]);
+  }, [currentUserPlayer, ownershipByTile, resolvedBoardTiles]);
   const ownedUtilityCount = useMemo(() => {
-    if (!boardPack?.tiles || !currentUserPlayer) {
+    if (!currentUserPlayer) {
       return 0;
     }
-    return boardPack.tiles.filter(
+    return resolvedBoardTiles.filter(
       (tile) =>
         tile.type === "UTILITY" &&
         ownershipByTile[tile.index]?.owner_player_id === currentUserPlayer.id,
     ).length;
-  }, [boardPack?.tiles, currentUserPlayer, ownershipByTile]);
+  }, [currentUserPlayer, ownershipByTile, resolvedBoardTiles]);
   const propertyActionTile = useMemo(() => {
-    if (!propertyActionModal || !boardPack?.tiles) {
+    if (!propertyActionModal) {
       return null;
     }
     return (
-      boardPack.tiles.find(
+      resolvedBoardTiles.find(
         (entry) => entry.index === propertyActionModal.tileIndex,
       ) ?? null
     );
-  }, [boardPack?.tiles, propertyActionModal]);
+  }, [propertyActionModal, resolvedBoardTiles]);
   const propertyActionPayout = useMemo(() => {
     if (!propertyActionModal || propertyActionModal.action !== "SELL_TO_MARKET") {
       return 0;
@@ -3044,10 +3049,10 @@ export default function PlayPage() {
     );
   }, [currentUserPlayer, players]);
   const counterpartyOwnedProperties = useMemo(() => {
-    if (!tradeCounterpartyId || !boardPack?.tiles) {
+    if (!tradeCounterpartyId) {
       return [];
     }
-    return boardPack.tiles
+    return resolvedBoardTiles
       .filter(
         (tile) =>
           ["PROPERTY", "RAIL", "UTILITY"].includes(tile.type) &&
@@ -3060,7 +3065,7 @@ export default function PlayPage() {
           houses: ownership?.houses ?? 0,
         };
       });
-  }, [boardPack?.tiles, ownershipByTile, tradeCounterpartyId]);
+  }, [ownershipByTile, resolvedBoardTiles, tradeCounterpartyId]);
   const canSubmitTradeProposal = useMemo(() => {
     const hasAssets =
       tradeOfferCash > 0 ||
@@ -3110,29 +3115,29 @@ export default function PlayPage() {
   const auctionTileIndex = gameState?.auction_tile_index ?? null;
   const auctionTile =
     auctionTileIndex !== null && auctionTileIndex !== undefined
-      ? boardPack?.tiles?.find((tile) => tile.index === auctionTileIndex) ?? null
+      ? resolvedBoardTiles.find((tile) => tile.index === auctionTileIndex) ?? null
       : null;
   const auctionBandColor = getTileBandColor(auctionTile);
   const auctionOwnedRailCount = useMemo(() => {
-    if (!currentUserPlayer?.id || !boardPack?.tiles) {
+    if (!currentUserPlayer?.id) {
       return 0;
     }
-    return boardPack.tiles.filter(
+    return resolvedBoardTiles.filter(
       (tile) =>
         tile.type === "RAIL" &&
         ownershipByTile[tile.index]?.owner_player_id === currentUserPlayer.id,
     ).length;
-  }, [boardPack?.tiles, currentUserPlayer?.id, ownershipByTile]);
+  }, [currentUserPlayer?.id, ownershipByTile, resolvedBoardTiles]);
   const auctionOwnedUtilityCount = useMemo(() => {
-    if (!currentUserPlayer?.id || !boardPack?.tiles) {
+    if (!currentUserPlayer?.id) {
       return 0;
     }
-    return boardPack.tiles.filter(
+    return resolvedBoardTiles.filter(
       (tile) =>
         tile.type === "UTILITY" &&
         ownershipByTile[tile.index]?.owner_player_id === currentUserPlayer.id,
     ).length;
-  }, [boardPack?.tiles, currentUserPlayer?.id, ownershipByTile]);
+  }, [currentUserPlayer?.id, ownershipByTile, resolvedBoardTiles]);
   const auctionCurrentBid = gameState?.auction_current_bid ?? 0;
   const auctionMinIncrement =
     gameState?.auction_min_increment ?? boardPackEconomy.auctionMinIncrement ?? 10;

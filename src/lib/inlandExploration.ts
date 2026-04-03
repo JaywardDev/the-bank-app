@@ -53,7 +53,7 @@ const roundInlandMoney = (amount: number) => Math.round(amount);
 export const INLAND_RESOURCE_CONFIG: Record<InlandResourceType, InlandResourceConfig> = {
   OIL: {
     type: "OIL",
-    label: "Oil Reserve",
+    label: "Oil Refinery",
     icon: "🛢️",
     category: "DEVELOP",
     weight: 7.5,
@@ -62,7 +62,7 @@ export const INLAND_RESOURCE_CONFIG: Record<InlandResourceType, InlandResourceCo
   },
   DEEP_WELL: {
     type: "DEEP_WELL",
-    label: "Deep Well",
+    label: "Water Reservoir",
     icon: "🕳️",
     category: "DEVELOP",
     weight: 7.5,
@@ -71,7 +71,7 @@ export const INLAND_RESOURCE_CONFIG: Record<InlandResourceType, InlandResourceCo
   },
   COAL: {
     type: "COAL",
-    label: "Coal Seam",
+    label: "Power Plant",
     icon: "⚫",
     category: "DEVELOP",
     weight: 7.5,

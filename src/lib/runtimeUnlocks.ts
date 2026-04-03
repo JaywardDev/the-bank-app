@@ -80,6 +80,7 @@ export const shouldUnlockCommunicationUtility = ({
   const inlandCells = normalizeInlandCellRecords(inlandExploredCells);
   let hasOilRefinery = false;
   let hasWaterReservoir = false;
+  let hasCoalPowerPlant = false;
 
   for (const inlandCell of inlandCells.values()) {
     if (inlandCell.status !== "DEVELOPED_SITE") {
@@ -91,7 +92,10 @@ export const shouldUnlockCommunicationUtility = ({
     if (inlandCell.developedSiteType === "DEEP_WELL") {
       hasWaterReservoir = true;
     }
-    if (hasOilRefinery && hasWaterReservoir) {
+    if (inlandCell.developedSiteType === "COAL") {
+      hasCoalPowerPlant = true;
+    }
+    if (hasOilRefinery && hasWaterReservoir && hasCoalPowerPlant) {
       return true;
     }
   }

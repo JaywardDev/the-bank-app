@@ -8,6 +8,7 @@ import BoardSquare from "@/app/components/BoardSquare";
 import BoardTrack from "@/app/components/BoardTrack";
 import CenterHub, { type MacroCenterCard } from "@/app/components/CenterHub";
 import { getBoardPackById } from "@/lib/boardPacks";
+import { resolveBoardTilesForRules } from "@/lib/resolvedBoardTiles";
 import { getRules } from "@/lib/rules";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 
@@ -776,6 +777,10 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
     ? Number(lastMovedTileIndexValue)
     : null;
   const boardPack = getBoardPackById(gameMeta?.board_pack_id);
+  const resolvedBoardTiles = useMemo(
+    () => resolveBoardTilesForRules({ boardPack, rules: gameState?.rules }),
+    [boardPack, gameState?.rules],
+  );
   const isAuctionActive = Boolean(gameState?.auction_active);
   const auctionSummary = useMemo(() => {
     if (!isAuctionActive) {
@@ -886,14 +891,14 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
     activeMacroCards.length - centerMacroCards.length,
   );
   const currentPlayerTile = useMemo(() => {
-    if (!currentPlayer || !boardPack?.tiles) {
+    if (!currentPlayer) {
       return null;
     }
     return (
-      boardPack.tiles.find((tile) => tile.index === currentPlayer.position) ??
+      resolvedBoardTiles.find((tile) => tile.index === currentPlayer.position) ??
       null
     );
-  }, [boardPack?.tiles, currentPlayer]);
+  }, [currentPlayer, resolvedBoardTiles]);
   const getOwnershipLabel = useCallback(
     (tileIndex: number | null) => {
       if (tileIndex === null || Number.isNaN(tileIndex)) {
@@ -932,7 +937,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
             : typeof tileIndexRaw === "string"
               ? Number.parseInt(tileIndexRaw, 10)
               : null;
-        const tile = boardPack?.tiles?.find((entry) => entry.index === tileIndex);
+        const tile = resolvedBoardTiles.find((entry) => entry.index === tileIndex);
         const tileLabel = tile
           ? `${tile.index} ${tile.name}`
           : tileIndex !== null
@@ -1664,7 +1669,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
 
       return "Update received";
     },
-    [boardPack?.tiles, getOwnershipLabel, players],
+    [boardPack?.tiles, getOwnershipLabel, players, resolvedBoardTiles],
   );
 
   const playerColorPalette = [
