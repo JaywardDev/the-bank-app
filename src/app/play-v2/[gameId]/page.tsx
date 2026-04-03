@@ -4681,7 +4681,7 @@ export default function PlayV2Page() {
         </div>
       ) : null}
       {selectedInteriorCell && !selectedInlandCellRecord ? (
-        <div className="fixed bottom-3 left-1/2 z-[45] w-[min(460px,calc(100vw-1rem))] -translate-x-1/2 p-2">
+        <div className="fixed bottom-3 left-1/2 z-[45] w-[min(460px,calc(100vw-1rem))] -translate-x-1/2 rounded-xl border border-emerald-200/30 bg-neutral-950/90 p-2 shadow-2xl backdrop-blur">
           <div className="flex items-center justify-between gap-2">
             <button
               type="button"
