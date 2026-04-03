@@ -4887,7 +4887,7 @@ export default function PlayV2Page() {
           sellToMarketSelection ? (
             <div className="space-y-1">
               <p>Market value: {formatMoney(sellToMarketSelection.marketValue)}</p>
-              <p>Bank payout (70%): {formatMoney(sellToMarketSelection.payout)}</p>
+              <p>Bank payout: {formatMoney(sellToMarketSelection.payout)}</p>
             </div>
           ) : (
             "Review sale details before confirming."
