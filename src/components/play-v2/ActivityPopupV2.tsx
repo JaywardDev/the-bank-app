@@ -131,18 +131,22 @@ export default function ActivityPopupV2({
             </ul>
           ) : (
             <ul className="divide-y divide-white/10">
-              {visibleTransactions.map((txn) => (
-                <li key={txn.id} className="px-2 py-1.5 text-[12px]">
-                  <div className="flex items-center justify-between gap-2 text-xs">
-                    <p className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-white/95">
-                      {txn.subtitle ?? txn.title}
-                    </p>
-                    <p className={txn.amount >= 0 ? "text-emerald-300" : "text-rose-300"}>
-                      {formatAmount(txn.amount, currencySymbol, boardPack)}
-                    </p>
-                  </div>
-                </li>
-              ))}
+              {visibleTransactions.length === 0 ? (
+                <li className="px-2 py-3 text-[12px] text-white/65">No wallet transactions yet.</li>
+              ) : (
+                visibleTransactions.map((txn) => (
+                  <li key={txn.id} className="px-2 py-1.5 text-[12px]">
+                    <div className="flex items-center justify-between gap-2 text-xs">
+                      <p className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-white/95">
+                        {txn.subtitle ?? txn.title}
+                      </p>
+                      <p className={txn.amount >= 0 ? "text-emerald-300" : "text-rose-300"}>
+                        {formatAmount(txn.amount, currencySymbol, boardPack)}
+                      </p>
+                    </div>
+                  </li>
+                ))
+              )}
             </ul>
           )}
         </div>

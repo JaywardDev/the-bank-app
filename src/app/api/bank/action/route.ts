@@ -2725,6 +2725,17 @@ const applyGoSalary = ({
       reason,
     },
   });
+  if (totalSalary !== 0) {
+    events.push({
+      event_type: "CASH_CREDIT",
+      payload: {
+        player_id: player.id,
+        amount: totalSalary,
+        reason: "COLLECT_GO",
+        source_event_type: "COLLECT_GO",
+      },
+    });
+  }
   return { balances: updatedBalances, balancesChanged: totalSalary !== 0 };
 };
 
@@ -2820,6 +2831,17 @@ const applyCardEffect = ({
           amount,
         },
       });
+      if (amount !== 0) {
+        events.push({
+          event_type: card.kind === "PAY" ? "CASH_DEBIT" : "CASH_CREDIT",
+          payload: {
+            player_id: currentPlayer.id,
+            amount,
+            reason: card.kind === "PAY" ? "CARD_PAY" : "CARD_RECEIVE",
+            source_event_type: card.kind === "PAY" ? "CARD_PAY" : "CARD_RECEIVE",
+          },
+        });
+      }
     }
   }
 
@@ -3332,6 +3354,30 @@ const finalizeMoveResolution = async ({
         event_type: "PAY_RENT",
         payload: rentPayload,
       });
+      events.push(
+        {
+          event_type: "CASH_DEBIT",
+          payload: {
+            player_id: currentPlayer.id,
+            amount: rentAmount,
+            reason: "PAY_RENT",
+            tile_index: activeLandingTile.index,
+            counterparty_player_id: rentOwnerId,
+            source_event_type: "PAY_RENT",
+          },
+        },
+        {
+          event_type: "CASH_CREDIT",
+          payload: {
+            player_id: rentOwnerId,
+            amount: rentAmount,
+            reason: "PAY_RENT",
+            tile_index: activeLandingTile.index,
+            counterparty_player_id: currentPlayer.id,
+            source_event_type: "PAY_RENT",
+          },
+        },
+      );
 
       if (activeLandingTile.type === "RAIL") {
         const inlandCells = normalizeInlandCellRecords(
@@ -3371,6 +3417,16 @@ const finalizeMoveResolution = async ({
               oil_refinery_count: oilRefineryCountsByPlayer[playerId] ?? 0,
             },
           });
+          events.push({
+            event_type: "CASH_CREDIT",
+            payload: {
+              player_id: playerId,
+              amount: payout,
+              reason: "OIL_RAIL_SYNERGY_PAYOUT",
+              tile_index: activeLandingTile.index,
+              source_event_type: "OIL_RAIL_SYNERGY_PAYOUT",
+            },
+          });
         }
 
         if (verticalIntegrationBonus > 0) {
@@ -3389,6 +3445,16 @@ const finalizeMoveResolution = async ({
               railroad_owner_player_id: rentOwnerId,
               rent_paid: rentAmount,
               payout: verticalIntegrationBonus,
+            },
+          });
+          events.push({
+            event_type: "CASH_CREDIT",
+            payload: {
+              player_id: rentOwnerId,
+              amount: verticalIntegrationBonus,
+              reason: "VERTICAL_INTEGRATION_BONUS",
+              tile_index: activeLandingTile.index,
+              source_event_type: "VERTICAL_INTEGRATION_BONUS",
             },
           });
         }
@@ -3436,6 +3502,16 @@ const finalizeMoveResolution = async ({
               coal_site_count: coalSiteCountsByPlayer[playerId] ?? 0,
             },
           });
+          events.push({
+            event_type: "CASH_CREDIT",
+            payload: {
+              player_id: playerId,
+              amount: payout,
+              reason: "COAL_UTILITY_SYNERGY_PAYOUT",
+              tile_index: activeLandingTile.index,
+              source_event_type: "COAL_UTILITY_SYNERGY_PAYOUT",
+            },
+          });
         }
 
         if (verticalIntegrationBonus > 0) {
@@ -3456,6 +3532,16 @@ const finalizeMoveResolution = async ({
               rent_paid: rentAmount,
               payout: verticalIntegrationBonus,
               coal_site_count: coalSiteCountsByPlayer[rentOwnerId] ?? 0,
+            },
+          });
+          events.push({
+            event_type: "CASH_CREDIT",
+            payload: {
+              player_id: rentOwnerId,
+              amount: verticalIntegrationBonus,
+              reason: "COAL_VERTICAL_INTEGRATION_BONUS",
+              tile_index: activeLandingTile.index,
+              source_event_type: "COAL_VERTICAL_INTEGRATION_BONUS",
             },
           });
         }
@@ -3503,6 +3589,16 @@ const finalizeMoveResolution = async ({
               water_site_count: waterSiteCountsByPlayer[playerId] ?? 0,
             },
           });
+          events.push({
+            event_type: "CASH_CREDIT",
+            payload: {
+              player_id: playerId,
+              amount: payout,
+              reason: "WATER_UTILITY_SYNERGY_PAYOUT",
+              tile_index: activeLandingTile.index,
+              source_event_type: "WATER_UTILITY_SYNERGY_PAYOUT",
+            },
+          });
         }
 
         if (verticalIntegrationBonus > 0) {
@@ -3523,6 +3619,16 @@ const finalizeMoveResolution = async ({
               rent_paid: rentAmount,
               payout: verticalIntegrationBonus,
               water_site_count: waterSiteCountsByPlayer[rentOwnerId] ?? 0,
+            },
+          });
+          events.push({
+            event_type: "CASH_CREDIT",
+            payload: {
+              player_id: rentOwnerId,
+              amount: verticalIntegrationBonus,
+              tile_index: activeLandingTile.index,
+              reason: "WATER_VERTICAL_INTEGRATION_BONUS",
+              source_event_type: "WATER_VERTICAL_INTEGRATION_BONUS",
             },
           });
         }
@@ -4047,6 +4153,17 @@ const applyLoanPaymentsForPlayer = async ({
         turns_remaining_after: turnsRemainingAfter,
       },
     });
+    events.push({
+      event_type: "CASH_DEBIT",
+      payload: {
+        player_id: player.id,
+        amount: paymentAmount,
+        reason: "COLLATERAL_LOAN_PAYMENT",
+        tile_index: loan.collateral_tile_index,
+        loan_id: loan.id,
+        source_event_type: "COLLATERAL_LOAN_PAYMENT",
+      },
+    });
 
     const macroInterestSurcharge = Math.round(
       remainingPrincipal * macroInterestTrendAccumulator,
@@ -4344,6 +4461,15 @@ const advanceTurn = async ({
           per_site_income: entry.perSiteIncome,
           subtotal: entry.subtotal,
         })),
+      },
+    });
+    events.push({
+      event_type: "CASH_CREDIT",
+      payload: {
+        player_id: nextPlayer.id,
+        amount: inlandIncome.total,
+        reason: "INLAND_PASSIVE_INCOME",
+        source_event_type: "INLAND_PASSIVE_INCOME",
       },
     });
   }
@@ -6165,7 +6291,7 @@ export async function POST(request: Request) {
         );
       }
 
-      const finalVersion = currentVersion + 1;
+      const finalVersion = currentVersion + 2;
       const exploredCellsByKey = normalizeInlandCellRecords(gameState.inland_explored_cells);
       const targetKey = toInlandCellKey(targetCell);
       const discoveredResourceType = rollInlandResourceType();
@@ -6208,6 +6334,15 @@ export async function POST(request: Request) {
         gameId,
         currentVersion + 1,
         [
+          {
+            event_type: "CASH_DEBIT",
+            payload: {
+              player_id: currentUserPlayer.id,
+              amount: explorationCost,
+              reason: "INTERIOR_EXPLORED",
+              source_event_type: "INTERIOR_EXPLORED",
+            },
+          },
           {
             event_type: "INTERIOR_EXPLORED",
             payload: {
@@ -6410,7 +6545,22 @@ export async function POST(request: Request) {
         await emitGameEvents(
           gameId,
           finalVersion,
-          [resolutionEvent],
+          [
+            ...(isSellResource
+              ? [
+                  {
+                    event_type: "CASH_CREDIT",
+                    payload: {
+                      player_id: currentUserPlayer.id,
+                      amount: sellPayout,
+                      reason: "INTERIOR_RESOURCE_SOLD",
+                      source_event_type: "INTERIOR_RESOURCE_SOLD",
+                    },
+                  },
+                ]
+              : []),
+            resolutionEvent,
+          ],
           user.id,
         );
         return NextResponse.json({ gameState: updatedState });
@@ -6436,13 +6586,14 @@ export async function POST(request: Request) {
         discoveredResourceType: null,
         developedSiteType: targetCell.discoveredResourceType,
       });
+      const developmentFinalVersion = currentVersion + 2;
       const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
         `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
         {
           method: "PATCH",
           headers: { Prefer: "return=representation" },
           body: JSON.stringify({
-            version: finalVersion,
+            version: developmentFinalVersion,
             balances: {
               ...balances,
               [currentUserPlayer.id]: currentCash - developmentCost,
@@ -6457,8 +6608,17 @@ export async function POST(request: Request) {
       }
       await emitGameEvents(
         gameId,
-        finalVersion,
+        currentVersion + 1,
         [
+          {
+            event_type: "CASH_DEBIT",
+            payload: {
+              player_id: currentUserPlayer.id,
+              amount: developmentCost,
+              reason: "INTERIOR_SITE_DEVELOPED",
+              source_event_type: "INTERIOR_SITE_DEVELOPED",
+            },
+          },
           {
             event_type: "INTERIOR_SITE_DEVELOPED",
             payload: {
@@ -6566,7 +6726,7 @@ export async function POST(request: Request) {
         bet_label: formatBetLabel(bet.kind, bet.selection),
         target_roll_seq: targetRollSeq,
       } satisfies Record<string, unknown>;
-      const finalVersion = currentVersion + 1;
+      const finalVersion = currentVersion + 2;
       const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
         `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
         {
@@ -6593,6 +6753,16 @@ export async function POST(request: Request) {
         gameId,
         currentVersion + 1,
         [
+          {
+            event_type: "CASH_DEBIT",
+            payload: {
+              player_id: currentUserPlayer.id,
+              amount: stake,
+              reason: "BETTING_MARKET_BET_PLACED",
+              bet_id: bet.id,
+              source_event_type: "BETTING_MARKET_BET_PLACED",
+            },
+          },
           {
             event_type: "BETTING_MARKET_BET_PLACED",
             payload: eventPayload,
@@ -6680,6 +6850,24 @@ export async function POST(request: Request) {
           { status: 409 },
         );
       }
+
+      await emitGameEvents(
+        gameId,
+        currentVersion + 1,
+        [
+          {
+            event_type: "CASH_CREDIT",
+            payload: {
+              player_id: currentUserPlayer.id,
+              amount: bet.stake,
+              reason: "BETTING_MARKET_BET_CANCELED",
+              bet_id: bet.id,
+              source_event_type: "BETTING_MARKET_BET_CANCELED",
+            },
+          },
+        ],
+        user.id,
+      );
 
       return NextResponse.json({ gameState: updatedState });
     }
@@ -6814,6 +7002,16 @@ export async function POST(request: Request) {
               tile_index: auctionTileIndex,
               winner_id: winnerId,
               amount,
+            },
+          });
+          events.push({
+            event_type: "CASH_DEBIT",
+            payload: {
+              player_id: winnerId,
+              amount,
+              reason: "AUCTION_WON",
+              tile_index: auctionTileIndex,
+              source_event_type: "AUCTION_WON",
             },
           });
         } else if (skipped) {
