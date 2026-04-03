@@ -14,6 +14,8 @@ type Game = {
   join_code: string;
   created_at: string | null;
   board_pack_id: string | null;
+  game_mode: "classic" | "round_mode" | null;
+  round_limit: number | null;
   status: string | null;
   created_by: string | null;
 };
@@ -42,6 +44,8 @@ export default function LobbyPage() {
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
+  const [hostGameMode, setHostGameMode] = useState<"classic" | "round_mode">("classic");
+  const [hostRoundLimit, setHostRoundLimit] = useState<100 | 150 | 200 | 300>(100);
   const [authLoading, setAuthLoading] = useState(true);
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
   const [sessionInvalid, setSessionInvalid] = useState(false);
@@ -71,7 +75,7 @@ export default function LobbyPage() {
   const loadLobby = useCallback(
     async (gameId: string, accessToken: string) => {
       const game = await supabaseClient.fetchFromSupabase<Game[]>(
-        `games?select=id,join_code,created_at,board_pack_id,status,created_by&id=eq.${gameId}&limit=1`,
+        `games?select=id,join_code,created_at,board_pack_id,game_mode,round_limit,status,created_by&id=eq.${gameId}&limit=1`,
         { method: "GET" },
         accessToken,
       );
@@ -93,6 +97,12 @@ export default function LobbyPage() {
       );
 
       setActiveGame(game[0]);
+      setHostGameMode(game[0].game_mode === "round_mode" ? "round_mode" : "classic");
+      setHostRoundLimit(
+        game[0].round_limit === 150 || game[0].round_limit === 200 || game[0].round_limit === 300
+          ? game[0].round_limit
+          : 100,
+      );
       setPlayers(playerRows);
       setGameState(stateRow ?? null);
 
@@ -527,6 +537,36 @@ export default function LobbyPage() {
     }
   };
 
+  const handleUpdateGameSettings = async () => {
+    if (!session?.access_token || !gameId) {
+      return;
+    }
+
+    setLoadingAction("settings");
+    setNotice(null);
+    try {
+      const result = await performBankActionWithRecovery({
+        action: "UPDATE_GAME_SETTINGS",
+        gameId,
+        gameMode: hostGameMode,
+        roundLimit: hostGameMode === "round_mode" ? hostRoundLimit : null,
+      });
+      if (!result) {
+        return;
+      }
+      setNotice("Game settings updated.");
+      await loadLobby(gameId, result.accessToken);
+    } catch (error) {
+      if (error instanceof Error) {
+        setNotice(error.message);
+      } else {
+        setNotice("Unable to update game settings.");
+      }
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
   const isHost = Boolean(
     session && activeGame?.created_by && session.user.id === activeGame.created_by,
   );
@@ -543,7 +583,7 @@ export default function LobbyPage() {
       } else {
         setCopyNotice("Select and copy the code.");
       }
-    } catch (error) {
+    } catch {
       setCopyNotice("Unable to copy. Please select the code.");
     }
 
@@ -606,6 +646,46 @@ export default function LobbyPage() {
                 Leave table
               </button>
             </div>
+            {isHost && activeGame.status === "lobby" ? (
+              <div className="space-y-2 rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-sm">
+                <label className="text-xs font-medium uppercase text-neutral-500">Game mode</label>
+                <select
+                  className="w-full rounded-md border border-neutral-300 bg-white px-2 py-2 text-sm text-neutral-900"
+                  value={hostGameMode}
+                  onChange={(event) =>
+                    setHostGameMode(event.target.value === "round_mode" ? "round_mode" : "classic")
+                  }
+                >
+                  <option value="classic">Classic</option>
+                  <option value="round_mode">Round Mode</option>
+                </select>
+                {hostGameMode === "round_mode" ? (
+                  <>
+                    <label className="text-xs font-medium uppercase text-neutral-500">Round limit</label>
+                    <select
+                      className="w-full rounded-md border border-neutral-300 bg-white px-2 py-2 text-sm text-neutral-900"
+                      value={hostRoundLimit}
+                      onChange={(event) =>
+                        setHostRoundLimit(Number(event.target.value) as 100 | 150 | 200 | 300)
+                      }
+                    >
+                      <option value={100}>100</option>
+                      <option value={150}>150</option>
+                      <option value={200}>200</option>
+                      <option value={300}>300</option>
+                    </select>
+                  </>
+                ) : null}
+                <button
+                  className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm font-semibold text-neutral-800 transition hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-60"
+                  type="button"
+                  onClick={handleUpdateGameSettings}
+                  disabled={loadingAction === "settings"}
+                >
+                  {loadingAction === "settings" ? "Saving…" : "Save setup"}
+                </button>
+              </div>
+            ) : null}
             {isHost && activeGame.status === "lobby" ? (
               <button
                 className="w-full rounded-xl bg-neutral-900 px-4 py-3 text-sm font-semibold text-white shadow-[0_6px_16px_rgba(15,23,42,0.25)] transition hover:bg-neutral-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900 disabled:cursor-not-allowed disabled:bg-neutral-400"

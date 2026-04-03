@@ -14,6 +14,7 @@ type FinalStanding = {
 
 type EndedGameResultsPanelProps = {
   standings: FinalStanding[];
+  reasonLabel?: string | null;
   formatMoney: (value: number) => string;
   onReturnHome: () => void;
   onShowSummary?: () => void;
@@ -48,6 +49,7 @@ function StatusCell({
 
 export default function EndedGameResultsPanel({
   standings,
+  reasonLabel,
   formatMoney,
   onReturnHome,
   onShowSummary,
@@ -56,7 +58,14 @@ export default function EndedGameResultsPanel({
     <div className="fixed inset-0 z-[140] flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm sm:p-6">
       <div className="flex max-h-[85vh] w-[90vw] max-w-[1400px] flex-col overflow-hidden rounded-3xl border border-white/15 bg-neutral-950/95 shadow-2xl shadow-black/40">
         <div className="flex flex-col gap-3 border-b border-white/10 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-          <h2 className="text-lg font-semibold text-white sm:text-xl">Final Results</h2>
+          <div>
+            <h2 className="text-lg font-semibold text-white sm:text-xl">Final Results</h2>
+            {reasonLabel ? (
+              <p className="mt-1 text-xs uppercase tracking-[0.18em] text-white/55">
+                {reasonLabel}
+              </p>
+            ) : null}
+          </div>
           <div className="flex flex-wrap items-center gap-2 sm:justify-end">
             {onShowSummary ? (
               <button

@@ -75,6 +75,8 @@ import type { TradeProposal } from "@/features/trade/types";
 type GameMeta = {
   id: string;
   board_pack_id: string | null;
+  game_mode: "classic" | "round_mode" | null;
+  round_limit: number | null;
   status: string;
   created_by: string | null;
 };
@@ -116,6 +118,7 @@ type GameState = {
   balances: Record<string, number> | null;
   last_roll: number | null;
   doubles_count: number | null;
+  rounds_elapsed: number | null;
   turn_phase: string | null;
   pending_action: Record<string, unknown> | null;
   pending_card_active: boolean | null;
@@ -471,7 +474,7 @@ export default function PlayV2Page() {
   const loadGameMeta = useCallback(
     async (gameId: string, accessToken?: string) => {
       const [game] = await supabaseClient.fetchFromSupabase<GameMeta[]>(
-        `games?select=id,board_pack_id,status,created_by&id=eq.${gameId}&limit=1`,
+        `games?select=id,board_pack_id,game_mode,round_limit,status,created_by&id=eq.${gameId}&limit=1`,
         { method: "GET" },
         accessToken,
       );
@@ -499,7 +502,7 @@ export default function PlayV2Page() {
   const loadGameState = useCallback(
     async (gameId: string, accessToken?: string) => {
       const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
-        `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,active_macro_effects_v1,skip_next_roll_by_player,betting_market_state,inland_explored_cells,income_tax_baseline_cash_by_player,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
+        `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,active_macro_effects_v1,skip_next_roll_by_player,betting_market_state,inland_explored_cells,income_tax_baseline_cash_by_player,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
         { method: "GET" },
         accessToken,
       );
@@ -921,11 +924,46 @@ export default function PlayV2Page() {
       ? rawReason.replaceAll("_", " ").toLowerCase()
       : null;
 
+    const payloadStandings = Array.isArray(payload?.standings)
+      ? payload.standings
+      : [];
+    const standings = payloadStandings
+      .map((entry) => {
+        if (!entry || typeof entry !== "object") {
+          return null;
+        }
+        const candidate = entry as Record<string, unknown>;
+        if (
+          typeof candidate.playerId !== "string" ||
+          typeof candidate.playerName !== "string" ||
+          typeof candidate.rank !== "number" ||
+          typeof candidate.cash !== "number" ||
+          typeof candidate.netWorth !== "number"
+        ) {
+          return null;
+        }
+        return {
+          playerId: candidate.playerId,
+          playerName: candidate.playerName,
+          rank: candidate.rank,
+          cash: candidate.cash,
+          netWorth: candidate.netWorth,
+          isWinner: candidate.isWinner === true,
+          isEliminated: candidate.isEliminated === true,
+          ownedCount: typeof candidate.ownedCount === "number" ? candidate.ownedCount : 0,
+          liabilityCount:
+            typeof candidate.liabilityCount === "number" ? candidate.liabilityCount : 0,
+        };
+      })
+      .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
+      .sort((a, b) => a.rank - b.rank);
+
     return {
       winnerPlayerId,
       winnerName,
       rawReason,
       reasonLabel,
+      standings,
       isCurrentUserWinner: Boolean(
         currentUserPlayerId &&
         winnerPlayerId &&
@@ -2283,85 +2321,19 @@ export default function PlayV2Page() {
     purchaseMortgageLiability,
   ]);
 
-  const finalStandings = useMemo(() => {
-    if (!gameOverState || !resolvedBoardTiles.length) {
-      return [];
+  const finalStandings = useMemo(
+    () => gameOverState?.standings ?? [],
+    [gameOverState?.standings],
+  );
+
+  const roundModeProgressLabel = useMemo(() => {
+    if (gameMeta?.game_mode !== "round_mode") {
+      return null;
     }
-
-    return players
-      .map((player) => {
-        const ownedTiles = resolvedBoardTiles.filter(
-          (tile) =>
-            ["PROPERTY", "RAIL", "UTILITY"].includes(tile.type) &&
-            ownershipByTile[tile.index]?.owner_player_id === player.id,
-        );
-        const ownedCount = ownedTiles.length;
-        const ownedAssetValue = computeOwnedAssetValue(ownedTiles);
-        const activePlayerLoans = playerLoans.filter(
-          (loan) => loan.player_id === player.id && loan.status === "active",
-        );
-        const activePlayerMortgages = purchaseMortgages.filter(
-          (mortgage) =>
-            mortgage.player_id === player.id && mortgage.status === "active",
-        );
-        const loanLiability = activePlayerLoans.reduce(
-          (total, loan) => total + (loan.remaining_principal ?? loan.principal),
-          0,
-        );
-        const mortgageLiability = activePlayerMortgages.reduce(
-          (total, mortgage) =>
-            total +
-            (mortgage.principal_remaining ?? 0) +
-            (mortgage.accrued_interest_unpaid ?? 0),
-          0,
-        );
-        const cash = gameState?.balances?.[player.id] ?? 0;
-        const totalLiability = loanLiability + mortgageLiability;
-        const playerNetWorth = cash + ownedAssetValue - totalLiability;
-
-        return {
-          playerId: player.id,
-          playerName: player.display_name,
-          cash,
-          netWorth: playerNetWorth,
-          isWinner: player.id === gameOverState.winnerPlayerId,
-          isEliminated: player.is_eliminated,
-          ownedCount,
-          liabilityCount:
-            activePlayerLoans.length + activePlayerMortgages.length,
-          eliminatedAtMs: player.eliminated_at
-            ? Date.parse(player.eliminated_at)
-            : Number.POSITIVE_INFINITY,
-        };
-      })
-      .sort((a, b) => {
-        if (a.isWinner !== b.isWinner) {
-          return a.isWinner ? -1 : 1;
-        }
-        if (b.netWorth !== a.netWorth) {
-          return b.netWorth - a.netWorth;
-        }
-        if (a.isEliminated !== b.isEliminated) {
-          return a.isEliminated ? 1 : -1;
-        }
-        if (a.eliminatedAtMs !== b.eliminatedAtMs) {
-          return a.eliminatedAtMs - b.eliminatedAtMs;
-        }
-        return a.playerName.localeCompare(b.playerName);
-      })
-      .map((entry, index) => ({
-        ...entry,
-        rank: index + 1,
-      }));
-  }, [
-    gameOverState,
-    gameState?.balances,
-    ownershipByTile,
-    playerLoans,
-    players,
-    purchaseMortgages,
-    resolvedBoardTiles,
-  ]);
+    const limit = gameMeta.round_limit ?? 0;
+    const rounds = gameState?.rounds_elapsed ?? 0;
+    return `Round Mode · ${rounds} / ${limit}`;
+  }, [gameMeta?.game_mode, gameMeta?.round_limit, gameState?.rounds_elapsed]);
 
   const collateralizedTileIndexes = useMemo(
     () =>
@@ -4049,6 +4021,13 @@ export default function PlayV2Page() {
         decisionActive={drawerDecisionNode !== null}
         rightDrawerLocked={fullscreenEventNode !== null}
         auctionActive={auctionActive}
+        headerActions={
+          roundModeProgressLabel ? (
+            <span className="rounded-full border border-white/25 bg-white/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-white/85">
+              {roundModeProgressLabel}
+            </span>
+          ) : null
+        }
         marketDrawerContent={
           <BettingMarketPanelV2
             bettingConfig={bettingConfig}
@@ -4638,6 +4617,7 @@ export default function PlayV2Page() {
       {gameOverState && gameOverOverlayDismissed ? (
         <EndedGameResultsPanel
           standings={finalStandings}
+          reasonLabel={gameOverState.reasonLabel}
           formatMoney={formatMoney}
           onReturnHome={handleReturnHomeFromGameOver}
           onShowSummary={() => setGameOverOverlayDismissed(false)}

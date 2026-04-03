@@ -116,10 +116,25 @@ type BaseActionRequest = {
   joinCode?: string;
   displayName?: string;
   boardPackId?: string;
+  gameMode?: GameModeConfig;
+  roundLimit?: number;
   expectedVersion?: number;
 };
 
+type GameModeConfig = "classic" | "round_mode";
+
+const ROUND_LIMIT_OPTIONS = [100, 150, 200, 300] as const;
+type RoundLimitOption = (typeof ROUND_LIMIT_OPTIONS)[number];
+
+const isRoundLimitOption = (value: unknown): value is RoundLimitOption =>
+  typeof value === "number" && ROUND_LIMIT_OPTIONS.includes(value as RoundLimitOption);
+
 type BankActionRequest =
+  | (BaseActionRequest & {
+      action: "UPDATE_GAME_SETTINGS";
+      gameMode?: GameModeConfig;
+      roundLimit?: number;
+    })
   | (BaseActionRequest & {
       action: "PROPOSE_TRADE";
       counterpartyPlayerId: string;
@@ -230,6 +245,8 @@ type GameRow = {
   created_at: string | null;
   created_by: string | null;
   board_pack_id: string | null;
+  game_mode: GameModeConfig | null;
+  round_limit: number | null;
 };
 
 type PlayerRow = {
@@ -334,6 +351,18 @@ type GoToJailPendingAction = {
   to_jail_tile_index: number;
 };
 
+
+type FinalStanding = {
+  playerId: string;
+  playerName: string;
+  rank: number;
+  cash: number;
+  netWorth: number;
+  isWinner: boolean;
+  isEliminated: boolean;
+  ownedCount: number;
+  liabilityCount: number;
+};
 
 type BankruptcyCandidate = {
   reason: InsolvencyReason;
@@ -2317,6 +2346,136 @@ const createGoToJailPendingAction = ({
   to_jail_tile_index: jailTile.index,
 });
 
+const computeAuthoritativeFinalStandings = async ({
+  gameId,
+  gameState,
+  players,
+  boardPack,
+}: {
+  gameId: string;
+  gameState: GameStateRow;
+  players: PlayerRow[];
+  boardPack: ReturnType<typeof getBoardPackById> | null;
+}): Promise<FinalStanding[]> => {
+  const boardTiles = resolveBoardTilesForRules({ boardPack, rules: gameState.rules });
+  const ownershipByTile = await loadOwnershipByTile(gameId);
+  const activeLoans = (await fetchFromSupabaseWithService<PlayerLoanRow[]>(
+    `player_loans?select=id,game_id,player_id,collateral_tile_index,principal,remaining_principal,rate_per_turn,term_turns,turns_remaining,payment_per_turn,status&game_id=eq.${gameId}&status=eq.active`,
+    { method: "GET" },
+  )) ?? [];
+  const activeMortgages = (await fetchFromSupabaseWithService<PurchaseMortgageRow[]>(
+    `purchase_mortgages?select=id,game_id,player_id,tile_index,principal_original,principal_remaining,rate_per_turn,term_turns,turns_remaining,payment_per_turn,turns_elapsed,accrued_interest_unpaid,status&game_id=eq.${gameId}&status=eq.active`,
+    { method: "GET" },
+  )) ?? [];
+
+  return players
+    .map((player) => {
+      const ownedTiles = boardTiles.filter(
+        (tile) =>
+          OWNABLE_TILE_TYPES.has(tile.type) &&
+          ownershipByTile[tile.index]?.owner_player_id === player.id,
+      );
+      const activePlayerLoans = activeLoans.filter((loan) => loan.player_id === player.id);
+      const activePlayerMortgages = activeMortgages.filter((mortgage) => mortgage.player_id === player.id);
+      const liabilities =
+        activePlayerLoans.reduce((total, loan) => total + (loan.remaining_principal ?? loan.principal), 0) +
+        activePlayerMortgages.reduce(
+          (total, mortgage) =>
+            total + (mortgage.principal_remaining ?? 0) + (mortgage.accrued_interest_unpaid ?? 0),
+          0,
+        );
+      const cash = gameState.balances?.[player.id] ?? 0;
+      const netWorth =
+        cash + ownedTiles.reduce((total, tile) => total + (tile.price ?? 0), 0) - liabilities;
+
+      return {
+        playerId: player.id,
+        playerName: player.display_name ?? "Unknown player",
+        cash,
+        netWorth,
+        isEliminated: player.is_eliminated,
+        ownedCount: ownedTiles.length,
+        liabilityCount: activePlayerLoans.length + activePlayerMortgages.length,
+        eliminatedAtMs: player.eliminated_at ? Date.parse(player.eliminated_at) : Number.POSITIVE_INFINITY,
+      };
+    })
+    .sort((a, b) => {
+      if (b.netWorth !== a.netWorth) {
+        return b.netWorth - a.netWorth;
+      }
+      if (a.isEliminated !== b.isEliminated) {
+        return a.isEliminated ? 1 : -1;
+      }
+      if (a.eliminatedAtMs !== b.eliminatedAtMs) {
+        return a.eliminatedAtMs - b.eliminatedAtMs;
+      }
+      return a.playerName.localeCompare(b.playerName);
+    })
+    .map((entry, index) => ({
+      playerId: entry.playerId,
+      playerName: entry.playerName,
+      rank: index + 1,
+      cash: entry.cash,
+      netWorth: entry.netWorth,
+      isWinner: index === 0,
+      isEliminated: entry.isEliminated,
+      ownedCount: entry.ownedCount,
+      liabilityCount: entry.liabilityCount,
+    }));
+};
+
+const resolveTurnHandoffCheckpoint = async ({
+  gameId,
+  game,
+  gameState,
+  players,
+  nextPlayer,
+  boardPack,
+}: {
+  gameId: string;
+  game: GameRow;
+  gameState: GameStateRow;
+  players: PlayerRow[];
+  nextPlayer: PlayerRow;
+  boardPack: ReturnType<typeof getBoardPackById> | null;
+}) => {
+  const firstActivePlayer = getFirstActivePlayer(players);
+  const tableRoundAdvanced = Boolean(
+    firstActivePlayer && nextPlayer.id === firstActivePlayer.id,
+  );
+  const nextRound =
+    (gameState.rounds_elapsed ?? 0) + (tableRoundAdvanced ? 1 : 0);
+  const gameMode = game.game_mode ?? "classic";
+  const roundLimit = game.round_limit;
+  const isRoundLimitReached =
+    gameMode === "round_mode" &&
+    typeof roundLimit === "number" &&
+    tableRoundAdvanced &&
+    nextRound >= roundLimit;
+
+  if (!isRoundLimitReached) {
+    return {
+      tableRoundAdvanced,
+      nextRound,
+      shouldEndForRoundLimit: false as const,
+    };
+  }
+
+  const standings = await computeAuthoritativeFinalStandings({
+    gameId,
+    gameState: { ...gameState, rounds_elapsed: nextRound },
+    players,
+    boardPack,
+  });
+
+  return {
+    tableRoundAdvanced,
+    nextRound,
+    shouldEndForRoundLimit: true as const,
+    standings,
+  };
+};
+
 const resolveBankruptcyIfNeeded = async ({
   gameId,
   gameState,
@@ -3106,6 +3265,7 @@ const applyCardEffect = ({
 
 const finalizeMoveResolution = async ({
   gameId,
+  game,
   gameState,
   players,
   currentPlayer,
@@ -3152,6 +3312,7 @@ const finalizeMoveResolution = async ({
   extraGameStatePatch,
 }: {
   gameId: string;
+  game: GameRow;
   gameState: GameStateRow;
   players: PlayerRow[];
   currentPlayer: PlayerRow;
@@ -4428,6 +4589,7 @@ const applyLoanPaymentsForPlayer = async ({
 
 const advanceTurn = async ({
   gameId,
+  game,
   gameState,
   players,
   currentPlayer,
@@ -4440,6 +4602,7 @@ const advanceTurn = async ({
   extraGameStatePatch = {},
 }: {
   gameId: string;
+  game: GameRow;
   gameState: GameStateRow;
   players: PlayerRow[];
   currentPlayer: PlayerRow;
@@ -4515,12 +4678,66 @@ const advanceTurn = async ({
     });
   }
 
-  const firstActivePlayer = getFirstActivePlayer(players);
-  const tableRoundAdvanced = Boolean(
-    firstActivePlayer && nextPlayer.id === firstActivePlayer.id,
-  );
-  const nextRound =
-    (gameState.rounds_elapsed ?? 0) + (tableRoundAdvanced ? 1 : 0);
+  const handoffCheckpoint = await resolveTurnHandoffCheckpoint({
+    gameId,
+    game,
+    gameState,
+    players,
+    nextPlayer,
+    boardPack,
+  });
+  const tableRoundAdvanced = handoffCheckpoint.tableRoundAdvanced;
+  const nextRound = handoffCheckpoint.nextRound;
+
+  if (handoffCheckpoint.shouldEndForRoundLimit) {
+    const roundLimitEvents: Array<{ event_type: string; payload: Record<string, unknown> }> = [
+      ...events,
+      {
+        event_type: "GAME_OVER",
+        payload: {
+          winner_player_id: handoffCheckpoint.standings[0]?.playerId ?? null,
+          winner_player_name: handoffCheckpoint.standings[0]?.playerName ?? null,
+          reason: "ROUND_LIMIT_REACHED",
+          round_limit: game.round_limit,
+          rounds_elapsed: nextRound,
+          standings: handoffCheckpoint.standings,
+        },
+      },
+    ];
+    const finalVersion = currentVersion + roundLimitEvents.length;
+    const [endedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+      `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+      {
+        method: "PATCH",
+        headers: {
+          Prefer: "return=representation",
+        },
+        body: JSON.stringify({
+          version: finalVersion,
+          current_player_id: handoffCheckpoint.standings[0]?.playerId ?? null,
+          last_roll: null,
+          doubles_count: 0,
+          rounds_elapsed: nextRound,
+          turn_phase: "AWAITING_ROLL",
+          pending_action: null,
+          updated_at: new Date().toISOString(),
+        }),
+      },
+    )) ?? [];
+
+    if (!endedState) {
+      return NextResponse.json({ error: "Version mismatch." }, { status: 409 });
+    }
+
+    await fetchFromSupabaseWithService(`games?id=eq.${gameId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "ended" }),
+    });
+
+    await emitGameEvents(gameId, currentVersion + 1, roundLimitEvents, userId);
+
+    return NextResponse.json({ gameState: endedState, status: "ended" });
+  }
   const macroEnabled = rules.macroEnabled;
   let nextLastMacroEventId = gameState.last_macro_event_id ?? null;
   const activeMacroEffectsV1 = normalizeActiveMacroEffectsV1(
@@ -4760,7 +4977,7 @@ export async function POST(request: Request) {
         resolvedBoardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY;
 
       const [game] = (await fetchFromSupabaseWithService<GameRow[]>(
-        "games?select=id,join_code,created_by",
+        "games?select=id,join_code,created_by,game_mode,round_limit",
         {
           method: "POST",
           headers: {
@@ -4772,6 +4989,12 @@ export async function POST(request: Request) {
             board_pack_id: resolvedBoardPackId,
             starting_cash: resolvedEconomy.startingBalance,
             base_currency: resolvedEconomy.currency.code,
+            game_mode:
+              body.gameMode === "round_mode" ? "round_mode" : "classic",
+            round_limit:
+              body.gameMode === "round_mode" && isRoundLimitOption(body.roundLimit)
+                ? body.roundLimit
+                : null,
           }),
         },
       )) ?? [];
@@ -4852,7 +5075,7 @@ export async function POST(request: Request) {
       const joinCode = body.joinCode.trim().toUpperCase();
 
       const [game] = (await fetchFromSupabaseWithService<GameRow[]>(
-        `games?select=id,join_code,status,created_at,board_pack_id,created_by&join_code=eq.${joinCode}&limit=1`,
+        `games?select=id,join_code,status,created_at,board_pack_id,created_by,game_mode,round_limit&join_code=eq.${joinCode}&limit=1`,
         { method: "GET" },
       )) ?? [];
 
@@ -5063,6 +5286,68 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true });
     }
 
+    if (body.action === "UPDATE_GAME_SETTINGS") {
+      const [settingsGame] = (await fetchFromSupabaseWithService<GameRow[]>(
+        `games?select=id,status,created_by,game_mode,round_limit&id=eq.${gameId}&limit=1`,
+        { method: "GET" },
+      )) ?? [];
+
+      if (!settingsGame) {
+        return NextResponse.json({ error: "Game not found." }, { status: 404 });
+      }
+
+      if (settingsGame.created_by && settingsGame.created_by !== user.id) {
+        return NextResponse.json(
+          { error: "Only the host can update game settings." },
+          { status: 403 },
+        );
+      }
+
+      if (settingsGame.status !== "lobby") {
+        return NextResponse.json(
+          { error: "Settings can only be changed in the lobby." },
+          { status: 409 },
+        );
+      }
+
+      const gameMode: GameModeConfig =
+        body.gameMode === "round_mode" ? "round_mode" : "classic";
+      const roundLimit = gameMode === "round_mode"
+        ? (isRoundLimitOption(body.roundLimit) ? body.roundLimit : null)
+        : null;
+
+      if (gameMode === "round_mode" && roundLimit === null) {
+        return NextResponse.json(
+          { error: "Round mode requires a valid round limit." },
+          { status: 400 },
+        );
+      }
+
+      const [updatedGame] = (await fetchFromSupabaseWithService<GameRow[]>(
+        `games?select=id,game_mode,round_limit&id=eq.${gameId}&status=eq.lobby`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            game_mode: gameMode,
+            round_limit: roundLimit,
+          }),
+        },
+      )) ?? [];
+
+      if (!updatedGame) {
+        return NextResponse.json({ error: "Unable to update settings." }, { status: 409 });
+      }
+
+      return NextResponse.json({
+        ok: true,
+        gameMode: updatedGame.game_mode,
+        roundLimit: updatedGame.round_limit,
+      });
+    }
+
     if (typeof body.expectedVersion !== "number") {
       return NextResponse.json(
         { error: "Missing expectedVersion." },
@@ -5078,7 +5363,7 @@ export async function POST(request: Request) {
     }
 
     const [game] = (await fetchFromSupabaseWithService<GameRow[]>(
-      `games?select=id,join_code,starting_cash,created_by,status,board_pack_id&id=eq.${gameId}&limit=1`,
+      `games?select=id,join_code,starting_cash,created_by,status,board_pack_id,game_mode,round_limit&id=eq.${gameId}&limit=1`,
       { method: "GET" },
     )) ?? [];
 
@@ -7659,6 +7944,7 @@ export async function POST(request: Request) {
 
       return await finalizeMoveResolution({
         gameId,
+        game,
         gameState,
         players,
         currentPlayer,
@@ -7780,6 +8066,7 @@ export async function POST(request: Request) {
 
       return await advanceTurn({
         gameId,
+        game,
         gameState: {
           ...gameState,
           pending_action: null,
@@ -7873,6 +8160,7 @@ export async function POST(request: Request) {
         };
         return await advanceTurn({
           gameId,
+          game,
           gameState,
           players,
           currentPlayer,
@@ -8346,6 +8634,7 @@ export async function POST(request: Request) {
 
       return await finalizeMoveResolution({
         gameId,
+        game,
         gameState,
         players,
         currentPlayer,
@@ -8488,67 +8777,26 @@ export async function POST(request: Request) {
         const eligibleIds = eligiblePlayers.map((player) => player.id);
 
         if (eligibleIds.length <= 1) {
-          const nextPlayer = getNextActivePlayer(
-            players,
-            gameState.current_player_id,
-          );
-
-          if (!nextPlayer) {
-            return NextResponse.json(
-              { error: "No active players remaining." },
-              { status: 409 },
-            );
-          }
-
           events.push({
             event_type: "AUCTION_SKIPPED",
             payload: {
               tile_index: body.tileIndex,
             },
           });
-          events.push({
-            event_type: "END_TURN",
-            payload: {
-              from_player_id: currentPlayer.id,
-              from_player_name: currentPlayer.display_name,
-              to_player_id: nextPlayer.id,
-              to_player_name: nextPlayer.display_name,
-            },
+
+          return await advanceTurn({
+            gameId,
+            game,
+            gameState,
+            players,
+            currentPlayer,
+            currentVersion,
+            userId: user.id,
+            rules,
+            startingCash: startingCash,
+            boardPack,
+            extraEvents: events,
           });
-
-          const finalVersion = currentVersion + events.length;
-          const [updatedState] =
-            (await fetchFromSupabaseWithService<GameStateRow[]>(
-              `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
-              {
-                method: "PATCH",
-                headers: {
-                  Prefer: "return=representation",
-                },
-                body: JSON.stringify({
-                  version: finalVersion,
-                  current_player_id: nextPlayer.id,
-                  last_roll: null,
-                  doubles_count: 0,
-                  turn_phase: nextPlayer.is_in_jail
-                    ? "AWAITING_JAIL_DECISION"
-                    : "AWAITING_ROLL",
-                  pending_action: null,
-                  updated_at: new Date().toISOString(),
-                }),
-              },
-            )) ?? [];
-
-          if (!updatedState) {
-            return NextResponse.json(
-              { error: "Version mismatch." },
-              { status: 409 },
-            );
-          }
-
-          await emitGameEvents(gameId, currentVersion + 1, events, user.id);
-
-          return NextResponse.json({ gameState: updatedState });
         }
 
         const nextTurnPlayerId = getNextEligibleAuctionPlayerId(
@@ -8615,60 +8863,19 @@ export async function POST(request: Request) {
         return NextResponse.json({ gameState: updatedState });
       }
 
-      const nextPlayer = getNextActivePlayer(
+      return await advanceTurn({
+        gameId,
+        game,
+        gameState,
         players,
-        gameState.current_player_id,
-      );
-
-      if (!nextPlayer) {
-        return NextResponse.json(
-          { error: "No active players remaining." },
-          { status: 409 },
-        );
-      }
-
-      events.push({
-        event_type: "END_TURN",
-        payload: {
-          from_player_id: currentPlayer.id,
-          from_player_name: currentPlayer.display_name,
-          to_player_id: nextPlayer.id,
-          to_player_name: nextPlayer.display_name,
-        },
+        currentPlayer,
+        currentVersion,
+        userId: user.id,
+        rules,
+        startingCash: startingCash,
+        boardPack,
+        extraEvents: events,
       });
-      const finalVersion = currentVersion + events.length;
-
-      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
-        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
-        {
-          method: "PATCH",
-          headers: {
-            Prefer: "return=representation",
-          },
-          body: JSON.stringify({
-            version: finalVersion,
-            current_player_id: nextPlayer.id,
-            last_roll: null,
-            doubles_count: 0,
-            turn_phase: nextPlayer.is_in_jail
-              ? "AWAITING_JAIL_DECISION"
-              : "AWAITING_ROLL",
-            pending_action: null,
-            updated_at: new Date().toISOString(),
-          }),
-        },
-      )) ?? [];
-
-      if (!updatedState) {
-        return NextResponse.json(
-          { error: "Version mismatch." },
-          { status: 409 },
-        );
-      }
-
-      await emitGameEvents(gameId, currentVersion + 1, events, user.id);
-
-      return NextResponse.json({ gameState: updatedState });
     }
 
     if (body.action === "DECLARE_BANKRUPTCY") {
@@ -11475,6 +11682,7 @@ export async function POST(request: Request) {
         };
         return await advanceTurn({
           gameId,
+          game,
           gameState,
           players,
           currentPlayer,
@@ -11512,127 +11720,6 @@ export async function POST(request: Request) {
       const shouldReleaseFromJail = isDouble || turnsRemaining === 0;
 
       if (!shouldReleaseFromJail) {
-        const nextPlayer = getNextActivePlayer(
-          players,
-          gameState.current_player_id,
-        );
-
-        if (!nextPlayer) {
-          return NextResponse.json(
-            { error: "No active players remaining." },
-            { status: 409 },
-          );
-        }
-        const events: Array<{
-          event_type: string;
-          payload: Record<string, unknown>;
-        }> = [
-          {
-            event_type: "ROLL_DICE",
-            payload: {
-              player_id: currentPlayer.id,
-              player_name: currentPlayer.display_name,
-              roll: rollTotal,
-              dice,
-            } satisfies DiceEventPayload,
-          },
-          {
-            event_type: "JAIL_DOUBLES_FAIL",
-            payload: {
-              player_id: currentPlayer.id,
-              player_name: currentPlayer.display_name,
-              dice,
-              turns_remaining: turnsRemaining,
-            },
-          },
-          {
-            event_type: "END_TURN",
-            payload: {
-              from_player_id: currentPlayer.id,
-              from_player_name: currentPlayer.display_name,
-              to_player_id: nextPlayer.id,
-              to_player_name: nextPlayer.display_name,
-            },
-          },
-        ];
-        const balances = gameState.balances ?? {};
-        let updatedBalances = balances;
-        let balancesChanged = false;
-
-        const loanResult = await applyLoanPaymentsForPlayer({
-          gameId,
-          player: nextPlayer,
-          balances: updatedBalances,
-          startingCash: startingCash,
-          macroInterestTrendAccumulator: getMacroInterestTrendAccumulatorV1(
-            getActiveMacroEffectsV1ForRules(
-              gameState?.active_macro_effects_v1,
-              rules.macroEnabled,
-            ),
-          ),
-          macroMortgageFlatDelta: getMacroMortgageFlatDeltaV1(
-            getActiveMacroEffectsV1ForRules(
-              gameState?.active_macro_effects_v1,
-              rules.macroEnabled,
-            ),
-          ),
-        });
-        updatedBalances = loanResult.balances;
-        balancesChanged = balancesChanged || loanResult.balancesChanged;
-        events.push(...loanResult.events);
-
-        if (loanResult.bankruptcyCandidate) {
-          const bankruptcyResult = await enterInsolvencyRecovery({
-            gameId,
-            gameState,
-            player: nextPlayer,
-            candidate: loanResult.bankruptcyCandidate,
-            events,
-            currentVersion,
-            userId: user.id,
-          });
-
-          if (bankruptcyResult.handled) {
-            if (bankruptcyResult.error) {
-              return NextResponse.json(
-                { error: bankruptcyResult.error },
-                { status: 409 },
-              );
-            }
-            return NextResponse.json({ gameState: bankruptcyResult.updatedState });
-          }
-        }
-
-        const finalVersion = currentVersion + events.length;
-
-        const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
-          `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
-          {
-            method: "PATCH",
-            headers: {
-              Prefer: "return=representation",
-            },
-            body: JSON.stringify({
-              version: finalVersion,
-              current_player_id: nextPlayer.id,
-              last_roll: null,
-              doubles_count: 0,
-              ...(balancesChanged ? { balances: updatedBalances } : {}),
-              turn_phase: nextPlayer.is_in_jail
-                ? "AWAITING_JAIL_DECISION"
-                : "AWAITING_ROLL",
-              updated_at: new Date().toISOString(),
-            }),
-          },
-        )) ?? [];
-
-        if (!updatedState) {
-          return NextResponse.json(
-            { error: "Version mismatch." },
-            { status: 409 },
-          );
-        }
-
         const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
           `players?id=eq.${currentPlayer.id}`,
           {
@@ -11653,9 +11740,38 @@ export async function POST(request: Request) {
           );
         }
 
-        await emitGameEvents(gameId, currentVersion + 1, events, user.id);
-
-        return NextResponse.json({ gameState: updatedState });
+        return await advanceTurn({
+          gameId,
+          game,
+          gameState,
+          players,
+          currentPlayer,
+          currentVersion,
+          userId: user.id,
+          rules,
+          startingCash: startingCash,
+          boardPack,
+          extraEvents: [
+            {
+              event_type: "ROLL_DICE",
+              payload: {
+                player_id: currentPlayer.id,
+                player_name: currentPlayer.display_name,
+                roll: rollTotal,
+                dice,
+              } satisfies DiceEventPayload,
+            },
+            {
+              event_type: "JAIL_DOUBLES_FAIL",
+              payload: {
+                player_id: currentPlayer.id,
+                player_name: currentPlayer.display_name,
+                dice,
+                turns_remaining: turnsRemaining,
+              },
+            },
+          ],
+        });
       }
 
       const boardTiles = resolveBoardTilesForRules({ boardPack, rules: gameState.rules });
@@ -12024,6 +12140,7 @@ export async function POST(request: Request) {
 
       return await finalizeMoveResolution({
         gameId,
+        game,
         gameState,
         players,
         currentPlayer,
@@ -12293,6 +12410,7 @@ export async function POST(request: Request) {
       }
       return await advanceTurn({
         gameId,
+        game,
         gameState,
         players,
         currentPlayer,

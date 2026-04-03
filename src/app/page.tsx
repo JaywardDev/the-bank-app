@@ -14,6 +14,8 @@ type Game = {
   join_code: string;
   created_at: string | null;
   board_pack_id: string | null;
+  game_mode: "classic" | "round_mode" | null;
+  round_limit: number | null;
   status: string | null;
   created_by: string | null;
 };
@@ -52,6 +54,8 @@ export default function Home() {
   const [playerName, setPlayerName] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [boardPackId, setBoardPackId] = useState(defaultBoardPackId);
+  const [gameMode, setGameMode] = useState<"classic" | "round_mode">("classic");
+  const [roundLimit, setRoundLimit] = useState<100 | 150 | 200 | 300>(100);
   const [resumeGames, setResumeGames] = useState<ResumeGame[]>([]);
   const [lastOpenedGameId, setLastOpenedGameId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -206,6 +210,8 @@ export default function Home() {
           action: "CREATE_GAME",
           playerName: playerName.trim(),
           boardPackId,
+          gameMode,
+          roundLimit: gameMode === "round_mode" ? roundLimit : null,
         }),
       });
 
@@ -445,6 +451,40 @@ export default function Home() {
               <p className="text-sm text-neutral-500">
                 Start a table and share the code with players.
               </p>
+              <div className="space-y-2">
+                <label className="text-xs font-medium uppercase text-neutral-500">
+                  Game mode
+                </label>
+                <select
+                  className="w-full rounded-xl border border-amber-200/70 bg-[#F4EFE7] px-3 py-2 text-sm text-neutral-900 focus-visible:border-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
+                  value={gameMode}
+                  onChange={(event) =>
+                    setGameMode(event.target.value === "round_mode" ? "round_mode" : "classic")
+                  }
+                >
+                  <option value="classic">Classic</option>
+                  <option value="round_mode">Round Mode</option>
+                </select>
+              </div>
+              {gameMode === "round_mode" ? (
+                <div className="space-y-2">
+                  <label className="text-xs font-medium uppercase text-neutral-500">
+                    Round limit
+                  </label>
+                  <select
+                    className="w-full rounded-xl border border-amber-200/70 bg-[#F4EFE7] px-3 py-2 text-sm text-neutral-900 focus-visible:border-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
+                    value={roundLimit}
+                    onChange={(event) =>
+                      setRoundLimit(Number(event.target.value) as 100 | 150 | 200 | 300)
+                    }
+                  >
+                    <option value={100}>100</option>
+                    <option value={150}>150</option>
+                    <option value={200}>200</option>
+                    <option value={300}>300</option>
+                  </select>
+                </div>
+              ) : null}
               <div className="space-y-2">
                 <label className="text-xs font-medium uppercase text-neutral-500">
                   Board pack
