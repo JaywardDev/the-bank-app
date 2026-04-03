@@ -57,7 +57,6 @@ export default function TileInfoPanelV2({
             <StatRow label="Type" value="Developed inland site" />
             <StatRow label="Owner" value={inlandSiteInfo.ownerLabel} />
             <StatRow label="Passive income" value={inlandSiteInfo.passiveIncomeLabel} />
-            <StatRow label="Cell" value={inlandSiteInfo.locationLabel} />
           </div>
           <div className="mt-2 space-y-1.5">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-white/55">
