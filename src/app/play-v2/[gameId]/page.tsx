@@ -41,6 +41,7 @@ import {
   canExploreInlandCell,
   getInlandDevelopmentCost,
   getInlandExplorationCost,
+  getInlandPassiveIncomePerTurn,
   getInlandResourceConfig,
   getInlandSellValue,
   isDevelopableResource,
@@ -2414,6 +2415,46 @@ export default function PlayV2Page() {
     return inlandCellsByKey.get(selectedInteriorCellKey) ?? null;
   }, [inlandCellsByKey, selectedInteriorCellKey]);
 
+  const selectedDevelopedInlandSiteInfo = useMemo(() => {
+    if (selectedInlandCellRecord?.status !== "DEVELOPED_SITE") {
+      return null;
+    }
+    if (!selectedInlandCellRecord.developedSiteType || !selectedInteriorCell) {
+      return null;
+    }
+    const siteConfig = getInlandResourceConfig(selectedInlandCellRecord.developedSiteType);
+    const sitePerkLines: string[] = [];
+    if (siteConfig.passiveIncomeMultiplierPerTurn) {
+      sitePerkLines.push("Generates recurring passive income each full round.");
+    }
+    if (selectedInlandCellRecord.developedSiteType === "OIL") {
+      sitePerkLines.push("Oil/Rail synergy: railroad rent contributes an oil refinery bonus pool.");
+      sitePerkLines.push("Vertical integration: rail owners with oil refineries receive an additional rail bonus.");
+    }
+    if (selectedInlandCellRecord.developedSiteType === "COAL") {
+      sitePerkLines.push("Coal/Utility synergy: electric utility rent contributes a coal-site bonus pool.");
+      sitePerkLines.push("Vertical integration: electric utility owners with coal sites receive an additional utility bonus.");
+    }
+    return {
+      name: `${siteConfig.icon} ${siteConfig.label}`,
+      ownerLabel: selectedInlandCellRecord.ownerPlayerId
+        ? (players.find((player) => player.id === selectedInlandCellRecord.ownerPlayerId)?.display_name ??
+          "Player")
+        : "Unowned",
+      passiveIncomeLabel: formatMoney(
+        getInlandPassiveIncomePerTurn(selectedInlandCellRecord.developedSiteType, inlandGoSalary),
+      ),
+      perks: sitePerkLines,
+      locationLabel: `${selectedInteriorCell.row}:${selectedInteriorCell.col}`,
+    };
+  }, [
+    selectedInlandCellRecord,
+    selectedInteriorCell,
+    players,
+    formatMoney,
+    inlandGoSalary,
+  ]);
+
   const currentUserOwnedTileIndices = useMemo(() => {
     if (!currentUserPlayerId) {
       return [] as number[];
@@ -4056,28 +4097,28 @@ export default function PlayV2Page() {
                 Tile Info
               </p>
               {selectedTile ? (
-                <>
-                  <TileInfoPanelV2
-                    tile={selectedTile}
-                    bandColor={getTileBandColor(selectedTile)}
-                    ownerLabel={selectedOwnerLabel || "Unowned"}
-                    statusLabel={selectedTileStatusLabel}
-                    purchasePriceLabel={formatMoney(selectedTile.price ?? null)}
-                    currentRentLabel={formatMoney(selectedTileCurrentRent)}
-                    upgradeCostLabel={
-                      selectedTileIsUpgradeable
-                        ? formatMoney(selectedTile.houseCost ?? null)
-                        : null
-                    }
-                    nextRentLabel={
-                      selectedTileNextRent !== null
-                        ? formatMoney(selectedTileNextRent)
-                        : null
-                    }
-                    isFullyUpgraded={selectedTileIsFullyUpgraded}
-                    onViewTitleCard={() => setShowTileTitleCardModal(true)}
-                  />
-                </>
+                <TileInfoPanelV2
+                  tile={selectedTile}
+                  bandColor={getTileBandColor(selectedTile)}
+                  ownerLabel={selectedOwnerLabel || "Unowned"}
+                  statusLabel={selectedTileStatusLabel}
+                  purchasePriceLabel={formatMoney(selectedTile.price ?? null)}
+                  currentRentLabel={formatMoney(selectedTileCurrentRent)}
+                  upgradeCostLabel={
+                    selectedTileIsUpgradeable
+                      ? formatMoney(selectedTile.houseCost ?? null)
+                      : null
+                  }
+                  nextRentLabel={
+                    selectedTileNextRent !== null
+                      ? formatMoney(selectedTileNextRent)
+                      : null
+                  }
+                  isFullyUpgraded={selectedTileIsFullyUpgraded}
+                  onViewTitleCard={() => setShowTileTitleCardModal(true)}
+                />
+              ) : selectedDevelopedInlandSiteInfo ? (
+                <TileInfoPanelV2 inlandSiteInfo={selectedDevelopedInlandSiteInfo} />
               ) : (
                 <p className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/70">
                   Select a tile to view details.
@@ -4482,6 +4523,12 @@ export default function PlayV2Page() {
               const inlandCell = inlandCellsByKey.get(key);
               if (inlandCell?.status === "DISCOVERED_RESOURCE") {
                 setOpenInlandDecisionCellKey(key);
+                return;
+              }
+              if (inlandCell?.status === "DEVELOPED_SITE") {
+                setOpenInlandDecisionCellKey(null);
+                setLeftDrawerMode("info");
+                setIsLeftDrawerOpen(true);
               } else {
                 setOpenInlandDecisionCellKey(null);
               }
@@ -4634,7 +4681,7 @@ export default function PlayV2Page() {
         </div>
       ) : null}
       {selectedInteriorCell && !selectedInlandCellRecord ? (
-        <div className="fixed bottom-3 left-1/2 z-[45] w-[min(460px,calc(100vw-1rem))] -translate-x-1/2 rounded-xl border border-emerald-200/30 bg-neutral-950/90 p-2 shadow-2xl backdrop-blur">
+        <div className="fixed bottom-3 left-1/2 z-[45] w-[min(460px,calc(100vw-1rem))] -translate-x-1/2 p-2">
           <div className="flex items-center justify-between gap-2">
             <button
               type="button"
@@ -4656,18 +4703,6 @@ export default function PlayV2Page() {
               Cancel
             </button>
           </div>
-        </div>
-      ) : null}
-      {selectedInteriorCell &&
-      selectedInlandCellRecord?.status === "DEVELOPED_SITE" &&
-      selectedInlandCellRecord.developedSiteType ? (
-        <div className="fixed bottom-3 left-1/2 z-[45] w-[min(460px,calc(100vw-1rem))] -translate-x-1/2 rounded-xl border border-sky-200/30 bg-neutral-950/90 p-3 shadow-2xl backdrop-blur">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-100/70">
-            Inland site
-          </p>
-          <p className="mt-1 text-sm font-semibold text-white">
-            {getInlandResourceConfig(selectedInlandCellRecord.developedSiteType).label} developed
-          </p>
         </div>
       ) : null}
       <button
