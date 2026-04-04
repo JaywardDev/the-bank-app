@@ -333,6 +333,18 @@ type PurchaseMortgage = {
   status: string;
 };
 
+type FinalStanding = {
+  playerId: string;
+  playerName: string;
+  rank: number;
+  cash: number;
+  netWorth: number;
+  isWinner: boolean;
+  isEliminated: boolean;
+  ownedCount: number;
+  liabilityCount: number;
+};
+
 const SESSION_EXPIRED_MESSAGE = "Session expired — please sign in again";
 const MIN_LOADING_SCREEN_MS = 5000;
 const lastGameKey = "bank.lastGameId";
@@ -925,10 +937,8 @@ export default function PlayV2Page() {
       ? rawReason.replaceAll("_", " ").toLowerCase()
       : null;
 
-    const payloadStandings = Array.isArray(payload?.standings)
-      ? payload.standings
-      : [];
-    const standings = payloadStandings
+    const payloadStandings = Array.isArray(payload?.standings) ? payload.standings : [];
+    const parsedPayloadStandings: FinalStanding[] = payloadStandings
       .map((entry) => {
         if (!entry || typeof entry !== "object") {
           return null;
@@ -958,6 +968,78 @@ export default function PlayV2Page() {
       })
       .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
       .sort((a, b) => a.rank - b.rank);
+    const payloadStandingsValid =
+      payloadStandings.length > 0 &&
+      parsedPayloadStandings.length === payloadStandings.length;
+
+    const fallbackStandings: FinalStanding[] = players
+      .map((player) => {
+        const cash = gameState?.balances?.[player.id] ?? 0;
+        const ownedTiles = Array.from(boardTilesByIndex.values()).filter(
+          (tile) => ownershipByTile[tile.index]?.owner_player_id === player.id,
+        );
+        const playerLoans = activeLoans.filter((loan) => loan.player_id === player.id);
+        const playerMortgages = activePurchaseMortgages.filter(
+          (mortgage) => mortgage.player_id === player.id,
+        );
+        const liabilities =
+          playerLoans.reduce(
+            (total, loan) => total + (loan.remaining_principal ?? loan.principal ?? 0),
+            0,
+          ) +
+          playerMortgages.reduce(
+            (total, mortgage) =>
+              total +
+              (mortgage.principal_remaining ?? 0) +
+              (mortgage.accrued_interest_unpaid ?? 0),
+            0,
+          );
+        return {
+          playerId: player.id,
+          playerName: player.display_name ?? "Unknown player",
+          cash,
+          netWorth:
+            cash + ownedTiles.reduce((total, tile) => total + (tile.price ?? 0), 0) - liabilities,
+          isEliminated: player.is_eliminated,
+          ownedCount: ownedTiles.length,
+          liabilityCount: playerLoans.length + playerMortgages.length,
+          eliminatedAtMs: player.eliminated_at
+            ? Date.parse(player.eliminated_at)
+            : Number.POSITIVE_INFINITY,
+        };
+      })
+      .sort((a, b) => {
+        if (b.netWorth !== a.netWorth) {
+          return b.netWorth - a.netWorth;
+        }
+        if (a.isEliminated !== b.isEliminated) {
+          return a.isEliminated ? 1 : -1;
+        }
+        if (a.eliminatedAtMs !== b.eliminatedAtMs) {
+          return a.eliminatedAtMs - b.eliminatedAtMs;
+        }
+        return a.playerName.localeCompare(b.playerName);
+      })
+      .map((entry, index) => ({
+        playerId: entry.playerId,
+        playerName: entry.playerName,
+        rank: index + 1,
+        cash: entry.cash,
+        netWorth: entry.netWorth,
+        isWinner: index === 0,
+        isEliminated: entry.isEliminated,
+        ownedCount: entry.ownedCount,
+        liabilityCount: entry.liabilityCount,
+      }));
+
+    const standings = payloadStandingsValid
+      ? parsedPayloadStandings
+      : fallbackStandings;
+    const standingsSource: "event" | "fallback" | "missing" = payloadStandingsValid
+      ? "event"
+      : fallbackStandings.length > 0
+        ? "fallback"
+        : "missing";
 
     return {
       winnerPlayerId,
@@ -965,6 +1047,7 @@ export default function PlayV2Page() {
       rawReason,
       reasonLabel,
       standings,
+      standingsSource,
       isCurrentUserWinner: Boolean(
         currentUserPlayerId &&
         winnerPlayerId &&
@@ -974,8 +1057,13 @@ export default function PlayV2Page() {
   }, [
     currentUserPlayerId,
     gameState?.current_player_id,
+    gameState?.balances,
     isGameEnded,
     latestGameOverEvent,
+    boardTilesByIndex,
+    ownershipByTile,
+    activeLoans,
+    activePurchaseMortgages,
     players,
   ]);
 
@@ -4665,6 +4753,7 @@ export default function PlayV2Page() {
         <EndedGameResultsPanel
           standings={finalStandings}
           reasonLabel={gameOverState.reasonLabel}
+          standingsSource={gameOverState.standingsSource}
           formatMoney={formatMoney}
           onReturnHome={handleReturnHomeFromGameOver}
           onShowSummary={() => setGameOverOverlayDismissed(false)}

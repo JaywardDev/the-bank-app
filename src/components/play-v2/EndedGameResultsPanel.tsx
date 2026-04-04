@@ -15,6 +15,7 @@ type FinalStanding = {
 type EndedGameResultsPanelProps = {
   standings: FinalStanding[];
   reasonLabel?: string | null;
+  standingsSource?: "event" | "fallback" | "missing";
   formatMoney: (value: number) => string;
   onReturnHome: () => void;
   onShowSummary?: () => void;
@@ -50,6 +51,7 @@ function StatusCell({
 export default function EndedGameResultsPanel({
   standings,
   reasonLabel,
+  standingsSource = "event",
   formatMoney,
   onReturnHome,
   onShowSummary,
@@ -87,6 +89,18 @@ export default function EndedGameResultsPanel({
         </div>
 
         <div className="min-h-0 flex-1 p-4 pt-3 sm:p-6 sm:pt-4">
+          {standingsSource === "fallback" ? (
+            <p className="mb-3 rounded-xl border border-amber-200/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+              Final standings payload was missing or malformed; showing reconstructed standings from
+              synced game state.
+            </p>
+          ) : null}
+          {standingsSource === "missing" ? (
+            <p className="mb-3 rounded-xl border border-rose-300/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">
+              Final standings are unavailable for this ended game. Try refreshing; if it persists,
+              this game likely ended without a persisted GAME_OVER standings payload.
+            </p>
+          ) : null}
           <div className="flex h-full min-h-0 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04]">
             <div className="min-h-0 flex-1 overflow-auto">
               <table className="min-w-full border-separate border-spacing-0 text-left">
@@ -102,6 +116,13 @@ export default function EndedGameResultsPanel({
                   </tr>
                 </thead>
                 <tbody>
+                  {standings.length === 0 ? (
+                    <tr className="text-sm text-white/80">
+                      <td className="px-4 py-5" colSpan={7}>
+                        No rankings are available.
+                      </td>
+                    </tr>
+                  ) : null}
                   {standings.map((entry, index) => (
                     <tr
                       key={entry.playerId}

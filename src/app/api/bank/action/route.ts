@@ -2424,6 +2424,24 @@ const computeAuthoritativeFinalStandings = async ({
     }));
 };
 
+const buildGameOverPayload = ({
+  winner,
+  reason,
+  standings,
+  extraPayload = {},
+}: {
+  winner: { id: string; display_name: string | null } | null;
+  reason: string;
+  standings: FinalStanding[];
+  extraPayload?: Record<string, unknown>;
+}) => ({
+  winner_player_id: winner?.id ?? null,
+  winner_player_name: winner?.display_name ?? null,
+  reason,
+  standings,
+  ...extraPayload,
+});
+
 const resolveTurnHandoffCheckpoint = async ({
   gameId,
   game,
@@ -2489,6 +2507,7 @@ const resolveBankruptcyIfNeeded = async ({
   currentVersion,
   userId,
   playerPosition,
+  boardPack,
 }: {
   gameId: string;
   gameState: GameStateRow;
@@ -2502,6 +2521,7 @@ const resolveBankruptcyIfNeeded = async ({
   currentVersion: number;
   userId: string;
   playerPosition: number | null;
+  boardPack: ReturnType<typeof getBoardPackById> | null;
 }): Promise<{
   handled: boolean;
   updatedState?: GameStateRow;
@@ -2613,13 +2633,31 @@ const resolveBankruptcyIfNeeded = async ({
   }
 
   if (gameIsOver) {
+    const standings = await computeAuthoritativeFinalStandings({
+      gameId,
+      gameState: {
+        ...gameState,
+        balances: updatedBalancesNormalized,
+      },
+      players: players.map((candidate) =>
+        candidate.id === player.id
+          ? {
+              ...candidate,
+              is_eliminated: true,
+              eliminated_at: now,
+            }
+          : candidate,
+      ),
+      boardPack,
+    });
+
     bankruptcyEvents.push({
       event_type: "GAME_OVER",
-      payload: {
-        winner_player_id: winner?.id ?? null,
-        winner_player_name: winner?.display_name ?? null,
+      payload: buildGameOverPayload({
+        winner,
         reason: "BANKRUPTCY",
-      },
+        standings,
+      }),
     });
   }
 
@@ -4694,14 +4732,21 @@ const advanceTurn = async ({
       ...events,
       {
         event_type: "GAME_OVER",
-        payload: {
-          winner_player_id: handoffCheckpoint.standings[0]?.playerId ?? null,
-          winner_player_name: handoffCheckpoint.standings[0]?.playerName ?? null,
+        payload: buildGameOverPayload({
+          winner:
+            handoffCheckpoint.standings[0] != null
+              ? {
+                  id: handoffCheckpoint.standings[0].playerId,
+                  display_name: handoffCheckpoint.standings[0].playerName,
+                }
+              : null,
           reason: "ROUND_LIMIT_REACHED",
-          round_limit: game.round_limit,
-          rounds_elapsed: nextRound,
           standings: handoffCheckpoint.standings,
-        },
+          extraPayload: {
+            round_limit: game.round_limit,
+            rounds_elapsed: nextRound,
+          },
+        }),
       },
     ];
     const finalVersion = currentVersion + roundLimitEvents.length;
@@ -5656,24 +5701,45 @@ export async function POST(request: Request) {
         );
       }
 
-      await fetchFromSupabaseWithService(
-        "game_events",
+      const terminalEvents: Array<{
+        event_type: string;
+        payload: Record<string, unknown>;
+      }> = [
         {
-          method: "POST",
-          headers: {
-            Prefer: "return=representation",
+          event_type: "END_GAME",
+          payload: {
+            previous_status: game.status,
           },
-          body: JSON.stringify({
-            game_id: gameId,
-            version: nextVersion,
-            event_type: "END_GAME",
-            payload: {
+        },
+      ];
+
+      if (gameState) {
+        const standings = await computeAuthoritativeFinalStandings({
+          gameId,
+          gameState,
+          players,
+          boardPack,
+        });
+        const winner = standings[0]
+          ? {
+              id: standings[0].playerId,
+              display_name: standings[0].playerName,
+            }
+          : null;
+        terminalEvents.push({
+          event_type: "GAME_OVER",
+          payload: buildGameOverPayload({
+            winner,
+            reason: "MANUAL_END_GAME",
+            standings,
+            extraPayload: {
               previous_status: game.status,
             },
-            created_by: user.id,
           }),
-        },
-      );
+        });
+      }
+
+      await emitGameEvents(gameId, nextVersion, terminalEvents, user.id);
 
       return NextResponse.json({ status: "ended" });
     }
