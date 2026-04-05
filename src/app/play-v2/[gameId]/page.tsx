@@ -959,7 +959,10 @@ export default function PlayV2Page() {
           rank: candidate.rank,
           cash: candidate.cash,
           netWorth: candidate.netWorth,
-          isWinner: candidate.isWinner === true,
+          isWinner:
+            typeof winnerPlayerId === "string"
+              ? candidate.playerId === winnerPlayerId
+              : candidate.isWinner === true,
           isEliminated: candidate.isEliminated === true,
           ownedCount: typeof candidate.ownedCount === "number" ? candidate.ownedCount : 0,
           liabilityCount:
@@ -1009,14 +1012,18 @@ export default function PlayV2Page() {
         };
       })
       .sort((a, b) => {
-        if (b.netWorth !== a.netWorth) {
-          return b.netWorth - a.netWorth;
-        }
-        if (a.isEliminated !== b.isEliminated) {
+        const bankruptcyEndsBySurvival = rawReason === "BANKRUPTCY";
+        if (bankruptcyEndsBySurvival && a.isEliminated !== b.isEliminated) {
           return a.isEliminated ? 1 : -1;
         }
         if (a.eliminatedAtMs !== b.eliminatedAtMs) {
           return a.eliminatedAtMs - b.eliminatedAtMs;
+        }
+        if (b.netWorth !== a.netWorth) {
+          return b.netWorth - a.netWorth;
+        }
+        if (!bankruptcyEndsBySurvival && a.isEliminated !== b.isEliminated) {
+          return a.isEliminated ? 1 : -1;
         }
         return a.playerName.localeCompare(b.playerName);
       })
@@ -1026,7 +1033,7 @@ export default function PlayV2Page() {
         rank: index + 1,
         cash: entry.cash,
         netWorth: entry.netWorth,
-        isWinner: index === 0,
+        isWinner: winnerPlayerId ? entry.playerId === winnerPlayerId : index === 0,
         isEliminated: entry.isEliminated,
         ownedCount: entry.ownedCount,
         liabilityCount: entry.liabilityCount,
@@ -4752,6 +4759,7 @@ export default function PlayV2Page() {
       {gameOverState && gameOverOverlayDismissed ? (
         <EndedGameResultsPanel
           standings={finalStandings}
+          winnerPlayerId={gameOverState.winnerPlayerId}
           reasonLabel={gameOverState.reasonLabel}
           standingsSource={gameOverState.standingsSource}
           formatMoney={formatMoney}

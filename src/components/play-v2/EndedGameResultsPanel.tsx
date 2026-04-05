@@ -14,6 +14,7 @@ type FinalStanding = {
 
 type EndedGameResultsPanelProps = {
   standings: FinalStanding[];
+  winnerPlayerId?: string | null;
   reasonLabel?: string | null;
   standingsSource?: "event" | "fallback" | "missing";
   formatMoney: (value: number) => string;
@@ -50,6 +51,7 @@ function StatusCell({
 
 export default function EndedGameResultsPanel({
   standings,
+  winnerPlayerId = null,
   reasonLabel,
   standingsSource = "event",
   formatMoney,
@@ -127,7 +129,7 @@ export default function EndedGameResultsPanel({
                     <tr
                       key={entry.playerId}
                       className={`text-sm text-white/85 odd:bg-white/[0.02] ${
-                        entry.isWinner ? "bg-amber-300/10" : ""
+                        winnerPlayerId === entry.playerId ? "bg-amber-300/10" : ""
                       }`}
                     >
                       <td
@@ -154,7 +156,7 @@ export default function EndedGameResultsPanel({
                         }`}
                       >
                         <StatusCell
-                          isWinner={entry.isWinner}
+                          isWinner={winnerPlayerId === entry.playerId}
                           isEliminated={entry.isEliminated}
                         />
                       </td>
