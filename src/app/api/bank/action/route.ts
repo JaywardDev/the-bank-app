@@ -59,7 +59,6 @@ import {
   isDevelopableResource,
   isInstantSellResource,
   normalizeInlandCellRecords,
-  normalizeInlandExploredCellKeys,
   rollInlandResourceType,
   serializeInlandCellRecords,
   toInlandCellKey,
@@ -6663,14 +6662,19 @@ export async function POST(request: Request) {
         );
       }
 
-      const exploredKeys = normalizeInlandExploredCellKeys(
-        gameState.inland_explored_cells,
+      const exploredCellsByKey = normalizeInlandCellRecords(gameState.inland_explored_cells);
+      const exploredKeys = new Set(Array.from(exploredCellsByKey.keys()));
+      const playerExploredKeys = new Set(
+        Array.from(exploredCellsByKey.values())
+          .filter((record) => record.ownerPlayerId === currentUserPlayer.id)
+          .map((record) => record.key),
       );
       const targetCell = { row, col };
       if (
         !canExploreInlandCell({
           cell: targetCell,
           exploredKeys,
+          playerExploredKeys,
           ownedTileIndices,
         })
       ) {
@@ -6692,7 +6696,6 @@ export async function POST(request: Request) {
       }
 
       const finalVersion = currentVersion + 2;
-      const exploredCellsByKey = normalizeInlandCellRecords(gameState.inland_explored_cells);
       const targetKey = toInlandCellKey(targetCell);
       const discoveredResourceType = rollInlandResourceType();
       exploredCellsByKey.set(targetKey, {

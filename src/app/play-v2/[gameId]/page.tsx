@@ -48,7 +48,6 @@ import {
   isInstantSellResource,
   isNoneResource,
   normalizeInlandCellRecords,
-  normalizeInlandExploredCellKeys,
   toInlandCellKey,
   type InlandCell,
 } from "@/lib/inlandExploration";
@@ -2494,9 +2493,20 @@ export default function PlayV2Page() {
   );
 
   const exploredInteriorCellKeys = useMemo(
-    () => normalizeInlandExploredCellKeys(gameState?.inland_explored_cells),
-    [gameState?.inland_explored_cells],
+    () => new Set(Array.from(inlandCellsByKey.keys())),
+    [inlandCellsByKey],
   );
+
+  const currentUserExploredInteriorCellKeys = useMemo(() => {
+    if (!currentUserPlayerId) {
+      return new Set<string>();
+    }
+    return new Set(
+      Array.from(inlandCellsByKey.values())
+        .filter((record) => record.ownerPlayerId === currentUserPlayerId)
+        .map((record) => record.key),
+    );
+  }, [currentUserPlayerId, inlandCellsByKey]);
 
   const selectedInteriorCellKey = useMemo(
     () => (selectedInteriorCell ? toInlandCellKey(selectedInteriorCell) : null),
@@ -2576,9 +2586,11 @@ export default function PlayV2Page() {
     return canExploreInlandCell({
       cell: selectedInteriorCell,
       exploredKeys: exploredInteriorCellKeys,
+      playerExploredKeys: currentUserExploredInteriorCellKeys,
       ownedTileIndices: currentUserOwnedTileIndices,
     });
   }, [
+    currentUserExploredInteriorCellKeys,
     currentUserOwnedTileIndices,
     currentUserPlayerId,
     exploredInteriorCellKeys,

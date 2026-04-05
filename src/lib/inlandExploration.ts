@@ -309,10 +309,12 @@ export const normalizeInlandExploredCellKeys = (value: unknown): Set<string> => 
 export const canExploreInlandCell = ({
   cell,
   exploredKeys,
+  playerExploredKeys,
   ownedTileIndices,
 }: {
   cell: InlandCell;
   exploredKeys: Set<string>;
+  playerExploredKeys: Set<string>;
   ownedTileIndices: number[];
 }) => {
   if (!isInlandCellInBounds(cell)) {
@@ -329,7 +331,7 @@ export const canExploreInlandCell = ({
   }
 
   const neighbors = getOrthogonalNeighbors(cell);
-  if (neighbors.some((neighbor) => exploredKeys.has(toInlandCellKey(neighbor)))) {
+  if (neighbors.some((neighbor) => playerExploredKeys.has(toInlandCellKey(neighbor)))) {
     return true;
   }
 
