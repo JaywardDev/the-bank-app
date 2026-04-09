@@ -436,6 +436,8 @@ export default function PlayV2Page() {
     null,
   );
   const recenterBoardRef = useRef<(() => void) | null>(null);
+  const latestGameStateVersionRef = useRef<number | null>(null);
+  const auctionAutoPassSubmittedForKeyRef = useRef<string | null>(null);
 
   const clearLastOpenedIfMatches = useCallback(
     (targetGameId: string | null) => {
@@ -479,8 +481,47 @@ export default function PlayV2Page() {
       setShowLeaveConfirm(false);
       setShowEndSessionConfirm(false);
       setShowHostLeaveGuard(false);
+      latestGameStateVersionRef.current = null;
+      auctionAutoPassSubmittedForKeyRef.current = null;
     },
     [clearLastOpenedIfMatches],
+  );
+
+  const applyIncomingGameState = useCallback(
+    (incomingState: GameState | null, options?: { allowEqualVersion?: boolean }) => {
+      if (!incomingState) {
+        latestGameStateVersionRef.current = null;
+        setGameState(null);
+        return;
+      }
+
+      setGameState((previousState) => {
+        if (!previousState) {
+          latestGameStateVersionRef.current = incomingState.version;
+          return incomingState;
+        }
+
+        if (incomingState.version > previousState.version) {
+          latestGameStateVersionRef.current = incomingState.version;
+          return incomingState;
+        }
+
+        if (
+          incomingState.version === previousState.version &&
+          options?.allowEqualVersion
+        ) {
+          latestGameStateVersionRef.current = incomingState.version;
+          return incomingState;
+        }
+
+        latestGameStateVersionRef.current = Math.max(
+          latestGameStateVersionRef.current ?? previousState.version,
+          previousState.version,
+        );
+        return previousState;
+      });
+    },
+    [],
   );
 
   const loadGameMeta = useCallback(
@@ -518,9 +559,9 @@ export default function PlayV2Page() {
         { method: "GET" },
         accessToken,
       );
-      setGameState(stateRow ?? null);
+      applyIncomingGameState(stateRow ?? null);
     },
-    [],
+    [applyIncomingGameState],
   );
 
   const loadEvents = useCallback(
@@ -1659,6 +1700,15 @@ export default function PlayV2Page() {
           auctionRemainingSeconds % 60,
         ).padStart(2, "0")}`
       : null;
+  const auctionAutoPassGuardKey = useMemo(
+    () =>
+      [
+        gameState?.version ?? "no-version",
+        auctionTurnPlayerId ?? "no-turn-player",
+        auctionTurnEndsAt ?? "no-turn-end",
+      ].join(":"),
+    [auctionTurnEndsAt, auctionTurnPlayerId, gameState?.version],
+  );
 
   useEffect(() => {
     if (!auctionActive) {
@@ -1796,8 +1846,12 @@ export default function PlayV2Page() {
         }
 
         if (result.response.status === 409) {
-          await loadAllSlices(routeGameId, accessToken);
-          const message = "Game state updated. Please try again.";
+          const isAuctionConflict =
+            request.action === "AUCTION_BID" || request.action === "AUCTION_PASS";
+          await refetchActionSlices(routeGameId, accessToken);
+          const message = isAuctionConflict
+            ? "Auction updated. Synced latest state."
+            : "Game state updated. Please try again.";
           if (!uiOptions?.suppressNotice) {
             setNotice(message);
           }
@@ -1832,7 +1886,6 @@ export default function PlayV2Page() {
     },
     [
       gameState?.version,
-      loadAllSlices,
       refetchActionSlices,
       routeGameId,
       session,
@@ -1945,6 +1998,34 @@ export default function PlayV2Page() {
     }
     void handleBankAction("AUCTION_PASS");
   }, [canActInAuction, handleBankAction]);
+
+  useEffect(() => {
+    if (!auctionActive) {
+      auctionAutoPassSubmittedForKeyRef.current = null;
+      return;
+    }
+
+    if (auctionAutoPassSubmittedForKeyRef.current !== auctionAutoPassGuardKey) {
+      auctionAutoPassSubmittedForKeyRef.current = null;
+    }
+
+    if (!canActInAuction || auctionRemainingSeconds !== 0) {
+      return;
+    }
+
+    if (auctionAutoPassSubmittedForKeyRef.current === auctionAutoPassGuardKey) {
+      return;
+    }
+
+    auctionAutoPassSubmittedForKeyRef.current = auctionAutoPassGuardKey;
+    void handleBankAction("AUCTION_PASS", undefined, { suppressNotice: true });
+  }, [
+    auctionActive,
+    auctionAutoPassGuardKey,
+    auctionRemainingSeconds,
+    canActInAuction,
+    handleBankAction,
+  ]);
 
   const handlePayJailFine = useCallback(() => {
     if (!isJailDecisionActor) {

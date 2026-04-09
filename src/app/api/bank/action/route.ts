@@ -1862,6 +1862,121 @@ const getNextEligibleAuctionPlayerId = (
   return null;
 };
 
+type AuctionTimeoutProgressResult = {
+  eligiblePlayerIds: string[];
+  passedPlayerIds: Set<string>;
+  currentBid: number;
+  currentWinnerId: string | null;
+  turnPlayerId: string | null;
+  turnEndsAt: Date | null;
+  minIncrement: number;
+  timeoutEvents: Array<{
+    event_type: string;
+    payload: Record<string, unknown>;
+  }>;
+};
+
+const advanceAuctionForExpiredTurns = ({
+  gameState,
+  players,
+  rules,
+  boardPackEconomy,
+  now,
+}: {
+  gameState: GameStateRow;
+  players: PlayerRow[];
+  rules: ReturnType<typeof getRules>;
+  boardPackEconomy: BoardPackEconomy;
+  now: Date;
+}): AuctionTimeoutProgressResult => {
+  const activePlayerIds = players
+    .filter((player) => !player.is_eliminated)
+    .map((player) => player.id);
+  const eligiblePlayerIds = normalizePlayerIdArray(
+    gameState.auction_eligible_player_ids,
+  ).filter((id) => activePlayerIds.includes(id));
+
+  const passedPlayerIds = new Set(
+    normalizePlayerIdArray(gameState.auction_passed_player_ids).filter((id) =>
+      eligiblePlayerIds.includes(id),
+    ),
+  );
+  const currentBid =
+    typeof gameState.auction_current_bid === "number"
+      ? gameState.auction_current_bid
+      : 0;
+  const currentWinnerId =
+    typeof gameState.auction_current_winner_player_id === "string"
+      ? gameState.auction_current_winner_player_id
+      : null;
+  let turnPlayerId =
+    typeof gameState.auction_turn_player_id === "string"
+      ? gameState.auction_turn_player_id
+      : null;
+  let turnEndsAt = gameState.auction_turn_ends_at
+    ? new Date(gameState.auction_turn_ends_at)
+    : null;
+  const minIncrement =
+    typeof gameState.auction_min_increment === "number"
+      ? gameState.auction_min_increment
+      : (boardPackEconomy.auctionMinIncrement ?? 10);
+  const timeoutEvents: AuctionTimeoutProgressResult["timeoutEvents"] = [];
+
+  const advanceTurn = (fromPlayerId: string | null) =>
+    getNextEligibleAuctionPlayerId(
+      players,
+      fromPlayerId,
+      eligiblePlayerIds,
+      passedPlayerIds,
+    );
+
+  const isValidTurnPlayer = (playerId: string | null) =>
+    Boolean(
+      playerId &&
+        eligiblePlayerIds.includes(playerId) &&
+        !passedPlayerIds.has(playerId) &&
+        !players.find((player) => player.id === playerId)?.is_eliminated,
+    );
+
+  if (!isValidTurnPlayer(turnPlayerId)) {
+    const nextTurnId = advanceTurn(turnPlayerId);
+    turnPlayerId = nextTurnId;
+    turnEndsAt = nextTurnId
+      ? new Date(now.getTime() + rules.auctionTurnSeconds * 1000)
+      : null;
+  }
+
+  while (turnPlayerId && turnEndsAt && now > turnEndsAt) {
+    if (!passedPlayerIds.has(turnPlayerId)) {
+      passedPlayerIds.add(turnPlayerId);
+      timeoutEvents.push({
+        event_type: "AUCTION_PASS",
+        payload: {
+          tile_index: gameState.auction_tile_index,
+          player_id: turnPlayerId,
+          auto: true,
+        },
+      });
+    }
+    const nextTurnId = advanceTurn(turnPlayerId);
+    turnPlayerId = nextTurnId;
+    turnEndsAt = nextTurnId
+      ? new Date(now.getTime() + rules.auctionTurnSeconds * 1000)
+      : null;
+  }
+
+  return {
+    eligiblePlayerIds,
+    passedPlayerIds,
+    currentBid,
+    currentWinnerId,
+    turnPlayerId,
+    turnEndsAt,
+    minIncrement,
+    timeoutEvents,
+  };
+};
+
 const parsePendingInsolvencyAction = (
   pendingAction: Record<string, unknown> | null | undefined,
 ): InsolvencyPendingAction | null => {
@@ -6557,6 +6672,70 @@ export async function POST(request: Request) {
     }
 
     if (gameState.auction_active && !isAuctionAction) {
+      const timeoutProgress = advanceAuctionForExpiredTurns({
+        gameState,
+        players,
+        rules,
+        boardPackEconomy,
+        now: new Date(),
+      });
+      const nextPassedIds = Array.from(timeoutProgress.passedPlayerIds);
+      const existingPassedIds = normalizePlayerIdArray(
+        gameState.auction_passed_player_ids,
+      );
+      const shouldUpdateAuctionState =
+        timeoutProgress.timeoutEvents.length > 0 ||
+        timeoutProgress.turnPlayerId !== gameState.auction_turn_player_id ||
+        (timeoutProgress.turnEndsAt?.toISOString() ?? null) !==
+          (gameState.auction_turn_ends_at ?? null) ||
+        nextPassedIds.length !== existingPassedIds.length;
+
+      if (shouldUpdateAuctionState) {
+        const stateOnlyMutationCount =
+          timeoutProgress.timeoutEvents.length === 0 ? 1 : 0;
+        const nextVersion =
+          currentVersion +
+          timeoutProgress.timeoutEvents.length +
+          stateOnlyMutationCount;
+        const [updatedAuctionState] = (await fetchFromSupabaseWithService<
+          GameStateRow[]
+        >(`game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`, {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            version: nextVersion,
+            auction_turn_player_id: timeoutProgress.turnPlayerId,
+            auction_turn_ends_at: timeoutProgress.turnEndsAt
+              ? timeoutProgress.turnEndsAt.toISOString()
+              : null,
+            auction_passed_player_ids: nextPassedIds,
+            auction_eligible_player_ids: timeoutProgress.eligiblePlayerIds,
+            auction_current_bid: timeoutProgress.currentBid,
+            auction_current_winner_player_id: timeoutProgress.currentWinnerId,
+            auction_min_increment: timeoutProgress.minIncrement,
+            updated_at: new Date().toISOString(),
+          }),
+        })) ?? [];
+
+        if (!updatedAuctionState) {
+          return NextResponse.json(
+            { error: "Version mismatch." },
+            { status: 409 },
+          );
+        }
+
+        if (timeoutProgress.timeoutEvents.length > 0) {
+          await emitGameEvents(
+            gameId,
+            currentVersion + 1,
+            timeoutProgress.timeoutEvents,
+            user.id,
+          );
+        }
+      }
+
       return NextResponse.json(
         { error: "Auction in progress." },
         { status: 409 },
@@ -7297,13 +7476,23 @@ export async function POST(request: Request) {
         );
       }
 
-      const activePlayerIds = players
-        .filter((player) => !player.is_eliminated)
-        .map((player) => player.id);
-      const eligiblePlayerIds = normalizePlayerIdArray(
-        gameState.auction_eligible_player_ids,
-      ).filter((id) => activePlayerIds.includes(id));
-
+      const now = new Date();
+      const {
+        eligiblePlayerIds,
+        passedPlayerIds,
+        currentBid: normalizedCurrentBid,
+        currentWinnerId: normalizedCurrentWinnerId,
+        turnPlayerId: normalizedTurnPlayerId,
+        turnEndsAt: normalizedTurnEndsAt,
+        minIncrement,
+        timeoutEvents,
+      } = advanceAuctionForExpiredTurns({
+        gameState,
+        players,
+        rules,
+        boardPackEconomy,
+        now,
+      });
       if (eligiblePlayerIds.length === 0) {
         return NextResponse.json(
           { error: "Auction has no eligible bidders." },
@@ -7311,35 +7500,14 @@ export async function POST(request: Request) {
         );
       }
 
-      const passedPlayerIds = new Set(
-        normalizePlayerIdArray(gameState.auction_passed_player_ids).filter((id) =>
-          eligiblePlayerIds.includes(id),
-        ),
-      );
-      let currentBid =
-        typeof gameState.auction_current_bid === "number"
-          ? gameState.auction_current_bid
-          : 0;
-      let currentWinnerId =
-        typeof gameState.auction_current_winner_player_id === "string"
-          ? gameState.auction_current_winner_player_id
-          : null;
-      let turnPlayerId =
-        typeof gameState.auction_turn_player_id === "string"
-          ? gameState.auction_turn_player_id
-          : null;
-      let turnEndsAt = gameState.auction_turn_ends_at
-        ? new Date(gameState.auction_turn_ends_at)
-        : null;
-      const minIncrement =
-        typeof gameState.auction_min_increment === "number"
-          ? gameState.auction_min_increment
-          : (boardPackEconomy.auctionMinIncrement ?? 10);
-      const now = new Date();
+      let currentBid = normalizedCurrentBid;
+      let currentWinnerId = normalizedCurrentWinnerId;
+      let turnPlayerId = normalizedTurnPlayerId;
+      let turnEndsAt = normalizedTurnEndsAt;
       const auctionEvents: Array<{
         event_type: string;
         payload: Record<string, unknown>;
-      }> = [];
+      }> = [...timeoutEvents];
 
       const advanceTurn = (fromPlayerId: string | null) =>
         getNextEligibleAuctionPlayerId(
@@ -7348,42 +7516,6 @@ export async function POST(request: Request) {
           eligiblePlayerIds,
           passedPlayerIds,
         );
-
-      const isValidTurnPlayer = (playerId: string | null) =>
-        Boolean(
-          playerId &&
-            eligiblePlayerIds.includes(playerId) &&
-            !passedPlayerIds.has(playerId) &&
-            !players.find((player) => player.id === playerId)?.is_eliminated,
-        );
-
-      if (!isValidTurnPlayer(turnPlayerId)) {
-        const nextTurnId = advanceTurn(turnPlayerId);
-        turnPlayerId = nextTurnId;
-        turnEndsAt = nextTurnId
-          ? new Date(now.getTime() + rules.auctionTurnSeconds * 1000)
-          : null;
-      }
-
-      while (turnPlayerId && turnEndsAt && now > turnEndsAt) {
-        if (!passedPlayerIds.has(turnPlayerId)) {
-          passedPlayerIds.add(turnPlayerId);
-          auctionEvents.push({
-            event_type: "AUCTION_PASS",
-            payload: {
-              tile_index: auctionTileIndex,
-              player_id: turnPlayerId,
-              auto: true,
-            },
-          });
-        }
-
-        const nextTurnId = advanceTurn(turnPlayerId);
-        turnPlayerId = nextTurnId;
-        turnEndsAt = nextTurnId
-          ? new Date(now.getTime() + rules.auctionTurnSeconds * 1000)
-          : null;
-      }
 
       const allEligiblePassed = eligiblePlayerIds.every((id) =>
         passedPlayerIds.has(id),
@@ -7559,7 +7691,9 @@ export async function POST(request: Request) {
           nextPassedIds.length !== existingPassedIds.length;
 
         if (shouldUpdateState) {
-          const finalVersion = currentVersion + auctionEvents.length;
+          const stateOnlyMutationCount = auctionEvents.length === 0 ? 1 : 0;
+          const finalVersion =
+            currentVersion + auctionEvents.length + stateOnlyMutationCount;
           const [updatedState] = (await fetchFromSupabaseWithService<
             GameStateRow[]
           >(`game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`, {
