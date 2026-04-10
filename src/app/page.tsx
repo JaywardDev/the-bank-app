@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getConfigErrors } from "@/lib/env";
 import { boardPacks, defaultBoardPackId } from "@/lib/boardPacks";
+import { postGameActionRequest } from "@/lib/client/postGameActionRequest";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 import InfoTooltip from "@/app/components/InfoTooltip";
 
@@ -200,28 +201,30 @@ export default function Home() {
     setNotice(null);
 
     try {
-      const response = await fetch("/api/bank/action", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          action: "CREATE_GAME",
-          playerName: playerName.trim(),
-          boardPackId,
-          gameMode,
-          roundLimit: gameMode === "round_mode" ? roundLimit : null,
-        }),
+      const payload = {
+        action: "CREATE_GAME",
+        playerName: playerName.trim(),
+        boardPackId,
+        gameMode,
+        roundLimit: gameMode === "round_mode" ? roundLimit : null,
+      };
+      const response = await postGameActionRequest({
+        payload,
+        accessToken: session.access_token,
       });
 
-      if (!response.ok) {
-        const error = (await response.json()) as { error?: string };
-        throw new Error(error.error ?? "Unable to create the game.");
+      if (response.refreshedSession) {
+        const refreshedSession = await supabaseClient.getSession();
+        setSession(refreshedSession);
       }
 
-      const data = (await response.json()) as { gameId?: string };
-      if (!data.gameId) {
+      if (!response.ok) {
+        const error = response.body as { error?: string } | null;
+        throw new Error(error?.error ?? "Unable to create the game.");
+      }
+
+      const data = response.body as { gameId?: string } | null;
+      if (!data?.gameId) {
         throw new Error("Unable to create the game.");
       }
 
@@ -264,39 +267,41 @@ export default function Home() {
     setNotice(null);
 
     try {
-      const response = await fetch("/api/bank/action", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          action: "JOIN_GAME",
-          joinCode: joinCode.trim(),
-          displayName: playerName.trim(),
-        }),
+      const payload = {
+        action: "JOIN_GAME",
+        joinCode: joinCode.trim(),
+        displayName: playerName.trim(),
+      };
+      const response = await postGameActionRequest({
+        payload,
+        accessToken: session.access_token,
       });
 
-      if (!response.ok) {
-        const error = (await response.json()) as { error?: string };
-        if (response.status === 409) {
-          throw new Error(
-            error.error ?? "That game has already started. Ask the host to reset.",
-          );
-        }
-        throw new Error(error.error ?? "Unable to join the game.");
+      if (response.refreshedSession) {
+        const refreshedSession = await supabaseClient.getSession();
+        setSession(refreshedSession);
       }
 
-      const data = (await response.json()) as {
+      if (!response.ok) {
+        const error = response.body as { error?: string } | null;
+        if (response.status === 409) {
+          throw new Error(
+            error?.error ?? "That game has already started. Ask the host to reset.",
+          );
+        }
+        throw new Error(error?.error ?? "Unable to join the game.");
+      }
+
+      const data = response.body as {
         gameId?: string;
         join_code?: string | null;
         created_at?: string | null;
         board_pack_id?: string | null;
         status?: string | null;
         created_by?: string | null;
-      };
+      } | null;
 
-      if (!data.gameId || !data.join_code) {
+      if (!data?.gameId || !data.join_code) {
         throw new Error("Unable to join the game.");
       }
 
