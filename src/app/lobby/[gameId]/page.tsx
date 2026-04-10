@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { getConfigErrors } from "@/lib/env";
+import { postGameActionRequest } from "@/lib/client/postGameActionRequest";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 
 const lastGameKey = "bank.lastGameId";
@@ -144,47 +145,40 @@ export default function LobbyPage() {
         throw new Error("Sign in on the home page to continue.");
       }
 
-      const performRequest = (accessToken: string) =>
-        fetch("/api/bank/action", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${accessToken}`,
-          },
-          body: JSON.stringify(body),
-        });
+      const result = await postGameActionRequest({
+        payload: body,
+        accessToken: session.access_token,
+      });
 
-      let response = await performRequest(session.access_token);
       let accessToken = session.access_token;
 
-      if (response.status === 401) {
-        const refreshedSession = await supabaseClient.refreshSession();
-        setSession(refreshedSession);
-        latestSessionRef.current = refreshedSession;
+      if (result.refreshedSession) {
+        const refreshedSessionState = await supabaseClient.getSession();
+        setSession(refreshedSessionState);
+        latestSessionRef.current = refreshedSessionState;
 
-        if (!refreshedSession?.access_token) {
+        if (!refreshedSessionState?.access_token) {
           setSessionInvalid(true);
           setNotice(SESSION_EXPIRED_MESSAGE);
           return null;
         }
 
-        accessToken = refreshedSession.access_token;
-        response = await performRequest(accessToken);
+        accessToken = refreshedSessionState.access_token;
       }
 
-      if (response.status === 401) {
+      if (result.status === 401) {
         setSessionInvalid(true);
         setNotice(SESSION_EXPIRED_MESSAGE);
         return null;
       }
 
-      if (!response.ok) {
-        const error = (await response.json()) as { error?: string };
-        throw new Error(error.error ?? "Unable to complete this action.");
+      if (!result.ok) {
+        const error = result.body as { error?: string } | null;
+        throw new Error(error?.error ?? "Unable to complete this action.");
       }
 
       setSessionInvalid(false);
-      return { response, accessToken };
+      return { response: result, accessToken };
     },
     [session],
   );
