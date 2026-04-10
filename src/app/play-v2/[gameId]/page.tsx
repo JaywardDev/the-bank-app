@@ -347,6 +347,7 @@ type FinalStanding = {
 const SESSION_EXPIRED_MESSAGE = "Session expired — please sign in again";
 const MIN_LOADING_SCREEN_MS = 5000;
 const lastGameKey = "bank.lastGameId";
+const RESUME_REFRESH_DEBOUNCE_MS = 400;
 
 export default function PlayV2Page() {
   const router = useRouter();
@@ -432,6 +433,14 @@ export default function PlayV2Page() {
   const [cancelingBetId, setCancelingBetId] = useState<string | null>(null);
 
   const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
+  const resumeRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const resumeRefreshInFlightRef = useRef(false);
+  const isMountedRef = useRef(true);
+  const latestRouteGameIdRef = useRef<string | null>(routeGameId ?? null);
+  const latestAccessTokenRef = useRef<string | null>(session?.access_token ?? null);
+  const latestLoadAllSlicesRef = useRef<typeof loadAllSlices | null>(null);
   const ownedReasonTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -704,6 +713,51 @@ export default function PlayV2Page() {
   );
 
   useEffect(() => {
+    latestRouteGameIdRef.current = routeGameId ?? null;
+  }, [routeGameId]);
+
+  useEffect(() => {
+    latestAccessTokenRef.current = session?.access_token ?? null;
+  }, [session?.access_token]);
+
+  useEffect(() => {
+    latestLoadAllSlicesRef.current = loadAllSlices;
+  }, [loadAllSlices]);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  const requestResumeRefresh = useCallback(() => {
+    const gameId = latestRouteGameIdRef.current;
+    const accessToken = latestAccessTokenRef.current;
+    if (!gameId || !accessToken) {
+      return;
+    }
+
+    if (resumeRefreshTimeoutRef.current) {
+      clearTimeout(resumeRefreshTimeoutRef.current);
+    }
+
+    resumeRefreshTimeoutRef.current = setTimeout(async () => {
+      if (resumeRefreshInFlightRef.current || !isMountedRef.current) {
+        return;
+      }
+
+      resumeRefreshInFlightRef.current = true;
+
+      try {
+        await latestLoadAllSlicesRef.current?.(gameId, accessToken);
+      } finally {
+        resumeRefreshInFlightRef.current = false;
+      }
+    }, RESUME_REFRESH_DEBOUNCE_MS);
+  }, []);
+
+  useEffect(() => {
     let isMounted = true;
 
     const hydrate = async () => {
@@ -884,6 +938,35 @@ export default function PlayV2Page() {
     routeGameId,
     session,
   ]);
+
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        requestResumeRefresh();
+      }
+    };
+
+    const handleFocus = () => {
+      requestResumeRefresh();
+    };
+
+    const handleOnline = () => {
+      requestResumeRefresh();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("online", handleOnline);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("online", handleOnline);
+      if (resumeRefreshTimeoutRef.current) {
+        clearTimeout(resumeRefreshTimeoutRef.current);
+      }
+    };
+  }, [requestResumeRefresh]);
 
   const isGameEnded = (gameMeta?.status ?? "").toLowerCase() === "ended";
 
