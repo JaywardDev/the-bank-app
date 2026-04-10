@@ -26,6 +26,7 @@ import { getDevelopmentLevelLabel } from "@/components/play-v2/utils/development
 import { DEFAULT_BOARD_PACK_ECONOMY, getBoardPackById } from "@/lib/boardPacks";
 import { resolveBoardTilesForRules } from "@/lib/resolvedBoardTiles";
 import { getTileBandColor } from "@/lib/boardTileStyles";
+import { postGameActionRequest } from "@/lib/client/postGameActionRequest";
 import {
   computeOwnedAssetValue,
   computeTaxableAssetValueForLuxuryTax,
@@ -1869,21 +1870,26 @@ export default function PlayV2Page() {
         };
 
         const runActionRequest = async (accessToken: string) => {
-          const response = await fetch("/api/bank/action", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${accessToken}`,
-            },
-            body: JSON.stringify(requestBody),
+          const response = await postGameActionRequest({
+            payload: requestBody,
+            accessToken,
           });
-
-          const payload = (await response.json().catch(() => null)) as {
+          const payload = (response.body as {
             error?: string;
             message?: string;
-          } | null;
+          } | null) ?? null;
+          const refreshedSession = response.refreshedSession
+            ? await supabaseClient.getSession()
+            : null;
 
-          return { payload, response };
+          return {
+            payload,
+            response: {
+              status: response.status,
+              ok: response.ok,
+            },
+            refreshedSession,
+          };
         };
 
         const getErrorMessage = (
@@ -1914,18 +1920,19 @@ export default function PlayV2Page() {
         let accessToken = session.access_token;
         let result = await runActionRequest(accessToken);
 
+        if (result.refreshedSession?.access_token) {
+          setSession(result.refreshedSession);
+          accessToken = result.refreshedSession.access_token;
+        }
+
         if (result.response.status === 401) {
-          const refreshedSession = await supabaseClient.refreshSession();
-          if (!refreshedSession?.access_token) {
+          if (!result.refreshedSession?.access_token) {
             setNeedsAuth(true);
             if (!uiOptions?.suppressNotice) {
               setNotice(SESSION_EXPIRED_MESSAGE);
             }
             return { ok: false, error: SESSION_EXPIRED_MESSAGE };
           }
-          setSession(refreshedSession);
-          accessToken = refreshedSession.access_token;
-          result = await runActionRequest(accessToken);
         }
 
         if (result.response.status === 409) {
