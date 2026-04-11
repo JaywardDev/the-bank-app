@@ -603,25 +603,17 @@ export default function LobbyPage() {
         aria-hidden="true"
       />
       <div className={compactLandscapeStyles.container}>
-        <header className={`${compactLandscapeStyles.header} items-start gap-3`}>
-          <div className="space-y-0.5">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-neutral-600">
-              Lobby
-            </p>
+        <header className={`${compactLandscapeStyles.header} items-center justify-between gap-3`}>
+          <div>
             <h1 className="text-xl font-semibold leading-tight text-neutral-900 sm:text-2xl">
               Waiting room
             </h1>
           </div>
           {activeGame ? (
-            <div className="flex items-center gap-2 self-center">
-              <button
-                className="rounded-lg border border-amber-200/80 bg-white/80 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.15em] text-neutral-800"
-                type="button"
-                onClick={() => setActiveModal("invite")}
-                aria-label="Invite players"
-              >
-                {activeGame.join_code}
-              </button>
+            <div className="flex items-center gap-2">
+              <div className="rounded-full border border-neutral-200/90 bg-white/70 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-600">
+                Code <span className="font-mono text-neutral-800">{activeGame.join_code}</span>
+              </div>
               <button
                 className="rounded-lg border border-amber-200/80 bg-white/80 px-3 py-1.5 text-xs font-semibold text-neutral-700"
                 type="button"
