@@ -5209,6 +5209,7 @@ export default function PlayV2Page() {
         turnPlayerId={auctionTurnPlayerId}
         turnPlayerName={auctionTurnPlayerName}
         auctionCountdownLabel={auctionCountdownLabel}
+        auctionRemainingSeconds={auctionRemainingSeconds}
         canAct={canActInAuction}
         minIncrement={auctionMinIncrement}
         bidderCash={currentBidderCash}
