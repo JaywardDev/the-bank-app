@@ -32,13 +32,13 @@ type AuctionBidControlsProps = {
 };
 
 function getCountdownChipClass(secondsLeft: number | null) {
-  if (secondsLeft != null && secondsLeft < 5) {
-    return "border-red-400 bg-red-600 text-white shadow-sm shadow-red-600/30 animate-pulse";
+  if (secondsLeft != null && secondsLeft <= 5) {
+    return "border-red-500 bg-red-600 text-white shadow-sm shadow-red-600/30 animate-pulse";
   }
-  if (secondsLeft != null && secondsLeft < 10) {
+  if (secondsLeft != null && secondsLeft <= 10) {
     return "border-red-200 bg-red-50 text-red-700";
   }
-  if (secondsLeft != null && secondsLeft <= 15) {
+  if (secondsLeft != null && secondsLeft <= 30) {
     return "border-amber-200 bg-amber-50 text-amber-700";
   }
   return "border-neutral-200 bg-neutral-50 text-neutral-700";
@@ -164,24 +164,23 @@ export default function AuctionOverlayV2({
           </div>
 
           <div className="grid gap-2 p-3">
-            <div className="flex flex-wrap items-center gap-1.5 text-xs text-neutral-700">
-              <span className="rounded-full border border-neutral-200 bg-neutral-50 px-2 py-0.5">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-neutral-600">
+              <span>
                 Leader: <span className="font-semibold text-neutral-900">{highestBidderName ?? "No bids yet"}</span>
               </span>
-              <span className="rounded-full border border-neutral-200 bg-neutral-50 px-2 py-0.5">
+              <span>
                 Current bidder:{" "}
                 <span className="font-semibold text-neutral-900">{turnPlayerName ?? "Waiting for bidder"}</span>
               </span>
-              <span className="rounded-full border border-neutral-200 bg-neutral-50 px-2 py-0.5">
+              <span>
                 Min next bid: <span className="font-semibold text-neutral-900">{formatCurrency(minNextBid, currency)}</span>
               </span>
-              <span className="rounded-full border border-neutral-200 bg-neutral-50 px-2 py-0.5">
-                Increment: <span className="font-semibold text-neutral-900">{formatCurrency(minIncrement, currency)}</span>
-              </span>
-              <span className="rounded-full border border-neutral-200 bg-neutral-50 px-2 py-0.5">
+              <span>
                 Your cash: <span className="font-semibold text-neutral-900">{formatCurrency(bidderCash, currency)}</span>
               </span>
-              <span className="rounded-full border border-neutral-200 bg-white px-2 py-0.5 font-semibold text-neutral-800">
+              <span
+                className={`font-semibold sm:ml-auto ${canAct ? "text-emerald-700" : "text-rose-700"}`}
+              >
                 {canAct ? "Your turn" : `Waiting for ${turnPlayerName ?? "next bidder"}`}
               </span>
             </div>
