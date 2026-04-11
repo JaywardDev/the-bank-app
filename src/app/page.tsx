@@ -340,7 +340,7 @@ export default function Home() {
   };
 
   return (
-    <main className="relative flex h-dvh flex-col overflow-hidden bg-[#F6F1E8] px-3 py-2 sm:px-4 sm:py-3">
+    <main className="relative flex h-[100svh] flex-col overflow-hidden bg-[#F6F1E8] px-3 py-2 pb-[max(env(safe-area-inset-bottom),0.5rem)] sm:px-4 sm:py-3 sm:pb-[max(env(safe-area-inset-bottom),0.75rem)]">
       <div
         className="pointer-events-none absolute inset-0 z-0 bg-[url('/icons/home_page.svg')] bg-cover bg-center bg-fixed"
         aria-hidden="true"
@@ -349,13 +349,13 @@ export default function Home() {
         className="pointer-events-none absolute inset-0 z-10 bg-neutral-950/15"
         aria-hidden="true"
       />
-      <div className="relative z-20 mx-auto flex w-full max-w-7xl flex-1 min-h-0 flex-col gap-3 md:gap-4">
-        <header className="flex flex-none items-start justify-between gap-3 rounded-2xl border border-amber-100/70 bg-[#FBFAF7]/95 px-4 py-2.5 shadow-[0_8px_20px_rgba(34,21,10,0.12)] md:px-5 md:py-3">
-          <div className="space-y-1">
-            <h1 className="text-xl font-semibold leading-tight text-neutral-900 sm:text-2xl">
+      <div className="relative z-20 mx-auto flex w-full max-w-7xl flex-1 min-h-0 flex-col gap-2.5 md:gap-3">
+        <header className="flex flex-none items-start justify-between gap-3 rounded-2xl border border-amber-100/70 bg-[#FBFAF7]/95 px-3.5 py-2 shadow-[0_8px_20px_rgba(34,21,10,0.12)] md:px-4 md:py-2.5">
+          <div className="space-y-0.5">
+            <h1 className="text-lg font-semibold leading-tight text-neutral-900 sm:text-xl">
               The Bank
             </h1>
-            <p className="text-xs text-neutral-600 sm:text-sm">
+            <p className="text-[11px] leading-tight text-neutral-600 sm:text-xs">
               A high-stakes table game of deals, risks, and fortune.
             </p>
           </div>
@@ -383,7 +383,7 @@ export default function Home() {
         ) : null}
 
         {!session ? (
-          <div className="grid flex-1 min-h-0 gap-3 sm:grid-cols-2 sm:items-start">
+          <div className="flex flex-1 min-h-0 flex-col gap-3 sm:flex-row sm:items-start">
             <section className="space-y-2 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-3 shadow-[0_8px_20px_rgba(34,21,10,0.12)]">
               <div className="space-y-1">
                 <h2 className="text-base font-semibold">Sign in</h2>
@@ -437,8 +437,8 @@ export default function Home() {
         ) : null}
 
         {session ? (
-          <div className="grid flex-1 min-h-0 gap-3 sm:grid-cols-[minmax(280px,0.9fr)_minmax(0,1.1fr)] sm:items-start">
-            <div className="flex min-h-0 flex-col gap-3 overflow-y-auto pr-1">
+          <div className="flex flex-1 min-h-0 flex-col gap-3 sm:flex-row sm:items-start">
+            <div className="flex flex-1 min-h-0 flex-col gap-3 overflow-y-auto pr-1">
               <section className="space-y-2 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-3 shadow-[0_8px_20px_rgba(34,21,10,0.12)]">
                 <h2 className="text-sm font-semibold uppercase tracking-[0.08em] text-neutral-700">
                   Player
@@ -477,7 +477,7 @@ export default function Home() {
               </section>
             </div>
 
-            <div className="flex min-h-0 flex-col gap-3">
+            <div className="flex flex-1 min-h-0 flex-col gap-2">
               <section className="flex-none space-y-2 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-3 shadow-[0_8px_20px_rgba(34,21,10,0.12)]">
                 <h2 className="text-base font-semibold">Host a table</h2>
                 <p className="text-xs text-neutral-500 sm:text-sm">
