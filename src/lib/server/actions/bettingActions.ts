@@ -69,7 +69,7 @@ export const handleBettingAction = async ({
 
     const kind = body.kind;
     const stakeRaw = body.stake;
-    if (!Number.isInteger(stakeRaw) || stakeRaw <= 0) {
+    if (typeof stakeRaw !== "number" || !Number.isInteger(stakeRaw) || stakeRaw <= 0) {
       return NextResponse.json(
         { error: "Stake must be a positive integer." },
         { status: 400 },
