@@ -37,6 +37,7 @@ import {
 } from "@/lib/loanMath";
 import {
   doesBetWin,
+  formatBetLabel,
   getBetPayoutMultiplier,
   normalizeBettingMarketState,
   type BettingMarketBetKind,
