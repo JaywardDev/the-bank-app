@@ -349,6 +349,19 @@ const SESSION_EXPIRED_MESSAGE = "Session expired — please sign in again";
 const MIN_LOADING_SCREEN_MS = 5000;
 const lastGameKey = "bank.lastGameId";
 const RESUME_REFRESH_DEBOUNCE_MS = 400;
+const REALTIME_SLICE_COALESCE_MS = 80;
+const sliceNames = [
+  "gameMeta",
+  "players",
+  "gameState",
+  "events",
+  "ownership",
+  "tradeProposals",
+  "loans",
+  "purchaseMortgages",
+] as const;
+type SliceName = (typeof sliceNames)[number];
+type SliceRequestEpochs = Record<SliceName, number>;
 
 export default function PlayV2Page() {
   const router = useRouter();
@@ -438,10 +451,27 @@ export default function PlayV2Page() {
     null,
   );
   const resumeRefreshInFlightRef = useRef(false);
+  const resumeRefreshQueuedRef = useRef(false);
+  const isRunningQueuedResumeRefreshRef = useRef(false);
   const isMountedRef = useRef(true);
   const latestRouteGameIdRef = useRef<string | null>(routeGameId ?? null);
   const latestAccessTokenRef = useRef<string | null>(session?.access_token ?? null);
   const latestLoadAllSlicesRef = useRef<typeof loadAllSlices | null>(null);
+  const latestCurrentUserPlayerIdRef = useRef<string | null>(null);
+  const sliceRequestEpochsRef = useRef<SliceRequestEpochs>({
+    gameMeta: 0,
+    players: 0,
+    gameState: 0,
+    events: 0,
+    ownership: 0,
+    tradeProposals: 0,
+    loans: 0,
+    purchaseMortgages: 0,
+  });
+  const realtimeDirtySlicesRef = useRef<Set<SliceName>>(new Set());
+  const realtimeSliceFlushTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const ownedReasonTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -491,6 +521,9 @@ export default function PlayV2Page() {
       setShowLeaveConfirm(false);
       setShowEndSessionConfirm(false);
       setShowHostLeaveGuard(false);
+      for (const sliceName of sliceNames) {
+        sliceRequestEpochsRef.current[sliceName] += 1;
+      }
       latestGameStateVersionRef.current = null;
       auctionAutoPassSubmittedForKeyRef.current = null;
     },
@@ -534,60 +567,89 @@ export default function PlayV2Page() {
     [],
   );
 
+  const startSliceRequest = useCallback((sliceName: SliceName) => {
+    const nextEpoch = sliceRequestEpochsRef.current[sliceName] + 1;
+    sliceRequestEpochsRef.current[sliceName] = nextEpoch;
+    return nextEpoch;
+  }, []);
+
+  const isLatestSliceRequest = useCallback(
+    (sliceName: SliceName, epoch: number) =>
+      sliceRequestEpochsRef.current[sliceName] === epoch,
+    [],
+  );
+
   const loadGameMeta = useCallback(
     async (gameId: string, accessToken?: string) => {
+      const requestEpoch = startSliceRequest("gameMeta");
       const [game] = await supabaseClient.fetchFromSupabase<GameMeta[]>(
         `games?select=id,board_pack_id,game_mode,round_limit,status,created_by&id=eq.${gameId}&limit=1`,
         { method: "GET" },
         accessToken,
       );
+      if (!isLatestSliceRequest("gameMeta", requestEpoch)) {
+        return null;
+      }
       const resolvedGameMeta = game ?? null;
       setGameMeta(resolvedGameMeta);
       return resolvedGameMeta;
     },
-    [],
+    [isLatestSliceRequest, startSliceRequest],
   );
 
   const loadPlayers = useCallback(
     async (gameId: string, accessToken?: string) => {
+      const requestEpoch = startSliceRequest("players");
       const rows = await supabaseClient.fetchFromSupabase<Player[]>(
         `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at&game_id=eq.${gameId}&order=created_at.asc`,
         { method: "GET" },
         accessToken,
       );
+      if (!isLatestSliceRequest("players", requestEpoch)) {
+        return rows;
+      }
       setPlayers(rows);
       setPlayersLoaded(true);
       return rows;
     },
-    [],
+    [isLatestSliceRequest, startSliceRequest],
   );
 
   const loadGameState = useCallback(
     async (gameId: string, accessToken?: string) => {
+      const requestEpoch = startSliceRequest("gameState");
       const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
         `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,active_macro_effects_v1,skip_next_roll_by_player,betting_market_state,inland_explored_cells,income_tax_baseline_cash_by_player,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
         { method: "GET" },
         accessToken,
       );
+      if (!isLatestSliceRequest("gameState", requestEpoch)) {
+        return;
+      }
       applyIncomingGameState(stateRow ?? null);
     },
-    [applyIncomingGameState],
+    [applyIncomingGameState, isLatestSliceRequest, startSliceRequest],
   );
 
   const loadEvents = useCallback(
     async (gameId: string, accessToken?: string) => {
+      const requestEpoch = startSliceRequest("events");
       const rows = await supabaseClient.fetchFromSupabase<GameEvent[]>(
         `game_events?select=id,event_type,payload,created_at,version&game_id=eq.${gameId}&order=version.desc&limit=100`,
         { method: "GET" },
         accessToken,
       );
+      if (!isLatestSliceRequest("events", requestEpoch)) {
+        return;
+      }
       setEvents(rows);
     },
-    [],
+    [isLatestSliceRequest, startSliceRequest],
   );
 
   const loadOwnership = useCallback(
     async (gameId: string, accessToken?: string) => {
+      const requestEpoch = startSliceRequest("ownership");
       const rows = await supabaseClient.fetchFromSupabase<OwnershipRow[]>(
         `property_ownership?select=tile_index,owner_player_id,collateral_loan_id,purchase_mortgage_id,houses&game_id=eq.${gameId}`,
         { method: "GET" },
@@ -604,26 +666,37 @@ export default function PlayV2Page() {
         }
         return acc;
       }, {});
+      if (!isLatestSliceRequest("ownership", requestEpoch)) {
+        return;
+      }
       setOwnershipByTile(mapped);
     },
-    [],
+    [isLatestSliceRequest, startSliceRequest],
   );
 
   const loadTradeProposals = useCallback(
     async (gameId: string, accessToken?: string) => {
+      const requestEpoch = startSliceRequest("tradeProposals");
       const rows = await supabaseClient.fetchFromSupabase<TradeProposal[]>(
         `trade_proposals?select=id,game_id,proposer_player_id,counterparty_player_id,offer_cash,offer_tile_indices,request_cash,request_tile_indices,snapshot,status,created_at&game_id=eq.${gameId}&order=created_at.desc`,
         { method: "GET" },
         accessToken,
       );
+      if (!isLatestSliceRequest("tradeProposals", requestEpoch)) {
+        return;
+      }
       setTradeProposals(rows);
     },
-    [],
+    [isLatestSliceRequest, startSliceRequest],
   );
 
   const loadLoans = useCallback(
     async (gameId: string, accessToken?: string, playerId?: string | null) => {
+      const requestEpoch = startSliceRequest("loans");
       if (!playerId) {
+        if (!isLatestSliceRequest("loans", requestEpoch)) {
+          return;
+        }
         setPlayerLoans([]);
         return;
       }
@@ -632,14 +705,21 @@ export default function PlayV2Page() {
         { method: "GET" },
         accessToken,
       );
+      if (!isLatestSliceRequest("loans", requestEpoch)) {
+        return;
+      }
       setPlayerLoans(rows);
     },
-    [],
+    [isLatestSliceRequest, startSliceRequest],
   );
 
   const loadPurchaseMortgages = useCallback(
     async (gameId: string, accessToken?: string, playerId?: string | null) => {
+      const requestEpoch = startSliceRequest("purchaseMortgages");
       if (!playerId) {
+        if (!isLatestSliceRequest("purchaseMortgages", requestEpoch)) {
+          return;
+        }
         setPurchaseMortgages([]);
         return;
       }
@@ -648,9 +728,12 @@ export default function PlayV2Page() {
         { method: "GET" },
         accessToken,
       );
+      if (!isLatestSliceRequest("purchaseMortgages", requestEpoch)) {
+        return;
+      }
       setPurchaseMortgages(rows);
     },
-    [],
+    [isLatestSliceRequest, startSliceRequest],
   );
 
   const currentUserPlayerId = useMemo(
@@ -722,39 +805,73 @@ export default function PlayV2Page() {
   }, [session?.access_token]);
 
   useEffect(() => {
+    latestCurrentUserPlayerIdRef.current = currentUserPlayerId;
+  }, [currentUserPlayerId]);
+
+  useEffect(() => {
     latestLoadAllSlicesRef.current = loadAllSlices;
   }, [loadAllSlices]);
 
   useEffect(() => {
+    const realtimeDirtySlices = realtimeDirtySlicesRef.current;
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
+      if (realtimeSliceFlushTimeoutRef.current) {
+        clearTimeout(realtimeSliceFlushTimeoutRef.current);
+      }
+      realtimeSliceFlushTimeoutRef.current = null;
+      realtimeDirtySlices.clear();
+      resumeRefreshQueuedRef.current = false;
+      isRunningQueuedResumeRefreshRef.current = false;
     };
   }, []);
 
   const requestResumeRefresh = useCallback(() => {
-    const gameId = latestRouteGameIdRef.current;
-    const accessToken = latestAccessTokenRef.current;
-    if (!gameId || !accessToken) {
-      return;
-    }
-
     if (resumeRefreshTimeoutRef.current) {
       clearTimeout(resumeRefreshTimeoutRef.current);
     }
 
-    resumeRefreshTimeoutRef.current = setTimeout(async () => {
-      if (resumeRefreshInFlightRef.current || !isMountedRef.current) {
+    resumeRefreshTimeoutRef.current = setTimeout(() => {
+      const runResumeRefreshPass = async () => {
+        const gameId = latestRouteGameIdRef.current;
+        const accessToken = latestAccessTokenRef.current;
+        if (!gameId || !accessToken || !isMountedRef.current) {
+          return;
+        }
+
+        if (resumeRefreshInFlightRef.current) {
+          resumeRefreshQueuedRef.current = true;
+          return;
+        }
+
+        resumeRefreshInFlightRef.current = true;
+        resumeRefreshQueuedRef.current = false;
+
+        try {
+          await latestLoadAllSlicesRef.current?.(gameId, accessToken);
+        } finally {
+          resumeRefreshInFlightRef.current = false;
+          if (
+            resumeRefreshQueuedRef.current &&
+            !isRunningQueuedResumeRefreshRef.current &&
+            isMountedRef.current
+          ) {
+            resumeRefreshQueuedRef.current = false;
+            isRunningQueuedResumeRefreshRef.current = true;
+            try {
+              await runResumeRefreshPass();
+            } finally {
+              isRunningQueuedResumeRefreshRef.current = false;
+            }
+          }
+        }
+      };
+
+      if (!isMountedRef.current) {
         return;
       }
-
-      resumeRefreshInFlightRef.current = true;
-
-      try {
-        await latestLoadAllSlicesRef.current?.(gameId, accessToken);
-      } finally {
-        resumeRefreshInFlightRef.current = false;
-      }
+      void runResumeRefreshPass();
     }, RESUME_REFRESH_DEBOUNCE_MS);
   }, []);
 
@@ -827,6 +944,64 @@ export default function PlayV2Page() {
     if (!realtimeClient) {
       return;
     }
+    const realtimeDirtySlices = realtimeDirtySlicesRef.current;
+
+    const flushRealtimeDirtySlices = () => {
+      realtimeSliceFlushTimeoutRef.current = null;
+      if (!isMountedRef.current || realtimeDirtySlices.size === 0) {
+        realtimeDirtySlices.clear();
+        return;
+      }
+      const dirtySlices = Array.from(realtimeDirtySlices);
+      realtimeDirtySlices.clear();
+      for (const sliceName of dirtySlices) {
+        switch (sliceName) {
+          case "players":
+            void loadPlayers(routeGameId, session.access_token);
+            break;
+          case "gameState":
+            void loadGameState(routeGameId, session.access_token);
+            break;
+          case "events":
+            void loadEvents(routeGameId, session.access_token);
+            break;
+          case "ownership":
+            void loadOwnership(routeGameId, session.access_token);
+            break;
+          case "tradeProposals":
+            void loadTradeProposals(routeGameId, session.access_token);
+            break;
+          case "loans":
+            void loadLoans(
+              routeGameId,
+              session.access_token,
+              latestCurrentUserPlayerIdRef.current,
+            );
+            break;
+          case "purchaseMortgages":
+            void loadPurchaseMortgages(
+              routeGameId,
+              session.access_token,
+              latestCurrentUserPlayerIdRef.current,
+            );
+            break;
+          case "gameMeta":
+            void loadGameMeta(routeGameId, session.access_token);
+            break;
+        }
+      }
+    };
+
+    const markRealtimeSliceDirty = (sliceName: SliceName) => {
+      realtimeDirtySlices.add(sliceName);
+      if (realtimeSliceFlushTimeoutRef.current) {
+        return;
+      }
+      realtimeSliceFlushTimeoutRef.current = setTimeout(
+        flushRealtimeDirtySlices,
+        REALTIME_SLICE_COALESCE_MS,
+      );
+    };
 
     const channel = realtimeClient
       .channel(`play-v2:${routeGameId}`)
@@ -838,7 +1013,7 @@ export default function PlayV2Page() {
           table: "players",
           filter: `game_id=eq.${routeGameId}`,
         },
-        async () => loadPlayers(routeGameId, session.access_token),
+        () => markRealtimeSliceDirty("players"),
       )
       .on(
         "postgres_changes",
@@ -848,7 +1023,7 @@ export default function PlayV2Page() {
           table: "game_state",
           filter: `game_id=eq.${routeGameId}`,
         },
-        async () => loadGameState(routeGameId, session.access_token),
+        () => markRealtimeSliceDirty("gameState"),
       )
       .on(
         "postgres_changes",
@@ -858,7 +1033,7 @@ export default function PlayV2Page() {
           table: "game_events",
           filter: `game_id=eq.${routeGameId}`,
         },
-        async () => loadEvents(routeGameId, session.access_token),
+        () => markRealtimeSliceDirty("events"),
       )
       .on(
         "postgres_changes",
@@ -868,7 +1043,7 @@ export default function PlayV2Page() {
           table: "property_ownership",
           filter: `game_id=eq.${routeGameId}`,
         },
-        async () => loadOwnership(routeGameId, session.access_token),
+        () => markRealtimeSliceDirty("ownership"),
       )
       .on(
         "postgres_changes",
@@ -878,7 +1053,7 @@ export default function PlayV2Page() {
           table: "trade_proposals",
           filter: `game_id=eq.${routeGameId}`,
         },
-        async () => loadTradeProposals(routeGameId, session.access_token),
+        () => markRealtimeSliceDirty("tradeProposals"),
       )
       .on(
         "postgres_changes",
@@ -888,8 +1063,7 @@ export default function PlayV2Page() {
           table: "player_loans",
           filter: `game_id=eq.${routeGameId}`,
         },
-        async () =>
-          loadLoans(routeGameId, session.access_token, currentUserPlayerId),
+        () => markRealtimeSliceDirty("loans"),
       )
       .on(
         "postgres_changes",
@@ -899,12 +1073,7 @@ export default function PlayV2Page() {
           table: "purchase_mortgages",
           filter: `game_id=eq.${routeGameId}`,
         },
-        async () =>
-          loadPurchaseMortgages(
-            routeGameId,
-            session.access_token,
-            currentUserPlayerId,
-          ),
+        () => markRealtimeSliceDirty("purchaseMortgages"),
       )
       .on(
         "postgres_changes",
@@ -914,13 +1083,18 @@ export default function PlayV2Page() {
           table: "games",
           filter: `id=eq.${routeGameId}`,
         },
-        async () => loadGameMeta(routeGameId, session.access_token),
+        () => markRealtimeSliceDirty("gameMeta"),
       )
       .subscribe();
 
     realtimeChannelRef.current = channel;
 
     return () => {
+      if (realtimeSliceFlushTimeoutRef.current) {
+        clearTimeout(realtimeSliceFlushTimeoutRef.current);
+      }
+      realtimeSliceFlushTimeoutRef.current = null;
+      realtimeDirtySlices.clear();
       if (realtimeChannelRef.current) {
         realtimeClient.removeChannel(realtimeChannelRef.current);
       }
@@ -935,7 +1109,6 @@ export default function PlayV2Page() {
     loadPlayers,
     loadPurchaseMortgages,
     loadTradeProposals,
-    currentUserPlayerId,
     routeGameId,
     session,
   ]);
@@ -966,6 +1139,8 @@ export default function PlayV2Page() {
       if (resumeRefreshTimeoutRef.current) {
         clearTimeout(resumeRefreshTimeoutRef.current);
       }
+      resumeRefreshTimeoutRef.current = null;
+      resumeRefreshQueuedRef.current = false;
     };
   }, [requestResumeRefresh]);
 
