@@ -681,6 +681,13 @@ export default function LobbyPage() {
               <button
                 className="rounded-lg border border-neutral-300 bg-white/85 px-4 py-2 text-sm font-semibold text-neutral-800"
                 type="button"
+                onClick={() => setActiveModal("invite")}
+              >
+                Invite details
+              </button>
+              <button
+                className="rounded-lg border border-neutral-300 bg-white/85 px-4 py-2 text-sm font-semibold text-neutral-800"
+                type="button"
                 onClick={() => setActiveModal("settings")}
               >
                 Host settings
