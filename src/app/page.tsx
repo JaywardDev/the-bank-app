@@ -355,23 +355,16 @@ export default function Home() {
         aria-hidden="true"
       />
       <div className={compactLandscapeStyles.container}>
-        <header className={compactLandscapeStyles.header}>
+        <header className={`${compactLandscapeStyles.header} py-2`}>
           <div className="space-y-0.5">
             <h1 className="text-lg font-semibold leading-tight text-neutral-900 sm:text-xl">
               The Bank
             </h1>
             <p className="text-[11px] leading-tight text-neutral-600 sm:text-xs">
-              Choose a table workflow to continue.
+              Start or join a table
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              className="rounded-lg border border-amber-200/80 bg-white/80 px-3 py-1.5 text-xs font-semibold text-neutral-700 transition hover:bg-white"
-              type="button"
-              onClick={() => router.push("/watch")}
-            >
-              Watch
-            </button>
             {session ? (
               <button
                 className="rounded-lg border border-amber-200/80 bg-white/80 px-3 py-1.5 text-xs font-semibold text-neutral-700 transition hover:bg-white disabled:opacity-60"
@@ -405,16 +398,10 @@ export default function Home() {
         ) : null}
 
         <section className={`flex min-h-0 flex-1 flex-col justify-between p-4 sm:p-5 ${compactLandscapeStyles.panel}`}>
-          <div className="space-y-2">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-neutral-500">
-              Table control
-            </p>
+          <div className="space-y-1.5">
             <h2 className="text-xl font-semibold text-neutral-900 sm:text-2xl">
-              {session ? "Pick your next move" : "Sign in to enter the table"}
+              {session ? "Choose a table" : "Sign in to play"}
             </h2>
-            <p className="text-xs text-neutral-600 sm:text-sm">
-              One action at a time. Setup steps open in focused modal screens.
-            </p>
           </div>
 
           <div className="grid gap-2.5 sm:grid-cols-2">
@@ -424,7 +411,7 @@ export default function Home() {
               className="rounded-xl border border-amber-300/80 bg-white/85 px-4 py-3 text-left shadow-[0_8px_20px_rgba(34,21,10,0.1)] transition hover:bg-white"
             >
               <p className="text-sm font-semibold text-neutral-900">Join table</p>
-              <p className="text-xs text-neutral-600">Enter code + display name</p>
+              <p className="text-xs text-neutral-600">Enter a table code</p>
             </button>
             <button
               type="button"
@@ -432,7 +419,7 @@ export default function Home() {
               className="rounded-xl border border-neutral-900/70 bg-neutral-900 px-4 py-3 text-left shadow-[0_8px_20px_rgba(20,14,8,0.25)] transition hover:bg-neutral-800"
             >
               <p className="text-sm font-semibold text-white">Host table</p>
-              <p className="text-xs text-neutral-200">Create lobby and invite players</p>
+              <p className="text-xs text-neutral-200">Create a new table</p>
             </button>
             <button
               type="button"
@@ -441,7 +428,7 @@ export default function Home() {
             >
               <p className="text-sm font-semibold text-neutral-900">Resume tables</p>
               <p className="text-xs text-neutral-600">
-                {resumeGames.length > 0 ? `${resumeGames.length} active tables` : "No active tables yet"}
+                {resumeGames.length > 0 ? `${resumeGames.length} active tables` : "No active tables"}
               </p>
             </button>
             <button
@@ -450,7 +437,7 @@ export default function Home() {
               className="rounded-xl border border-amber-200/80 bg-[#F7F2EA]/90 px-4 py-3 text-left transition hover:bg-[#F3EBDF]"
             >
               <p className="text-sm font-semibold text-neutral-900">Watch game</p>
-              <p className="text-xs text-neutral-600">Projection board mode</p>
+              <p className="text-xs text-neutral-600">Spectator mode</p>
             </button>
           </div>
         </section>
