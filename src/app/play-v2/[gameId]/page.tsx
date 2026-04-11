@@ -82,6 +82,11 @@ type GameMeta = {
   created_by: string | null;
 };
 
+type LoadGameMetaResult =
+  | { status: "success"; gameMeta: GameMeta }
+  | { status: "missing" }
+  | { status: "stale" };
+
 type Player = {
   id: string;
   user_id: string;
@@ -579,7 +584,10 @@ export default function PlayV2Page() {
   );
 
   const loadGameMeta = useCallback(
-    async (gameId: string, accessToken?: string) => {
+    async (
+      gameId: string,
+      accessToken?: string,
+    ): Promise<LoadGameMetaResult> => {
       const requestEpoch = startSliceRequest("gameMeta");
       const [game] = await supabaseClient.fetchFromSupabase<GameMeta[]>(
         `games?select=id,board_pack_id,game_mode,round_limit,status,created_by&id=eq.${gameId}&limit=1`,
@@ -587,11 +595,14 @@ export default function PlayV2Page() {
         accessToken,
       );
       if (!isLatestSliceRequest("gameMeta", requestEpoch)) {
-        return null;
+        return { status: "stale" } as const;
       }
       const resolvedGameMeta = game ?? null;
       setGameMeta(resolvedGameMeta);
-      return resolvedGameMeta;
+      if (!resolvedGameMeta) {
+        return { status: "missing" } as const;
+      }
+      return { status: "success", gameMeta: resolvedGameMeta } as const;
     },
     [isLatestSliceRequest, startSliceRequest],
   );
@@ -899,7 +910,9 @@ export default function PlayV2Page() {
 
       try {
         const loadedGameMeta = await loadAllSlices(routeGameId, accessToken);
-        if (!loadedGameMeta) {
+        // stale game-meta requests are intentionally ignored; they are not a
+        // confirmed missing game and should not trigger the terminal state.
+        if (loadedGameMeta?.status === "missing") {
           setGameMetaError("No active game.");
         }
       } catch (error) {
