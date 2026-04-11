@@ -340,7 +340,7 @@ export default function Home() {
   };
 
   return (
-    <main className="relative min-h-dvh bg-[#F6F1E8] px-4 py-4 sm:px-6 sm:py-6">
+    <main className="relative min-h-dvh bg-[#F6F1E8] px-3 py-2 sm:px-4 sm:py-3">
       <div
         className="pointer-events-none absolute inset-0 z-0 bg-[url('/icons/home_page.svg')] bg-cover bg-center bg-fixed"
         aria-hidden="true"
@@ -349,11 +349,13 @@ export default function Home() {
         className="pointer-events-none absolute inset-0 z-10 bg-neutral-950/15"
         aria-hidden="true"
       />
-      <div className="relative z-20 mx-auto flex w-full max-w-7xl flex-col gap-4 md:gap-6">
-        <header className="flex items-start justify-between gap-4 rounded-2xl border border-amber-100/70 bg-[#FBFAF7]/95 px-4 py-3 shadow-[0_10px_24px_rgba(34,21,10,0.12)] md:px-5 md:py-4">
-          <div className="space-y-2">
-            <h1 className="text-2xl font-semibold text-neutral-900">The Bank</h1>
-            <p className="text-sm text-neutral-600">
+      <div className="relative z-20 mx-auto flex w-full max-w-7xl flex-col gap-3 md:gap-4">
+        <header className="flex items-start justify-between gap-3 rounded-2xl border border-amber-100/70 bg-[#FBFAF7]/95 px-4 py-2.5 shadow-[0_8px_20px_rgba(34,21,10,0.12)] md:px-5 md:py-3">
+          <div className="space-y-1">
+            <h1 className="text-xl font-semibold leading-tight text-neutral-900 sm:text-2xl">
+              The Bank
+            </h1>
+            <p className="text-xs text-neutral-600 sm:text-sm">
               A high-stakes table game of deals, risks, and fortune.
             </p>
           </div>
@@ -381,11 +383,11 @@ export default function Home() {
         ) : null}
 
         {!session ? (
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.05fr)_minmax(280px,0.7fr)] lg:items-start">
-            <section className="space-y-3 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-4 shadow-[0_10px_24px_rgba(34,21,10,0.12)]">
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1.05fr)_minmax(280px,0.7fr)] lg:items-start">
+            <section className="space-y-2 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-3 shadow-[0_8px_20px_rgba(34,21,10,0.12)]">
               <div className="space-y-1">
                 <h2 className="text-base font-semibold">Sign in</h2>
-                <p className="text-sm text-neutral-500">
+                <p className="text-xs text-neutral-500 sm:text-sm">
                   Confirm your seat at the table.
                 </p>
               </div>
@@ -393,7 +395,7 @@ export default function Home() {
               {authLoading ? (
                 <p className="text-sm text-neutral-500">Checking session…</p>
               ) : (
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   <label className="text-xs font-medium uppercase text-neutral-500">
                     Email
                   </label>
@@ -404,7 +406,7 @@ export default function Home() {
                     value={authEmail}
                     onChange={(event) => setAuthEmail(event.target.value)}
                   />
-                  <p className="text-xs text-neutral-500">
+                  <p className="text-[11px] text-neutral-500 sm:text-xs">
                     We&apos;ll send a confirmation link to your email.
                   </p>
                   <button
@@ -419,7 +421,7 @@ export default function Home() {
               )}
             </section>
 
-            <section className="space-y-2 rounded-2xl border border-amber-200/80 bg-[#F7F2EA]/90 p-4 shadow-[0_8px_18px_rgba(34,21,10,0.1)] lg:sticky lg:top-4">
+            <section className="space-y-1.5 rounded-2xl border border-amber-200/80 bg-[#F7F2EA]/90 p-3 shadow-[0_8px_18px_rgba(34,21,10,0.1)] lg:sticky lg:top-3">
               <button
                 className="w-full rounded-xl border border-amber-300/70 bg-[#F7F2EA] px-4 py-2 text-sm font-semibold text-neutral-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] transition hover:bg-[#F1E9DD] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
                 type="button"
@@ -427,7 +429,7 @@ export default function Home() {
               >
                 Watch Game
               </button>
-              <p className="text-xs text-neutral-600">
+              <p className="text-[11px] text-neutral-600 sm:text-xs">
                 Display the projection board on another device using a join code.
               </p>
             </section>
@@ -435,11 +437,13 @@ export default function Home() {
         ) : null}
 
         {session ? (
-          <div className="grid gap-4 lg:grid-cols-[minmax(340px,0.9fr)_minmax(0,1.1fr)] lg:items-start">
-            <div className="space-y-4 lg:sticky lg:top-4">
-              <section className="space-y-3 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-4 shadow-[0_10px_24px_rgba(34,21,10,0.12)]">
-                <h2 className="text-base font-semibold">Player</h2>
-                <div className="space-y-2">
+          <div className="grid gap-3 xl:grid-cols-[minmax(320px,0.9fr)_minmax(0,1.1fr)] xl:items-start">
+            <div className="space-y-3 xl:sticky xl:top-3">
+              <section className="space-y-2 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-3 shadow-[0_8px_20px_rgba(34,21,10,0.12)]">
+                <h2 className="text-sm font-semibold uppercase tracking-[0.08em] text-neutral-700">
+                  Player
+                </h2>
+                <div className="space-y-1.5">
                   <label className="text-xs font-medium uppercase text-neutral-500">
                     Display name
                   </label>
@@ -453,9 +457,9 @@ export default function Home() {
                 </div>
               </section>
 
-              <section className="space-y-3 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-4 shadow-[0_10px_24px_rgba(34,21,10,0.12)]">
+              <section className="space-y-2 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-3 shadow-[0_8px_20px_rgba(34,21,10,0.12)]">
                 <h2 className="text-base font-semibold">Join a table</h2>
-                <p className="text-sm text-neutral-500">
+                <p className="text-xs text-neutral-500 sm:text-sm">
                   Enter the code from the host to join their lobby.
                 </p>
                 <input
@@ -466,7 +470,7 @@ export default function Home() {
                   onChange={(event) => setJoinCode(event.target.value)}
                 />
                 <button
-                  className="w-full rounded-xl border border-amber-300/70 bg-[#F7F2EA]/80 px-4 py-3 text-sm font-semibold text-neutral-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] transition hover:bg-[#F1E9DD] active:translate-y-0.5 active:shadow-[inset_0_1px_0_rgba(255,255,255,0.4)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70 disabled:cursor-not-allowed disabled:border-amber-200/60 disabled:text-neutral-400 disabled:opacity-70"
+                  className="w-full rounded-xl border border-amber-300/70 bg-[#F7F2EA]/80 px-4 py-2 text-sm font-semibold text-neutral-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] transition hover:bg-[#F1E9DD] active:translate-y-0.5 active:shadow-[inset_0_1px_0_rgba(255,255,255,0.4)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70 disabled:cursor-not-allowed disabled:border-amber-200/60 disabled:text-neutral-400 disabled:opacity-70"
                   type="button"
                   onClick={handleJoinGame}
                   disabled={!session || loadingAction === "join"}
@@ -474,22 +478,101 @@ export default function Home() {
                   {loadingAction === "join" ? "Joining…" : "Join table"}
                 </button>
               </section>
+            </div>
+
+            <div className="space-y-3">
+              <section className="space-y-2 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-3 shadow-[0_8px_20px_rgba(34,21,10,0.12)]">
+                <h2 className="text-base font-semibold">Host a table</h2>
+                <p className="text-xs text-neutral-500 sm:text-sm">
+                  Start a table and share the code with players.
+                </p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium uppercase text-neutral-500">
+                      Game mode
+                    </label>
+                    <select
+                      className="w-full rounded-xl border border-amber-200/70 bg-[#F4EFE7] px-3 py-2 text-sm text-neutral-900 focus-visible:border-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
+                      value={gameMode}
+                      onChange={(event) =>
+                        setGameMode(
+                          event.target.value === "round_mode" ? "round_mode" : "classic",
+                        )
+                      }
+                    >
+                      <option value="classic">Classic</option>
+                      <option value="round_mode">Round Mode</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium uppercase text-neutral-500">
+                      Board pack
+                    </label>
+                    <select
+                      className="w-full rounded-xl border border-amber-200/70 bg-[#F4EFE7] px-3 py-2 text-sm text-neutral-900 focus-visible:border-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
+                      value={boardPackId}
+                      onChange={(event) => setBoardPackId(event.target.value)}
+                    >
+                      {boardPacks.map((pack) => (
+                        <option key={pack.id} value={pack.id}>
+                          {pack.displayName}{pack.tooltip ? " ℹ️" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                {gameMode === "round_mode" ? (
+                  <div className="max-w-[300px] space-y-1.5">
+                    <label className="text-xs font-medium uppercase text-neutral-500">
+                      Round limit
+                    </label>
+                    <select
+                      className="w-full rounded-xl border border-amber-200/70 bg-[#F4EFE7] px-3 py-2 text-sm text-neutral-900 focus-visible:border-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
+                      value={roundLimit}
+                      onChange={(event) =>
+                        setRoundLimit(Number(event.target.value) as 100 | 150 | 200 | 300)
+                      }
+                    >
+                      <option value={100}>100</option>
+                      <option value={150}>150</option>
+                      <option value={200}>200</option>
+                      <option value={300}>300</option>
+                    </select>
+                  </div>
+                ) : null}
+                {boardPacks.find((pack) => pack.id === boardPackId)?.tooltip ? (
+                  <div className="flex items-center gap-2 text-xs text-neutral-600">
+                    <span>Board details</span>
+                    <InfoTooltip
+                      text={boardPacks.find((pack) => pack.id === boardPackId)?.tooltip ?? ""}
+                    />
+                  </div>
+                ) : null}
+                <button
+                  className="w-full rounded-xl bg-gradient-to-b from-neutral-900 to-neutral-800 px-4 py-2 text-sm font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_10px_22px_rgba(29,20,12,0.35)] transition active:translate-y-0.5 active:shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_5px_12px_rgba(29,20,12,0.3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[#FBFAF7] disabled:cursor-not-allowed disabled:opacity-60"
+                  type="button"
+                  onClick={handleCreateGame}
+                  disabled={!session || loadingAction === "create"}
+                >
+                  {loadingAction === "create" ? "Creating…" : "Host table"}
+                </button>
+              </section>
 
               {session && resumeGames.length > 0 ? (
-                <section className="space-y-3 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-4 shadow-[0_10px_24px_rgba(34,21,10,0.12)]">
+                <section className="space-y-2 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-3 shadow-[0_8px_20px_rgba(34,21,10,0.12)]">
                   <div className="space-y-1">
                     <h2 className="text-base font-semibold">Resume tables</h2>
-                    <p className="text-sm text-neutral-500">
+                    <p className="text-xs text-neutral-500 sm:text-sm">
                       Active games you are currently part of.
                     </p>
                   </div>
-                  <div className="max-h-[42dvh] space-y-2 overflow-y-auto pr-1">
+                  <div className="max-h-[30dvh] space-y-1.5 overflow-y-auto pr-1">
                     {resumeGames.map((game) => (
                       <button
                         key={game.gameId}
                         type="button"
                         onClick={() => openResumeGame(game)}
-                        className={`w-full rounded-xl border px-3 py-3 text-left text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70 ${
+                        className={`w-full rounded-xl border px-3 py-2 text-left text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70 ${
                           lastOpenedGameId === game.gameId
                             ? "border-amber-400 bg-amber-50"
                             : "border-amber-200/70 bg-[#F7F2EA]/80 hover:bg-[#F1E9DD]"
@@ -499,7 +582,7 @@ export default function Home() {
                           <span>{game.status === "lobby" ? "Lobby" : "In progress"}</span>
                           <span className="font-mono text-xs tracking-[0.2em]">{game.joinCode}</span>
                         </div>
-                        <div className="mt-1 text-xs text-neutral-600">
+                        <div className="text-xs text-neutral-600">
                           {game.displayName ? `Playing as ${game.displayName}` : "Resume table"}
                         </div>
                       </button>
@@ -508,82 +591,6 @@ export default function Home() {
                 </section>
               ) : null}
             </div>
-
-            <section className="space-y-3 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-4 shadow-[0_10px_24px_rgba(34,21,10,0.12)]">
-              <h2 className="text-base font-semibold">Host a table</h2>
-              <p className="text-sm text-neutral-500">
-                Start a table and share the code with players.
-              </p>
-              <div className="space-y-2">
-                <label className="text-xs font-medium uppercase text-neutral-500">
-                  Game mode
-                </label>
-                <select
-                  className="w-full rounded-xl border border-amber-200/70 bg-[#F4EFE7] px-3 py-2 text-sm text-neutral-900 focus-visible:border-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
-                  value={gameMode}
-                  onChange={(event) =>
-                    setGameMode(event.target.value === "round_mode" ? "round_mode" : "classic")
-                  }
-                >
-                  <option value="classic">Classic</option>
-                  <option value="round_mode">Round Mode</option>
-                </select>
-              </div>
-              {gameMode === "round_mode" ? (
-                <div className="space-y-2">
-                  <label className="text-xs font-medium uppercase text-neutral-500">
-                    Round limit
-                  </label>
-                  <select
-                    className="w-full rounded-xl border border-amber-200/70 bg-[#F4EFE7] px-3 py-2 text-sm text-neutral-900 focus-visible:border-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
-                    value={roundLimit}
-                    onChange={(event) =>
-                      setRoundLimit(Number(event.target.value) as 100 | 150 | 200 | 300)
-                    }
-                  >
-                    <option value={100}>100</option>
-                    <option value={150}>150</option>
-                    <option value={200}>200</option>
-                    <option value={300}>300</option>
-                  </select>
-                </div>
-              ) : null}
-              <div className="space-y-2">
-                <label className="text-xs font-medium uppercase text-neutral-500">
-                  Board pack
-                </label>
-                <select
-                  className="w-full rounded-xl border border-amber-200/70 bg-[#F4EFE7] px-3 py-2 text-sm text-neutral-900 focus-visible:border-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
-                  value={boardPackId}
-                  onChange={(event) => setBoardPackId(event.target.value)}
-                >
-                  {boardPacks.map((pack) => (
-                    <option key={pack.id} value={pack.id}>
-                      {pack.displayName}{pack.tooltip ? " ℹ️" : ""}
-                    </option>
-                  ))}
-                </select>
-                {boardPacks.find((pack) => pack.id === boardPackId)?.tooltip ? (
-                  <div className="flex items-center gap-2 text-xs text-neutral-600">
-                    <span>Board details</span>
-                    <InfoTooltip
-                      text={
-                        boardPacks.find((pack) => pack.id === boardPackId)?.tooltip ?? ""
-                      }
-                    />
-                  </div>
-                ) : null}
-              </div>
-              <button
-                className="w-full rounded-xl bg-gradient-to-b from-neutral-900 to-neutral-800 px-4 py-3 text-sm font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_10px_22px_rgba(29,20,12,0.35)] transition active:translate-y-0.5 active:shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_5px_12px_rgba(29,20,12,0.3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[#FBFAF7] disabled:cursor-not-allowed disabled:opacity-60"
-                type="button"
-                onClick={handleCreateGame}
-                disabled={!session || loadingAction === "create"}
-              >
-                {loadingAction === "create" ? "Creating…" : "Host table"}
-              </button>
-            </section>
-
           </div>
         ) : null}
 
