@@ -603,25 +603,20 @@ export default function LobbyPage() {
         aria-hidden="true"
       />
       <div className={compactLandscapeStyles.container}>
-        <header className={`${compactLandscapeStyles.header} items-center justify-between gap-3`}>
-          <div>
-            <h1 className="text-xl font-semibold leading-tight text-neutral-900 sm:text-2xl">
-              Waiting room
-            </h1>
-          </div>
+        <header
+          className={`${compactLandscapeStyles.header} flex items-center justify-between gap-3`}
+        >
+          <h1 className="text-xl font-semibold leading-tight text-neutral-900 sm:text-2xl">
+            Waiting room
+          </h1>
           {activeGame ? (
-            <div className="flex items-center gap-2">
-              <div className="rounded-full border border-neutral-200/90 bg-white/70 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-600">
-                Code <span className="font-mono text-neutral-800">{activeGame.join_code}</span>
-              </div>
-              <button
-                className="rounded-lg border border-amber-200/80 bg-white/80 px-3 py-1.5 text-xs font-semibold text-neutral-700"
-                type="button"
-                onClick={handleLeaveLobby}
-              >
-                Leave
-              </button>
-            </div>
+            <button
+              className="rounded-lg border border-amber-200/80 bg-white/80 px-3 py-1.5 text-xs font-semibold text-neutral-700"
+              type="button"
+              onClick={handleLeaveLobby}
+            >
+              Leave
+            </button>
           ) : null}
         </header>
 
