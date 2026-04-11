@@ -7,6 +7,7 @@ import { boardPacks, defaultBoardPackId } from "@/lib/boardPacks";
 import { postGameActionRequest } from "@/lib/client/postGameActionRequest";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 import InfoTooltip from "@/app/components/InfoTooltip";
+import RotateToLandscapeOverlay from "@/components/play-v2/RotateToLandscapeOverlay";
 
 const lastGameKey = "bank.lastGameId";
 
@@ -339,7 +340,7 @@ export default function Home() {
   };
 
   return (
-    <main className="relative min-h-dvh bg-[#F6F1E8] p-6 flex items-start justify-center">
+    <main className="relative min-h-dvh bg-[#F6F1E8] px-4 py-4 sm:px-6 sm:py-6">
       <div
         className="pointer-events-none absolute inset-0 z-0 bg-[url('/icons/home_page.svg')] bg-cover bg-center bg-fixed"
         aria-hidden="true"
@@ -348,8 +349,8 @@ export default function Home() {
         className="pointer-events-none absolute inset-0 z-10 bg-neutral-950/15"
         aria-hidden="true"
       />
-      <div className="relative z-20 w-full max-w-md space-y-6">
-        <header className="flex items-start justify-between gap-4">
+      <div className="relative z-20 mx-auto flex w-full max-w-7xl flex-col gap-4 md:gap-6">
+        <header className="flex items-start justify-between gap-4 rounded-2xl border border-amber-100/70 bg-[#FBFAF7]/95 px-4 py-3 shadow-[0_10px_24px_rgba(34,21,10,0.12)] md:px-5 md:py-4">
           <div className="space-y-2">
             <h1 className="text-2xl font-semibold text-neutral-900">The Bank</h1>
             <p className="text-sm text-neutral-600">
@@ -380,7 +381,7 @@ export default function Home() {
         ) : null}
 
         {!session ? (
-          <div className="space-y-4">
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.05fr)_minmax(280px,0.7fr)] lg:items-start">
             <section className="space-y-3 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-4 shadow-[0_10px_24px_rgba(34,21,10,0.12)]">
               <div className="space-y-1">
                 <h2 className="text-base font-semibold">Sign in</h2>
@@ -418,7 +419,7 @@ export default function Home() {
               )}
             </section>
 
-            <section className="space-y-2 rounded-2xl border border-amber-200/80 bg-[#F7F2EA]/90 p-4 shadow-[0_8px_18px_rgba(34,21,10,0.1)]">
+            <section className="space-y-2 rounded-2xl border border-amber-200/80 bg-[#F7F2EA]/90 p-4 shadow-[0_8px_18px_rgba(34,21,10,0.1)] lg:sticky lg:top-4">
               <button
                 className="w-full rounded-xl border border-amber-300/70 bg-[#F7F2EA] px-4 py-2 text-sm font-semibold text-neutral-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] transition hover:bg-[#F1E9DD] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
                 type="button"
@@ -434,22 +435,79 @@ export default function Home() {
         ) : null}
 
         {session ? (
-          <>
-            <section className="space-y-3 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-4 shadow-[0_10px_24px_rgba(34,21,10,0.12)]">
-              <h2 className="text-base font-semibold">Player</h2>
-              <div className="space-y-2">
-                <label className="text-xs font-medium uppercase text-neutral-500">
-                  Display name
-                </label>
+          <div className="grid gap-4 lg:grid-cols-[minmax(340px,0.9fr)_minmax(0,1.1fr)] lg:items-start">
+            <div className="space-y-4 lg:sticky lg:top-4">
+              <section className="space-y-3 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-4 shadow-[0_10px_24px_rgba(34,21,10,0.12)]">
+                <h2 className="text-base font-semibold">Player</h2>
+                <div className="space-y-2">
+                  <label className="text-xs font-medium uppercase text-neutral-500">
+                    Display name
+                  </label>
+                  <input
+                    className="w-full rounded-xl border border-amber-200/70 bg-[#F4EFE7] px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-500 focus-visible:border-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
+                    type="text"
+                    placeholder="Banker Alex"
+                    value={playerName}
+                    onChange={(event) => setPlayerName(event.target.value)}
+                  />
+                </div>
+              </section>
+
+              <section className="space-y-3 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-4 shadow-[0_10px_24px_rgba(34,21,10,0.12)]">
+                <h2 className="text-base font-semibold">Join a table</h2>
+                <p className="text-sm text-neutral-500">
+                  Enter the code from the host to join their lobby.
+                </p>
                 <input
-                  className="w-full rounded-xl border border-amber-200/70 bg-[#F4EFE7] px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-500 focus-visible:border-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
+                  className="w-full rounded-xl border border-amber-200/70 bg-[#F4EFE7] px-3 py-2 text-sm uppercase tracking-[0.3em] text-neutral-900 placeholder:text-neutral-500 focus-visible:border-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
                   type="text"
-                  placeholder="Banker Alex"
-                  value={playerName}
-                  onChange={(event) => setPlayerName(event.target.value)}
+                  placeholder="ABC123"
+                  value={joinCode}
+                  onChange={(event) => setJoinCode(event.target.value)}
                 />
-              </div>
-            </section>
+                <button
+                  className="w-full rounded-xl border border-amber-300/70 bg-[#F7F2EA]/80 px-4 py-3 text-sm font-semibold text-neutral-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] transition hover:bg-[#F1E9DD] active:translate-y-0.5 active:shadow-[inset_0_1px_0_rgba(255,255,255,0.4)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70 disabled:cursor-not-allowed disabled:border-amber-200/60 disabled:text-neutral-400 disabled:opacity-70"
+                  type="button"
+                  onClick={handleJoinGame}
+                  disabled={!session || loadingAction === "join"}
+                >
+                  {loadingAction === "join" ? "Joining…" : "Join table"}
+                </button>
+              </section>
+
+              {session && resumeGames.length > 0 ? (
+                <section className="space-y-3 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-4 shadow-[0_10px_24px_rgba(34,21,10,0.12)]">
+                  <div className="space-y-1">
+                    <h2 className="text-base font-semibold">Resume tables</h2>
+                    <p className="text-sm text-neutral-500">
+                      Active games you are currently part of.
+                    </p>
+                  </div>
+                  <div className="max-h-[42dvh] space-y-2 overflow-y-auto pr-1">
+                    {resumeGames.map((game) => (
+                      <button
+                        key={game.gameId}
+                        type="button"
+                        onClick={() => openResumeGame(game)}
+                        className={`w-full rounded-xl border px-3 py-3 text-left text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70 ${
+                          lastOpenedGameId === game.gameId
+                            ? "border-amber-400 bg-amber-50"
+                            : "border-amber-200/70 bg-[#F7F2EA]/80 hover:bg-[#F1E9DD]"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2 font-semibold text-neutral-900">
+                          <span>{game.status === "lobby" ? "Lobby" : "In progress"}</span>
+                          <span className="font-mono text-xs tracking-[0.2em]">{game.joinCode}</span>
+                        </div>
+                        <div className="mt-1 text-xs text-neutral-600">
+                          {game.displayName ? `Playing as ${game.displayName}` : "Resume table"}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
+            </div>
 
             <section className="space-y-3 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-4 shadow-[0_10px_24px_rgba(34,21,10,0.12)]">
               <h2 className="text-base font-semibold">Host a table</h2>
@@ -526,61 +584,7 @@ export default function Home() {
               </button>
             </section>
 
-            <section className="space-y-3 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-4 shadow-[0_10px_24px_rgba(34,21,10,0.12)]">
-              <h2 className="text-base font-semibold">Join a table</h2>
-              <p className="text-sm text-neutral-500">
-                Enter the code from the host to join their lobby.
-              </p>
-              <input
-                className="w-full rounded-xl border border-amber-200/70 bg-[#F4EFE7] px-3 py-2 text-sm uppercase tracking-[0.3em] text-neutral-900 placeholder:text-neutral-500 focus-visible:border-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
-                type="text"
-                placeholder="ABC123"
-                value={joinCode}
-                onChange={(event) => setJoinCode(event.target.value)}
-              />
-              <button
-                className="w-full rounded-xl border border-amber-300/70 bg-[#F7F2EA]/80 px-4 py-3 text-sm font-semibold text-neutral-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] transition hover:bg-[#F1E9DD] active:translate-y-0.5 active:shadow-[inset_0_1px_0_rgba(255,255,255,0.4)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70 disabled:cursor-not-allowed disabled:border-amber-200/60 disabled:text-neutral-400 disabled:opacity-70"
-                type="button"
-                onClick={handleJoinGame}
-                disabled={!session || loadingAction === "join"}
-              >
-                {loadingAction === "join" ? "Joining…" : "Join table"}
-              </button>
-            </section>
-          </>
-        ) : null}
-
-        {session && resumeGames.length > 0 ? (
-          <section className="space-y-3 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-4 shadow-[0_10px_24px_rgba(34,21,10,0.12)]">
-            <div className="space-y-1">
-              <h2 className="text-base font-semibold">Resume tables</h2>
-              <p className="text-sm text-neutral-500">
-                Active games you are currently part of.
-              </p>
-            </div>
-            <div className="space-y-2">
-              {resumeGames.map((game) => (
-                <button
-                  key={game.gameId}
-                  type="button"
-                  onClick={() => openResumeGame(game)}
-                  className={`w-full rounded-xl border px-3 py-3 text-left text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70 ${
-                    lastOpenedGameId === game.gameId
-                      ? "border-amber-400 bg-amber-50"
-                      : "border-amber-200/70 bg-[#F7F2EA]/80 hover:bg-[#F1E9DD]"
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2 font-semibold text-neutral-900">
-                    <span>{game.status === "lobby" ? "Lobby" : "In progress"}</span>
-                    <span className="font-mono text-xs tracking-[0.2em]">{game.joinCode}</span>
-                  </div>
-                  <div className="mt-1 text-xs text-neutral-600">
-                    {game.displayName ? `Playing as ${game.displayName}` : "Resume table"}
-                  </div>
-                </button>
-              ))}
-            </div>
-          </section>
+          </div>
         ) : null}
 
         {notice ? (
@@ -590,6 +594,7 @@ export default function Home() {
         ) : null}
 
       </div>
+      <RotateToLandscapeOverlay />
     </main>
   );
 }

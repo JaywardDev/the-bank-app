@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
+import RotateToLandscapeOverlay from "@/components/play-v2/RotateToLandscapeOverlay";
 
 const lastGameKey = "bank.lastGameId";
 
@@ -23,10 +24,11 @@ export default function LobbyRedirectPage() {
   }, [router]);
 
   return (
-    <main className="min-h-dvh bg-neutral-50 p-6 flex items-start justify-center">
-      <div className="w-full max-w-md rounded-2xl border bg-white p-5 text-sm text-neutral-500">
+    <main className="relative min-h-dvh bg-neutral-50 p-4 sm:p-6">
+      <div className="mx-auto flex min-h-[calc(100dvh-2rem)] w-full max-w-5xl items-center justify-center rounded-3xl border border-neutral-200/80 bg-white/90 p-5 text-sm text-neutral-500 shadow-sm sm:min-h-[calc(100dvh-3rem)] sm:p-8">
         Loading lobby…
       </div>
+      <RotateToLandscapeOverlay />
     </main>
   );
 }
