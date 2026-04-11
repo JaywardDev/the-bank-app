@@ -24,8 +24,8 @@ export default function LobbyRedirectPage() {
   }, [router]);
 
   return (
-    <main className="relative min-h-dvh bg-neutral-50 p-4 sm:p-6">
-      <div className="mx-auto flex min-h-[calc(100dvh-2rem)] w-full max-w-5xl items-center justify-center rounded-3xl border border-neutral-200/80 bg-white/90 p-5 text-sm text-neutral-500 shadow-sm sm:min-h-[calc(100dvh-3rem)] sm:p-8">
+    <main className="relative flex h-dvh flex-col overflow-hidden bg-neutral-50 p-4 sm:p-6">
+      <div className="mx-auto flex h-full w-full max-w-5xl items-center justify-center rounded-3xl border border-neutral-200/80 bg-white/90 p-5 text-sm text-neutral-500 shadow-sm sm:p-8">
         Loading lobby…
       </div>
       <RotateToLandscapeOverlay />

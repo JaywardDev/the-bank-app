@@ -340,7 +340,7 @@ export default function Home() {
   };
 
   return (
-    <main className="relative min-h-dvh bg-[#F6F1E8] px-3 py-2 sm:px-4 sm:py-3">
+    <main className="relative flex h-dvh flex-col overflow-hidden bg-[#F6F1E8] px-3 py-2 sm:px-4 sm:py-3">
       <div
         className="pointer-events-none absolute inset-0 z-0 bg-[url('/icons/home_page.svg')] bg-cover bg-center bg-fixed"
         aria-hidden="true"
@@ -349,8 +349,8 @@ export default function Home() {
         className="pointer-events-none absolute inset-0 z-10 bg-neutral-950/15"
         aria-hidden="true"
       />
-      <div className="relative z-20 mx-auto flex w-full max-w-7xl flex-col gap-3 md:gap-4">
-        <header className="flex items-start justify-between gap-3 rounded-2xl border border-amber-100/70 bg-[#FBFAF7]/95 px-4 py-2.5 shadow-[0_8px_20px_rgba(34,21,10,0.12)] md:px-5 md:py-3">
+      <div className="relative z-20 mx-auto flex w-full max-w-7xl flex-1 min-h-0 flex-col gap-3 md:gap-4">
+        <header className="flex flex-none items-start justify-between gap-3 rounded-2xl border border-amber-100/70 bg-[#FBFAF7]/95 px-4 py-2.5 shadow-[0_8px_20px_rgba(34,21,10,0.12)] md:px-5 md:py-3">
           <div className="space-y-1">
             <h1 className="text-xl font-semibold leading-tight text-neutral-900 sm:text-2xl">
               The Bank
@@ -383,7 +383,7 @@ export default function Home() {
         ) : null}
 
         {!session ? (
-          <div className="grid gap-3 lg:grid-cols-[minmax(0,1.05fr)_minmax(280px,0.7fr)] lg:items-start">
+          <div className="grid flex-1 min-h-0 gap-3 sm:grid-cols-2 sm:items-start">
             <section className="space-y-2 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-3 shadow-[0_8px_20px_rgba(34,21,10,0.12)]">
               <div className="space-y-1">
                 <h2 className="text-base font-semibold">Sign in</h2>
@@ -421,7 +421,7 @@ export default function Home() {
               )}
             </section>
 
-            <section className="space-y-1.5 rounded-2xl border border-amber-200/80 bg-[#F7F2EA]/90 p-3 shadow-[0_8px_18px_rgba(34,21,10,0.1)] lg:sticky lg:top-3">
+            <section className="space-y-1.5 rounded-2xl border border-amber-200/80 bg-[#F7F2EA]/90 p-3 shadow-[0_8px_18px_rgba(34,21,10,0.1)]">
               <button
                 className="w-full rounded-xl border border-amber-300/70 bg-[#F7F2EA] px-4 py-2 text-sm font-semibold text-neutral-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] transition hover:bg-[#F1E9DD] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
                 type="button"
@@ -437,8 +437,8 @@ export default function Home() {
         ) : null}
 
         {session ? (
-          <div className="grid gap-3 xl:grid-cols-[minmax(320px,0.9fr)_minmax(0,1.1fr)] xl:items-start">
-            <div className="space-y-3 xl:sticky xl:top-3">
+          <div className="grid flex-1 min-h-0 gap-3 sm:grid-cols-[minmax(280px,0.9fr)_minmax(0,1.1fr)] sm:items-start">
+            <div className="flex min-h-0 flex-col gap-3 overflow-y-auto pr-1">
               <section className="space-y-2 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-3 shadow-[0_8px_20px_rgba(34,21,10,0.12)]">
                 <h2 className="text-sm font-semibold uppercase tracking-[0.08em] text-neutral-700">
                   Player
@@ -455,9 +455,6 @@ export default function Home() {
                     onChange={(event) => setPlayerName(event.target.value)}
                   />
                 </div>
-              </section>
-
-              <section className="space-y-2 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-3 shadow-[0_8px_20px_rgba(34,21,10,0.12)]">
                 <h2 className="text-base font-semibold">Join a table</h2>
                 <p className="text-xs text-neutral-500 sm:text-sm">
                   Enter the code from the host to join their lobby.
@@ -480,8 +477,8 @@ export default function Home() {
               </section>
             </div>
 
-            <div className="space-y-3">
-              <section className="space-y-2 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-3 shadow-[0_8px_20px_rgba(34,21,10,0.12)]">
+            <div className="flex min-h-0 flex-col gap-3">
+              <section className="flex-none space-y-2 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-3 shadow-[0_8px_20px_rgba(34,21,10,0.12)]">
                 <h2 className="text-base font-semibold">Host a table</h2>
                 <p className="text-xs text-neutral-500 sm:text-sm">
                   Start a table and share the code with players.
@@ -559,14 +556,14 @@ export default function Home() {
               </section>
 
               {session && resumeGames.length > 0 ? (
-                <section className="space-y-2 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-3 shadow-[0_8px_20px_rgba(34,21,10,0.12)]">
+                <section className="flex min-h-0 flex-1 flex-col space-y-2 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-3 shadow-[0_8px_20px_rgba(34,21,10,0.12)]">
                   <div className="space-y-1">
                     <h2 className="text-base font-semibold">Resume tables</h2>
                     <p className="text-xs text-neutral-500 sm:text-sm">
                       Active games you are currently part of.
                     </p>
                   </div>
-                  <div className="max-h-[30dvh] space-y-1.5 overflow-y-auto pr-1">
+                  <div className="flex-1 min-h-0 space-y-1.5 overflow-y-auto pr-1">
                     {resumeGames.map((game) => (
                       <button
                         key={game.gameId}
@@ -595,7 +592,7 @@ export default function Home() {
         ) : null}
 
         {notice ? (
-          <div className="rounded-2xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
+          <div className="flex-none rounded-2xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
             {notice}
           </div>
         ) : null}

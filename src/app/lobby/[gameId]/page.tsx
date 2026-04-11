@@ -588,7 +588,7 @@ export default function LobbyPage() {
   }, [activeGame?.join_code]);
 
   return (
-    <main className="lobby-skin relative min-h-dvh bg-neutral-50 px-4 py-4 sm:px-6 sm:py-6">
+    <main className="lobby-skin relative flex h-dvh flex-col overflow-hidden bg-neutral-50 px-4 py-4 sm:px-6 sm:py-6">
       <div
         className="pointer-events-none absolute inset-0 z-0 bg-[url('/icons/lobby_page.svg')] bg-cover bg-center bg-fixed"
         aria-hidden="true"
@@ -597,8 +597,8 @@ export default function LobbyPage() {
         className="pointer-events-none absolute inset-0 z-10 bg-neutral-950/40"
         aria-hidden="true"
       />
-      <div className="relative z-20 mx-auto flex w-full max-w-7xl flex-col gap-4 md:gap-6">
-        <header className="rounded-3xl border border-amber-200/80 bg-[#f8f2e7]/95 px-5 py-4 shadow-[0_12px_30px_rgba(37,25,10,0.18)] backdrop-blur">
+      <div className="relative z-20 mx-auto flex w-full max-w-7xl flex-1 min-h-0 flex-col gap-4 md:gap-6">
+        <header className="flex-none rounded-3xl border border-amber-200/80 bg-[#f8f2e7]/95 px-5 py-4 shadow-[0_12px_30px_rgba(37,25,10,0.18)] backdrop-blur">
           <div className="space-y-1">
             <h1 className="text-2xl font-semibold text-neutral-900">Game lobby</h1>
             <p className="text-sm text-neutral-700">
@@ -618,8 +618,8 @@ export default function LobbyPage() {
           </div>
         ) : null}
 
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)] lg:items-start">
-          <section className="space-y-4 rounded-3xl border border-amber-200/70 bg-[#f8f2e7] p-5 shadow-[0_14px_34px_rgba(37,25,10,0.18)]">
+        <div className="grid flex-1 min-h-0 gap-4 sm:grid-cols-[minmax(0,1.15fr)_minmax(280px,0.85fr)] sm:items-start">
+          <section className="flex min-h-0 flex-col space-y-4 rounded-3xl border border-amber-200/70 bg-[#f8f2e7] p-5 shadow-[0_14px_34px_rgba(37,25,10,0.18)]">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 className="text-base font-semibold">Waiting room</h2>
@@ -633,11 +633,11 @@ export default function LobbyPage() {
                 Loading lobby…
               </div>
             ) : activeGame ? (
-              <div className="space-y-2">
+              <div className="flex min-h-0 flex-1 flex-col space-y-2">
                 <div className="text-xs uppercase text-neutral-500">
                   Seated players ({players.length})
                 </div>
-                <ul className="max-h-[48dvh] space-y-2 overflow-y-auto pr-1">
+                <ul className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
                   {players.map((player) => (
                     <li
                       key={player.id}
@@ -655,7 +655,7 @@ export default function LobbyPage() {
             )}
           </section>
 
-          <aside className="space-y-4 lg:sticky lg:top-4">
+          <aside className="min-h-0 space-y-4 overflow-y-auto pr-1">
             {activeGame ? (
               <>
                 <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-sm">
@@ -756,7 +756,7 @@ export default function LobbyPage() {
         </div>
 
         {notice ? (
-          <div className="rounded-2xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
+          <div className="flex-none rounded-2xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
             <p>{notice}</p>
             {sessionInvalid ? (
               <button
