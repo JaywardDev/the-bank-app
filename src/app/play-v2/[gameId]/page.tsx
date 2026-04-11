@@ -346,7 +346,7 @@ type FinalStanding = {
 };
 
 const SESSION_EXPIRED_MESSAGE = "Session expired — please sign in again";
-const MIN_LOADING_SCREEN_MS = 5000;
+const MIN_LOADING_SCREEN_MS = 4000;
 const lastGameKey = "bank.lastGameId";
 const RESUME_REFRESH_DEBOUNCE_MS = 400;
 const REALTIME_SLICE_COALESCE_MS = 80;
@@ -420,7 +420,6 @@ export default function PlayV2Page() {
   const [loadingStartedAt, setLoadingStartedAt] = useState<number | null>(null);
   const [loadingElapsedMs, setLoadingElapsedMs] = useState(0);
   const [loadingMinElapsed, setLoadingMinElapsed] = useState(false);
-  const [introDismissed, setIntroDismissed] = useState(false);
   const [gameOverOverlayDismissed, setGameOverOverlayDismissed] =
     useState(false);
   const [ownedActionReason, setOwnedActionReason] = useState<{
@@ -2819,7 +2818,7 @@ export default function PlayV2Page() {
   const isConfigured = Boolean(session?.access_token);
   const canShowIntro =
     isConfigured && Boolean(routeGameId) && !needsAuth && !gameMetaError;
-  const shouldShowIntro = canShowIntro && !introDismissed;
+  const shouldShowIntro = canShowIntro && (!loadingMinElapsed || !isGameReady);
   const loadingProgress = Math.min(
     (loadingElapsedMs / MIN_LOADING_SCREEN_MS) * 100,
     100,
@@ -4394,13 +4393,6 @@ export default function PlayV2Page() {
   }
 
   if (shouldShowIntro) {
-    const startButtonDisabled = !isGameReady || !loadingMinElapsed;
-    const startButtonLabel = !isGameReady
-      ? "Loading…"
-      : !loadingMinElapsed
-        ? "Preparing…"
-        : "Start";
-
     return (
       <>
         <RotateToLandscapeOverlay />
@@ -4439,14 +4431,6 @@ export default function PlayV2Page() {
               <p className="text-xs text-white/75">
                 {isGameReady ? "Finalizing board…" : "Loading game…"}
               </p>
-              <button
-                type="button"
-                disabled={startButtonDisabled}
-                onClick={() => setIntroDismissed(true)}
-                className="inline-flex min-w-28 items-center justify-center rounded-full border border-white/30 bg-white/20 px-5 py-2 text-sm font-semibold text-white transition enabled:hover:bg-white/30 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {startButtonLabel}
-              </button>
             </div>
           </div>
         </main>
