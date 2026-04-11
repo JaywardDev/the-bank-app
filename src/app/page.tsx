@@ -7,6 +7,8 @@ import { boardPacks, defaultBoardPackId } from "@/lib/boardPacks";
 import { postGameActionRequest } from "@/lib/client/postGameActionRequest";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 import InfoTooltip from "@/app/components/InfoTooltip";
+import CompactOverlayModal from "@/app/components/CompactOverlayModal";
+import { compactLandscapeStyles } from "@/app/components/compactLandscape";
 import RotateToLandscapeOverlay from "@/components/play-v2/RotateToLandscapeOverlay";
 
 const lastGameKey = "bank.lastGameId";
@@ -63,6 +65,9 @@ export default function Home() {
   const [notice, setNotice] = useState<string | null>(null);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [activeModal, setActiveModal] = useState<"signin" | "join" | "host" | "resume" | null>(
+    null,
+  );
 
   const isConfigured = useMemo(() => supabaseClient.isConfigured(), []);
   const configErrors = useMemo(() => getConfigErrors(), []);
@@ -340,7 +345,7 @@ export default function Home() {
   };
 
   return (
-    <main className="relative flex h-[100svh] flex-col overflow-hidden bg-[#F6F1E8] px-3 py-2 pb-[max(env(safe-area-inset-bottom),0.5rem)] sm:px-4 sm:py-3 sm:pb-[max(env(safe-area-inset-bottom),0.75rem)]">
+    <main className={`home-skin bg-[#F6F1E8] ${compactLandscapeStyles.viewport}`}>
       <div
         className="pointer-events-none absolute inset-0 z-0 bg-[url('/icons/home_page.svg')] bg-cover bg-center bg-fixed"
         aria-hidden="true"
@@ -349,26 +354,43 @@ export default function Home() {
         className="pointer-events-none absolute inset-0 z-10 bg-neutral-950/15"
         aria-hidden="true"
       />
-      <div className="relative z-20 mx-auto flex w-full max-w-7xl flex-1 min-h-0 flex-col gap-2.5 md:gap-3">
-        <header className="flex flex-none items-start justify-between gap-3 rounded-2xl border border-amber-100/70 bg-[#FBFAF7]/95 px-3.5 py-2 shadow-[0_8px_20px_rgba(34,21,10,0.12)] md:px-4 md:py-2.5">
+      <div className={compactLandscapeStyles.container}>
+        <header className={compactLandscapeStyles.header}>
           <div className="space-y-0.5">
             <h1 className="text-lg font-semibold leading-tight text-neutral-900 sm:text-xl">
               The Bank
             </h1>
             <p className="text-[11px] leading-tight text-neutral-600 sm:text-xs">
-              A high-stakes table game of deals, risks, and fortune.
+              Choose a table workflow to continue.
             </p>
           </div>
-          {session ? (
+          <div className="flex items-center gap-2">
             <button
-              className="text-xs font-medium text-neutral-500 hover:text-neutral-900"
+              className="rounded-lg border border-amber-200/80 bg-white/80 px-3 py-1.5 text-xs font-semibold text-neutral-700 transition hover:bg-white"
               type="button"
-              onClick={handleSignOut}
-              disabled={loadingAction === "signout"}
+              onClick={() => router.push("/watch")}
             >
-              Sign out
+              Watch
             </button>
-          ) : null}
+            {session ? (
+              <button
+                className="rounded-lg border border-amber-200/80 bg-white/80 px-3 py-1.5 text-xs font-semibold text-neutral-700 transition hover:bg-white disabled:opacity-60"
+                type="button"
+                onClick={handleSignOut}
+                disabled={loadingAction === "signout"}
+              >
+                {loadingAction === "signout" ? "Signing out…" : "Sign out"}
+              </button>
+            ) : (
+              <button
+                className="rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-neutral-800"
+                type="button"
+                onClick={() => setActiveModal("signin")}
+              >
+                Sign in
+              </button>
+            )}
+          </div>
         </header>
 
         {hasConfigErrors ? (
@@ -382,222 +404,231 @@ export default function Home() {
           </div>
         ) : null}
 
-        {!session ? (
-          <div className="flex flex-1 min-h-0 flex-col gap-3 sm:flex-row sm:items-start">
-            <section className="space-y-2 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-3 shadow-[0_8px_20px_rgba(34,21,10,0.12)]">
-              <div className="space-y-1">
-                <h2 className="text-base font-semibold">Sign in</h2>
-                <p className="text-xs text-neutral-500 sm:text-sm">
-                  Confirm your seat at the table.
-                </p>
-              </div>
+        <section className={`flex min-h-0 flex-1 flex-col justify-between p-4 sm:p-5 ${compactLandscapeStyles.panel}`}>
+          <div className="space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-neutral-500">
+              Table control
+            </p>
+            <h2 className="text-xl font-semibold text-neutral-900 sm:text-2xl">
+              {session ? "Pick your next move" : "Sign in to enter the table"}
+            </h2>
+            <p className="text-xs text-neutral-600 sm:text-sm">
+              One action at a time. Setup steps open in focused modal screens.
+            </p>
+          </div>
 
-              {authLoading ? (
-                <p className="text-sm text-neutral-500">Checking session…</p>
-              ) : (
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium uppercase text-neutral-500">
-                    Email
-                  </label>
-                  <input
-                    className="w-full rounded-xl border border-amber-200/70 bg-[#F4EFE7] px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-500 focus-visible:border-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
-                    type="email"
-                    placeholder="you@example.com"
-                    value={authEmail}
-                    onChange={(event) => setAuthEmail(event.target.value)}
-                  />
-                  <p className="text-[11px] text-neutral-500 sm:text-xs">
-                    We&apos;ll send a confirmation link to your email.
-                  </p>
-                  <button
-                    className="w-full rounded-xl bg-gradient-to-b from-neutral-900 to-neutral-800 px-4 py-2 text-sm font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_8px_18px_rgba(29,20,12,0.35)] transition active:translate-y-0.5 active:shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_4px_10px_rgba(29,20,12,0.3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[#FBFAF7] disabled:cursor-not-allowed disabled:opacity-60"
-                    type="button"
-                    onClick={handleSendMagicLink}
-                    disabled={loadingAction === "auth" || hasConfigErrors}
-                  >
-                    {loadingAction === "auth" ? "Sending…" : "Confirm email"}
-                  </button>
-                </div>
-              )}
-            </section>
-
-            <section className="space-y-1.5 rounded-2xl border border-amber-200/80 bg-[#F7F2EA]/90 p-3 shadow-[0_8px_18px_rgba(34,21,10,0.1)]">
-              <button
-                className="w-full rounded-xl border border-amber-300/70 bg-[#F7F2EA] px-4 py-2 text-sm font-semibold text-neutral-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] transition hover:bg-[#F1E9DD] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
-                type="button"
-                onClick={() => router.push("/watch")}
-              >
-                Watch Game
-              </button>
-              <p className="text-[11px] text-neutral-600 sm:text-xs">
-                Display the projection board on another device using a join code.
+          <div className="grid gap-2.5 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={() => (session ? setActiveModal("join") : setActiveModal("signin"))}
+              className="rounded-xl border border-amber-300/80 bg-white/85 px-4 py-3 text-left shadow-[0_8px_20px_rgba(34,21,10,0.1)] transition hover:bg-white"
+            >
+              <p className="text-sm font-semibold text-neutral-900">Join table</p>
+              <p className="text-xs text-neutral-600">Enter code + display name</p>
+            </button>
+            <button
+              type="button"
+              onClick={() => (session ? setActiveModal("host") : setActiveModal("signin"))}
+              className="rounded-xl border border-neutral-900/70 bg-neutral-900 px-4 py-3 text-left shadow-[0_8px_20px_rgba(20,14,8,0.25)] transition hover:bg-neutral-800"
+            >
+              <p className="text-sm font-semibold text-white">Host table</p>
+              <p className="text-xs text-neutral-200">Create lobby and invite players</p>
+            </button>
+            <button
+              type="button"
+              onClick={() => (session ? setActiveModal("resume") : setActiveModal("signin"))}
+              className="rounded-xl border border-amber-200/80 bg-[#F7F2EA]/90 px-4 py-3 text-left transition hover:bg-[#F3EBDF]"
+            >
+              <p className="text-sm font-semibold text-neutral-900">Resume tables</p>
+              <p className="text-xs text-neutral-600">
+                {resumeGames.length > 0 ? `${resumeGames.length} active tables` : "No active tables yet"}
               </p>
-            </section>
+            </button>
+            <button
+              type="button"
+              onClick={() => router.push("/watch")}
+              className="rounded-xl border border-amber-200/80 bg-[#F7F2EA]/90 px-4 py-3 text-left transition hover:bg-[#F3EBDF]"
+            >
+              <p className="text-sm font-semibold text-neutral-900">Watch game</p>
+              <p className="text-xs text-neutral-600">Projection board mode</p>
+            </button>
           </div>
-        ) : null}
-
-        {session ? (
-          <div className="flex flex-1 min-h-0 flex-col gap-3 sm:flex-row sm:items-start">
-            <div className="flex flex-1 min-h-0 flex-col gap-3 overflow-y-auto pr-1">
-              <section className="space-y-2 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-3 shadow-[0_8px_20px_rgba(34,21,10,0.12)]">
-                <h2 className="text-sm font-semibold uppercase tracking-[0.08em] text-neutral-700">
-                  Player
-                </h2>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium uppercase text-neutral-500">
-                    Display name
-                  </label>
-                  <input
-                    className="w-full rounded-xl border border-amber-200/70 bg-[#F4EFE7] px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-500 focus-visible:border-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
-                    type="text"
-                    placeholder="Banker Alex"
-                    value={playerName}
-                    onChange={(event) => setPlayerName(event.target.value)}
-                  />
-                </div>
-                <h2 className="text-base font-semibold">Join a table</h2>
-                <p className="text-xs text-neutral-500 sm:text-sm">
-                  Enter the code from the host to join their lobby.
-                </p>
-                <input
-                  className="w-full rounded-xl border border-amber-200/70 bg-[#F4EFE7] px-3 py-2 text-sm uppercase tracking-[0.3em] text-neutral-900 placeholder:text-neutral-500 focus-visible:border-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
-                  type="text"
-                  placeholder="ABC123"
-                  value={joinCode}
-                  onChange={(event) => setJoinCode(event.target.value)}
-                />
-                <button
-                  className="w-full rounded-xl border border-amber-300/70 bg-[#F7F2EA]/80 px-4 py-2 text-sm font-semibold text-neutral-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] transition hover:bg-[#F1E9DD] active:translate-y-0.5 active:shadow-[inset_0_1px_0_rgba(255,255,255,0.4)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70 disabled:cursor-not-allowed disabled:border-amber-200/60 disabled:text-neutral-400 disabled:opacity-70"
-                  type="button"
-                  onClick={handleJoinGame}
-                  disabled={!session || loadingAction === "join"}
-                >
-                  {loadingAction === "join" ? "Joining…" : "Join table"}
-                </button>
-              </section>
-            </div>
-
-            <div className="flex flex-1 min-h-0 flex-col gap-2">
-              <section className="flex-none space-y-2 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-3 shadow-[0_8px_20px_rgba(34,21,10,0.12)]">
-                <h2 className="text-base font-semibold">Host a table</h2>
-                <p className="text-xs text-neutral-500 sm:text-sm">
-                  Start a table and share the code with players.
-                </p>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium uppercase text-neutral-500">
-                      Game mode
-                    </label>
-                    <select
-                      className="w-full rounded-xl border border-amber-200/70 bg-[#F4EFE7] px-3 py-2 text-sm text-neutral-900 focus-visible:border-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
-                      value={gameMode}
-                      onChange={(event) =>
-                        setGameMode(
-                          event.target.value === "round_mode" ? "round_mode" : "classic",
-                        )
-                      }
-                    >
-                      <option value="classic">Classic</option>
-                      <option value="round_mode">Round Mode</option>
-                    </select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium uppercase text-neutral-500">
-                      Board pack
-                    </label>
-                    <select
-                      className="w-full rounded-xl border border-amber-200/70 bg-[#F4EFE7] px-3 py-2 text-sm text-neutral-900 focus-visible:border-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
-                      value={boardPackId}
-                      onChange={(event) => setBoardPackId(event.target.value)}
-                    >
-                      {boardPacks.map((pack) => (
-                        <option key={pack.id} value={pack.id}>
-                          {pack.displayName}{pack.tooltip ? " ℹ️" : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                {gameMode === "round_mode" ? (
-                  <div className="max-w-[300px] space-y-1.5">
-                    <label className="text-xs font-medium uppercase text-neutral-500">
-                      Round limit
-                    </label>
-                    <select
-                      className="w-full rounded-xl border border-amber-200/70 bg-[#F4EFE7] px-3 py-2 text-sm text-neutral-900 focus-visible:border-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
-                      value={roundLimit}
-                      onChange={(event) =>
-                        setRoundLimit(Number(event.target.value) as 100 | 150 | 200 | 300)
-                      }
-                    >
-                      <option value={100}>100</option>
-                      <option value={150}>150</option>
-                      <option value={200}>200</option>
-                      <option value={300}>300</option>
-                    </select>
-                  </div>
-                ) : null}
-                {boardPacks.find((pack) => pack.id === boardPackId)?.tooltip ? (
-                  <div className="flex items-center gap-2 text-xs text-neutral-600">
-                    <span>Board details</span>
-                    <InfoTooltip
-                      text={boardPacks.find((pack) => pack.id === boardPackId)?.tooltip ?? ""}
-                    />
-                  </div>
-                ) : null}
-                <button
-                  className="w-full rounded-xl bg-gradient-to-b from-neutral-900 to-neutral-800 px-4 py-2 text-sm font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_10px_22px_rgba(29,20,12,0.35)] transition active:translate-y-0.5 active:shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_5px_12px_rgba(29,20,12,0.3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[#FBFAF7] disabled:cursor-not-allowed disabled:opacity-60"
-                  type="button"
-                  onClick={handleCreateGame}
-                  disabled={!session || loadingAction === "create"}
-                >
-                  {loadingAction === "create" ? "Creating…" : "Host table"}
-                </button>
-              </section>
-
-              {session && resumeGames.length > 0 ? (
-                <section className="flex min-h-0 flex-1 flex-col space-y-2 rounded-2xl border border-amber-100/70 bg-[#FBFAF7] p-3 shadow-[0_8px_20px_rgba(34,21,10,0.12)]">
-                  <div className="space-y-1">
-                    <h2 className="text-base font-semibold">Resume tables</h2>
-                    <p className="text-xs text-neutral-500 sm:text-sm">
-                      Active games you are currently part of.
-                    </p>
-                  </div>
-                  <div className="flex-1 min-h-0 space-y-1.5 overflow-y-auto pr-1">
-                    {resumeGames.map((game) => (
-                      <button
-                        key={game.gameId}
-                        type="button"
-                        onClick={() => openResumeGame(game)}
-                        className={`w-full rounded-xl border px-3 py-2 text-left text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70 ${
-                          lastOpenedGameId === game.gameId
-                            ? "border-amber-400 bg-amber-50"
-                            : "border-amber-200/70 bg-[#F7F2EA]/80 hover:bg-[#F1E9DD]"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-2 font-semibold text-neutral-900">
-                          <span>{game.status === "lobby" ? "Lobby" : "In progress"}</span>
-                          <span className="font-mono text-xs tracking-[0.2em]">{game.joinCode}</span>
-                        </div>
-                        <div className="text-xs text-neutral-600">
-                          {game.displayName ? `Playing as ${game.displayName}` : "Resume table"}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </section>
-              ) : null}
-            </div>
-          </div>
-        ) : null}
+        </section>
 
         {notice ? (
           <div className="flex-none rounded-2xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
             {notice}
           </div>
         ) : null}
-
       </div>
+
+      <CompactOverlayModal
+        open={activeModal === "signin"}
+        title="Sign in"
+        onClose={() => setActiveModal(null)}
+      >
+        {authLoading ? (
+          <p className="text-sm text-neutral-500">Checking session…</p>
+        ) : (
+          <div className="space-y-2">
+            <label className="text-xs font-medium uppercase text-neutral-500">Email</label>
+            <input
+              className="w-full rounded-xl border border-amber-200/70 bg-[#F4EFE7] px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-500 focus-visible:border-amber-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
+              type="email"
+              placeholder="you@example.com"
+              value={authEmail}
+              onChange={(event) => setAuthEmail(event.target.value)}
+            />
+            <button
+              className="w-full rounded-xl bg-gradient-to-b from-neutral-900 to-neutral-800 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+              type="button"
+              onClick={handleSendMagicLink}
+              disabled={loadingAction === "auth" || hasConfigErrors}
+            >
+              {loadingAction === "auth" ? "Sending…" : "Send magic link"}
+            </button>
+          </div>
+        )}
+      </CompactOverlayModal>
+
+      <CompactOverlayModal open={activeModal === "join"} title="Join table" onClose={() => setActiveModal(null)}>
+        <div className="space-y-2">
+          <div className="space-y-1">
+            <label className="text-xs font-medium uppercase text-neutral-500">Display name</label>
+            <input
+              className="w-full rounded-xl border border-amber-200/70 bg-[#F4EFE7] px-3 py-2 text-sm text-neutral-900"
+              type="text"
+              placeholder="Banker Alex"
+              value={playerName}
+              onChange={(event) => setPlayerName(event.target.value)}
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium uppercase text-neutral-500">Join code</label>
+            <input
+              className="w-full rounded-xl border border-amber-200/70 bg-[#F4EFE7] px-3 py-2 text-sm uppercase tracking-[0.3em] text-neutral-900"
+              type="text"
+              placeholder="ABC123"
+              value={joinCode}
+              onChange={(event) => setJoinCode(event.target.value)}
+            />
+          </div>
+          <button
+            className="w-full rounded-xl border border-amber-300/70 bg-[#F7F2EA]/80 px-4 py-2 text-sm font-semibold text-neutral-800 disabled:opacity-60"
+            type="button"
+            onClick={handleJoinGame}
+            disabled={!session || loadingAction === "join"}
+          >
+            {loadingAction === "join" ? "Joining…" : "Join table"}
+          </button>
+        </div>
+      </CompactOverlayModal>
+
+      <CompactOverlayModal open={activeModal === "host"} title="Host table" onClose={() => setActiveModal(null)}>
+        <div className="space-y-2">
+          <div className="space-y-1">
+            <label className="text-xs font-medium uppercase text-neutral-500">Display name</label>
+            <input
+              className="w-full rounded-xl border border-amber-200/70 bg-[#F4EFE7] px-3 py-2 text-sm text-neutral-900"
+              type="text"
+              placeholder="Banker Alex"
+              value={playerName}
+              onChange={(event) => setPlayerName(event.target.value)}
+            />
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div className="space-y-1">
+              <label className="text-xs font-medium uppercase text-neutral-500">Game mode</label>
+              <select
+                className="w-full rounded-xl border border-amber-200/70 bg-[#F4EFE7] px-3 py-2 text-sm text-neutral-900"
+                value={gameMode}
+                onChange={(event) =>
+                  setGameMode(event.target.value === "round_mode" ? "round_mode" : "classic")
+                }
+              >
+                <option value="classic">Classic</option>
+                <option value="round_mode">Round Mode</option>
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium uppercase text-neutral-500">Board pack</label>
+              <select
+                className="w-full rounded-xl border border-amber-200/70 bg-[#F4EFE7] px-3 py-2 text-sm text-neutral-900"
+                value={boardPackId}
+                onChange={(event) => setBoardPackId(event.target.value)}
+              >
+                {boardPacks.map((pack) => (
+                  <option key={pack.id} value={pack.id}>
+                    {pack.displayName}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          {gameMode === "round_mode" ? (
+            <div className="space-y-1">
+              <label className="text-xs font-medium uppercase text-neutral-500">Round limit</label>
+              <select
+                className="w-full rounded-xl border border-amber-200/70 bg-[#F4EFE7] px-3 py-2 text-sm text-neutral-900"
+                value={roundLimit}
+                onChange={(event) => setRoundLimit(Number(event.target.value) as 100 | 150 | 200 | 300)}
+              >
+                <option value={100}>100</option>
+                <option value={150}>150</option>
+                <option value={200}>200</option>
+                <option value={300}>300</option>
+              </select>
+            </div>
+          ) : null}
+          {boardPacks.find((pack) => pack.id === boardPackId)?.tooltip ? (
+            <div className="flex items-center gap-2 text-xs text-neutral-600">
+              <span>Board details</span>
+              <InfoTooltip text={boardPacks.find((pack) => pack.id === boardPackId)?.tooltip ?? ""} />
+            </div>
+          ) : null}
+          <button
+            className="w-full rounded-xl bg-gradient-to-b from-neutral-900 to-neutral-800 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+            type="button"
+            onClick={handleCreateGame}
+            disabled={!session || loadingAction === "create"}
+          >
+            {loadingAction === "create" ? "Creating…" : "Create and host"}
+          </button>
+        </div>
+      </CompactOverlayModal>
+
+      <CompactOverlayModal
+        open={activeModal === "resume"}
+        title="Resume tables"
+        onClose={() => setActiveModal(null)}
+      >
+        {resumeGames.length === 0 ? (
+          <p className="text-sm text-neutral-600">No active tables found for this account.</p>
+        ) : (
+          <div className="space-y-1.5">
+            {resumeGames.map((game) => (
+              <button
+                key={game.gameId}
+                type="button"
+                onClick={() => openResumeGame(game)}
+                className={`w-full rounded-xl border px-3 py-2 text-left text-sm transition ${
+                  lastOpenedGameId === game.gameId
+                    ? "border-amber-400 bg-amber-50"
+                    : "border-amber-200/70 bg-[#F7F2EA]/80 hover:bg-[#F1E9DD]"
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2 font-semibold text-neutral-900">
+                  <span>{game.status === "lobby" ? "Lobby" : "In progress"}</span>
+                  <span className="font-mono text-xs tracking-[0.2em]">{game.joinCode}</span>
+                </div>
+                <div className="text-xs text-neutral-600">
+                  {game.displayName ? `Playing as ${game.displayName}` : "Resume table"}
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </CompactOverlayModal>
       <RotateToLandscapeOverlay />
     </main>
   );

@@ -7,6 +7,7 @@ import { getConfigErrors } from "@/lib/env";
 import { postGameActionRequest } from "@/lib/client/postGameActionRequest";
 import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 import RotateToLandscapeOverlay from "@/components/play-v2/RotateToLandscapeOverlay";
+import CompactOverlayModal from "@/app/components/CompactOverlayModal";
 import { compactLandscapeStyles } from "@/app/components/compactLandscape";
 
 const lastGameKey = "bank.lastGameId";
@@ -52,6 +53,9 @@ export default function LobbyPage() {
   const [authLoading, setAuthLoading] = useState(true);
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
   const [sessionInvalid, setSessionInvalid] = useState(false);
+  const [activeModal, setActiveModal] = useState<"invite" | "settings" | "end-session" | null>(
+    null,
+  );
   const latestSessionRef = useRef<SupabaseSession | null>(null);
   const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshInFlightRef = useRef(false);
@@ -602,12 +606,30 @@ export default function LobbyPage() {
         <header className={compactLandscapeStyles.header}>
           <div className="space-y-1">
             <h1 className="text-xl font-semibold leading-tight text-neutral-900 sm:text-2xl">
-              Game lobby
+              Waiting room
             </h1>
             <p className="text-xs text-neutral-700 sm:text-sm">
-              Share the join code and wait for the host to start.
+              Players join here while the host prepares the round.
             </p>
           </div>
+          {activeGame ? (
+            <div className="flex items-center gap-2">
+              <button
+                className="rounded-lg border border-amber-200/80 bg-white/80 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.15em] text-neutral-800"
+                type="button"
+                onClick={() => setActiveModal("invite")}
+              >
+                {activeGame.join_code}
+              </button>
+              <button
+                className="rounded-lg border border-amber-200/80 bg-white/80 px-3 py-1.5 text-xs font-semibold text-neutral-700"
+                type="button"
+                onClick={handleLeaveLobby}
+              >
+                Leave
+              </button>
+            </div>
+          ) : null}
         </header>
 
         {hasConfigErrors ? (
@@ -621,153 +643,81 @@ export default function LobbyPage() {
           </div>
         ) : null}
 
-        <div className="grid min-h-0 flex-1 gap-3 sm:grid-cols-[minmax(0,1.15fr)_minmax(260px,0.85fr)]">
-          <section className={`flex min-h-0 flex-col p-4 ${compactLandscapeStyles.panel}`}>
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-semibold uppercase tracking-[0.08em] text-neutral-800">
-                  Waiting room
-                </h2>
-                <p className="mt-1 text-xs text-neutral-600">
-                  Invite players before kicking off the game.
-                </p>
-              </div>
+        <section className={`flex min-h-0 flex-1 flex-col p-4 ${compactLandscapeStyles.panel}`}>
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold uppercase tracking-[0.08em] text-neutral-700">
+              Seated players
+            </h2>
+            <span className="rounded-full border border-neutral-200 bg-white/80 px-2.5 py-1 text-[11px] font-medium text-neutral-600">
+              {players.length} total
+            </span>
+          </div>
+          <p className="mt-1 text-xs text-neutral-600">Main table view stays focused on the roster.</p>
+          {authLoading ? (
+            <div className="mt-3 rounded-xl border border-amber-200/70 bg-white/70 p-3 text-xs text-neutral-600">
+              Loading lobby…
             </div>
-            {authLoading ? (
-              <div className="mt-3 rounded-xl border border-amber-200/70 bg-white/70 p-3 text-xs text-neutral-600">
-                Loading lobby…
-              </div>
-            ) : activeGame ? (
-              <div className="mt-3 flex min-h-0 flex-1 flex-col">
-                <div className="pb-2 text-[11px] font-medium uppercase tracking-[0.06em] text-neutral-500">
-                  Seated players ({players.length})
-                </div>
-                <ul className="min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1">
-                  {players.map((player) => (
-                    <li
-                      key={player.id}
-                      className="flex items-center justify-between rounded-lg border border-neutral-200/80 bg-white/85 px-3 py-1.5 text-xs text-neutral-700 shadow-[0_4px_10px_rgba(37,25,10,0.08)]"
-                    >
-                      {player.display_name ?? "Player"}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : (
-              <section className="mt-3 rounded-xl border bg-white/80 p-3 text-xs text-neutral-500">
-                Lobby not loaded yet.
-              </section>
-            )}
-          </section>
-
-          <aside className="min-h-0 overflow-y-auto pr-1">
-            {activeGame ? (
-              <section className={`flex min-h-0 flex-col gap-3 p-3 ${compactLandscapeStyles.panel}`}>
-                <div className="rounded-lg border border-neutral-200/90 bg-white/85 p-2.5">
-                  <div className="flex items-center justify-between gap-2 text-[11px] font-medium uppercase tracking-[0.06em] text-neutral-500">
-                    <span>Join code</span>
-                    <button
-                      className="rounded-md border border-neutral-200 bg-white px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-neutral-700 transition hover:border-neutral-300 hover:bg-neutral-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-700"
-                      type="button"
-                      onClick={handleCopyCode}
-                    >
-                      Copy
-                    </button>
-                  </div>
-                  <div className="mt-1.5 text-base font-semibold uppercase tracking-[0.32em] text-neutral-900">
-                    <span className="select-all font-mono">{activeGame.join_code}</span>
-                  </div>
-                  {copyNotice ? (
-                    <div className="mt-1 text-[11px] text-neutral-500">{copyNotice}</div>
-                  ) : null}
-                </div>
-
-                <button
-                  className="w-full rounded-md border border-transparent px-2 py-1 text-xs font-semibold text-neutral-600 transition hover:text-neutral-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-700"
-                  type="button"
-                  onClick={handleLeaveLobby}
-                >
-                  Leave table
-                </button>
-
-                {isHost && activeGame.status === "lobby" ? (
-                  <div className="space-y-2 rounded-lg border border-neutral-200/90 bg-white/85 p-2.5">
-                    <div className="text-[11px] font-medium uppercase tracking-[0.06em] text-neutral-500">
-                      Host settings
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-medium uppercase tracking-[0.05em] text-neutral-500">
-                        Game mode
-                      </label>
-                      <select
-                        className="h-8 w-full rounded-md border border-neutral-300 bg-white px-2 text-xs text-neutral-900"
-                        value={hostGameMode}
-                        onChange={(event) =>
-                          setHostGameMode(
-                            event.target.value === "round_mode" ? "round_mode" : "classic",
-                          )
-                        }
-                      >
-                        <option value="classic">Classic</option>
-                        <option value="round_mode">Round Mode</option>
-                      </select>
-                    </div>
-                    {hostGameMode === "round_mode" ? (
-                      <div className="space-y-1">
-                        <label className="text-[11px] font-medium uppercase tracking-[0.05em] text-neutral-500">
-                          Round limit
-                        </label>
-                        <select
-                          className="h-8 w-full rounded-md border border-neutral-300 bg-white px-2 text-xs text-neutral-900"
-                          value={hostRoundLimit}
-                          onChange={(event) =>
-                            setHostRoundLimit(Number(event.target.value) as 100 | 150 | 200 | 300)
-                          }
-                        >
-                          <option value={100}>100</option>
-                          <option value={150}>150</option>
-                          <option value={200}>200</option>
-                          <option value={300}>300</option>
-                        </select>
-                      </div>
+          ) : activeGame ? (
+            <div className="mt-3 flex min-h-0 flex-1 flex-col">
+              <ul className="min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1">
+                {players.map((player) => (
+                  <li
+                    key={player.id}
+                    className="flex items-center justify-between rounded-lg border border-neutral-200/80 bg-white/85 px-3 py-2 text-sm text-neutral-700 shadow-[0_4px_10px_rgba(37,25,10,0.08)]"
+                  >
+                    <span>{player.display_name ?? "Player"}</span>
+                    {player.user_id === activeGame.created_by ? (
+                      <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-neutral-500">
+                        Host
+                      </span>
                     ) : null}
-                    <button
-                      className="h-8 w-full rounded-md border border-neutral-300 bg-white px-3 text-xs font-semibold text-neutral-800 transition hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-60"
-                      type="button"
-                      onClick={handleUpdateGameSettings}
-                      disabled={loadingAction === "settings"}
-                    >
-                      {loadingAction === "settings" ? "Saving…" : "Save setup"}
-                    </button>
-                  </div>
-                ) : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <section className="mt-3 rounded-xl border bg-white/80 p-3 text-xs text-neutral-500">
+              Lobby not loaded yet.
+            </section>
+          )}
 
-                {isHost ? (
-                  <div className="mt-auto space-y-2">
-                    {activeGame.status === "lobby" ? (
-                      <button
-                        className="h-9 w-full rounded-lg bg-neutral-900 px-4 text-sm font-semibold text-white shadow-[0_6px_14px_rgba(15,23,42,0.22)] transition hover:bg-neutral-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900 disabled:cursor-not-allowed disabled:bg-neutral-400"
-                        type="button"
-                        onClick={handleStartGame}
-                        disabled={loadingAction === "start"}
-                      >
-                        {loadingAction === "start" ? "Starting…" : "Start game"}
-                      </button>
-                    ) : null}
-                    <button
-                      className="h-8 w-full rounded-lg border border-rose-200/80 bg-rose-50/85 px-3 text-xs font-semibold text-rose-800 transition hover:border-rose-300 hover:bg-rose-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-400 disabled:cursor-not-allowed disabled:border-rose-100 disabled:text-rose-300"
-                      type="button"
-                      onClick={handleEndSession}
-                      disabled={loadingAction === "end"}
-                    >
-                      {loadingAction === "end" ? "Ending…" : "End session"}
-                    </button>
-                  </div>
-                ) : null}
-              </section>
-            ) : null}
-          </aside>
-        </div>
+          {isHost && activeGame?.status === "lobby" ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-semibold text-white disabled:bg-neutral-400"
+                type="button"
+                onClick={handleStartGame}
+                disabled={loadingAction === "start"}
+              >
+                {loadingAction === "start" ? "Starting…" : "Start game"}
+              </button>
+              <button
+                className="rounded-lg border border-neutral-300 bg-white/85 px-4 py-2 text-sm font-semibold text-neutral-800"
+                type="button"
+                onClick={() => setActiveModal("settings")}
+              >
+                Host settings
+              </button>
+              <button
+                className="rounded-lg border border-rose-200/80 bg-rose-50/85 px-4 py-2 text-sm font-semibold text-rose-800"
+                type="button"
+                onClick={() => setActiveModal("end-session")}
+              >
+                End session
+              </button>
+            </div>
+          ) : (
+            <div className="mt-3 flex gap-2">
+              <button
+                className="rounded-lg border border-neutral-300 bg-white/85 px-4 py-2 text-sm font-semibold text-neutral-800"
+                type="button"
+                onClick={() => setActiveModal("invite")}
+              >
+                Invite details
+              </button>
+            </div>
+          )}
+        </section>
 
         {notice ? (
           <div className="flex-none rounded-2xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
@@ -790,6 +740,96 @@ export default function LobbyPage() {
           </div>
         ) : null}
       </div>
+
+      <CompactOverlayModal
+        open={activeModal === "invite"}
+        title="Invite players"
+        onClose={() => setActiveModal(null)}
+      >
+        <div className="space-y-2">
+          <p className="text-xs text-neutral-600">Share this join code with players at the table.</p>
+          <div className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-center text-lg font-semibold uppercase tracking-[0.32em] text-neutral-900">
+            <span className="select-all font-mono">{activeGame?.join_code ?? "------"}</span>
+          </div>
+          <button
+            className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm font-semibold text-neutral-800"
+            type="button"
+            onClick={handleCopyCode}
+          >
+            Copy join code
+          </button>
+          {copyNotice ? <p className="text-xs text-neutral-500">{copyNotice}</p> : null}
+        </div>
+      </CompactOverlayModal>
+
+      <CompactOverlayModal
+        open={activeModal === "settings"}
+        title="Host settings"
+        onClose={() => setActiveModal(null)}
+      >
+        <div className="space-y-2">
+          <div className="space-y-1">
+            <label className="text-xs font-medium uppercase tracking-[0.05em] text-neutral-500">
+              Game mode
+            </label>
+            <select
+              className="h-9 w-full rounded-md border border-neutral-300 bg-white px-2 text-sm text-neutral-900"
+              value={hostGameMode}
+              onChange={(event) =>
+                setHostGameMode(event.target.value === "round_mode" ? "round_mode" : "classic")
+              }
+            >
+              <option value="classic">Classic</option>
+              <option value="round_mode">Round Mode</option>
+            </select>
+          </div>
+          {hostGameMode === "round_mode" ? (
+            <div className="space-y-1">
+              <label className="text-xs font-medium uppercase tracking-[0.05em] text-neutral-500">
+                Round limit
+              </label>
+              <select
+                className="h-9 w-full rounded-md border border-neutral-300 bg-white px-2 text-sm text-neutral-900"
+                value={hostRoundLimit}
+                onChange={(event) =>
+                  setHostRoundLimit(Number(event.target.value) as 100 | 150 | 200 | 300)
+                }
+              >
+                <option value={100}>100</option>
+                <option value={150}>150</option>
+                <option value={200}>200</option>
+                <option value={300}>300</option>
+              </select>
+            </div>
+          ) : null}
+          <button
+            className="h-9 w-full rounded-md border border-neutral-300 bg-white px-3 text-sm font-semibold text-neutral-800 disabled:opacity-60"
+            type="button"
+            onClick={handleUpdateGameSettings}
+            disabled={loadingAction === "settings"}
+          >
+            {loadingAction === "settings" ? "Saving…" : "Save settings"}
+          </button>
+        </div>
+      </CompactOverlayModal>
+
+      <CompactOverlayModal
+        open={activeModal === "end-session"}
+        title="End session"
+        onClose={() => setActiveModal(null)}
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-neutral-700">End this session for all players and return home?</p>
+          <button
+            className="h-9 w-full rounded-lg border border-rose-200/80 bg-rose-50/85 px-3 text-sm font-semibold text-rose-800 disabled:opacity-60"
+            type="button"
+            onClick={handleEndSession}
+            disabled={loadingAction === "end"}
+          >
+            {loadingAction === "end" ? "Ending…" : "Confirm end session"}
+          </button>
+        </div>
+      </CompactOverlayModal>
       <RotateToLandscapeOverlay />
     </main>
   );
