@@ -355,35 +355,28 @@ export default function Home() {
         aria-hidden="true"
       />
       <div className={compactLandscapeStyles.container}>
-        <header className={`${compactLandscapeStyles.header} py-2`}>
-          <div className="space-y-0.5">
-            <h1 className="text-lg font-semibold leading-tight text-neutral-900 sm:text-xl">
-              The Bank
-            </h1>
-            <p className="text-[11px] leading-tight text-neutral-600 sm:text-xs">
-              Start or join a table
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            {session ? (
-              <button
-                className="rounded-lg border border-amber-200/80 bg-white/80 px-3 py-1.5 text-xs font-semibold text-neutral-700 transition hover:bg-white disabled:opacity-60"
-                type="button"
-                onClick={handleSignOut}
-                disabled={loadingAction === "signout"}
-              >
-                {loadingAction === "signout" ? "Signing out…" : "Sign out"}
-              </button>
-            ) : (
-              <button
-                className="rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-neutral-800"
-                type="button"
-                onClick={() => setActiveModal("signin")}
-              >
-                Sign in
-              </button>
-            )}
-          </div>
+        <header className={`${compactLandscapeStyles.header} flex items-center justify-between gap-3 py-2`}>
+          <h1 className="text-lg font-semibold leading-tight text-neutral-900 sm:text-xl">
+            The Bank
+          </h1>
+          {session ? (
+            <button
+              className="rounded-lg border border-amber-200/80 bg-white/80 px-3 py-1.5 text-xs font-semibold text-neutral-700 transition hover:bg-white disabled:opacity-60"
+              type="button"
+              onClick={handleSignOut}
+              disabled={loadingAction === "signout"}
+            >
+              {loadingAction === "signout" ? "Signing out…" : "Sign out"}
+            </button>
+          ) : (
+            <button
+              className="rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-neutral-800"
+              type="button"
+              onClick={() => setActiveModal("signin")}
+            >
+              Sign in
+            </button>
+          )}
         </header>
 
         {hasConfigErrors ? (
