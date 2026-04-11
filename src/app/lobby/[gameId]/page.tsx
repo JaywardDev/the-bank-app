@@ -603,21 +603,22 @@ export default function LobbyPage() {
         aria-hidden="true"
       />
       <div className={compactLandscapeStyles.container}>
-        <header className={compactLandscapeStyles.header}>
-          <div className="space-y-1">
+        <header className={`${compactLandscapeStyles.header} items-start gap-3`}>
+          <div className="space-y-0.5">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-neutral-600">
+              Lobby
+            </p>
             <h1 className="text-xl font-semibold leading-tight text-neutral-900 sm:text-2xl">
               Waiting room
             </h1>
-            <p className="text-xs text-neutral-700 sm:text-sm">
-              Players join here while the host prepares the round.
-            </p>
           </div>
           {activeGame ? (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 self-center">
               <button
                 className="rounded-lg border border-amber-200/80 bg-white/80 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.15em] text-neutral-800"
                 type="button"
                 onClick={() => setActiveModal("invite")}
+                aria-label="Invite players"
               >
                 {activeGame.join_code}
               </button>
@@ -646,13 +647,12 @@ export default function LobbyPage() {
         <section className={`flex min-h-0 flex-1 flex-col p-4 ${compactLandscapeStyles.panel}`}>
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-sm font-semibold uppercase tracking-[0.08em] text-neutral-700">
-              Seated players
+              Players
             </h2>
             <span className="rounded-full border border-neutral-200 bg-white/80 px-2.5 py-1 text-[11px] font-medium text-neutral-600">
-              {players.length} total
+              {players.length} players
             </span>
           </div>
-          <p className="mt-1 text-xs text-neutral-600">Main table view stays focused on the roster.</p>
           {authLoading ? (
             <div className="mt-3 rounded-xl border border-amber-200/70 bg-white/70 p-3 text-xs text-neutral-600">
               Loading lobby…
