@@ -67,7 +67,7 @@ export const handleBettingAction = async ({
       );
     }
 
-    const kind = body.kind;
+    const kind = body.kind as BettingMarketBetKind;
     const stakeRaw = body.stake;
     if (typeof stakeRaw !== "number" || !Number.isInteger(stakeRaw) || stakeRaw <= 0) {
       return NextResponse.json(
