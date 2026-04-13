@@ -1838,18 +1838,8 @@ export default function PlayV2Page() {
 
   const handleBackToHomeIntent = useCallback(() => {
     closeMenuOverlay();
-    if (!routeGameId) {
-      router.push("/");
-      return;
-    }
-
-    if (isHost) {
-      setShowHostLeaveGuard(true);
-      return;
-    }
-
-    setShowLeaveConfirm(true);
-  }, [closeMenuOverlay, isHost, routeGameId, router]);
+    router.push("/");
+  }, [closeMenuOverlay, router]);
 
   const handleReturnHomeFromGameOver = useCallback(() => {
     clearPlayV2State(routeGameId ?? null);
@@ -5207,7 +5197,7 @@ export default function PlayV2Page() {
                   disabled={leaveMenuDisabled}
                   className="w-full rounded-xl border border-white/15 bg-white/5 px-4 py-2.5 text-left text-sm font-semibold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {leaveMenuDisabled ? "Leaving…" : "Leave Table"}
+                  {leaveMenuDisabled ? "Surrendering…" : "Surrender"}
                 </button>
               ) : null}
               {isHost && inGame ? (
@@ -5286,9 +5276,14 @@ export default function PlayV2Page() {
       />
       <ConfirmActionModalV2
         open={showLeaveConfirm}
-        title="Leave table?"
-        description="You will leave the game and return Home."
-        confirmLabel={actionLoading === "LEAVE_GAME" ? "Leaving…" : "Leave"}
+        title="Surrender?"
+        description={
+          <div className="space-y-1">
+            <p>You will forfeit this game and be removed from play.</p>
+            <p>This cannot be undone.</p>
+          </div>
+        }
+        confirmLabel={actionLoading === "LEAVE_GAME" ? "Surrendering…" : "Surrender"}
         cancelLabel="Cancel"
         isConfirming={isActionInFlight}
         onConfirm={() => {
@@ -5315,7 +5310,7 @@ export default function PlayV2Page() {
               You’re the host
             </p>
             <p className="mt-2 text-sm text-neutral-700">
-              Leaving without ending can orphan the table. What do you want to
+              Surrendering without ending can orphan the table. What do you want to
               do?
             </p>
             <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
