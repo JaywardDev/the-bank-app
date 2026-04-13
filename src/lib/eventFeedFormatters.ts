@@ -1167,6 +1167,20 @@ export const formatEventDescription = (
       return `${playerName} went bankrupt (${reason})${propertyCount}`;
     }
 
+    if (event.event_type === "SURRENDER") {
+      const playerId =
+        typeof payload?.player_id === "string" ? payload.player_id : null;
+      const playerName =
+        players.find((player) => player.id === playerId)?.display_name ??
+        "Player";
+      const returnedIds = Array.isArray(payload?.returned_property_ids)
+        ? payload.returned_property_ids
+        : [];
+      const propertyCount =
+        returnedIds.length > 0 ? ` (${returnedIds.length} properties)` : "";
+      return `${playerName} surrendered${propertyCount}`;
+    }
+
     if (event.event_type === "JAIL_PAY_FINE") {
       const fineAmount =
         typeof payload?.amount === "number"

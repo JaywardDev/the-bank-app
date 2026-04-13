@@ -247,6 +247,7 @@ type BankAction =
   | "USE_TAX_EXEMPTION_PASS"
   | "CONFIRM_INSOLVENCY_PAYMENT"
   | "DECLARE_BANKRUPTCY"
+  | "SURRENDER_GAME"
   | "BUY_PROPERTY"
   | "DECLINE_PROPERTY"
   | "AUCTION_BID"
@@ -438,7 +439,6 @@ export default function PlayV2Page() {
   } | null>(null);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [showEndSessionConfirm, setShowEndSessionConfirm] = useState(false);
-  const [showHostLeaveGuard, setShowHostLeaveGuard] = useState(false);
   const [showMenuOverlay, setShowMenuOverlay] = useState(false);
   const [showTileTitleCardModal, setShowTileTitleCardModal] = useState(false);
   const [showActivityPopup, setShowActivityPopup] = useState(false);
@@ -524,7 +524,6 @@ export default function PlayV2Page() {
       setPayoffMortgageId(null);
       setShowLeaveConfirm(false);
       setShowEndSessionConfirm(false);
-      setShowHostLeaveGuard(false);
       for (const sliceName of sliceNames) {
         sliceRequestEpochsRef.current[sliceName] += 1;
       }
@@ -1829,12 +1828,8 @@ export default function PlayV2Page() {
 
   const handleLeaveIntent = useCallback(() => {
     closeMenuOverlay();
-    if (isHost) {
-      setShowHostLeaveGuard(true);
-      return;
-    }
     setShowLeaveConfirm(true);
-  }, [closeMenuOverlay, isHost]);
+  }, [closeMenuOverlay]);
 
   const handleBackToHomeIntent = useCallback(() => {
     closeMenuOverlay();
@@ -1864,10 +1859,10 @@ export default function PlayV2Page() {
   }, [closeMenuOverlay, showMenuOverlay]);
 
   useEffect(() => {
-    if (showLeaveConfirm || showEndSessionConfirm || showHostLeaveGuard) {
+    if (showLeaveConfirm || showEndSessionConfirm) {
       setShowMenuOverlay(false);
     }
-  }, [showEndSessionConfirm, showHostLeaveGuard, showLeaveConfirm]);
+  }, [showEndSessionConfirm, showLeaveConfirm]);
 
   const rollDiceDisabledReason = useMemo(() => {
     if (!(actionLoading === "ROLL_DICE" || !canRoll)) {
@@ -2095,7 +2090,7 @@ export default function PlayV2Page() {
         };
 
         let accessToken = session.access_token;
-        let result = await runActionRequest(accessToken);
+        const result = await runActionRequest(accessToken);
 
         if (result.refreshedSession?.access_token) {
           setSession(result.refreshedSession);
@@ -2326,12 +2321,12 @@ export default function PlayV2Page() {
       return;
     }
 
-    setActionLoading("LEAVE_GAME");
+    setActionLoading("SURRENDER_GAME");
     setNotice(null);
 
     const requestBody = {
       gameId: routeGameId,
-      action: "LEAVE_GAME",
+      action: "SURRENDER_GAME",
     };
 
     try {
@@ -2367,14 +2362,13 @@ export default function PlayV2Page() {
         const payload = (await response.json().catch(() => null)) as {
           error?: string;
         } | null;
-        throw new Error(payload?.error ?? "Unable to leave this table.");
+        throw new Error(payload?.error ?? "Unable to surrender this match.");
       }
 
-      clearPlayV2State(routeGameId);
       router.push("/");
     } catch (error) {
       setNotice(
-        error instanceof Error ? error.message : "Unable to leave this table.",
+        error instanceof Error ? error.message : "Unable to surrender this match.",
       );
     } finally {
       setActionLoading(null);
@@ -4448,7 +4442,7 @@ export default function PlayV2Page() {
     gameState?.last_roll != null ? String(gameState.last_roll) : "—";
 
   const inGame = Boolean(routeGameId);
-  const leaveMenuDisabled = actionLoading === "LEAVE_GAME";
+  const leaveMenuDisabled = actionLoading === "SURRENDER_GAME";
   const endMenuDisabled = actionLoading === "END_GAME";
   const backHomeDisabled = leaveMenuDisabled || endMenuDisabled;
 
@@ -5280,10 +5274,11 @@ export default function PlayV2Page() {
         description={
           <div className="space-y-1">
             <p>You will forfeit this game and be removed from play.</p>
+            <p>Your assets will be liquidated according to game rules.</p>
             <p>This cannot be undone.</p>
           </div>
         }
-        confirmLabel={actionLoading === "LEAVE_GAME" ? "Surrendering…" : "Surrender"}
+        confirmLabel={actionLoading === "SURRENDER_GAME" ? "Surrendering…" : "Surrender"}
         cancelLabel="Cancel"
         isConfirming={isActionInFlight}
         onConfirm={() => {
@@ -5300,51 +5295,6 @@ export default function PlayV2Page() {
           setShowLeaveConfirm(false);
         }}
       />
-      {showHostLeaveGuard ? (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-md rounded-3xl border border-amber-200 bg-white/95 p-5 shadow-2xl ring-1 ring-black/10 backdrop-blur">
-            <p className="text-xs font-semibold uppercase tracking-wide text-amber-600">
-              Host action required
-            </p>
-            <p className="mt-1 text-lg font-semibold text-neutral-900">
-              You’re the host
-            </p>
-            <p className="mt-2 text-sm text-neutral-700">
-              Surrendering without ending can orphan the table. What do you want to
-              do?
-            </p>
-            <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <button
-                type="button"
-                className="rounded-2xl border border-neutral-300 px-4 py-2 text-sm font-semibold text-neutral-700 disabled:opacity-50"
-                onClick={() => {
-                  if (isActionInFlight) {
-                    return;
-                  }
-                  setShowHostLeaveGuard(false);
-                }}
-                disabled={isActionInFlight}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="rounded-2xl bg-red-600 px-4 py-2 text-sm font-semibold text-white disabled:bg-red-200"
-                onClick={() => {
-                  if (isActionInFlight) {
-                    return;
-                  }
-                  setShowHostLeaveGuard(false);
-                  void handleEndSessionV2();
-                }}
-                disabled={isActionInFlight}
-              >
-                {actionLoading === "END_GAME" ? "Ending…" : "End Session"}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
       <ConfirmActionModalV2
         open={sellToMarketSelection !== null}
         title={
