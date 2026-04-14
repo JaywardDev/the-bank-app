@@ -496,6 +496,13 @@ export const handleInlandAction = async ({
   }
 
   if (body.action === "BUY_BANK_OWNED_INTERIOR_SITE") {
+    if (gameState.pending_action) {
+      return NextResponse.json(
+        { error: "Resolve the current pending action before buying a bank-owned inland site." },
+        { status: 409 },
+      );
+    }
+
     const interiorCell = body.interiorCell;
     const row =
       interiorCell && typeof interiorCell.row === "number" ? interiorCell.row : Number.NaN;
