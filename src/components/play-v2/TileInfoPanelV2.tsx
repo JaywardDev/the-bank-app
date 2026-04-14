@@ -2,10 +2,19 @@ import type { BoardTile } from "@/lib/boardPacks";
 
 type InlandDevelopedSiteInfo = {
   name: string;
+  stageLabel: string;
   ownerLabel: string;
-  passiveIncomeLabel: string;
+  passiveIncomeLabel: string | null;
   perks: string[];
   locationLabel: string;
+  saleStatusLabel?: string | null;
+  salePriceLabel?: string | null;
+  showBuyAction?: boolean;
+  canBuy?: boolean;
+  onBuy?: () => void;
+  isBuying?: boolean;
+  buyDisabledReason?: string | null;
+  buyButtonLabel?: string;
 };
 
 type TileInfoPanelV2Props = {
@@ -54,9 +63,18 @@ export default function TileInfoPanelV2({
         <div className="pl-2">
           <p className="text-sm font-semibold text-white">{inlandSiteInfo.name}</p>
           <div className="mt-2 space-y-1.5">
-            <StatRow label="Type" value="Developed inland site" />
+            <StatRow label="Type" value={inlandSiteInfo.stageLabel} />
             <StatRow label="Owner" value={inlandSiteInfo.ownerLabel} />
-            <StatRow label="Passive income" value={inlandSiteInfo.passiveIncomeLabel} />
+            {inlandSiteInfo.passiveIncomeLabel ? (
+              <StatRow label="Passive income" value={inlandSiteInfo.passiveIncomeLabel} />
+            ) : null}
+            <StatRow label="Location" value={inlandSiteInfo.locationLabel} />
+            {inlandSiteInfo.saleStatusLabel ? (
+              <StatRow label="Sale status" value={inlandSiteInfo.saleStatusLabel} />
+            ) : null}
+            {inlandSiteInfo.salePriceLabel ? (
+              <StatRow label="Sale price" value={inlandSiteInfo.salePriceLabel} />
+            ) : null}
           </div>
           <div className="mt-2 space-y-1.5">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-white/55">
@@ -74,6 +92,21 @@ export default function TileInfoPanelV2({
               <p className="text-xs text-white/70">No extra perk metadata is available yet.</p>
             )}
           </div>
+          {inlandSiteInfo.showBuyAction && inlandSiteInfo.onBuy ? (
+            <div className="mt-3 space-y-1.5">
+              <button
+                type="button"
+                onClick={inlandSiteInfo.onBuy}
+                disabled={!inlandSiteInfo.canBuy || inlandSiteInfo.isBuying}
+                className="w-full rounded-lg border border-emerald-200/30 bg-emerald-500/20 px-2.5 py-2 text-xs font-semibold text-emerald-100 transition hover:bg-emerald-500/30 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {inlandSiteInfo.isBuying ? "Buying…" : inlandSiteInfo.buyButtonLabel ?? "Buy"}
+              </button>
+              {inlandSiteInfo.buyDisabledReason ? (
+                <p className="text-[11px] text-white/65">{inlandSiteInfo.buyDisabledReason}</p>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </div>
     );

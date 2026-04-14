@@ -2,10 +2,12 @@ import { NextResponse } from "next/server";
 import { DEFAULT_BOARD_PACK_ECONOMY, type BoardPackEconomy } from "@/lib/boardPacks";
 import {
   canExploreInlandCell,
+  getInlandBankSalePrice,
   getInlandDevelopmentCost,
   getInlandExplorationCost,
   getInlandSellValue,
   getInlandVoucherReward,
+  isBankSellableInlandCell,
   isBonusResource,
   isDevelopableResource,
   isInstantSellResource,
@@ -236,7 +238,7 @@ export const handleInlandAction = async ({
         { status: 409 },
       );
     }
-    if (targetCell.ownerPlayerId && targetCell.ownerPlayerId !== currentUserPlayer.id) {
+    if (targetCell.ownerPlayerId !== currentUserPlayer.id) {
       return NextResponse.json(
         { error: "Only the discovering player can decide this inland resource." },
         { status: 409 },
@@ -490,6 +492,108 @@ export const handleInlandAction = async ({
       developmentEvents,
       user.id,
     );
+    return NextResponse.json({ gameState: updatedState });
+  }
+
+  if (body.action === "BUY_BANK_OWNED_INTERIOR_SITE") {
+    const interiorCell = body.interiorCell;
+    const row =
+      interiorCell && typeof interiorCell.row === "number" ? interiorCell.row : Number.NaN;
+    const col =
+      interiorCell && typeof interiorCell.col === "number" ? interiorCell.col : Number.NaN;
+    if (!Number.isInteger(row) || !Number.isInteger(col)) {
+      return NextResponse.json({ error: "A valid interiorCell is required." }, { status: 400 });
+    }
+
+    const key = toInlandCellKey({ row, col });
+    const inlandCells = normalizeInlandCellRecords(gameState.inland_explored_cells);
+    const targetCell = inlandCells.get(key);
+    if (!targetCell || !isBankSellableInlandCell(targetCell)) {
+      return NextResponse.json(
+        { error: "This inland tile is not available for bank sale." },
+        { status: 409 },
+      );
+    }
+
+    const goSalary = boardPackEconomy.passGoAmount ?? DEFAULT_BOARD_PACK_ECONOMY.passGoAmount ?? 0;
+    const salePrice = getInlandBankSalePrice(targetCell, goSalary);
+    if (salePrice === null) {
+      return NextResponse.json(
+        { error: "Unable to price this inland tile for bank sale." },
+        { status: 409 },
+      );
+    }
+
+    const balances = gameState.balances ?? {};
+    const currentCash = balances[currentUserPlayer.id] ?? 0;
+    if (currentCash < salePrice) {
+      return NextResponse.json(
+        { error: "Insufficient cash to buy this inland tile." },
+        { status: 409 },
+      );
+    }
+
+    inlandCells.set(key, {
+      ...targetCell,
+      ownerPlayerId: currentUserPlayer.id,
+    });
+
+    const purchasedAssetType =
+      targetCell.status === "DISCOVERED_RESOURCE"
+        ? targetCell.discoveredResourceType
+        : targetCell.developedSiteType;
+    const startVersion = currentVersion + 1;
+    const finalVersion = currentVersion + 2;
+    const nowIso = new Date().toISOString();
+    const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+      `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+      {
+        method: "PATCH",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify({
+          version: finalVersion,
+          balances: {
+            ...balances,
+            [currentUserPlayer.id]: currentCash - salePrice,
+          },
+          inland_explored_cells: serializeInlandCellRecords(inlandCells),
+          updated_at: nowIso,
+        }),
+      },
+    )) ?? [];
+    if (!updatedState) {
+      return NextResponse.json({ error: "Version mismatch." }, { status: 409 });
+    }
+
+    await emitGameEvents(
+      gameId,
+      startVersion,
+      [
+        {
+          event_type: "CASH_DEBIT",
+          payload: {
+            player_id: currentUserPlayer.id,
+            amount: salePrice,
+            reason: "BANK_OWNED_INTERIOR_PURCHASE",
+            source_event_type: "BANK_OWNED_INTERIOR_PURCHASED",
+          },
+        },
+        {
+          event_type: "BANK_OWNED_INTERIOR_PURCHASED",
+          payload: {
+            player_id: currentUserPlayer.id,
+            player_name: currentUserPlayer.display_name,
+            row,
+            col,
+            purchase_price: salePrice,
+            inland_status: targetCell.status,
+            resource_type: purchasedAssetType,
+          },
+        },
+      ],
+      user.id,
+    );
+
     return NextResponse.json({ gameState: updatedState });
   }
 

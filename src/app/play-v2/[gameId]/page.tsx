@@ -40,11 +40,13 @@ import {
 import { formatCurrency, getCurrencyMetaFromBoardPack } from "@/lib/currency";
 import {
   canExploreInlandCell,
+  getInlandBankSalePrice,
   getInlandDevelopmentCost,
   getInlandExplorationCost,
   getInlandPassiveIncomePerTurn,
   getInlandResourceConfig,
   getInlandSellValue,
+  isBankSellableInlandCell,
   isDevelopableResource,
   isInstantSellResource,
   isNoneResource,
@@ -266,6 +268,7 @@ type BankAction =
   | "SELL_INTERIOR_RESOURCE"
   | "DEVELOP_INTERIOR_SITE"
   | "DEFER_INTERIOR_RESOURCE_DECISION"
+  | "BUY_BANK_OWNED_INTERIOR_SITE"
   | "PROPOSE_TRADE"
   | "ACCEPT_TRADE"
   | "REJECT_TRADE"
@@ -2616,6 +2619,26 @@ export default function PlayV2Page() {
     [handleBankAction],
   );
 
+  const handleBuyBankOwnedInlandSite = useCallback(
+    async (cell: InlandCell) => {
+      const result = await handleBankAction(
+        {
+          action: "BUY_BANK_OWNED_INTERIOR_SITE",
+          interiorCell: cell,
+        },
+        undefined,
+        { suppressNotice: false },
+      );
+      if (!result.ok) {
+        return;
+      }
+      setOpenInlandDecisionCellKey(null);
+      setLeftDrawerMode("info");
+      setIsLeftDrawerOpen(true);
+    },
+    [handleBankAction],
+  );
+
   const sellToMarketSelection = useMemo(() => {
     if (sellToMarketTileIndex === null || !resolvedBoardTiles) {
       return null;
@@ -2862,11 +2885,55 @@ export default function PlayV2Page() {
     return inlandCellsByKey.get(selectedInteriorCellKey) ?? null;
   }, [inlandCellsByKey, selectedInteriorCellKey]);
 
-  const selectedDevelopedInlandSiteInfo = useMemo(() => {
-    if (selectedInlandCellRecord?.status !== "DEVELOPED_SITE") {
+  const selectedInlandSiteInfo = useMemo(() => {
+    if (!selectedInlandCellRecord || !selectedInteriorCell) {
       return null;
     }
-    if (!selectedInlandCellRecord.developedSiteType || !selectedInteriorCell) {
+    const ownerName = selectedInlandCellRecord.ownerPlayerId
+      ? (players.find((player) => player.id === selectedInlandCellRecord.ownerPlayerId)?.display_name ??
+        "Player")
+      : "Unowned";
+    const salePrice = getInlandBankSalePrice(selectedInlandCellRecord, inlandGoSalary);
+    const isBankSellable = isBankSellableInlandCell(selectedInlandCellRecord) && salePrice !== null;
+    const canAffordPurchase = isBankSellable && (currentUserCash ?? 0) >= (salePrice ?? 0);
+
+    if (selectedInlandCellRecord.status === "DISCOVERED_RESOURCE") {
+      if (!selectedInlandCellRecord.discoveredResourceType) {
+        return null;
+      }
+      const resourceConfig = getInlandResourceConfig(selectedInlandCellRecord.discoveredResourceType);
+      return {
+        name: `${resourceConfig.icon} ${resourceConfig.label}`,
+        stageLabel: "Discovered inland resource",
+        ownerLabel: ownerName,
+        locationLabel: `${selectedInteriorCell.row}:${selectedInteriorCell.col}`,
+        passiveIncomeLabel: null,
+        perks: ["Can be developed later for recurring passive income."],
+        salePriceLabel: isBankSellable && salePrice !== null ? formatMoney(salePrice) : null,
+        saleStatusLabel: isBankSellable ? "Bank sale available" : "Informational only",
+        canBuy: canAffordPurchase,
+        showBuyAction: isBankSellable,
+        buyButtonLabel: "Buy resource claim",
+      };
+    }
+
+    if (selectedInlandCellRecord.status === "EXPLORED_EMPTY") {
+      return {
+        name: "🟫 Explored inland tile",
+        stageLabel: "Explored empty",
+        ownerLabel: ownerName,
+        locationLabel: `${selectedInteriorCell.row}:${selectedInteriorCell.col}`,
+        passiveIncomeLabel: null,
+        perks: ["Explored and mapped. No extractable resource on this tile."],
+        salePriceLabel: null,
+        saleStatusLabel: "Not for sale",
+        canBuy: false,
+        showBuyAction: false,
+        buyButtonLabel: "Buy",
+      };
+    }
+
+    if (selectedInlandCellRecord.status !== "DEVELOPED_SITE" || !selectedInlandCellRecord.developedSiteType) {
       return null;
     }
     const siteConfig = getInlandResourceConfig(selectedInlandCellRecord.developedSiteType);
@@ -2884,23 +2951,103 @@ export default function PlayV2Page() {
     }
     return {
       name: `${siteConfig.icon} ${siteConfig.label}`,
-      ownerLabel: selectedInlandCellRecord.ownerPlayerId
-        ? (players.find((player) => player.id === selectedInlandCellRecord.ownerPlayerId)?.display_name ??
-          "Player")
-        : "Unowned",
+      stageLabel: "Developed inland site",
+      ownerLabel: ownerName,
       passiveIncomeLabel: formatMoney(
         getInlandPassiveIncomePerTurn(selectedInlandCellRecord.developedSiteType, inlandGoSalary),
       ),
       perks: sitePerkLines,
       locationLabel: `${selectedInteriorCell.row}:${selectedInteriorCell.col}`,
+      salePriceLabel: isBankSellable && salePrice !== null ? formatMoney(salePrice) : null,
+      saleStatusLabel: isBankSellable ? "Bank sale available" : "Not for sale",
+      canBuy: canAffordPurchase,
+      showBuyAction: isBankSellable,
+      buyButtonLabel: "Buy developed site",
     };
   }, [
-    selectedInlandCellRecord,
-    selectedInteriorCell,
-    players,
+    currentUserCash,
     formatMoney,
     inlandGoSalary,
+    players,
+    selectedInlandCellRecord,
+    selectedInteriorCell,
   ]);
+
+  const isOwnedDiscoveredDecisionCell = useMemo(() => {
+    if (!selectedInlandCellRecord || !currentUserPlayerId) {
+      return false;
+    }
+    return (
+      selectedInlandCellRecord.status === "DISCOVERED_RESOURCE" &&
+      selectedInlandCellRecord.ownerPlayerId === currentUserPlayerId
+    );
+  }, [currentUserPlayerId, selectedInlandCellRecord]);
+
+  const selectedDiscoveredDecisionResourceType = useMemo(() => {
+    if (!isOwnedDiscoveredDecisionCell) {
+      return null;
+    }
+    return selectedInlandCellRecord?.discoveredResourceType ?? null;
+  }, [isOwnedDiscoveredDecisionCell, selectedInlandCellRecord]);
+
+  const isBuyBankOwnedInlandLoading = actionLoading === "BUY_BANK_OWNED_INTERIOR_SITE";
+
+  const selectedInlandBuyDisabledReason = useMemo(() => {
+    if (!selectedInlandSiteInfo?.showBuyAction) {
+      return null;
+    }
+    if (!isMyTurn) {
+      return "Only available during your turn.";
+    }
+    if (hasBlockingPendingAction || auctionActive) {
+      return "Resolve pending decisions before buying.";
+    }
+    if (!selectedInlandSiteInfo.canBuy) {
+      return "Insufficient cash.";
+    }
+    return null;
+  }, [auctionActive, hasBlockingPendingAction, isMyTurn, selectedInlandSiteInfo]);
+
+  const canSubmitSelectedInlandBuy = useMemo(
+    () =>
+      Boolean(
+        selectedInlandSiteInfo?.showBuyAction &&
+          !selectedInlandBuyDisabledReason &&
+          selectedInteriorCell,
+      ),
+    [selectedInlandBuyDisabledReason, selectedInlandSiteInfo, selectedInteriorCell],
+  );
+
+  const selectedInlandSitePanelBuyHandler = useCallback(() => {
+    if (!selectedInteriorCell || !canSubmitSelectedInlandBuy) {
+      return;
+    }
+    void handleBuyBankOwnedInlandSite(selectedInteriorCell);
+  }, [canSubmitSelectedInlandBuy, handleBuyBankOwnedInlandSite, selectedInteriorCell]);
+
+  const selectedInlandSitePanelProps = useMemo(() => {
+    if (!selectedInlandSiteInfo) {
+      return null;
+    }
+    return {
+      ...selectedInlandSiteInfo,
+      canBuy: canSubmitSelectedInlandBuy,
+      onBuy: selectedInlandSitePanelBuyHandler,
+      isBuying: isBuyBankOwnedInlandLoading,
+      buyDisabledReason: selectedInlandBuyDisabledReason,
+    };
+  }, [
+    canSubmitSelectedInlandBuy,
+    isBuyBankOwnedInlandLoading,
+    selectedInlandBuyDisabledReason,
+    selectedInlandSiteInfo,
+    selectedInlandSitePanelBuyHandler,
+  ]);
+
+  const selectedDevelopedInlandSiteInfo = useMemo(
+    () => selectedInlandSitePanelProps,
+    [selectedInlandSitePanelProps],
+  );
 
   const currentUserOwnedTileIndices = useMemo(() => {
     if (!currentUserPlayerId) {
@@ -4955,11 +5102,15 @@ export default function PlayV2Page() {
               setSelectedInteriorCell(cell);
               const key = toInlandCellKey(cell);
               const inlandCell = inlandCellsByKey.get(key);
-              if (inlandCell?.status === "DISCOVERED_RESOURCE") {
+              if (
+                inlandCell?.status === "DISCOVERED_RESOURCE" &&
+                inlandCell.ownerPlayerId &&
+                inlandCell.ownerPlayerId === currentUserPlayerId
+              ) {
                 setOpenInlandDecisionCellKey(key);
                 return;
               }
-              if (inlandCell?.status === "DEVELOPED_SITE") {
+              if (inlandCell) {
                 setOpenInlandDecisionCellKey(null);
                 setLeftDrawerMode("info");
                 setIsLeftDrawerOpen(true);
@@ -5339,40 +5490,40 @@ export default function PlayV2Page() {
       />
       {openInlandDecisionCellKey &&
       selectedInteriorCell &&
-      selectedInlandCellRecord?.status === "DISCOVERED_RESOURCE" &&
-      selectedInlandCellRecord.discoveredResourceType ? (
+      isOwnedDiscoveredDecisionCell &&
+      selectedDiscoveredDecisionResourceType ? (
         <div className="fixed inset-0 z-[220] flex items-center justify-center bg-black/60 p-4">
           <div className="w-full max-w-sm rounded-2xl border border-emerald-200/25 bg-neutral-900/95 p-5 text-white shadow-2xl">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-200/80">
               Exploration
             </p>
             <p className="mt-2 text-lg font-semibold">
-              {getInlandResourceConfig(selectedInlandCellRecord.discoveredResourceType!).icon}{" "}
-              {getInlandResourceConfig(selectedInlandCellRecord.discoveredResourceType!).label}
+              {getInlandResourceConfig(selectedDiscoveredDecisionResourceType).icon}{" "}
+              {getInlandResourceConfig(selectedDiscoveredDecisionResourceType).label}
             </p>
-            {isInstantSellResource(selectedInlandCellRecord.discoveredResourceType!) ? (
+            {isInstantSellResource(selectedDiscoveredDecisionResourceType) ? (
               <p className="mt-2 text-sm text-white/75">
                 Sell now for{" "}
                 {formatMoney(
                   getInlandSellValue(
-                    selectedInlandCellRecord.discoveredResourceType!,
+                    selectedDiscoveredDecisionResourceType,
                     inlandGoSalary,
                   ) ?? 0,
                 )}
                 .
               </p>
-            ) : isDevelopableResource(selectedInlandCellRecord.discoveredResourceType!) ? (
+            ) : isDevelopableResource(selectedDiscoveredDecisionResourceType) ? (
               <p className="mt-2 text-sm text-white/75">
                 Develop this site for{" "}
                 {formatMoney(
                   getInlandDevelopmentCost(
-                    selectedInlandCellRecord.discoveredResourceType!,
+                    selectedDiscoveredDecisionResourceType,
                     inlandGoSalary,
                   ) ?? 0,
                 )}
                 .
               </p>
-            ) : isNoneResource(selectedInlandCellRecord.discoveredResourceType!) ? (
+            ) : isNoneResource(selectedDiscoveredDecisionResourceType) ? (
               <p className="mt-2 text-sm text-white/75">
                 This tile is empty land. Resolve it to continue.
               </p>
@@ -5380,7 +5531,7 @@ export default function PlayV2Page() {
               <p className="mt-2 text-sm text-white/75">
                 Claim voucher reward:
                 {" "}
-                {selectedInlandCellRecord.discoveredResourceType === "TIMBER"
+                {selectedDiscoveredDecisionResourceType === "TIMBER"
                   ? "+1 free build token"
                   : "+1 free upgrade token"}
               </p>
@@ -5390,7 +5541,7 @@ export default function PlayV2Page() {
                 type="button"
                 onClick={() =>
                     void handleInlandResourceDecision(
-                    isDevelopableResource(selectedInlandCellRecord.discoveredResourceType!)
+                    isDevelopableResource(selectedDiscoveredDecisionResourceType)
                       ? "DEVELOP_INTERIOR_SITE"
                       : "SELL_INTERIOR_RESOURCE",
                     selectedInteriorCell,
@@ -5398,11 +5549,11 @@ export default function PlayV2Page() {
                 }
                 className="inline-flex w-full items-center justify-center rounded-xl border border-emerald-200/25 bg-emerald-500/20 px-4 py-2.5 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-500/30"
               >
-                {isDevelopableResource(selectedInlandCellRecord.discoveredResourceType!)
+                {isDevelopableResource(selectedDiscoveredDecisionResourceType)
                   ? "Develop"
-                  : isInstantSellResource(selectedInlandCellRecord.discoveredResourceType!)
+                  : isInstantSellResource(selectedDiscoveredDecisionResourceType)
                     ? "Sell"
-                    : isNoneResource(selectedInlandCellRecord.discoveredResourceType!)
+                    : isNoneResource(selectedDiscoveredDecisionResourceType)
                       ? "Acknowledge"
                       : "Claim"}
               </button>

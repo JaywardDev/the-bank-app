@@ -155,6 +155,23 @@ export const getInlandDevelopmentCost = (
   return roundInlandMoney(goSalary * multiplier);
 };
 
+export const getInlandBankSalePrice = (
+  record: Pick<InlandCellRecord, "status" | "discoveredResourceType" | "developedSiteType">,
+  goSalary: number,
+) => {
+  if (record.status === "DISCOVERED_RESOURCE" && record.discoveredResourceType) {
+    return roundInlandMoney(getInlandExplorationCost(goSalary) * 0.7);
+  }
+  if (record.status === "DEVELOPED_SITE" && record.developedSiteType) {
+    const developmentCost = getInlandDevelopmentCost(record.developedSiteType, goSalary);
+    if (developmentCost === null) {
+      return null;
+    }
+    return roundInlandMoney(developmentCost * 0.7);
+  }
+  return null;
+};
+
 export const getInlandPassiveIncomePerTurn = (
   resourceType: InlandResourceType,
   goSalary: number,
@@ -304,6 +321,40 @@ export const serializeInlandCellRecords = (recordsByKey: Map<string, InlandCellR
 
 export const normalizeInlandExploredCellKeys = (value: unknown): Set<string> => {
   return new Set(Array.from(normalizeInlandCellRecords(value).keys()));
+};
+
+export const isBankSellableInlandCell = (record: InlandCellRecord | null | undefined) => {
+  if (!record || record.ownerPlayerId) {
+    return false;
+  }
+  if (record.status === "DISCOVERED_RESOURCE") {
+    return Boolean(record.discoveredResourceType);
+  }
+  if (record.status === "DEVELOPED_SITE") {
+    return Boolean(record.developedSiteType);
+  }
+  return false;
+};
+
+export const clearInlandOwnershipForPlayer = ({
+  recordsByKey,
+  playerId,
+}: {
+  recordsByKey: Map<string, InlandCellRecord>;
+  playerId: string;
+}) => {
+  let didChange = false;
+  for (const [key, record] of recordsByKey.entries()) {
+    if (record.ownerPlayerId !== playerId) {
+      continue;
+    }
+    recordsByKey.set(key, {
+      ...record,
+      ownerPlayerId: null,
+    });
+    didChange = true;
+  }
+  return didChange;
 };
 
 export const canExploreInlandCell = ({

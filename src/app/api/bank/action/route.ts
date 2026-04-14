@@ -43,11 +43,13 @@ import {
   type BettingMarketBetKind,
 } from "@/lib/bettingMarket";
 import {
+  clearInlandOwnershipForPlayer,
   computeCoalUtilitySynergyPayouts,
   computeOilRailSynergyPayouts,
   computeWaterUtilitySynergyPayouts,
   computeInlandPassiveIncomeForPlayer,
   normalizeInlandCellRecords,
+  serializeInlandCellRecords,
 } from "@/lib/inlandExploration";
 import { resolveBoardTilesForRules } from "@/lib/resolvedBoardTiles";
 import {
@@ -170,6 +172,7 @@ type BankActionRequest =
         | "SELL_INTERIOR_RESOURCE"
         | "DEVELOP_INTERIOR_SITE"
         | "DEFER_INTERIOR_RESOURCE_DECISION"
+        | "BUY_BANK_OWNED_INTERIOR_SITE"
         | "DEFAULT_PROPERTY",
         "DECLINE_PROPERTY" | "BUY_PROPERTY"
       >;
@@ -2733,6 +2736,11 @@ const resolvePlayerElimination = async ({
     gameState.auction_passed_player_ids,
   ).filter((playerId) => playerId !== eliminatedPlayer.id);
   const shouldClearAuction = Boolean(gameState.auction_active);
+  const inlandCells = normalizeInlandCellRecords(gameState.inland_explored_cells);
+  const inlandOwnershipCleared = clearInlandOwnershipForPlayer({
+    recordsByKey: inlandCells,
+    playerId: eliminatedPlayer.id,
+  });
   const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
     `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
     {
@@ -2770,6 +2778,11 @@ const resolvePlayerElimination = async ({
               auction_turn_ends_at: null,
               auction_passed_player_ids: auctionPassedIds,
               auction_min_increment: null,
+            }
+          : {}),
+        ...(inlandOwnershipCleared
+          ? {
+              inland_explored_cells: serializeInlandCellRecords(inlandCells),
             }
           : {}),
         updated_at: now,

@@ -174,6 +174,19 @@ export const formatEventDescription = (
       return `${playerName} explored inland but found empty land`;
     }
 
+    if (event.event_type === "BANK_OWNED_INTERIOR_PURCHASED") {
+      const playerName =
+        typeof payload?.player_name === "string" ? payload.player_name : "Player";
+      const price = parseNumber(payload?.purchase_price);
+      const amountLabel =
+        price !== null ? formatMoney(price, currencyCode, currencySymbol) : "bank price";
+      const status =
+        typeof payload?.inland_status === "string"
+          ? payload.inland_status.replaceAll("_", " ").toLowerCase()
+          : "inland asset";
+      return `${playerName} bought a bank-owned ${status} for ${amountLabel}`;
+    }
+
     if (event.event_type === "HOUSE_BUILD_VOUCHER_USED") {
       const playerName =
         typeof payload?.player_name === "string" ? payload.player_name : "Player";
@@ -1301,6 +1314,7 @@ export const deriveWalletTransactions = (
     INTERIOR_RESOURCE_DEVELOPED: "resource development",
     INTERIOR_SITE_DEVELOPED: "resource development",
     RESOURCE_DEVELOPMENT: "resource development",
+    BANK_OWNED_INTERIOR_PURCHASE: "bank inland purchase",
   };
 
   for (const event of events) {
