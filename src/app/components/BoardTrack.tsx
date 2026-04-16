@@ -345,7 +345,7 @@ export default function BoardTrack({
                   onTileClick(tile.index);
                 }
               }}
-              className={`group relative overflow-hidden border border-transparent text-neutral-800 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.2)] ${
+              className={`group relative ${isMapTileFace ? "overflow-visible" : "overflow-hidden"} border border-transparent text-neutral-800 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.2)] ${
                 isCorner ? "rounded-[6px]" : "rounded-sm"
               } ${lastMovedTileIndex === tile.index ? "ring-2 ring-amber-400" : ""} ${
                 selectedTileIndex === tile.index
@@ -381,7 +381,7 @@ export default function BoardTrack({
               </div>
 
               <div
-                className={`relative h-full w-full overflow-hidden ${
+                className={`relative h-full w-full ${isMapTileFace ? "overflow-visible" : "overflow-hidden"} ${
                   isCorner ? "rounded-[6px]" : "rounded-sm"
                 } bg-[#f3f0e6] ${onTileClick ? "transition group-hover:bg-[#f8f4eb]" : ""}`}
                 style={{ backgroundColor: mapTileBaseColor }}
@@ -429,14 +429,14 @@ export default function BoardTrack({
                 ) : null}
 
                 {isMapTileFace && isOwnableTile && isOwnedByPlayer && mapBuildingSpriteSrc ? (
-                  <div className="pointer-events-none absolute inset-[2px] z-10">
+                  <div className="pointer-events-none absolute inset-0 z-10 overflow-visible">
                     <Image
                       src={mapBuildingSpriteSrc}
                       alt=""
                       width={96}
                       height={96}
                       aria-hidden
-                      className="h-full w-full object-cover"
+                      className="absolute bottom-0 left-1/2 h-[170%] w-[170%] max-w-none -translate-x-1/2 object-contain"
                     />
                   </div>
                 ) : null}
