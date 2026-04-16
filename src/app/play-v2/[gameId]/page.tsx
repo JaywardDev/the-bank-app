@@ -54,6 +54,7 @@ import {
   toInlandCellKey,
   type InlandCell,
 } from "@/lib/inlandExploration";
+import { getInlandResourceIconSrc } from "@/lib/inlandResourceIcons";
 import {
   calculateAmortizedPaymentPerTurn,
   calculateDownPaymentAmount,
@@ -5497,8 +5498,21 @@ export default function PlayV2Page() {
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-200/80">
               Exploration
             </p>
-            <p className="mt-2 text-lg font-semibold">
-              {getInlandResourceConfig(selectedDiscoveredDecisionResourceType).icon}{" "}
+            <p className="mt-2 flex items-center gap-2 text-lg font-semibold">
+              {getInlandResourceIconSrc(selectedDiscoveredDecisionResourceType) ? (
+                <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-[#f3f0e6]/85 p-1">
+                  <Image
+                    src={getInlandResourceIconSrc(selectedDiscoveredDecisionResourceType) ?? ""}
+                    alt=""
+                    width={24}
+                    height={24}
+                    aria-hidden
+                    className="h-full w-full object-contain"
+                  />
+                </span>
+              ) : (
+                <span>{getInlandResourceConfig(selectedDiscoveredDecisionResourceType).icon}</span>
+              )}
               {getInlandResourceConfig(selectedDiscoveredDecisionResourceType).label}
             </p>
             {isInstantSellResource(selectedDiscoveredDecisionResourceType) ? (

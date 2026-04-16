@@ -8,6 +8,7 @@ import { getBoardTileIconSrc, isIconOnlySpecialTile } from "@/lib/tileIcons";
 import type { BoardPackEconomy } from "@/lib/boardPacks";
 import { formatCurrencyCompact, getCurrentTileRent } from "@/lib/rent";
 import type { InlandCellRecord } from "@/lib/inlandExploration";
+import { getInlandResourceIconSrc } from "@/lib/inlandResourceIcons";
 
 type BoardPlayer = {
   id: string;
@@ -190,6 +191,9 @@ export default function BoardTrack({
       >
         <div className="absolute inset-0 z-0">
           {interiorCells.map((cell) => {
+            const developedSiteIconSrc = getInlandResourceIconSrc(
+              cell.inlandCellRecord?.developedSiteType,
+            );
             return (
               <div
                 key={`interior-${cell.row}-${cell.col}`}
@@ -218,9 +222,20 @@ export default function BoardTrack({
                   </span>
                 ) : null}
                 {cell.state === "DEVELOPED_SITE" ? (
-                  <span className="pointer-events-none absolute right-0.5 top-0.5 z-[2] rounded-full bg-sky-200/90 px-1 text-[10px] font-bold text-sky-950">
-                    ⚒
-                  </span>
+                  <div className="pointer-events-none absolute inset-[16%] z-[2] flex items-center justify-center rounded-[2px] bg-[#f3f0e6]/75 p-[8%]">
+                    {developedSiteIconSrc ? (
+                      <Image
+                        src={developedSiteIconSrc}
+                        alt=""
+                        width={48}
+                        height={48}
+                        aria-hidden
+                        className="h-full w-full scale-[0.95] object-contain opacity-95"
+                      />
+                    ) : (
+                      <span className="h-1.5 w-1.5 rounded-full bg-sky-800/80" />
+                    )}
+                  </div>
                 ) : null}
                 {onInteriorCellClick ? (
                   <button
