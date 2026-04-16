@@ -222,7 +222,7 @@ export default function BoardTrack({
                   </span>
                 ) : null}
                 {cell.state === "DEVELOPED_SITE" ? (
-                  <div className="pointer-events-none absolute inset-[16%] z-[2] flex items-center justify-center rounded-[2px] bg-[#f3f0e6]/75 p-[8%]">
+                  <div className="pointer-events-none absolute inset-0 z-[2] overflow-visible">
                     {developedSiteIconSrc ? (
                       <Image
                         src={developedSiteIconSrc}
@@ -230,7 +230,7 @@ export default function BoardTrack({
                         width={48}
                         height={48}
                         aria-hidden
-                        className="h-full w-full scale-[0.95] object-contain opacity-95"
+                        className="absolute bottom-0 left-1/2 h-[170%] w-[170%] max-w-none -translate-x-1/2 object-contain opacity-95"
                       />
                     ) : (
                       <span className="h-1.5 w-1.5 rounded-full bg-sky-800/80" />
