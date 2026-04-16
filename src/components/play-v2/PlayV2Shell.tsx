@@ -425,7 +425,7 @@ export default function PlayV2Shell({
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-neutral-950 text-white">
       <div className="play-v2-shell-content">
-        <section className="absolute inset-x-0 top-0 z-20 h-9 border-b border-[#6F4B25]/70 bg-gradient-to-b from-[#B07F45] to-[#9C6B33] px-2.5 text-white md:h-10 md:px-3">
+        <section className="absolute inset-x-0 top-0 z-20 h-9 border-b border-[#6A4520]/80 bg-gradient-to-b from-[#9F6C37] to-[#845628] px-2.5 text-white md:h-10 md:px-3">
           <div className="grid h-full grid-cols-2 items-center gap-2 pr-28 text-[11px] sm:grid-cols-4 sm:pr-64 sm:text-xs">
             <div>
               <p className="text-[10px] uppercase tracking-wide text-white/70">Cash</p>
@@ -434,7 +434,7 @@ export default function PlayV2Shell({
             <div className="relative" ref={netWorthPopoverRef}>
               <button
                 type="button"
-                className="-mx-1 -my-0.5 rounded px-1 py-0.5 text-left transition hover:bg-[#875927]/35"
+                className="-mx-1 -my-0.5 rounded px-1 py-0.5 text-left transition hover:bg-[#6E4521]/45"
                 onClick={() => setShowNetWorthPopover((current) => !current)}
                 aria-expanded={showNetWorthPopover}
                 aria-controls={netWorthPopoverId}
@@ -445,7 +445,7 @@ export default function PlayV2Shell({
               {showNetWorthPopover && netWorthBreakdown ? (
                 <div
                   id={netWorthPopoverId}
-                  className="absolute left-0 top-full z-[60] mt-1.5 min-w-52 rounded-lg border border-white/15 bg-neutral-950/95 p-2.5 text-xs shadow-xl shadow-black/40 backdrop-blur"
+                  className="absolute left-0 top-full z-[60] mt-1.5 min-w-52 rounded-lg border border-[#B68955]/30 bg-[#5A381A]/95 p-2.5 text-xs shadow-xl shadow-black/40 backdrop-blur"
                   role="dialog"
                   aria-label="Net worth breakdown"
                 >
@@ -481,7 +481,7 @@ export default function PlayV2Shell({
                 <span>{lastRollLabel}</span>
                 {lastDiceLabel ? <span className="text-white/80">· {lastDiceLabel}</span> : null}
                 {isDoubleRoll ? (
-                  <span className="rounded-full border border-white/30 bg-[#7E542A]/35 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white/90">
+                  <span className="rounded-full border border-white/35 bg-[#6A4520]/55 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white/90">
                     DOUBLE!
                   </span>
                 ) : null}
@@ -677,7 +677,7 @@ export default function PlayV2Shell({
 
         <aside
           id="left-drawer"
-          className={`absolute bottom-0 left-0 top-9 z-20 flex w-72 flex-col border-r border-white/15 bg-neutral-900 transition-transform duration-200 md:top-10 ${
+          className={`absolute bottom-0 left-0 top-9 z-20 flex w-72 flex-col border-r border-[#5E3D1D]/90 bg-gradient-to-b from-[#7B5127] to-[#6A4520] transition-transform duration-200 md:top-10 ${
             leftOpen ? "translate-x-0" : "-translate-x-full"
           }`}
         >
@@ -703,7 +703,7 @@ export default function PlayV2Shell({
 
         <aside
           id="right-drawer"
-          className={`absolute bottom-0 right-0 top-9 z-20 flex w-72 flex-col border-l border-white/15 bg-neutral-900 transition-transform duration-200 md:top-10 ${
+          className={`absolute bottom-0 right-0 top-9 z-20 flex w-72 flex-col border-l border-[#5E3D1D]/90 bg-gradient-to-b from-[#7B5127] to-[#6A4520] transition-transform duration-200 md:top-10 ${
             rightOpen ? "translate-x-0" : "translate-x-full"
           }`}
         >

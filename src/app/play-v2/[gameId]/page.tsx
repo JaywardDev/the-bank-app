@@ -4645,7 +4645,7 @@ export default function PlayV2Page() {
         auctionActive={auctionActive}
         headerActions={
           roundModeProgressLabel ? (
-            <span className="rounded-full border border-white/25 bg-white/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-white/85">
+            <span className="rounded-full border border-[#C19360]/40 bg-[#6E4521]/45 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-white/85">
               {roundModeProgressLabel}
             </span>
           ) : null
@@ -4739,7 +4739,7 @@ export default function PlayV2Page() {
                 <label className="block text-xs text-white/75">
                   Counterparty
                   <select
-                    className="mt-1 w-full rounded-md border border-white/15 bg-neutral-900/90 px-2.5 py-2 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
+                    className="mt-1 w-full rounded-md border border-[#C19360]/30 bg-[#5A381A]/80 px-2.5 py-2 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
                     value={tradeCounterpartyId}
                     onChange={(event) => {
                       setTradeCounterpartyId(event.target.value);
@@ -4759,14 +4759,14 @@ export default function PlayV2Page() {
                 </label>
 
                 <div className="grid grid-cols-1 gap-3">
-                  <div className="rounded-md border border-white/10 bg-black/20 p-3">
+                  <div className="rounded-md border border-[#B68955]/25 bg-[#6A4520]/45 p-3">
                     <p className="text-xs font-semibold uppercase tracking-wide text-white/60">
                       Offer
                     </p>
                     <label className="mt-2 block text-xs text-white/75">
                       Cash
                       <input
-                        className="mt-1 w-full rounded-md border border-white/15 bg-neutral-900/90 px-2.5 py-2 text-sm text-white"
+                        className="mt-1 w-full rounded-md border border-[#C19360]/30 bg-[#5A381A]/80 px-2.5 py-2 text-sm text-white"
                         type="number"
                         min={0}
                         max={Math.max(0, currentUserCash ?? 0)}
@@ -4819,14 +4819,14 @@ export default function PlayV2Page() {
                     </div>
                   </div>
 
-                  <div className="rounded-md border border-white/10 bg-black/20 p-3">
+                  <div className="rounded-md border border-[#B68955]/25 bg-[#6A4520]/45 p-3">
                     <p className="text-xs font-semibold uppercase tracking-wide text-white/60">
                       Request
                     </p>
                     <label className="mt-2 block text-xs text-white/75">
                       Cash
                       <input
-                        className="mt-1 w-full rounded-md border border-white/15 bg-neutral-900/90 px-2.5 py-2 text-sm text-white"
+                        className="mt-1 w-full rounded-md border border-[#C19360]/30 bg-[#5A381A]/80 px-2.5 py-2 text-sm text-white"
                         type="number"
                         min={0}
                         value={tradeRequestCash}
@@ -5295,7 +5295,7 @@ export default function PlayV2Page() {
       <button
         type="button"
         onClick={() => setShowActivityPopup((open) => !open)}
-        className="fixed bottom-1 left-1 z-[20] inline-flex h-8 items-center justify-center rounded-full border border-[#6E4824]/75 bg-[#8F5F2E] px-3 text-xs font-semibold leading-none text-white/95 shadow-md shadow-black/25 transition hover:bg-[#7E5328] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6E4824]/55"
+        className="fixed bottom-1 left-1 z-[20] inline-flex h-8 items-center justify-center rounded-full border border-[#5E3D1D]/85 bg-[#744820] px-3 text-xs font-semibold leading-none text-white/95 shadow-md shadow-black/25 transition hover:bg-[#6A411D] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8A5B2C]/55"
         aria-label="Open activity and wallet transactions"
         aria-expanded={showActivityPopup}
       >
