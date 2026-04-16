@@ -19,12 +19,12 @@ const baseButtonClass =
   "inline-flex h-12 w-12 items-center justify-center rounded-full border p-0 text-neutral-900 shadow-lg shadow-black/35 transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-100/80 focus-visible:ring-offset-1 focus-visible:ring-offset-neutral-900 disabled:cursor-not-allowed disabled:opacity-45";
 
 const defaultButtonStateClass =
-  "border-stone-400 bg-stone-300/95 text-neutral-900 hover:border-stone-500 hover:bg-stone-400 active:scale-[0.98] active:border-stone-500 active:bg-stone-400";
+  "border-stone-400/45 bg-stone-300/60 text-neutral-900 hover:border-stone-500 hover:bg-stone-400 active:scale-[0.98] active:border-stone-500 active:bg-stone-400";
 
 const activeButtonStateClass =
   "border-amber-400 bg-amber-200 text-neutral-900 shadow-lg shadow-black/35 hover:bg-amber-100 active:scale-[0.98]";
 
-const defaultIconClass = "h-7 w-7 object-contain";
+const defaultIconClass = "h-12 w-12 object-contain";
 
 export function PlayV2ActionButton({
   iconSrc,
