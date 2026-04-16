@@ -532,14 +532,14 @@ export default function PlayV2Shell({
               onClick={onRecenterBoard}
               iconSrc="/icons/recenter-icon.svg"
               iconAlt=""
-              aria-label="Recenter"
+              ariaLabel="Recenter board"
               title="Recenter"
             />
             <PlayV2ActionButton
               onClick={handleLeftToggle}
               iconSrc="/icons/tile-info-icon.svg"
               iconAlt=""
-              aria-label="Open tile information panel"
+              ariaLabel="Open tile info"
               title="Tile information"
               aria-expanded={leftOpen && leftDrawerMode === "info"}
               aria-controls="left-drawer"
@@ -549,7 +549,7 @@ export default function PlayV2Shell({
               onClick={handleWalletToggle}
               iconSrc="/icons/wallet-icon.svg"
               iconAlt=""
-              aria-label="Open bank panel"
+              ariaLabel="Open wallet"
               title="Open bank panel"
               aria-expanded={leftOpen && leftDrawerMode === "wallet"}
               aria-controls="left-drawer"
@@ -559,7 +559,7 @@ export default function PlayV2Shell({
               onClick={handleMarketToggle}
               iconSrc="/icons/betting-market-icon.svg"
               iconAlt=""
-              aria-label="Open market panel"
+              ariaLabel="Open betting market"
               title="Open market panel"
               aria-expanded={leftOpen && leftDrawerMode === "market"}
               aria-controls="left-drawer"
@@ -576,7 +576,7 @@ export default function PlayV2Shell({
               onClick={onMenuToggle}
               iconSrc="/icons/menu-icon.svg"
               iconAlt=""
-              aria-label="Menu"
+              ariaLabel="Open menu"
               title="Open menu"
               aria-expanded={menuOpen}
             />
@@ -584,7 +584,7 @@ export default function PlayV2Shell({
               onClick={handleDecisionToggle}
               iconSrc="/icons/decision-icon.svg"
               iconAlt=""
-              aria-label="Open decisions panel"
+              ariaLabel="Open decisions"
               title="Open decisions panel"
               aria-expanded={rightOpen && rightDrawerMode === "decision"}
               aria-controls="right-drawer"
@@ -602,7 +602,7 @@ export default function PlayV2Shell({
               onClick={handleTradeToggle}
               iconSrc="/icons/trade-icon.svg"
               iconAlt=""
-              aria-label="Open trade panel"
+              ariaLabel="Open trade"
               title="Open trade panel"
               aria-expanded={rightOpen && rightDrawerMode === "trade"}
               aria-controls="right-drawer"
@@ -620,7 +620,7 @@ export default function PlayV2Shell({
               onClick={handleMacroToggle}
               iconSrc="/icons/macro-icon.svg"
               iconAlt=""
-              aria-label="Open active macro effects panel"
+              ariaLabel="Open macro effects"
               title="Open active macro effects panel"
               aria-expanded={rightOpen && rightDrawerMode === "macro"}
               aria-controls="right-drawer"
