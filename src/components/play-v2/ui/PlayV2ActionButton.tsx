@@ -16,12 +16,13 @@ type PlayV2ActionButtonProps = {
 } & Omit<ButtonHTMLAttributes<HTMLButtonElement>, "aria-label" | "title">;
 
 const baseButtonClass =
-  "inline-flex h-12 w-12 items-center justify-center rounded-full border p-0 text-white shadow-lg transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 disabled:cursor-not-allowed disabled:opacity-40";
+  "inline-flex h-12 w-12 items-center justify-center rounded-full border p-0 text-neutral-900 shadow-md shadow-black/25 transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-100/80 focus-visible:ring-offset-1 focus-visible:ring-offset-neutral-900 disabled:cursor-not-allowed disabled:opacity-45";
 
 const defaultButtonStateClass =
-  "border-white/30 bg-neutral-900 hover:bg-neutral-800 active:scale-[0.98] active:bg-neutral-700";
+  "border-stone-300/85 bg-stone-200/95 hover:border-stone-200 hover:bg-stone-100 active:scale-[0.98] active:border-stone-300 active:bg-stone-200";
 
-const activeButtonStateClass = "border-sky-300/70 bg-sky-500/20 text-white";
+const activeButtonStateClass =
+  "border-amber-300/80 bg-amber-100 text-neutral-900 shadow-md shadow-black/30 hover:bg-amber-50 active:scale-[0.98]";
 
 const defaultIconClass = "h-7 w-7 object-contain";
 
