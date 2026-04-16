@@ -425,21 +425,21 @@ export default function PlayV2Shell({
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-neutral-950 text-white">
       <div className="play-v2-shell-content">
-        <section className="absolute inset-x-0 top-0 z-20 h-9 border-b border-white/10 bg-neutral-950 px-2.5 md:h-10 md:px-3">
+        <section className="absolute inset-x-0 top-0 z-20 h-9 border-b border-stone-500/35 bg-stone-300 px-2.5 text-neutral-900 md:h-10 md:px-3">
           <div className="grid h-full grid-cols-2 items-center gap-2 pr-28 text-[11px] sm:grid-cols-4 sm:pr-64 sm:text-xs">
             <div>
-              <p className="text-[10px] uppercase tracking-wide text-white/55">Cash</p>
+              <p className="text-[10px] uppercase tracking-wide text-neutral-800/70">Cash</p>
               <p className="font-semibold leading-tight">{cashLabel}</p>
             </div>
             <div className="relative" ref={netWorthPopoverRef}>
               <button
                 type="button"
-                className="rounded px-1 py-0.5 -mx-1 -my-0.5 text-left transition hover:bg-white/10"
+                className="-mx-1 -my-0.5 rounded px-1 py-0.5 text-left transition hover:bg-stone-400/45"
                 onClick={() => setShowNetWorthPopover((current) => !current)}
                 aria-expanded={showNetWorthPopover}
                 aria-controls={netWorthPopoverId}
               >
-                <p className="text-[10px] uppercase tracking-wide text-white/55">Net Worth</p>
+                <p className="text-[10px] uppercase tracking-wide text-neutral-800/70">Net Worth</p>
                 <p className="font-semibold leading-tight">{netWorthLabel}</p>
               </button>
               {showNetWorthPopover && netWorthBreakdown ? (
@@ -472,14 +472,14 @@ export default function PlayV2Shell({
               ) : null}
             </div>
             <div>
-              <p className="text-[10px] uppercase tracking-wide text-white/55">Turn</p>
+              <p className="text-[10px] uppercase tracking-wide text-neutral-800/70">Turn</p>
               <p className="font-semibold leading-tight">{turnPlayerLabel}</p>
             </div>
             <div className="min-w-0">
-              <p className="text-[10px] uppercase tracking-wide text-white/55">Last Roll</p>
+              <p className="text-[10px] uppercase tracking-wide text-neutral-800/70">Last Roll</p>
               <p className="flex flex-wrap items-center gap-1 font-semibold leading-tight">
                 <span>{lastRollLabel}</span>
-                {lastDiceLabel ? <span className="text-white/80">· {lastDiceLabel}</span> : null}
+                {lastDiceLabel ? <span className="text-neutral-800/80">· {lastDiceLabel}</span> : null}
                 {isDoubleRoll ? (
                   <span className="rounded-full bg-amber-200/20 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-200">
                     DOUBLE!

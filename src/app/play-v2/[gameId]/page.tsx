@@ -5295,7 +5295,7 @@ export default function PlayV2Page() {
       <button
         type="button"
         onClick={() => setShowActivityPopup((open) => !open)}
-        className="fixed bottom-1 left-1 z-[20] inline-flex h-8 items-center justify-center rounded-full border border-white/20 bg-neutral-900/90 px-3 text-xs font-semibold leading-none text-white shadow-lg backdrop-blur transition hover:bg-neutral-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+        className="fixed bottom-1 left-1 z-[20] inline-flex h-8 items-center justify-center rounded-full border border-stone-500/40 bg-stone-300 px-3 text-xs font-semibold leading-none text-neutral-900 shadow-md shadow-black/20 transition hover:bg-stone-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-700/55"
         aria-label="Open activity and wallet transactions"
         aria-expanded={showActivityPopup}
       >
