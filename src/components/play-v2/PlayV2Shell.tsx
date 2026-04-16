@@ -4,148 +4,9 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import Image from "next/image";
 import type { BoardPackEconomy } from "@/lib/boardPacks";
 import { formatCurrency, getCurrencyMetaFromEconomy } from "@/lib/currency";
+import { PlayV2ActionButton } from "@/components/play-v2/ui/PlayV2ActionButton";
 
 type WalletTab = "owned" | "loans" | "mortgages";
-
-type WalletButtonProps = {
-  open: boolean;
-  onClick: () => void;
-};
-
-type MarketButtonProps = {
-  open: boolean;
-  onClick: () => void;
-};
-
-type DecisionButtonProps = {
-  open: boolean;
-  onClick: () => void;
-  disabled?: boolean;
-  showAttention?: boolean;
-};
-
-type TradeButtonProps = {
-  open: boolean;
-  onClick: () => void;
-  disabled?: boolean;
-  showAttention?: boolean;
-};
-
-type MacroButtonProps = {
-  open: boolean;
-  onClick: () => void;
-  disabled?: boolean;
-  showIndicator?: boolean;
-};
-
-const utilityButtonClass =
-  "inline-flex h-12 w-12 items-center justify-center rounded-xl border border-white/30 bg-neutral-900 p-0 text-white shadow-lg transition hover:bg-neutral-800";
-
-function WalletButton({ open, onClick }: WalletButtonProps) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={utilityButtonClass}
-      aria-expanded={open}
-      aria-controls="left-drawer"
-      aria-label="Open bank panel"
-      title="Open bank panel"
-    >
-      <span className="bank-icon" aria-hidden>
-        🏦
-      </span>
-    </button>
-  );
-}
-
-function MarketButton({ open, onClick }: MarketButtonProps) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={utilityButtonClass}
-      aria-expanded={open}
-      aria-controls="left-drawer"
-      aria-label="Open market panel"
-      title="Open market panel"
-    >
-      <span className="market-icon" aria-hidden>
-        📈
-      </span>
-    </button>
-  );
-}
-
-function DecisionButton({ open, onClick, disabled = false, showAttention = false }: DecisionButtonProps) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`${utilityButtonClass} relative disabled:cursor-not-allowed disabled:opacity-40`}
-      aria-expanded={open}
-      aria-controls="right-drawer"
-      aria-label="Open decisions panel"
-      title="Open decisions panel"
-      disabled={disabled}
-    >
-      <span className="decision-icon" aria-hidden>
-        ⚖️
-      </span>
-      {showAttention ? (
-        <span className="absolute -left-1 -top-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-none text-white">
-          !
-        </span>
-      ) : null}
-    </button>
-  );
-}
-
-function TradeButton({ open, onClick, disabled = false, showAttention = false }: TradeButtonProps) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`${utilityButtonClass} relative disabled:cursor-not-allowed disabled:opacity-40`}
-      aria-expanded={open}
-      aria-controls="right-drawer"
-      aria-label="Open trade panel"
-      title="Open trade panel"
-      disabled={disabled}
-    >
-      <span className="trade-icon" aria-hidden>
-        🤝
-      </span>
-      {showAttention ? (
-        <span className="absolute -left-1 -top-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-none text-white">
-          !
-        </span>
-      ) : null}
-    </button>
-  );
-}
-
-function MacroButton({ open, onClick, disabled = false, showIndicator = false }: MacroButtonProps) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`${utilityButtonClass} relative disabled:cursor-not-allowed disabled:opacity-40`}
-      aria-expanded={open}
-      aria-controls="right-drawer"
-      aria-label="Open active macro effects panel"
-      title="Open active macro effects panel"
-      disabled={disabled}
-    >
-      <span className="macro-icon" aria-hidden>
-        🌐
-      </span>
-      {showIndicator ? (
-        <span className="absolute -left-0.5 -top-0.5 inline-flex h-2.5 w-2.5 rounded-full border border-sky-100/40 bg-sky-300 shadow-[0_0_0_2px_rgba(10,10,10,0.55)]" />
-      ) : null}
-    </button>
-  );
-}
 
 type WalletPanelProps = {
   ownedCount: number;
@@ -667,39 +528,42 @@ export default function PlayV2Shell({
               leftOpen ? "control-stack-left-open" : ""
             }`}
           >
-            <button
-              type="button"
+            <PlayV2ActionButton
               onClick={onRecenterBoard}
+              iconSrc="/icons/recenter-icon.svg"
+              iconAlt=""
               aria-label="Recenter"
               title="Recenter"
-              className={utilityButtonClass}
-            >
-              <svg aria-hidden="true" viewBox="0 0 24 24" className="utility-svg-icon" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="3.5" />
-                <path d="M12 2v3" />
-                <path d="M12 19v3" />
-                <path d="M2 12h3" />
-                <path d="M19 12h3" />
-              </svg>
-            </button>
-            <button
-              type="button"
+            />
+            <PlayV2ActionButton
               onClick={handleLeftToggle}
-              className={utilityButtonClass}
+              iconSrc="/icons/tile-info-icon.svg"
+              iconAlt=""
               aria-label="Open tile information panel"
               title="Tile information"
-            >
-              <span className="info-icon" aria-hidden>
-                ⓘ
-              </span>
-            </button>
-            <WalletButton
-              open={leftOpen && leftDrawerMode === "wallet"}
-              onClick={handleWalletToggle}
+              aria-expanded={leftOpen && leftDrawerMode === "info"}
+              aria-controls="left-drawer"
+              isActive={leftOpen && leftDrawerMode === "info"}
             />
-            <MarketButton
-              open={leftOpen && leftDrawerMode === "market"}
+            <PlayV2ActionButton
+              onClick={handleWalletToggle}
+              iconSrc="/icons/wallet-icon.svg"
+              iconAlt=""
+              aria-label="Open bank panel"
+              title="Open bank panel"
+              aria-expanded={leftOpen && leftDrawerMode === "wallet"}
+              aria-controls="left-drawer"
+              isActive={leftOpen && leftDrawerMode === "wallet"}
+            />
+            <PlayV2ActionButton
               onClick={handleMarketToggle}
+              iconSrc="/icons/betting-market-icon.svg"
+              iconAlt=""
+              aria-label="Open market panel"
+              title="Open market panel"
+              aria-expanded={leftOpen && leftDrawerMode === "market"}
+              aria-controls="left-drawer"
+              isActive={leftOpen && leftDrawerMode === "market"}
             />
           </div>
 
@@ -708,35 +572,65 @@ export default function PlayV2Shell({
               rightOpen ? "control-stack-right-open" : ""
             }`}
           >
-            <button
-              type="button"
+            <PlayV2ActionButton
               onClick={onMenuToggle}
-              className={utilityButtonClass}
+              iconSrc="/icons/menu-icon.svg"
+              iconAlt=""
               aria-label="Menu"
               title="Open menu"
               aria-expanded={menuOpen}
-            >
-              <span className="menu-icon" aria-hidden>
-                ≡
-              </span>
-            </button>
-            <DecisionButton
-              open={rightOpen && rightDrawerMode === "decision"}
+            />
+            <PlayV2ActionButton
               onClick={handleDecisionToggle}
+              iconSrc="/icons/decision-icon.svg"
+              iconAlt=""
+              aria-label="Open decisions panel"
+              title="Open decisions panel"
+              aria-expanded={rightOpen && rightDrawerMode === "decision"}
+              aria-controls="right-drawer"
+              isActive={rightOpen && rightDrawerMode === "decision"}
               disabled={rightDrawerLocked}
-              showAttention={decisionNeedsAttention}
+              badge={
+                decisionNeedsAttention ? (
+                  <span className="absolute -left-1 -top-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-none text-white">
+                    !
+                  </span>
+                ) : null
+              }
             />
-            <TradeButton
-              open={rightOpen && rightDrawerMode === "trade"}
+            <PlayV2ActionButton
               onClick={handleTradeToggle}
+              iconSrc="/icons/trade-icon.svg"
+              iconAlt=""
+              aria-label="Open trade panel"
+              title="Open trade panel"
+              aria-expanded={rightOpen && rightDrawerMode === "trade"}
+              aria-controls="right-drawer"
+              isActive={rightOpen && rightDrawerMode === "trade"}
               disabled={rightDrawerLocked || (decisionActive && !tradeAccessibleDuringDecision)}
-              showAttention={tradeNeedsAttention}
+              badge={
+                tradeNeedsAttention ? (
+                  <span className="absolute -left-1 -top-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-none text-white">
+                    !
+                  </span>
+                ) : null
+              }
             />
-            <MacroButton
-              open={rightOpen && rightDrawerMode === "macro"}
+            <PlayV2ActionButton
               onClick={handleMacroToggle}
+              iconSrc="/icons/macro-icon.svg"
+              iconAlt=""
+              aria-label="Open active macro effects panel"
+              title="Open active macro effects panel"
+              aria-expanded={rightOpen && rightDrawerMode === "macro"}
+              aria-controls="right-drawer"
+              isActive={rightOpen && rightDrawerMode === "macro"}
               disabled={rightDrawerLocked || decisionActive}
-              showIndicator={macroEffectsActive}
+              indicator={
+                macroEffectsActive ? (
+                  <span className="absolute -left-0.5 -top-0.5 inline-flex h-2.5 w-2.5 rounded-full border border-sky-100/40 bg-sky-300 shadow-[0_0_0_2px_rgba(10,10,10,0.55)]" />
+                ) : null
+              }
             />
           </div>
 
@@ -858,48 +752,6 @@ export default function PlayV2Shell({
           bottom: calc(var(--action-stack-offset) + env(safe-area-inset-bottom, 0px));
           right: calc(var(--action-stack-offset) + env(safe-area-inset-right, 0px));
           gap: var(--action-stack-gap);
-        }
-
-        .utility-svg-icon {
-          height: 20px;
-          width: 20px;
-          flex-shrink: 0;
-        }
-
-        .menu-icon,
-        .bank-icon,
-        .market-icon,
-        .decision-icon,
-        .trade-icon,
-        .macro-icon,
-        .info-icon {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          width: 20px;
-          height: 20px;
-          font-size: 20px;
-          line-height: 1;
-          flex-shrink: 0;
-        }
-
-        .bank-icon {
-          font-size: 19px;
-        }
-
-        .market-icon {
-          font-size: 18px;
-        }
-
-        .decision-icon,
-        .trade-icon,
-        .macro-icon {
-          font-size: 18px;
-        }
-
-        .menu-icon,
-        .info-icon {
-          font-size: 20px;
         }
 
         @media (max-height: 760px) {
