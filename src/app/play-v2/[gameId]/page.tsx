@@ -5204,8 +5204,8 @@ export default function PlayV2Page() {
         }
       />
       {gameOverState && !gameOverOverlayDismissed ? (
-        <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-3xl border border-white/15 bg-neutral-950/95 p-6 text-center shadow-2xl">
+        <div className="fixed inset-0 z-[250] flex items-center justify-center bg-[#2A1709]/65 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl border border-[#D3A369]/30 bg-[#4E3018]/95 p-6 text-center shadow-2xl">
             <p className="text-xs font-semibold uppercase tracking-[0.3em] text-white/55">
               Game Over
             </p>
@@ -5259,16 +5259,16 @@ export default function PlayV2Page() {
       ) : null}
       {fullscreenEventNode ? (
         <div className="fixed inset-0 z-[200]">
-          <div className="absolute inset-0 bg-black/60" />
+          <div className="absolute inset-0 bg-[#2A1709]/60" />
           <div className="relative flex h-full w-full items-center justify-center p-4">
-            <div className="w-full max-w-xl rounded-3xl border border-white/20 bg-neutral-900/95 p-4 shadow-2xl backdrop-blur">
+            <div className="w-full max-w-xl rounded-3xl border border-[#D3A369]/30 bg-[#4E3018]/95 p-4 shadow-2xl backdrop-blur">
               {fullscreenEventNode}
             </div>
           </div>
         </div>
       ) : null}
       {selectedInteriorCell && !selectedInlandCellRecord ? (
-        <div className="fixed bottom-3 left-1/2 z-[45] w-[min(460px,calc(100vw-1rem))] -translate-x-1/2 rounded-xl border border-emerald-200/30 bg-neutral-950/90 p-2 shadow-2xl backdrop-blur">
+        <div className="fixed bottom-3 left-1/2 z-[45] w-[min(460px,calc(100vw-1rem))] -translate-x-1/2 rounded-xl border border-emerald-200/35 bg-[#4E3018]/92 p-2 shadow-2xl backdrop-blur">
           <div className="flex items-center justify-between gap-2">
             <button
               type="button"
@@ -5312,11 +5312,11 @@ export default function PlayV2Page() {
       />
       {showMenuOverlay ? (
         <div
-          className="fixed inset-0 z-40 flex items-center justify-center bg-black/55 p-4"
+          className="fixed inset-0 z-40 flex items-center justify-center bg-[#2A1709]/55 p-4"
           onClick={closeMenuOverlay}
         >
           <div
-            className="relative z-[41] w-full max-w-sm rounded-2xl border border-white/15 bg-neutral-900/95 p-4 shadow-2xl backdrop-blur"
+            className="relative z-[41] w-full max-w-sm rounded-2xl border border-[#D3A369]/30 bg-[#4E3018]/95 p-4 shadow-2xl backdrop-blur"
             onClick={(event) => event.stopPropagation()}
           >
             <p className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-white/60">
@@ -5364,11 +5364,11 @@ export default function PlayV2Page() {
       ) : null}
       {showTileTitleCardModal && selectedTile ? (
         <div
-          className="fixed inset-0 z-40 flex items-center justify-center bg-black/65 p-4"
+          className="fixed inset-0 z-40 flex items-center justify-center bg-[#2A1709]/65 p-4"
           onClick={() => setShowTileTitleCardModal(false)}
         >
           <div
-            className="relative w-full max-w-md rounded-2xl border border-white/15 bg-neutral-900/90 p-3 shadow-2xl backdrop-blur"
+            className="relative w-full max-w-md rounded-2xl border border-[#D3A369]/30 bg-[#4E3018]/92 p-3 shadow-2xl backdrop-blur"
             onClick={(event) => event.stopPropagation()}
           >
             <button
@@ -5492,8 +5492,8 @@ export default function PlayV2Page() {
       selectedInteriorCell &&
       isOwnedDiscoveredDecisionCell &&
       selectedDiscoveredDecisionResourceType ? (
-        <div className="fixed inset-0 z-[220] flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-sm rounded-2xl border border-emerald-200/25 bg-neutral-900/95 p-5 text-white shadow-2xl">
+        <div className="fixed inset-0 z-[220] flex items-center justify-center bg-[#2A1709]/60 p-4">
+          <div className="w-full max-w-sm rounded-2xl border border-emerald-200/35 bg-[#4E3018]/95 p-5 text-white shadow-2xl">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-200/80">
               Exploration
             </p>

@@ -423,7 +423,7 @@ export default function PlayV2Shell({
   const formatMoney = (value: number) => formatCurrency(value, currency);
 
   return (
-    <main className="relative h-screen w-screen overflow-hidden bg-neutral-950 text-white">
+    <main className="relative h-screen w-screen overflow-hidden bg-[#2F1D10] text-white">
       <div className="play-v2-shell-content">
         <section className="absolute inset-x-0 top-0 z-20 h-9 border-b border-[#6A4520]/80 bg-gradient-to-b from-[#9F6C37] to-[#845628] px-2.5 text-white md:h-10 md:px-3">
           <div className="grid h-full grid-cols-2 items-center gap-2 pr-28 text-[11px] sm:grid-cols-4 sm:pr-64 sm:text-xs">

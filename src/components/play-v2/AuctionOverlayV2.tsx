@@ -135,7 +135,7 @@ export default function AuctionOverlayV2({
 
   return (
     <>
-      <div className="fixed inset-0 z-20 bg-black/50 backdrop-blur-[2px]" />
+      <div className="fixed inset-0 z-20 bg-[#2A1709]/52 backdrop-blur-[2px]" />
       <div className="fixed inset-0 z-30 flex items-center justify-center p-3 md:p-4">
         <div className="flex max-h-[82vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-amber-200 bg-white/95 shadow-2xl ring-1 ring-black/10 backdrop-blur">
           <div className="grid gap-2 border-b border-neutral-200 px-3 py-2 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center sm:gap-3">

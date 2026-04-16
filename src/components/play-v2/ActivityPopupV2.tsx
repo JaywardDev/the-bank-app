@@ -85,12 +85,12 @@ export default function ActivityPopupV2({
 
   return (
     <div className="fixed inset-0 z-[60]" onClick={onClose} aria-hidden={!isOpen}>
-      <div className="absolute inset-0 bg-black/25" />
+      <div className="absolute inset-0 bg-[#2A1709]/35" />
       <section
         role="dialog"
         aria-modal="true"
         aria-label="Activity and wallet transactions"
-        className="absolute bottom-3 left-3 w-[min(92vw,340px)] max-h-[70vh] overflow-hidden rounded-2xl border border-white/20 bg-neutral-900/95 text-white shadow-2xl backdrop-blur"
+        className="absolute bottom-3 left-3 w-[min(92vw,340px)] max-h-[70vh] overflow-hidden rounded-2xl border border-[#C7935A]/30 bg-[#4E3018]/95 text-white shadow-2xl backdrop-blur"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="border-b border-white/15 p-2">

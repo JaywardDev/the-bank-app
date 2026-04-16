@@ -59,8 +59,8 @@ export default function EndedGameResultsPanel({
   onShowSummary,
 }: EndedGameResultsPanelProps) {
   return (
-    <div className="fixed inset-0 z-[140] flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm sm:p-6">
-      <div className="flex max-h-[85vh] w-[90vw] max-w-[1400px] flex-col overflow-hidden rounded-3xl border border-white/15 bg-neutral-950/95 shadow-2xl shadow-black/40">
+    <div className="fixed inset-0 z-[140] flex items-center justify-center bg-[#2A1709]/65 p-4 backdrop-blur-sm sm:p-6">
+      <div className="flex max-h-[85vh] w-[90vw] max-w-[1400px] flex-col overflow-hidden rounded-3xl border border-[#D3A369]/30 bg-[#4E3018]/95 shadow-2xl shadow-black/40">
         <div className="flex flex-col gap-3 border-b border-white/10 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <div>
             <h2 className="text-lg font-semibold text-white sm:text-xl">Final Results</h2>
@@ -106,7 +106,7 @@ export default function EndedGameResultsPanel({
           <div className="flex h-full min-h-0 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04]">
             <div className="min-h-0 flex-1 overflow-auto">
               <table className="min-w-full border-separate border-spacing-0 text-left">
-                <thead className="sticky top-0 z-10 bg-neutral-950/95 backdrop-blur-xl">
+                <thead className="sticky top-0 z-10 bg-[#4A2D16]/95 backdrop-blur-xl">
                   <tr className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/45">
                     <th className="px-4 py-3">Rank</th>
                     <th className="px-4 py-3">Player</th>
