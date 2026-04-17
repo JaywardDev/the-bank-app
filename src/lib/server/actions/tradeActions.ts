@@ -4,8 +4,12 @@ type TradeActionRequest = {
   action?: string;
   counterpartyPlayerId?: string;
   offerCash?: number;
+  offerFreeBuildTokens?: number;
+  offerFreeUpgradeTokens?: number;
   offerTiles?: number[];
   requestCash?: number;
+  requestFreeBuildTokens?: number;
+  requestFreeUpgradeTokens?: number;
   requestTiles?: number[];
   tradeId?: string;
 };
@@ -42,8 +46,12 @@ type TradeProposalRow = {
   proposer_player_id: string;
   counterparty_player_id: string;
   offer_cash: number;
+  offer_free_build_tokens: number;
+  offer_free_upgrade_tokens: number;
   offer_tile_indices: number[];
   request_cash: number;
+  request_free_build_tokens: number;
+  request_free_upgrade_tokens: number;
   request_tile_indices: number[];
   snapshot: TradeSnapshotTile[] | { tiles: TradeSnapshotTile[] } | null;
   status: string;
@@ -200,7 +208,15 @@ export const handleTradeAction = async <
   if (body.action === "PROPOSE_TRADE") {
     const counterpartyId = body.counterpartyPlayerId;
     const offerCashValue = toInteger(body.offerCash) ?? 0;
+    const offerFreeBuildTokensValue =
+      Math.max(0, toInteger(body.offerFreeBuildTokens) ?? 0);
+    const offerFreeUpgradeTokensValue =
+      Math.max(0, toInteger(body.offerFreeUpgradeTokens) ?? 0);
     const requestCashValue = toInteger(body.requestCash) ?? 0;
+    const requestFreeBuildTokensValue =
+      Math.max(0, toInteger(body.requestFreeBuildTokens) ?? 0);
+    const requestFreeUpgradeTokensValue =
+      Math.max(0, toInteger(body.requestFreeUpgradeTokens) ?? 0);
     if (offerCashValue < 0 || requestCashValue < 0) {
       return NextResponse.json(
         { error: "Trade cash amounts must be zero or greater." },
@@ -209,6 +225,10 @@ export const handleTradeAction = async <
     }
     const offerCash = offerCashValue;
     const requestCash = requestCashValue;
+    const offerFreeBuildTokens = offerFreeBuildTokensValue;
+    const offerFreeUpgradeTokens = offerFreeUpgradeTokensValue;
+    const requestFreeBuildTokens = requestFreeBuildTokensValue;
+    const requestFreeUpgradeTokens = requestFreeUpgradeTokensValue;
     const offerTiles = normalizeTileIndices(body.offerTiles);
     const requestTiles = normalizeTileIndices(body.requestTiles);
 
@@ -327,7 +347,7 @@ export const handleTradeAction = async <
     try {
       [tradeProposal] =
         (await fetchFromSupabaseWithService<TradeProposalRow[]>(
-          "trade_proposals?select=id,game_id,proposer_player_id,counterparty_player_id,offer_cash,offer_tile_indices,request_cash,request_tile_indices,snapshot,status,created_at",
+          "trade_proposals?select=id,game_id,proposer_player_id,counterparty_player_id,offer_cash,offer_free_build_tokens,offer_free_upgrade_tokens,offer_tile_indices,request_cash,request_free_build_tokens,request_free_upgrade_tokens,request_tile_indices,snapshot,status,created_at",
           {
             method: "POST",
             headers: {
@@ -338,8 +358,12 @@ export const handleTradeAction = async <
               proposer_player_id: currentUserPlayer.id,
               counterparty_player_id: counterpartyId,
               offer_cash: offerCash,
+              offer_free_build_tokens: offerFreeBuildTokens,
+              offer_free_upgrade_tokens: offerFreeUpgradeTokens,
               offer_tile_indices: offerTiles,
               request_cash: requestCash,
+              request_free_build_tokens: requestFreeBuildTokens,
+              request_free_upgrade_tokens: requestFreeUpgradeTokens,
               request_tile_indices: requestTiles,
               snapshot: snapshotTiles,
               status: "PENDING",
@@ -406,7 +430,7 @@ export const handleTradeAction = async <
 
   const [tradeProposal] =
     (await fetchFromSupabaseWithService<TradeProposalRow[]>(
-      `trade_proposals?select=id,game_id,proposer_player_id,counterparty_player_id,offer_cash,offer_tile_indices,request_cash,request_tile_indices,snapshot,status,created_at&id=eq.${tradeId}&game_id=eq.${gameId}&limit=1`,
+      `trade_proposals?select=id,game_id,proposer_player_id,counterparty_player_id,offer_cash,offer_free_build_tokens,offer_free_upgrade_tokens,offer_tile_indices,request_cash,request_free_build_tokens,request_free_upgrade_tokens,request_tile_indices,snapshot,status,created_at&id=eq.${tradeId}&game_id=eq.${gameId}&limit=1`,
       { method: "GET" },
     )) ?? [];
 

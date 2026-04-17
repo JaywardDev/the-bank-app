@@ -131,8 +131,12 @@ type BankActionRequest =
       action: "PROPOSE_TRADE";
       counterpartyPlayerId: string;
       offerCash?: number;
+      offerFreeBuildTokens?: number;
+      offerFreeUpgradeTokens?: number;
       offerTiles?: number[];
       requestCash?: number;
+      requestFreeBuildTokens?: number;
+      requestFreeUpgradeTokens?: number;
       requestTiles?: number[];
     })
   | (BaseActionRequest & {

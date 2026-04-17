@@ -1650,7 +1650,7 @@ export default function PlayPage() {
       const proposalRows = await supabaseClient.fetchFromSupabase<
         TradeProposal[]
       >(
-        `trade_proposals?select=id,game_id,proposer_player_id,counterparty_player_id,offer_cash,offer_tile_indices,request_cash,request_tile_indices,snapshot,status,created_at&game_id=eq.${activeGameId}&order=created_at.desc`,
+        `trade_proposals?select=id,game_id,proposer_player_id,counterparty_player_id,offer_cash,offer_free_build_tokens,offer_free_upgrade_tokens,offer_tile_indices,request_cash,request_free_build_tokens,request_free_upgrade_tokens,request_tile_indices,snapshot,status,created_at&game_id=eq.${activeGameId}&order=created_at.desc`,
         { method: "GET" },
         accessToken,
       );
@@ -3670,8 +3670,12 @@ export default function PlayPage() {
             action: "PROPOSE_TRADE";
             counterpartyPlayerId: string;
             offerCash?: number;
+            offerFreeBuildTokens?: number;
+            offerFreeUpgradeTokens?: number;
             offerTiles?: number[];
             requestCash?: number;
+            requestFreeBuildTokens?: number;
+            requestFreeUpgradeTokens?: number;
             requestTiles?: number[];
           }
         | { action: "ACCEPT_TRADE" | "REJECT_TRADE" | "CANCEL_TRADE"; tradeId: string },
@@ -3694,9 +3698,25 @@ export default function PlayPage() {
           ? request.counterpartyPlayerId
           : undefined;
       const offerCash = "offerCash" in request ? request.offerCash : undefined;
+      const offerFreeBuildTokens =
+        "offerFreeBuildTokens" in request
+          ? request.offerFreeBuildTokens
+          : undefined;
+      const offerFreeUpgradeTokens =
+        "offerFreeUpgradeTokens" in request
+          ? request.offerFreeUpgradeTokens
+          : undefined;
       const offerTiles = "offerTiles" in request ? request.offerTiles : undefined;
       const requestCash =
         "requestCash" in request ? request.requestCash : undefined;
+      const requestFreeBuildTokens =
+        "requestFreeBuildTokens" in request
+          ? request.requestFreeBuildTokens
+          : undefined;
+      const requestFreeUpgradeTokens =
+        "requestFreeUpgradeTokens" in request
+          ? request.requestFreeUpgradeTokens
+          : undefined;
       const requestTiles =
         "requestTiles" in request ? request.requestTiles : undefined;
       if (!session || !gameId) {
@@ -3773,8 +3793,12 @@ export default function PlayPage() {
               tradeId,
               counterpartyPlayerId,
               offerCash,
+              offerFreeBuildTokens,
+              offerFreeUpgradeTokens,
               offerTiles,
               requestCash,
+              requestFreeBuildTokens,
+              requestFreeUpgradeTokens,
               requestTiles,
               expectedVersion:
                 typeof expectedVersionOverride === "number"

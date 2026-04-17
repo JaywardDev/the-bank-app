@@ -11,8 +11,12 @@ export type TradeProposal = {
   proposer_player_id: string;
   counterparty_player_id: string;
   offer_cash: number;
+  offer_free_build_tokens: number;
+  offer_free_upgrade_tokens: number;
   offer_tile_indices: number[];
   request_cash: number;
+  request_free_build_tokens: number;
+  request_free_upgrade_tokens: number;
   request_tile_indices: number[];
   snapshot: TradeSnapshotTile[] | { tiles: TradeSnapshotTile[] } | null;
   status: string;

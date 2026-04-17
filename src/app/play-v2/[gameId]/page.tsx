@@ -286,8 +286,12 @@ type BankActionRequest = {
   tradeId?: string;
   counterpartyPlayerId?: string;
   offerCash?: number;
+  offerFreeBuildTokens?: number;
+  offerFreeUpgradeTokens?: number;
   offerTiles?: number[];
   requestCash?: number;
+  requestFreeBuildTokens?: number;
+  requestFreeUpgradeTokens?: number;
   requestTiles?: number[];
   kind?: BettingMarketBetKind;
   selection?: BettingMarketBetSelection;
@@ -691,7 +695,7 @@ export default function PlayV2Page() {
     async (gameId: string, accessToken?: string) => {
       const requestEpoch = startSliceRequest("tradeProposals");
       const rows = await supabaseClient.fetchFromSupabase<TradeProposal[]>(
-        `trade_proposals?select=id,game_id,proposer_player_id,counterparty_player_id,offer_cash,offer_tile_indices,request_cash,request_tile_indices,snapshot,status,created_at&game_id=eq.${gameId}&order=created_at.desc`,
+        `trade_proposals?select=id,game_id,proposer_player_id,counterparty_player_id,offer_cash,offer_free_build_tokens,offer_free_upgrade_tokens,offer_tile_indices,request_cash,request_free_build_tokens,request_free_upgrade_tokens,request_tile_indices,snapshot,status,created_at&game_id=eq.${gameId}&order=created_at.desc`,
         { method: "GET" },
         accessToken,
       );
@@ -2028,9 +2032,21 @@ export default function PlayV2Page() {
           ...(request.offerCash !== undefined
             ? { offerCash: request.offerCash }
             : {}),
+          ...(request.offerFreeBuildTokens !== undefined
+            ? { offerFreeBuildTokens: request.offerFreeBuildTokens }
+            : {}),
+          ...(request.offerFreeUpgradeTokens !== undefined
+            ? { offerFreeUpgradeTokens: request.offerFreeUpgradeTokens }
+            : {}),
           ...(request.offerTiles ? { offerTiles: request.offerTiles } : {}),
           ...(request.requestCash !== undefined
             ? { requestCash: request.requestCash }
+            : {}),
+          ...(request.requestFreeBuildTokens !== undefined
+            ? { requestFreeBuildTokens: request.requestFreeBuildTokens }
+            : {}),
+          ...(request.requestFreeUpgradeTokens !== undefined
+            ? { requestFreeUpgradeTokens: request.requestFreeUpgradeTokens }
             : {}),
           ...(request.requestTiles
             ? { requestTiles: request.requestTiles }
