@@ -8,11 +8,21 @@ type TradeProposalModalProps = {
   offerCash: number;
   maxOfferCash: number;
   onOfferCashChange: (value: number) => void;
+  offerFreeBuildTokens: number;
+  maxOfferFreeBuildTokens: number;
+  onOfferFreeBuildTokensChange: (value: number) => void;
+  offerFreeUpgradeTokens: number;
+  maxOfferFreeUpgradeTokens: number;
+  onOfferFreeUpgradeTokensChange: (value: number) => void;
   offerProperties: TradePropertyOption[];
   selectedOfferTileIndices: number[];
   onOfferTileToggle: (tileIndex: number, checked: boolean) => void;
   requestCash: number;
   onRequestCashChange: (value: number) => void;
+  requestFreeBuildTokens: number;
+  onRequestFreeBuildTokensChange: (value: number) => void;
+  requestFreeUpgradeTokens: number;
+  onRequestFreeUpgradeTokensChange: (value: number) => void;
   requestProperties: TradePropertyOption[];
   selectedRequestTileIndices: number[];
   onRequestTileToggle: (tileIndex: number, checked: boolean) => void;
@@ -30,11 +40,21 @@ export const TradeProposalModal = ({
   offerCash,
   maxOfferCash,
   onOfferCashChange,
+  offerFreeBuildTokens,
+  maxOfferFreeBuildTokens,
+  onOfferFreeBuildTokensChange,
+  offerFreeUpgradeTokens,
+  maxOfferFreeUpgradeTokens,
+  onOfferFreeUpgradeTokensChange,
   offerProperties,
   selectedOfferTileIndices,
   onOfferTileToggle,
   requestCash,
   onRequestCashChange,
+  requestFreeBuildTokens,
+  onRequestFreeBuildTokensChange,
+  requestFreeUpgradeTokens,
+  onRequestFreeUpgradeTokensChange,
   requestProperties,
   selectedRequestTileIndices,
   onRequestTileToggle,
@@ -105,6 +125,44 @@ export const TradeProposalModal = ({
                     }
                   />
                 </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="text-xs text-neutral-500">
+                    Build vouchers
+                    <input
+                      className="mt-1 w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm text-neutral-700"
+                      type="number"
+                      min={0}
+                      max={maxOfferFreeBuildTokens}
+                      value={offerFreeBuildTokens}
+                      onChange={(event) =>
+                        onOfferFreeBuildTokensChange(
+                          Math.min(
+                            Math.max(0, Number(event.target.value)),
+                            maxOfferFreeBuildTokens,
+                          ),
+                        )
+                      }
+                    />
+                  </label>
+                  <label className="text-xs text-neutral-500">
+                    Upgrade vouchers
+                    <input
+                      className="mt-1 w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm text-neutral-700"
+                      type="number"
+                      min={0}
+                      max={maxOfferFreeUpgradeTokens}
+                      value={offerFreeUpgradeTokens}
+                      onChange={(event) =>
+                        onOfferFreeUpgradeTokensChange(
+                          Math.min(
+                            Math.max(0, Number(event.target.value)),
+                            maxOfferFreeUpgradeTokens,
+                          ),
+                        )
+                      }
+                    />
+                  </label>
+                </div>
                 <div className="space-y-1">
                   <p className="text-xs text-neutral-500">Properties</p>
                   {offerProperties.length === 0 ? (
@@ -153,6 +211,36 @@ export const TradeProposalModal = ({
                     }
                   />
                 </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="text-xs text-neutral-500">
+                    Build vouchers
+                    <input
+                      className="mt-1 w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm text-neutral-700"
+                      type="number"
+                      min={0}
+                      value={requestFreeBuildTokens}
+                      onChange={(event) =>
+                        onRequestFreeBuildTokensChange(
+                          Math.max(0, Number(event.target.value)),
+                        )
+                      }
+                    />
+                  </label>
+                  <label className="text-xs text-neutral-500">
+                    Upgrade vouchers
+                    <input
+                      className="mt-1 w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm text-neutral-700"
+                      type="number"
+                      min={0}
+                      value={requestFreeUpgradeTokens}
+                      onChange={(event) =>
+                        onRequestFreeUpgradeTokensChange(
+                          Math.max(0, Number(event.target.value)),
+                        )
+                      }
+                    />
+                  </label>
+                </div>
                 <div className="space-y-1">
                   <p className="text-xs text-neutral-500">Properties</p>
                   {selectedCounterpartyId ? (

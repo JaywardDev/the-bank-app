@@ -4,8 +4,12 @@ type IncomingTradeModalProps = {
   isOpen: boolean;
   counterpartyName: string;
   requestCash: number;
+  requestFreeBuildTokens: number;
+  requestFreeUpgradeTokens: number;
   requestTileIndices: number[];
   offerCash: number;
+  offerFreeBuildTokens: number;
+  offerFreeUpgradeTokens: number;
   offerTileIndices: number[];
   snapshotTiles: TradeSnapshotTile[];
   liabilities: TradeLiabilitySummary[];
@@ -23,8 +27,12 @@ export const IncomingTradeModal = ({
   isOpen,
   counterpartyName,
   requestCash,
+  requestFreeBuildTokens,
+  requestFreeUpgradeTokens,
   requestTileIndices,
   offerCash,
+  offerFreeBuildTokens,
+  offerFreeUpgradeTokens,
   offerTileIndices,
   snapshotTiles,
   liabilities,
@@ -73,6 +81,12 @@ export const IncomingTradeModal = ({
                 {requestCash > 0 ? (
                   <li>Cash: {formatMoney(requestCash, currencySymbol)}</li>
                 ) : null}
+                {requestFreeBuildTokens > 0 ? (
+                  <li>Build vouchers: {requestFreeBuildTokens}</li>
+                ) : null}
+                {requestFreeUpgradeTokens > 0 ? (
+                  <li>Upgrade vouchers: {requestFreeUpgradeTokens}</li>
+                ) : null}
                 {requestTileIndices.length > 0 ? (
                   requestTileIndices.map((tileIndex) => {
                     const snapshot = snapshotTiles.find(
@@ -88,8 +102,10 @@ export const IncomingTradeModal = ({
                       </li>
                     );
                   })
-                ) : requestCash === 0 ? (
-                  <li className="text-neutral-400">No properties</li>
+                ) : requestCash === 0 &&
+                  requestFreeBuildTokens === 0 &&
+                  requestFreeUpgradeTokens === 0 ? (
+                  <li className="text-neutral-400">Nothing</li>
                 ) : null}
               </ul>
             </div>
@@ -100,6 +116,12 @@ export const IncomingTradeModal = ({
               <ul className="mt-2 space-y-1 text-sm text-neutral-700">
                 {offerCash > 0 ? (
                   <li>Cash: {formatMoney(offerCash, currencySymbol)}</li>
+                ) : null}
+                {offerFreeBuildTokens > 0 ? (
+                  <li>Build vouchers: {offerFreeBuildTokens}</li>
+                ) : null}
+                {offerFreeUpgradeTokens > 0 ? (
+                  <li>Upgrade vouchers: {offerFreeUpgradeTokens}</li>
                 ) : null}
                 {offerTileIndices.length > 0 ? (
                   offerTileIndices.map((tileIndex) => {
@@ -116,8 +138,10 @@ export const IncomingTradeModal = ({
                       </li>
                     );
                   })
-                ) : offerCash === 0 ? (
-                  <li className="text-neutral-400">No properties</li>
+                ) : offerCash === 0 &&
+                  offerFreeBuildTokens === 0 &&
+                  offerFreeUpgradeTokens === 0 ? (
+                  <li className="text-neutral-400">Nothing</li>
                 ) : null}
               </ul>
             </div>

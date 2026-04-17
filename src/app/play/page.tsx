@@ -617,6 +617,8 @@ type Player = {
   is_in_jail: boolean;
   jail_turns_remaining: number;
   get_out_of_jail_free_count: number;
+  free_build_tokens: number;
+  free_upgrade_tokens: number;
   is_eliminated: boolean;
   eliminated_at: string | null;
 };
@@ -977,8 +979,16 @@ export default function PlayPage() {
   const [isIncomingTradeOpen, setIsIncomingTradeOpen] = useState(false);
   const [tradeCounterpartyId, setTradeCounterpartyId] = useState<string>("");
   const [tradeOfferCash, setTradeOfferCash] = useState<number>(0);
+  const [tradeOfferFreeBuildTokens, setTradeOfferFreeBuildTokens] =
+    useState<number>(0);
+  const [tradeOfferFreeUpgradeTokens, setTradeOfferFreeUpgradeTokens] =
+    useState<number>(0);
   const [tradeOfferTiles, setTradeOfferTiles] = useState<number[]>([]);
   const [tradeRequestCash, setTradeRequestCash] = useState<number>(0);
+  const [tradeRequestFreeBuildTokens, setTradeRequestFreeBuildTokens] =
+    useState<number>(0);
+  const [tradeRequestFreeUpgradeTokens, setTradeRequestFreeUpgradeTokens] =
+    useState<number>(0);
   const [tradeRequestTiles, setTradeRequestTiles] = useState<number[]>([]);
   const [payoffLoan, setPayoffLoan] = useState<PlayerLoan | null>(null);
   const [propertyActionModal, setPropertyActionModal] = useState<{
@@ -1569,7 +1579,7 @@ export default function PlayPage() {
   const loadPlayers = useCallback(
     async (activeGameId: string, accessToken?: string) => {
       const playerRows = await supabaseClient.fetchFromSupabase<Player[]>(
-        `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,is_eliminated,eliminated_at&game_id=eq.${activeGameId}&order=created_at.asc`,
+        `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at&game_id=eq.${activeGameId}&order=created_at.asc`,
         { method: "GET" },
         accessToken,
       );
@@ -3069,15 +3079,23 @@ export default function PlayPage() {
   const canSubmitTradeProposal = useMemo(() => {
     const hasAssets =
       tradeOfferCash > 0 ||
+      tradeOfferFreeBuildTokens > 0 ||
+      tradeOfferFreeUpgradeTokens > 0 ||
       tradeOfferTiles.length > 0 ||
       tradeRequestCash > 0 ||
+      tradeRequestFreeBuildTokens > 0 ||
+      tradeRequestFreeUpgradeTokens > 0 ||
       tradeRequestTiles.length > 0;
     return Boolean(tradeCounterpartyId) && hasAssets;
   }, [
     tradeCounterpartyId,
     tradeOfferCash,
+    tradeOfferFreeBuildTokens,
+    tradeOfferFreeUpgradeTokens,
     tradeOfferTiles.length,
     tradeRequestCash,
+    tradeRequestFreeBuildTokens,
+    tradeRequestFreeUpgradeTokens,
     tradeRequestTiles.length,
   ]);
   const activeLoans = playerLoans.filter((loan) => loan.status === "active");
@@ -3233,7 +3251,15 @@ export default function PlayPage() {
   const incomingTradeRequestTiles =
     incomingTradeProposal?.request_tile_indices ?? [];
   const incomingTradeOfferCash = incomingTradeProposal?.offer_cash ?? 0;
+  const incomingTradeOfferFreeBuildTokens =
+    incomingTradeProposal?.offer_free_build_tokens ?? 0;
+  const incomingTradeOfferFreeUpgradeTokens =
+    incomingTradeProposal?.offer_free_upgrade_tokens ?? 0;
   const incomingTradeRequestCash = incomingTradeProposal?.request_cash ?? 0;
+  const incomingTradeRequestFreeBuildTokens =
+    incomingTradeProposal?.request_free_build_tokens ?? 0;
+  const incomingTradeRequestFreeUpgradeTokens =
+    incomingTradeProposal?.request_free_upgrade_tokens ?? 0;
   const incomingTradeCounterpartyName = incomingTradeProposal
     ? getPlayerNameById(incomingTradeProposal.proposer_player_id)
     : "Player";
@@ -3570,6 +3596,26 @@ export default function PlayPage() {
       (payload && typeof payload.request_cash === "number"
         ? payload.request_cash
         : 0);
+    const offerFreeBuildTokens =
+      proposal?.offer_free_build_tokens ??
+      (payload && typeof payload.offer_free_build_tokens === "number"
+        ? payload.offer_free_build_tokens
+        : 0);
+    const offerFreeUpgradeTokens =
+      proposal?.offer_free_upgrade_tokens ??
+      (payload && typeof payload.offer_free_upgrade_tokens === "number"
+        ? payload.offer_free_upgrade_tokens
+        : 0);
+    const requestFreeBuildTokens =
+      proposal?.request_free_build_tokens ??
+      (payload && typeof payload.request_free_build_tokens === "number"
+        ? payload.request_free_build_tokens
+        : 0);
+    const requestFreeUpgradeTokens =
+      proposal?.request_free_upgrade_tokens ??
+      (payload && typeof payload.request_free_upgrade_tokens === "number"
+        ? payload.request_free_upgrade_tokens
+        : 0);
     const offerTiles =
       proposal?.offer_tile_indices ??
       (Array.isArray(payload?.offer_tile_indices)
@@ -3593,8 +3639,12 @@ export default function PlayPage() {
       counterpartyPlayerId:
         counterpartyId ?? proposal?.counterparty_player_id ?? "",
       offerCash,
+      offerFreeBuildTokens,
+      offerFreeUpgradeTokens,
       offerTiles,
       requestCash,
+      requestFreeBuildTokens,
+      requestFreeUpgradeTokens,
       requestTiles,
       snapshotTiles,
     });
@@ -4034,8 +4084,12 @@ export default function PlayPage() {
     const defaultCounterparty = availableCounterparties[0]?.id ?? "";
     setTradeCounterpartyId(defaultCounterparty);
     setTradeOfferCash(0);
+    setTradeOfferFreeBuildTokens(0);
+    setTradeOfferFreeUpgradeTokens(0);
     setTradeOfferTiles([]);
     setTradeRequestCash(0);
+    setTradeRequestFreeBuildTokens(0);
+    setTradeRequestFreeUpgradeTokens(0);
     setTradeRequestTiles([]);
     setIsProposeTradeOpen(true);
   }, [currentUserPlayer, myPlayerBalance, ownedProperties.length, players]);
@@ -4051,8 +4105,12 @@ export default function PlayPage() {
     if (
       !hasTradeValue({
         offerCash,
+        offerFreeBuildTokens: tradeOfferFreeBuildTokens,
+        offerFreeUpgradeTokens: tradeOfferFreeUpgradeTokens,
         offerTiles: tradeOfferTiles,
         requestCash,
+        requestFreeBuildTokens: tradeRequestFreeBuildTokens,
+        requestFreeUpgradeTokens: tradeRequestFreeUpgradeTokens,
         requestTiles: tradeRequestTiles,
       })
     ) {
@@ -4063,8 +4121,16 @@ export default function PlayPage() {
       action: "PROPOSE_TRADE",
       counterpartyPlayerId: tradeCounterpartyId,
       offerCash: toOptionalPositiveCash(offerCash),
+      offerFreeBuildTokens: toOptionalPositiveCash(tradeOfferFreeBuildTokens),
+      offerFreeUpgradeTokens: toOptionalPositiveCash(tradeOfferFreeUpgradeTokens),
       offerTiles: toOptionalTileIndices(tradeOfferTiles),
       requestCash: toOptionalPositiveCash(requestCash),
+      requestFreeBuildTokens: toOptionalPositiveCash(
+        tradeRequestFreeBuildTokens,
+      ),
+      requestFreeUpgradeTokens: toOptionalPositiveCash(
+        tradeRequestFreeUpgradeTokens,
+      ),
       requestTiles: toOptionalTileIndices(tradeRequestTiles),
     });
     if (success) {
@@ -4075,8 +4141,12 @@ export default function PlayPage() {
     handleBankAction,
     tradeCounterpartyId,
     tradeOfferCash,
+    tradeOfferFreeBuildTokens,
+    tradeOfferFreeUpgradeTokens,
     tradeOfferTiles,
     tradeRequestCash,
+    tradeRequestFreeBuildTokens,
+    tradeRequestFreeUpgradeTokens,
     tradeRequestTiles,
   ]);
 
@@ -5065,6 +5135,12 @@ export default function PlayPage() {
           offerCash={tradeOfferCash}
           maxOfferCash={myPlayerBalance}
           onOfferCashChange={setTradeOfferCash}
+          offerFreeBuildTokens={tradeOfferFreeBuildTokens}
+          maxOfferFreeBuildTokens={currentUserPlayer?.free_build_tokens ?? 0}
+          onOfferFreeBuildTokensChange={setTradeOfferFreeBuildTokens}
+          offerFreeUpgradeTokens={tradeOfferFreeUpgradeTokens}
+          maxOfferFreeUpgradeTokens={currentUserPlayer?.free_upgrade_tokens ?? 0}
+          onOfferFreeUpgradeTokensChange={setTradeOfferFreeUpgradeTokens}
           offerProperties={ownedProperties.map(({ tile, houses }) => ({
             tileIndex: tile.index,
             tileName: tile.name,
@@ -5080,6 +5156,10 @@ export default function PlayPage() {
           }}
           requestCash={tradeRequestCash}
           onRequestCashChange={setTradeRequestCash}
+          requestFreeBuildTokens={tradeRequestFreeBuildTokens}
+          onRequestFreeBuildTokensChange={setTradeRequestFreeBuildTokens}
+          requestFreeUpgradeTokens={tradeRequestFreeUpgradeTokens}
+          onRequestFreeUpgradeTokensChange={setTradeRequestFreeUpgradeTokens}
           requestProperties={counterpartyOwnedProperties.map(({ tile, houses }) => ({
             tileIndex: tile.index,
             tileName: tile.name,
@@ -5102,8 +5182,12 @@ export default function PlayPage() {
           isOpen={Boolean(incomingTradeProposal && isIncomingTradeOpen)}
           counterpartyName={incomingTradeCounterpartyName}
           requestCash={incomingTradeRequestCash}
+          requestFreeBuildTokens={incomingTradeRequestFreeBuildTokens}
+          requestFreeUpgradeTokens={incomingTradeRequestFreeUpgradeTokens}
           requestTileIndices={incomingTradeRequestTiles}
           offerCash={incomingTradeOfferCash}
+          offerFreeBuildTokens={incomingTradeOfferFreeBuildTokens}
+          offerFreeUpgradeTokens={incomingTradeOfferFreeUpgradeTokens}
           offerTileIndices={incomingTradeOfferTiles}
           snapshotTiles={incomingTradeSnapshotTiles}
           liabilities={incomingTradeLiabilities}
@@ -5148,6 +5232,16 @@ export default function PlayPage() {
                       {tradeExecutionPerspective.giveCash > 0 ? (
                         <li>Cash: {formatMoney(tradeExecutionPerspective.giveCash, currencySymbol)}</li>
                       ) : null}
+                      {tradeExecutionPerspective.giveFreeBuildTokens > 0 ? (
+                        <li>
+                          Build vouchers: {tradeExecutionPerspective.giveFreeBuildTokens}
+                        </li>
+                      ) : null}
+                      {tradeExecutionPerspective.giveFreeUpgradeTokens > 0 ? (
+                        <li>
+                          Upgrade vouchers: {tradeExecutionPerspective.giveFreeUpgradeTokens}
+                        </li>
+                      ) : null}
                       {tradeExecutionPerspective.giveTiles.length > 0 ? (
                         tradeExecutionPerspective.giveTiles.map((tileIndex) => {
                           const snapshot =
@@ -5164,7 +5258,9 @@ export default function PlayPage() {
                             </li>
                           );
                         })
-                      ) : tradeExecutionPerspective.giveCash === 0 ? (
+                      ) : tradeExecutionPerspective.giveCash === 0 &&
+                        tradeExecutionPerspective.giveFreeBuildTokens === 0 &&
+                        tradeExecutionPerspective.giveFreeUpgradeTokens === 0 ? (
                         <li className="text-neutral-400">Nothing</li>
                       ) : null}
                     </ul>
@@ -5176,6 +5272,16 @@ export default function PlayPage() {
                     <ul className="mt-2 space-y-1 text-sm text-neutral-700">
                       {tradeExecutionPerspective.receiveCash > 0 ? (
                         <li>Cash: {formatMoney(tradeExecutionPerspective.receiveCash, currencySymbol)}</li>
+                      ) : null}
+                      {tradeExecutionPerspective.receiveFreeBuildTokens > 0 ? (
+                        <li>
+                          Build vouchers: {tradeExecutionPerspective.receiveFreeBuildTokens}
+                        </li>
+                      ) : null}
+                      {tradeExecutionPerspective.receiveFreeUpgradeTokens > 0 ? (
+                        <li>
+                          Upgrade vouchers: {tradeExecutionPerspective.receiveFreeUpgradeTokens}
+                        </li>
                       ) : null}
                       {tradeExecutionPerspective.receiveTiles.length > 0 ? (
                         tradeExecutionPerspective.receiveTiles.map((tileIndex) => {
@@ -5193,7 +5299,9 @@ export default function PlayPage() {
                             </li>
                           );
                         })
-                      ) : tradeExecutionPerspective.receiveCash === 0 ? (
+                      ) : tradeExecutionPerspective.receiveCash === 0 &&
+                        tradeExecutionPerspective.receiveFreeBuildTokens === 0 &&
+                        tradeExecutionPerspective.receiveFreeUpgradeTokens === 0 ? (
                         <li className="text-neutral-400">Nothing</li>
                       ) : null}
                     </ul>

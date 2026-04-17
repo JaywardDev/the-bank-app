@@ -395,8 +395,16 @@ export default function PlayV2Page() {
   const [tradeProposals, setTradeProposals] = useState<TradeProposal[]>([]);
   const [tradeCounterpartyId, setTradeCounterpartyId] = useState<string>("");
   const [tradeOfferCash, setTradeOfferCash] = useState<number>(0);
+  const [tradeOfferFreeBuildTokens, setTradeOfferFreeBuildTokens] =
+    useState<number>(0);
+  const [tradeOfferFreeUpgradeTokens, setTradeOfferFreeUpgradeTokens] =
+    useState<number>(0);
   const [tradeOfferTiles, setTradeOfferTiles] = useState<number[]>([]);
   const [tradeRequestCash, setTradeRequestCash] = useState<number>(0);
+  const [tradeRequestFreeBuildTokens, setTradeRequestFreeBuildTokens] =
+    useState<number>(0);
+  const [tradeRequestFreeUpgradeTokens, setTradeRequestFreeUpgradeTokens] =
+    useState<number>(0);
   const [tradeRequestTiles, setTradeRequestTiles] = useState<number[]>([]);
   const [playerLoans, setPlayerLoans] = useState<PlayerLoan[]>([]);
   const [purchaseMortgages, setPurchaseMortgages] = useState<
@@ -3373,16 +3381,24 @@ export default function PlayV2Page() {
       Boolean(tradeCounterpartyId) &&
       hasTradeValue({
         offerCash: tradeOfferCash,
+        offerFreeBuildTokens: tradeOfferFreeBuildTokens,
+        offerFreeUpgradeTokens: tradeOfferFreeUpgradeTokens,
         offerTiles: tradeOfferTiles,
         requestCash: tradeRequestCash,
+        requestFreeBuildTokens: tradeRequestFreeBuildTokens,
+        requestFreeUpgradeTokens: tradeRequestFreeUpgradeTokens,
         requestTiles: tradeRequestTiles,
       })
     );
   }, [
     tradeCounterpartyId,
     tradeOfferCash,
+    tradeOfferFreeBuildTokens,
+    tradeOfferFreeUpgradeTokens,
     tradeOfferTiles,
     tradeRequestCash,
+    tradeRequestFreeBuildTokens,
+    tradeRequestFreeUpgradeTokens,
     tradeRequestTiles,
   ]);
 
@@ -3427,6 +3443,14 @@ export default function PlayV2Page() {
   const incomingTradeCounterpartyName = incomingTradeProposal
     ? getPlayerNameById(incomingTradeProposal.proposer_player_id)
     : "";
+  const incomingTradeOfferFreeBuildTokens =
+    incomingTradeProposal?.offer_free_build_tokens ?? 0;
+  const incomingTradeOfferFreeUpgradeTokens =
+    incomingTradeProposal?.offer_free_upgrade_tokens ?? 0;
+  const incomingTradeRequestFreeBuildTokens =
+    incomingTradeProposal?.request_free_build_tokens ?? 0;
+  const incomingTradeRequestFreeUpgradeTokens =
+    incomingTradeProposal?.request_free_upgrade_tokens ?? 0;
   const formatTradeMoney = useCallback(
     (amount: number) => {
       return formatMoney(amount);
@@ -3456,8 +3480,12 @@ export default function PlayV2Page() {
     if (
       !hasTradeValue({
         offerCash: tradeOfferCash,
+        offerFreeBuildTokens: tradeOfferFreeBuildTokens,
+        offerFreeUpgradeTokens: tradeOfferFreeUpgradeTokens,
         offerTiles: tradeOfferTiles,
         requestCash: tradeRequestCash,
+        requestFreeBuildTokens: tradeRequestFreeBuildTokens,
+        requestFreeUpgradeTokens: tradeRequestFreeUpgradeTokens,
         requestTiles: tradeRequestTiles,
       })
     ) {
@@ -3469,16 +3497,28 @@ export default function PlayV2Page() {
       action: "PROPOSE_TRADE",
       counterpartyPlayerId: tradeCounterpartyId,
       offerCash: toOptionalPositiveCash(tradeOfferCash),
+      offerFreeBuildTokens: toOptionalPositiveCash(tradeOfferFreeBuildTokens),
+      offerFreeUpgradeTokens: toOptionalPositiveCash(tradeOfferFreeUpgradeTokens),
       offerTiles: toOptionalTileIndices(tradeOfferTiles),
       requestCash: toOptionalPositiveCash(tradeRequestCash),
+      requestFreeBuildTokens: toOptionalPositiveCash(
+        tradeRequestFreeBuildTokens,
+      ),
+      requestFreeUpgradeTokens: toOptionalPositiveCash(
+        tradeRequestFreeUpgradeTokens,
+      ),
       requestTiles: toOptionalTileIndices(tradeRequestTiles),
     });
   }, [
     handleBankAction,
     tradeCounterpartyId,
     tradeOfferCash,
+    tradeOfferFreeBuildTokens,
+    tradeOfferFreeUpgradeTokens,
     tradeOfferTiles,
     tradeRequestCash,
+    tradeRequestFreeBuildTokens,
+    tradeRequestFreeUpgradeTokens,
     tradeRequestTiles,
   ]);
 
@@ -4798,6 +4838,44 @@ export default function PlayV2Page() {
                         }
                       />
                     </label>
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      <label className="block text-xs text-white/75">
+                        Build vouchers
+                        <input
+                          className="mt-1 w-full rounded-md border border-[#C19360]/30 bg-[#5A381A]/80 px-2.5 py-2 text-sm text-white"
+                          type="number"
+                          min={0}
+                          max={Math.max(0, currentPlayerFreeBuildTokens)}
+                          value={tradeOfferFreeBuildTokens}
+                          onChange={(event) =>
+                            setTradeOfferFreeBuildTokens(
+                              Math.min(
+                                Math.max(0, Number(event.target.value)),
+                                Math.max(0, currentPlayerFreeBuildTokens),
+                              ),
+                            )
+                          }
+                        />
+                      </label>
+                      <label className="block text-xs text-white/75">
+                        Upgrade vouchers
+                        <input
+                          className="mt-1 w-full rounded-md border border-[#C19360]/30 bg-[#5A381A]/80 px-2.5 py-2 text-sm text-white"
+                          type="number"
+                          min={0}
+                          max={Math.max(0, currentPlayerFreeUpgradeTokens)}
+                          value={tradeOfferFreeUpgradeTokens}
+                          onChange={(event) =>
+                            setTradeOfferFreeUpgradeTokens(
+                              Math.min(
+                                Math.max(0, Number(event.target.value)),
+                                Math.max(0, currentPlayerFreeUpgradeTokens),
+                              ),
+                            )
+                          }
+                        />
+                      </label>
+                    </div>
                     <div className="mt-2 space-y-1">
                       <p className="text-xs text-white/70">Properties</p>
                       {ownTradePropertyOptions.length === 0 ? (
@@ -4854,6 +4932,36 @@ export default function PlayV2Page() {
                         }
                       />
                     </label>
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      <label className="block text-xs text-white/75">
+                        Build vouchers
+                        <input
+                          className="mt-1 w-full rounded-md border border-[#C19360]/30 bg-[#5A381A]/80 px-2.5 py-2 text-sm text-white"
+                          type="number"
+                          min={0}
+                          value={tradeRequestFreeBuildTokens}
+                          onChange={(event) =>
+                            setTradeRequestFreeBuildTokens(
+                              Math.max(0, Number(event.target.value)),
+                            )
+                          }
+                        />
+                      </label>
+                      <label className="block text-xs text-white/75">
+                        Upgrade vouchers
+                        <input
+                          className="mt-1 w-full rounded-md border border-[#C19360]/30 bg-[#5A381A]/80 px-2.5 py-2 text-sm text-white"
+                          type="number"
+                          min={0}
+                          value={tradeRequestFreeUpgradeTokens}
+                          onChange={(event) =>
+                            setTradeRequestFreeUpgradeTokens(
+                              Math.max(0, Number(event.target.value)),
+                            )
+                          }
+                        />
+                      </label>
+                    </div>
                     <div className="mt-2 space-y-1">
                       <p className="text-xs text-white/70">Properties</p>
                       {!tradeCounterpartyId ? (
@@ -4931,6 +5039,16 @@ export default function PlayV2Page() {
                           {formatTradeMoney(incomingTradeProposal.request_cash)}
                         </li>
                       ) : null}
+                      {incomingTradeRequestFreeBuildTokens > 0 ? (
+                        <li>
+                          Build vouchers: {incomingTradeRequestFreeBuildTokens}
+                        </li>
+                      ) : null}
+                      {incomingTradeRequestFreeUpgradeTokens > 0 ? (
+                        <li>
+                          Upgrade vouchers: {incomingTradeRequestFreeUpgradeTokens}
+                        </li>
+                      ) : null}
                       {incomingTradeProposal.request_tile_indices.length > 0 ? (
                         incomingTradeProposal.request_tile_indices.map(
                           (tileIndex) => {
@@ -4948,8 +5066,10 @@ export default function PlayV2Page() {
                             );
                           },
                         )
-                      ) : incomingTradeProposal.request_cash === 0 ? (
-                        <li className="text-emerald-100/70">No properties</li>
+                      ) : incomingTradeProposal.request_cash === 0 &&
+                        incomingTradeRequestFreeBuildTokens === 0 &&
+                        incomingTradeRequestFreeUpgradeTokens === 0 ? (
+                        <li className="text-emerald-100/70">Nothing</li>
                       ) : null}
                     </ul>
                   </div>
@@ -4960,6 +5080,16 @@ export default function PlayV2Page() {
                         <li>
                           Cash:{" "}
                           {formatTradeMoney(incomingTradeProposal.offer_cash)}
+                        </li>
+                      ) : null}
+                      {incomingTradeOfferFreeBuildTokens > 0 ? (
+                        <li>
+                          Build vouchers: {incomingTradeOfferFreeBuildTokens}
+                        </li>
+                      ) : null}
+                      {incomingTradeOfferFreeUpgradeTokens > 0 ? (
+                        <li>
+                          Upgrade vouchers: {incomingTradeOfferFreeUpgradeTokens}
                         </li>
                       ) : null}
                       {incomingTradeProposal.offer_tile_indices.length > 0 ? (
@@ -4979,8 +5109,10 @@ export default function PlayV2Page() {
                             );
                           },
                         )
-                      ) : incomingTradeProposal.offer_cash === 0 ? (
-                        <li className="text-emerald-100/70">No properties</li>
+                      ) : incomingTradeProposal.offer_cash === 0 &&
+                        incomingTradeOfferFreeBuildTokens === 0 &&
+                        incomingTradeOfferFreeUpgradeTokens === 0 ? (
+                        <li className="text-emerald-100/70">Nothing</li>
                       ) : null}
                     </ul>
                   </div>

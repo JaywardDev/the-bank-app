@@ -32,18 +32,30 @@ export const toOptionalTileIndices = (tileIndices: number[]) =>
 
 export const hasTradeValue = ({
   offerCash,
+  offerFreeBuildTokens = 0,
+  offerFreeUpgradeTokens = 0,
   offerTiles,
   requestCash,
+  requestFreeBuildTokens = 0,
+  requestFreeUpgradeTokens = 0,
   requestTiles,
 }: {
   offerCash: number;
+  offerFreeBuildTokens?: number;
+  offerFreeUpgradeTokens?: number;
   offerTiles: number[];
   requestCash: number;
+  requestFreeBuildTokens?: number;
+  requestFreeUpgradeTokens?: number;
   requestTiles: number[];
 }) =>
   offerCash > 0 ||
+  offerFreeBuildTokens > 0 ||
+  offerFreeUpgradeTokens > 0 ||
   offerTiles.length > 0 ||
   requestCash > 0 ||
+  requestFreeBuildTokens > 0 ||
+  requestFreeUpgradeTokens > 0 ||
   requestTiles.length > 0;
 
 export const deriveTradeExecutionPerspective = ({
@@ -69,6 +81,18 @@ export const deriveTradeExecutionPerspective = ({
   const receiveCash = isProposer
     ? tradeExecutionSummary.requestCash
     : tradeExecutionSummary.offerCash;
+  const giveFreeBuildTokens = isProposer
+    ? tradeExecutionSummary.offerFreeBuildTokens
+    : tradeExecutionSummary.requestFreeBuildTokens;
+  const giveFreeUpgradeTokens = isProposer
+    ? tradeExecutionSummary.offerFreeUpgradeTokens
+    : tradeExecutionSummary.requestFreeUpgradeTokens;
+  const receiveFreeBuildTokens = isProposer
+    ? tradeExecutionSummary.requestFreeBuildTokens
+    : tradeExecutionSummary.offerFreeBuildTokens;
+  const receiveFreeUpgradeTokens = isProposer
+    ? tradeExecutionSummary.requestFreeUpgradeTokens
+    : tradeExecutionSummary.offerFreeUpgradeTokens;
   const counterpartyName = isProposer
     ? getPlayerNameById(tradeExecutionSummary.counterpartyPlayerId)
     : getPlayerNameById(tradeExecutionSummary.proposerPlayerId);
@@ -78,6 +102,10 @@ export const deriveTradeExecutionPerspective = ({
     receiveTiles,
     giveCash,
     receiveCash,
+    giveFreeBuildTokens,
+    giveFreeUpgradeTokens,
+    receiveFreeBuildTokens,
+    receiveFreeUpgradeTokens,
     counterpartyName,
     snapshotTiles: tradeExecutionSummary.snapshotTiles,
   };

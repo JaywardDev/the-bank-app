@@ -28,8 +28,12 @@ export type TradeExecutionSummary = {
   proposerPlayerId: string;
   counterpartyPlayerId: string;
   offerCash: number;
+  offerFreeBuildTokens: number;
+  offerFreeUpgradeTokens: number;
   offerTiles: number[];
   requestCash: number;
+  requestFreeBuildTokens: number;
+  requestFreeUpgradeTokens: number;
   requestTiles: number[];
   snapshotTiles: TradeSnapshotTile[];
 };
@@ -39,6 +43,10 @@ export type TradeExecutionPerspective = {
   receiveTiles: number[];
   giveCash: number;
   receiveCash: number;
+  giveFreeBuildTokens: number;
+  giveFreeUpgradeTokens: number;
+  receiveFreeBuildTokens: number;
+  receiveFreeUpgradeTokens: number;
   counterpartyName: string;
   snapshotTiles: TradeSnapshotTile[];
 };
