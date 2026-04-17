@@ -122,7 +122,17 @@ const isForestStyledOuterSpecialTile = (tile: BoardTile) => {
   if (tile.type === "FREE_PARKING") return true;
   if (tile.type === "JAIL") return true;
   if (tile.type === "GO_TO_JAIL") return true;
+  if (tile.type !== "TAX") return false;
+  const tileLabel = `${tile.tile_id} ${tile.name}`.toLowerCase();
+  return tileLabel.includes("income") || tileLabel.includes("super");
+};
+
+const isTransparentMapOuterSpecialTile = (tile: BoardTile) => {
+  if (tile.type === "START") return true;
   if (tile.type === "CHANCE" || tile.type === "COMMUNITY_CHEST") return true;
+  if (tile.type === "FREE_PARKING") return true;
+  if (tile.type === "JAIL") return true;
+  if (tile.type === "GO_TO_JAIL") return true;
   if (tile.type === "EVENT") {
     const tileLabel = `${tile.tile_id} ${tile.name}`.toLowerCase();
     return tileLabel.includes("chance") || tileLabel.includes("community");
@@ -304,6 +314,8 @@ export default function BoardTrack({
           const isOwnedByPlayer = Boolean(ownership?.owner_player_id);
           const housesCount = ownershipByTile[tile.index]?.houses ?? 0;
           const mapBuildingSpriteSrc = getMapBuildingSprite(housesCount);
+          const isTransparentMapSpecialTile =
+            isMapTileFace && isTransparentMapOuterSpecialTile(tile) && !isOwnableTile;
           const mapTileBaseColor = isMapTileFace
             ? isPropertyTile
               ? isOwned
@@ -313,7 +325,9 @@ export default function BoardTrack({
                 ? isOwned
                   ? "transparent"
                   : MAP_TILE_WARM_WHITE
-                : MAP_TILE_WARM_WHITE
+                : isTransparentMapSpecialTile
+                  ? "transparent"
+                  : MAP_TILE_WARM_WHITE
             : MAP_TILE_WARM_WHITE;
           const showMapCenteredIcon = isMapTileFace
             ? !isPropertyTile
