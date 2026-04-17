@@ -512,8 +512,12 @@ export const handleTradeAction = async <
           proposer_player_id: currentUserPlayer.id,
           counterparty_player_id: counterpartyId,
           offer_cash: offerCash,
+          offer_free_build_tokens: offerFreeBuildTokens,
+          offer_free_upgrade_tokens: offerFreeUpgradeTokens,
           offer_tile_indices: offerTiles,
           request_cash: requestCash,
+          request_free_build_tokens: requestFreeBuildTokens,
+          request_free_upgrade_tokens: requestFreeUpgradeTokens,
           request_tile_indices: requestTiles,
         },
       },
@@ -668,6 +672,19 @@ export const handleTradeAction = async <
   const cashDeltas = computeTradeCashDeltas(tradeProposal);
   const offerCash = cashDeltas.offerCash;
   const requestCash = cashDeltas.requestCash;
+  const offerFreeBuildTokens = Math.max(0, tradeProposal.offer_free_build_tokens ?? 0);
+  const offerFreeUpgradeTokens = Math.max(
+    0,
+    tradeProposal.offer_free_upgrade_tokens ?? 0,
+  );
+  const requestFreeBuildTokens = Math.max(
+    0,
+    tradeProposal.request_free_build_tokens ?? 0,
+  );
+  const requestFreeUpgradeTokens = Math.max(
+    0,
+    tradeProposal.request_free_upgrade_tokens ?? 0,
+  );
   const offerTiles = tradeProposal.offer_tile_indices ?? [];
   const requestTiles = tradeProposal.request_tile_indices ?? [];
 
@@ -867,8 +884,12 @@ export const handleTradeAction = async <
         proposer_player_id: tradeProposal.proposer_player_id,
         counterparty_player_id: tradeProposal.counterparty_player_id,
         offer_cash: offerCash,
+        offer_free_build_tokens: offerFreeBuildTokens,
+        offer_free_upgrade_tokens: offerFreeUpgradeTokens,
         offer_tile_indices: offerTiles,
         request_cash: requestCash,
+        request_free_build_tokens: requestFreeBuildTokens,
+        request_free_upgrade_tokens: requestFreeUpgradeTokens,
         request_tile_indices: requestTiles,
       },
     },

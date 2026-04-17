@@ -37,6 +37,9 @@ const parseNumber = (value: unknown): number | null => {
   return null;
 };
 
+const formatVoucherLabel = (quantity: number, type: "build" | "upgrade") =>
+  `${quantity} ${type} voucher${quantity === 1 ? "" : "s"}`;
+
 const getTurnsRemainingFromPayload = (payload: unknown): number | null => {
   if (!payload || typeof payload !== "object") {
     return null;
@@ -81,6 +84,27 @@ export const formatEventDescription = (
     }
     const owner = players.find((player) => player.id === ownership.owner_player_id);
     return `Owned by ${owner?.display_name ?? "Player"}`;
+  };
+  const getTradeLegSummary = (params: {
+    cash: number;
+    buildVouchers: number;
+    upgradeVouchers: number;
+    tileIndices: number[];
+  }) => {
+    const summaryParts: string[] = [];
+    if (params.cash > 0) {
+      summaryParts.push(formatMoney(params.cash, currencyCode, currencySymbol));
+    }
+    if (params.buildVouchers > 0) {
+      summaryParts.push(formatVoucherLabel(params.buildVouchers, "build"));
+    }
+    if (params.upgradeVouchers > 0) {
+      summaryParts.push(formatVoucherLabel(params.upgradeVouchers, "upgrade"));
+    }
+    for (const tileIndex of params.tileIndices) {
+      summaryParts.push(getTileNameByIndex(tileIndex));
+    }
+    return summaryParts;
   };
 
     const payload =
@@ -214,7 +238,61 @@ export const formatEventDescription = (
         ? players.find((player) => player.id === counterpartyId)?.display_name ??
           "Player"
         : "Player";
-      return `Trade proposed · ${proposerName} → ${counterpartyName}`;
+      const offerCash = Math.max(0, parseNumber(payload?.offer_cash) ?? 0);
+      const offerFreeBuildTokens = Math.max(
+        0,
+        parseNumber(payload?.offer_free_build_tokens) ?? 0,
+      );
+      const offerFreeUpgradeTokens = Math.max(
+        0,
+        parseNumber(payload?.offer_free_upgrade_tokens) ?? 0,
+      );
+      const offerTileIndices = Array.isArray(payload?.offer_tile_indices)
+        ? payload.offer_tile_indices
+            .map((entry) => parseNumber(entry))
+            .filter((entry): entry is number => entry !== null)
+        : [];
+      const requestCash = Math.max(0, parseNumber(payload?.request_cash) ?? 0);
+      const requestFreeBuildTokens = Math.max(
+        0,
+        parseNumber(payload?.request_free_build_tokens) ?? 0,
+      );
+      const requestFreeUpgradeTokens = Math.max(
+        0,
+        parseNumber(payload?.request_free_upgrade_tokens) ?? 0,
+      );
+      const requestTileIndices = Array.isArray(payload?.request_tile_indices)
+        ? payload.request_tile_indices
+            .map((entry) => parseNumber(entry))
+            .filter((entry): entry is number => entry !== null)
+        : [];
+
+      const proposerGives = getTradeLegSummary({
+        cash: offerCash,
+        buildVouchers: offerFreeBuildTokens,
+        upgradeVouchers: offerFreeUpgradeTokens,
+        tileIndices: offerTileIndices,
+      });
+      const proposerGets = getTradeLegSummary({
+        cash: requestCash,
+        buildVouchers: requestFreeBuildTokens,
+        upgradeVouchers: requestFreeUpgradeTokens,
+        tileIndices: requestTileIndices,
+      });
+      const detailParts: string[] = [];
+      if (proposerGives.length > 0) {
+        detailParts.push(
+          `${proposerName} gives ${proposerGives.join(", ")}`,
+        );
+      }
+      if (proposerGets.length > 0) {
+        detailParts.push(
+          `${proposerName} gets ${proposerGets.join(", ")}`,
+        );
+      }
+      const detailSuffix =
+        detailParts.length > 0 ? ` · ${detailParts.join(" · ")}` : "";
+      return `Trade proposed · ${proposerName} → ${counterpartyName}${detailSuffix}`;
     }
 
     if (event.event_type === "TRADE_ACCEPTED") {
@@ -234,7 +312,60 @@ export const formatEventDescription = (
         ? players.find((player) => player.id === counterpartyId)?.display_name ??
           "Player"
         : "Player";
-      return `Trade executed · ${proposerName} ⇄ ${counterpartyName}`;
+      const offerCash = Math.max(0, parseNumber(payload?.offer_cash) ?? 0);
+      const offerFreeBuildTokens = Math.max(
+        0,
+        parseNumber(payload?.offer_free_build_tokens) ?? 0,
+      );
+      const offerFreeUpgradeTokens = Math.max(
+        0,
+        parseNumber(payload?.offer_free_upgrade_tokens) ?? 0,
+      );
+      const offerTileIndices = Array.isArray(payload?.offer_tile_indices)
+        ? payload.offer_tile_indices
+            .map((entry) => parseNumber(entry))
+            .filter((entry): entry is number => entry !== null)
+        : [];
+      const requestCash = Math.max(0, parseNumber(payload?.request_cash) ?? 0);
+      const requestFreeBuildTokens = Math.max(
+        0,
+        parseNumber(payload?.request_free_build_tokens) ?? 0,
+      );
+      const requestFreeUpgradeTokens = Math.max(
+        0,
+        parseNumber(payload?.request_free_upgrade_tokens) ?? 0,
+      );
+      const requestTileIndices = Array.isArray(payload?.request_tile_indices)
+        ? payload.request_tile_indices
+            .map((entry) => parseNumber(entry))
+            .filter((entry): entry is number => entry !== null)
+        : [];
+      const proposerGives = getTradeLegSummary({
+        cash: offerCash,
+        buildVouchers: offerFreeBuildTokens,
+        upgradeVouchers: offerFreeUpgradeTokens,
+        tileIndices: offerTileIndices,
+      });
+      const proposerGets = getTradeLegSummary({
+        cash: requestCash,
+        buildVouchers: requestFreeBuildTokens,
+        upgradeVouchers: requestFreeUpgradeTokens,
+        tileIndices: requestTileIndices,
+      });
+      const detailParts: string[] = [];
+      if (proposerGives.length > 0) {
+        detailParts.push(
+          `${proposerName} gave ${proposerGives.join(", ")}`,
+        );
+      }
+      if (proposerGets.length > 0) {
+        detailParts.push(
+          `${proposerName} received ${proposerGets.join(", ")}`,
+        );
+      }
+      const detailSuffix =
+        detailParts.length > 0 ? ` · ${detailParts.join(" · ")}` : "";
+      return `Trade executed · ${proposerName} ⇄ ${counterpartyName}${detailSuffix}`;
     }
 
     if (event.event_type === "TRADE_REJECTED") {
