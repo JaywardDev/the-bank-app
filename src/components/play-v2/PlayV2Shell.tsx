@@ -655,7 +655,7 @@ export default function PlayV2Shell({
                     alt=""
                     width={30}
                     height={30}
-                    className="h-10 w-10 object-contain"
+                    className="h-12 w-12 object-contain"
                     aria-hidden
                   />
                 </button>
