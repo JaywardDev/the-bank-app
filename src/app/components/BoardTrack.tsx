@@ -110,11 +110,11 @@ const getForestVariantIndex = (row: number, col: number) => {
 
 const getMapBuildingSprite = (houses: number) => {
   if (houses <= 0) return null;
-  if (houses === 1) return "/assets/house-1.png";
-  if (houses === 2) return "/assets/house-2.png";
-  if (houses === 3) return "/assets/house-3.png";
-  if (houses === 4) return "/assets/house-4.png";
-  return "/assets/house-5.png";
+  if (houses === 1) return "/assets/house-1.svg";
+  if (houses === 2) return "/assets/house-2.svg";
+  if (houses === 3) return "/assets/house-3.svg";
+  if (houses === 4) return "/assets/house-4.svg";
+  return "/assets/house-5.svg";
 };
 
 export default function BoardTrack({
