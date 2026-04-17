@@ -60,6 +60,11 @@ type TradeProposalRow = {
   created_at: string | null;
 };
 
+type AcceptTradeAtomicResult = {
+  status: "ACCEPTED" | "REJECTED";
+  rejection_reason: string | null;
+};
+
 type OwnershipByTile = Record<number, { owner_player_id: string | null }>;
 
 type HandleTradeActionParams<
@@ -660,244 +665,13 @@ export const handleTradeAction = async <
     );
   }
 
-  const rejectTrade = async (message: string) => {
-    const [updatedTrade] =
-      (await fetchFromSupabaseWithService<TradeProposalRow[]>(
-        `trade_proposals?id=eq.${tradeProposal.id}`,
-        {
-          method: "PATCH",
-          headers: {
-            Prefer: "return=representation",
-          },
-          body: JSON.stringify({
-            status: "REJECTED",
-          }),
-        },
-      )) ?? [];
-
-    if (!updatedTrade) {
-      return NextResponse.json(
-        { error: "Unable to reject trade proposal." },
-        { status: 500 },
-      );
-    }
-
-    const events = [
-      {
-        event_type: "TRADE_REJECTED",
-        payload: {
-          trade_id: tradeProposal.id,
-          proposer_player_id: tradeProposal.proposer_player_id,
-          counterparty_player_id: tradeProposal.counterparty_player_id,
-          rejected_by_player_id: currentUserPlayer.id,
-          reason: message,
-        },
-      },
-    ];
-    const finalVersion = currentVersion + events.length;
-    const [updatedState] =
-      (await fetchFromSupabaseWithService<GameStateRow[]>(
-        `${GAME_STATE_SELECT}&game_id=eq.${gameId}`,
-        {
-          method: "PATCH",
-          headers: {
-            Prefer: "return=representation",
-          },
-          body: JSON.stringify({
-            version: finalVersion,
-            updated_at: new Date().toISOString(),
-          }),
-        },
-      )) ?? [];
-
-    await emitGameEvents(gameId, currentVersion + 1, events, user.id);
-
-    return NextResponse.json(
-      { error: message, gameState: updatedState },
-      { status: 409 },
-    );
-  };
-
   const cashDeltas = computeTradeCashDeltas(tradeProposal);
   const offerCash = cashDeltas.offerCash;
   const requestCash = cashDeltas.requestCash;
-  const offerFreeBuildTokens = Math.max(0, tradeProposal.offer_free_build_tokens ?? 0);
-  const offerFreeUpgradeTokens = Math.max(
-    0,
-    tradeProposal.offer_free_upgrade_tokens ?? 0,
-  );
-  const requestFreeBuildTokens = Math.max(
-    0,
-    tradeProposal.request_free_build_tokens ?? 0,
-  );
-  const requestFreeUpgradeTokens = Math.max(
-    0,
-    tradeProposal.request_free_upgrade_tokens ?? 0,
-  );
   const offerTiles = tradeProposal.offer_tile_indices ?? [];
   const requestTiles = tradeProposal.request_tile_indices ?? [];
 
-  const proposerBalance = balances[tradeProposal.proposer_player_id] ?? 0;
-  const counterpartyBalance = balances[tradeProposal.counterparty_player_id] ?? 0;
-
-  if (offerCash > proposerBalance) {
-    return NextResponse.json(
-      { error: "Proposer no longer has enough cash for this trade." },
-      { status: 409 },
-    );
-  }
-  if (requestCash > counterpartyBalance) {
-    return NextResponse.json(
-      { error: "You no longer have enough cash for this trade." },
-      { status: 409 },
-    );
-  }
-
-  const voucherRows =
-    (await fetchFromSupabaseWithService<
-      Pick<PlayerRow, "id" | "free_build_tokens" | "free_upgrade_tokens">[]
-    >(
-      `players?select=id,free_build_tokens,free_upgrade_tokens&game_id=eq.${gameId}&id=in.(${tradeProposal.proposer_player_id},${tradeProposal.counterparty_player_id})`,
-      { method: "GET" },
-    )) ?? [];
-  const proposerVoucherRow =
-    voucherRows.find((row) => row.id === tradeProposal.proposer_player_id) ?? null;
-  const counterpartyVoucherRow =
-    voucherRows.find((row) => row.id === tradeProposal.counterparty_player_id) ?? null;
-
-  if (!proposerVoucherRow || !counterpartyVoucherRow) {
-    return NextResponse.json(
-      { error: "Unable to validate trade vouchers for both players." },
-      { status: 409 },
-    );
-  }
-
-  const proposerFreeBuildTokens = proposerVoucherRow.free_build_tokens ?? 0;
-  const proposerFreeUpgradeTokens = proposerVoucherRow.free_upgrade_tokens ?? 0;
-  const counterpartyFreeBuildTokens = counterpartyVoucherRow.free_build_tokens ?? 0;
-  const counterpartyFreeUpgradeTokens =
-    counterpartyVoucherRow.free_upgrade_tokens ?? 0;
-
-  if (offerFreeBuildTokens > proposerFreeBuildTokens) {
-    return NextResponse.json(
-      {
-        error:
-          "Proposer no longer has enough free build vouchers for this trade.",
-      },
-      { status: 409 },
-    );
-  }
-  if (offerFreeUpgradeTokens > proposerFreeUpgradeTokens) {
-    return NextResponse.json(
-      {
-        error:
-          "Proposer no longer has enough free upgrade vouchers for this trade.",
-      },
-      { status: 409 },
-    );
-  }
-  if (requestFreeBuildTokens > counterpartyFreeBuildTokens) {
-    return NextResponse.json(
-      { error: "You no longer have enough free build vouchers for this trade." },
-      { status: 409 },
-    );
-  }
-  if (requestFreeUpgradeTokens > counterpartyFreeUpgradeTokens) {
-    return NextResponse.json(
-      { error: "You no longer have enough free upgrade vouchers for this trade." },
-      { status: 409 },
-    );
-  }
-
-  const nextProposerFreeBuildTokens =
-    proposerFreeBuildTokens - offerFreeBuildTokens + requestFreeBuildTokens;
-  const nextProposerFreeUpgradeTokens =
-    proposerFreeUpgradeTokens - offerFreeUpgradeTokens + requestFreeUpgradeTokens;
-  const nextCounterpartyFreeBuildTokens =
-    counterpartyFreeBuildTokens - requestFreeBuildTokens + offerFreeBuildTokens;
-  const nextCounterpartyFreeUpgradeTokens =
-    counterpartyFreeUpgradeTokens -
-    requestFreeUpgradeTokens +
-    offerFreeUpgradeTokens;
-
-  if (
-    nextProposerFreeBuildTokens < 0 ||
-    nextProposerFreeUpgradeTokens < 0 ||
-    nextCounterpartyFreeBuildTokens < 0 ||
-    nextCounterpartyFreeUpgradeTokens < 0
-  ) {
-    return NextResponse.json(
-      { error: "Trade would result in negative voucher balances." },
-      { status: 409 },
-    );
-  }
-
   const snapshotTiles = normalizeTradeSnapshot(tradeProposal.snapshot);
-  const tradeTileIndices = Array.from(new Set([...offerTiles, ...requestTiles]));
-  let ownershipRows: OwnershipRow[] = [];
-  if (tradeTileIndices.length > 0) {
-    ownershipRows =
-      (await fetchFromSupabaseWithService<OwnershipRow[]>(
-        `property_ownership?select=tile_index,owner_player_id,collateral_loan_id,purchase_mortgage_id,houses&game_id=eq.${gameId}&tile_index=in.(${tradeTileIndices.join(",")})`,
-        { method: "GET" },
-      )) ?? [];
-  }
-  const ownershipByIndex = ownershipRows.reduce<Record<number, OwnershipRow>>(
-    (acc, row) => {
-      acc[row.tile_index] = row;
-      return acc;
-    },
-    {},
-  );
-
-  for (const tileIndex of offerTiles) {
-    const ownership = ownershipByIndex[tileIndex];
-    if (!ownership?.owner_player_id) {
-      return rejectTrade(`Tile ${tileIndex} is no longer owned.`);
-    }
-    if (ownership.owner_player_id !== tradeProposal.proposer_player_id) {
-      return rejectTrade(`Proposer no longer owns tile ${tileIndex}.`);
-    }
-  }
-
-  for (const tileIndex of requestTiles) {
-    const ownership = ownershipByIndex[tileIndex];
-    if (!ownership?.owner_player_id) {
-      return rejectTrade(`Tile ${tileIndex} is no longer owned.`);
-    }
-    if (ownership.owner_player_id !== tradeProposal.counterparty_player_id) {
-      return rejectTrade(`Counterparty no longer owns tile ${tileIndex}.`);
-    }
-  }
-
-  for (const snapshotTile of snapshotTiles) {
-    const ownership = ownershipByIndex[snapshotTile.tile_index];
-    if (!ownership) {
-      return rejectTrade(`Tile ${snapshotTile.tile_index} is missing.`);
-    }
-    const currentHouses = ownership.houses ?? 0;
-    if (ownership.collateral_loan_id !== snapshotTile.collateral_loan_id) {
-      return rejectTrade(
-        `Trade is out of date: collateral loan changed for tile ${snapshotTile.tile_index}.`,
-      );
-    }
-    if (ownership.purchase_mortgage_id !== snapshotTile.purchase_mortgage_id) {
-      return rejectTrade(
-        `Trade is out of date: mortgage changed for tile ${snapshotTile.tile_index}.`,
-      );
-    }
-    if (currentHouses !== snapshotTile.houses) {
-      return rejectTrade(
-        `Trade is out of date: houses changed for tile ${snapshotTile.tile_index}.`,
-      );
-    }
-  }
-
-  const updatedBalances = { ...balances };
-  updatedBalances[tradeProposal.proposer_player_id] =
-    proposerBalance + cashDeltas.proposerDelta;
-  updatedBalances[tradeProposal.counterparty_player_id] =
-    counterpartyBalance + cashDeltas.counterpartyDelta;
 
   const propertyTransferUpdates: Array<{
     tile_index: number;
@@ -963,137 +737,126 @@ export const handleTradeAction = async <
     }
   }
 
-  const [updatedTrade] =
-    (await fetchFromSupabaseWithService<TradeProposalRow[]>(
-      `trade_proposals?id=eq.${tradeProposal.id}`,
-      {
-        method: "PATCH",
-        headers: {
-          Prefer: "return=representation",
+  let acceptResult: AcceptTradeAtomicResult;
+  try {
+    const [rpcResult] =
+      (await fetchFromSupabaseWithService<AcceptTradeAtomicResult[]>(
+        "rpc/accept_trade_proposal_atomic",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            p_game_id: gameId,
+            p_trade_id: tradeProposal.id,
+            p_counterparty_player_id: currentUserPlayer.id,
+            p_expected_version: currentVersion,
+            p_actor_user_id: user.id,
+          }),
         },
-        body: JSON.stringify({
-          status: "ACCEPTED",
-        }),
-      },
-    )) ?? [];
-
-  if (!updatedTrade) {
-    return NextResponse.json(
-      { error: "Unable to accept trade proposal." },
-      { status: 500 },
-    );
-  }
-
-  const [updatedProposerVouchers] =
-    (await fetchFromSupabaseWithService<
-      Pick<PlayerRow, "id" | "free_build_tokens" | "free_upgrade_tokens">[]
-    >(`players?id=eq.${tradeProposal.proposer_player_id}`, {
-      method: "PATCH",
-      headers: {
-        Prefer: "return=representation",
-      },
-      body: JSON.stringify({
-        free_build_tokens: nextProposerFreeBuildTokens,
-        free_upgrade_tokens: nextProposerFreeUpgradeTokens,
-      }),
-    })) ?? [];
-  if (!updatedProposerVouchers) {
-    return NextResponse.json(
-      { error: "Unable to transfer proposer vouchers." },
-      { status: 500 },
-    );
-  }
-
-  const [updatedCounterpartyVouchers] =
-    (await fetchFromSupabaseWithService<
-      Pick<PlayerRow, "id" | "free_build_tokens" | "free_upgrade_tokens">[]
-    >(`players?id=eq.${tradeProposal.counterparty_player_id}`, {
-      method: "PATCH",
-      headers: {
-        Prefer: "return=representation",
-      },
-      body: JSON.stringify({
-        free_build_tokens: nextCounterpartyFreeBuildTokens,
-        free_upgrade_tokens: nextCounterpartyFreeUpgradeTokens,
-      }),
-    })) ?? [];
-  if (!updatedCounterpartyVouchers) {
-    return NextResponse.json(
-      { error: "Unable to transfer counterparty vouchers." },
-      { status: 500 },
-    );
-  }
-
-  if (offerTiles.length > 0) {
-    await fetchFromSupabaseWithService(
-      `property_ownership?game_id=eq.${gameId}&tile_index=in.(${offerTiles.join(",")})`,
-      {
-        method: "PATCH",
-        headers: {
-          Prefer: "return=representation",
-        },
-        body: JSON.stringify({
-          owner_player_id: tradeProposal.counterparty_player_id,
-        }),
-      },
-    );
-  }
-
-  if (requestTiles.length > 0) {
-    await fetchFromSupabaseWithService(
-      `property_ownership?game_id=eq.${gameId}&tile_index=in.(${requestTiles.join(",")})`,
-      {
-        method: "PATCH",
-        headers: {
-          Prefer: "return=representation",
-        },
-        body: JSON.stringify({
-          owner_player_id: tradeProposal.proposer_player_id,
-        }),
-      },
-    );
-  }
-
-  const collateralLoanIds = loanAssumptions
-    .filter((loan) => loan.loan_type === "COLLATERAL")
-    .map((loan) => loan.loan_id);
-  const mortgageIds = loanAssumptions
-    .filter((loan) => loan.loan_type === "PURCHASE_MORTGAGE")
-    .map((loan) => loan.loan_id);
-
-  if (collateralLoanIds.length > 0) {
-    for (const assumption of loanAssumptions.filter(
-      (loan) => loan.loan_type === "COLLATERAL",
-    )) {
-      await fetchFromSupabaseWithService(`player_loans?id=eq.${assumption.loan_id}`, {
-        method: "PATCH",
-        headers: {
-          Prefer: "return=representation",
-        },
-        body: JSON.stringify({
-          player_id: assumption.to_player_id,
-        }),
-      });
+      )) ?? [];
+    if (!rpcResult) {
+      return NextResponse.json(
+        { error: "Unable to accept trade proposal." },
+        { status: 500 },
+      );
     }
+    acceptResult = rpcResult;
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unable to accept trade proposal.";
+    if (message.includes("TRADE_STATUS_INVALID")) {
+      return NextResponse.json(
+        { error: "Trade proposal is no longer pending." },
+        { status: 409 },
+      );
+    }
+    if (message.includes("ONLY_COUNTERPARTY_CAN_ACCEPT")) {
+      return NextResponse.json(
+        { error: "Only the counterparty can accept this trade." },
+        { status: 403 },
+      );
+    }
+    if (message.includes("INSUFFICIENT_PROPOSER_CASH")) {
+      return NextResponse.json(
+        { error: "Proposer no longer has enough cash for this trade." },
+        { status: 409 },
+      );
+    }
+    if (message.includes("INSUFFICIENT_COUNTERPARTY_CASH")) {
+      return NextResponse.json(
+        { error: "You no longer have enough cash for this trade." },
+        { status: 409 },
+      );
+    }
+    if (message.includes("INSUFFICIENT_PROPOSER_BUILD_VOUCHERS")) {
+      return NextResponse.json(
+        { error: "Proposer no longer has enough free build vouchers for this trade." },
+        { status: 409 },
+      );
+    }
+    if (message.includes("INSUFFICIENT_PROPOSER_UPGRADE_VOUCHERS")) {
+      return NextResponse.json(
+        { error: "Proposer no longer has enough free upgrade vouchers for this trade." },
+        { status: 409 },
+      );
+    }
+    if (message.includes("INSUFFICIENT_COUNTERPARTY_BUILD_VOUCHERS")) {
+      return NextResponse.json(
+        { error: "You no longer have enough free build vouchers for this trade." },
+        { status: 409 },
+      );
+    }
+    if (message.includes("INSUFFICIENT_COUNTERPARTY_UPGRADE_VOUCHERS")) {
+      return NextResponse.json(
+        { error: "You no longer have enough free upgrade vouchers for this trade." },
+        { status: 409 },
+      );
+    }
+    if (message.includes("VERSION_MISMATCH")) {
+      return NextResponse.json(
+        { error: "Game state changed before this trade was accepted. Please retry." },
+        { status: 409 },
+      );
+    }
+    throw error;
   }
 
-  if (mortgageIds.length > 0) {
-    for (const assumption of loanAssumptions.filter(
-      (loan) => loan.loan_type === "PURCHASE_MORTGAGE",
-    )) {
-      await fetchFromSupabaseWithService(
-        `purchase_mortgages?id=eq.${assumption.loan_id}`,
+  if (acceptResult.status === "REJECTED") {
+    const rejectionMessage =
+      acceptResult.rejection_reason ?? "Trade is out of date and was rejected.";
+    const events = [
+      {
+        event_type: "TRADE_REJECTED",
+        payload: {
+          trade_id: tradeProposal.id,
+          proposer_player_id: tradeProposal.proposer_player_id,
+          counterparty_player_id: tradeProposal.counterparty_player_id,
+          rejected_by_player_id: currentUserPlayer.id,
+          reason: rejectionMessage,
+        },
+      },
+    ];
+    const finalVersion = currentVersion + events.length;
+    const [updatedState] =
+      (await fetchFromSupabaseWithService<GameStateRow[]>(
+        `${GAME_STATE_SELECT}&game_id=eq.${gameId}`,
         {
           method: "PATCH",
           headers: {
             Prefer: "return=representation",
           },
           body: JSON.stringify({
-            player_id: assumption.to_player_id,
+            version: finalVersion,
+            updated_at: new Date().toISOString(),
           }),
         },
-      );
-    }
+      )) ?? [];
+
+    await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+
+    return NextResponse.json(
+      { error: rejectionMessage, gameState: updatedState },
+      { status: 409 },
+    );
   }
 
   const events: Array<{ event_type: string; payload: Record<string, unknown> }> = [
@@ -1189,7 +952,6 @@ export const handleTradeAction = async <
         },
         body: JSON.stringify({
           version: finalVersion,
-          balances: updatedBalances,
           rules: nextRules,
           updated_at: new Date().toISOString(),
         }),
