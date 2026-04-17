@@ -635,42 +635,46 @@ export default function PlayV2Shell({
           </div>
 
           {showTurnActions ? (
-            <section className="action-stack absolute bottom-0 right-0 z-20 flex flex-col items-center">
-              <button
-                type="button"
-                className={`flex h-14 w-14 items-center justify-center rounded-full border shadow-lg transition ${
-                  rollEmphasized
-                    ? "border-emerald-600 bg-emerald-600 text-white shadow-emerald-600/30"
-                    : "border-emerald-200 bg-emerald-100 text-emerald-300 shadow-emerald-200/40 opacity-70"
-                } ${shouldPulse ? "player-ready-pulse" : ""}`}
-                onClick={onRollDice}
-                disabled={!canRoll || isRolling}
-                aria-label={isRolling ? "Rolling dice" : "Roll dice"}
-                title={rollDiceDisabledReason ?? "Roll dice"}
-              >
-                <span className="sr-only">{isRolling ? "Rolling…" : "Roll dice"}</span>
-                <Image
-                  src="/icons/dice.svg"
-                  alt=""
-                  width={30}
-                  height={30}
-                  className="h-10 w-10 object-contain"
-                  aria-hidden
-                />
-              </button>
-              <button
-                type="button"
-                className={`flex h-12 w-12 items-center justify-center rounded-full border text-xs font-semibold shadow-lg transition ${
-                  endEmphasized
-                    ? "border-rose-600 bg-rose-600 text-white shadow-rose-600/30"
-                    : "border-rose-200 bg-rose-100 text-rose-300 shadow-rose-200/40 opacity-70"
-                }`}
-                onClick={onEndTurn}
-                disabled={!canEndTurn || isEnding}
-                aria-label={isEnding ? "Ending turn" : "End turn"}
-              >
-                {isEnding ? "..." : "END"}
-              </button>
+            <section className="action-stack absolute bottom-0 right-0 z-20">
+              <div className="action-stack-item action-stack-roll">
+                <button
+                  type="button"
+                  className={`flex h-14 w-14 items-center justify-center rounded-full border shadow-lg transition ${
+                    rollEmphasized
+                      ? "border-emerald-600 bg-emerald-600 text-white shadow-emerald-600/30"
+                      : "border-emerald-200 bg-emerald-100 text-emerald-300 shadow-emerald-200/40 opacity-70"
+                  } ${shouldPulse ? "player-ready-pulse" : ""}`}
+                  onClick={onRollDice}
+                  disabled={!canRoll || isRolling}
+                  aria-label={isRolling ? "Rolling dice" : "Roll dice"}
+                  title={rollDiceDisabledReason ?? "Roll dice"}
+                >
+                  <span className="sr-only">{isRolling ? "Rolling…" : "Roll dice"}</span>
+                  <Image
+                    src="/icons/dice.svg"
+                    alt=""
+                    width={30}
+                    height={30}
+                    className="h-10 w-10 object-contain"
+                    aria-hidden
+                  />
+                </button>
+              </div>
+              <div className="action-stack-item action-stack-end">
+                <button
+                  type="button"
+                  className={`flex h-12 w-12 items-center justify-center rounded-full border text-xs font-semibold shadow-lg transition ${
+                    endEmphasized
+                      ? "border-rose-600 bg-rose-600 text-white shadow-rose-600/30"
+                      : "border-rose-200 bg-rose-100 text-rose-300 shadow-rose-200/40 opacity-70"
+                  }`}
+                  onClick={onEndTurn}
+                  disabled={!canEndTurn || isEnding}
+                  aria-label={isEnding ? "Ending turn" : "End turn"}
+                >
+                  {isEnding ? "..." : "END"}
+                </button>
+              </div>
             </section>
           ) : null}
         </section>
@@ -751,7 +755,23 @@ export default function PlayV2Shell({
           --action-stack-gap: 0.75rem;
           bottom: calc(var(--action-stack-offset) + env(safe-area-inset-bottom, 0px));
           right: calc(var(--action-stack-offset) + env(safe-area-inset-right, 0px));
-          gap: var(--action-stack-gap);
+          position: relative;
+          width: calc(3.5rem + 1.8rem);
+          height: calc(3rem + var(--action-stack-gap) + 3.5rem);
+        }
+
+        .action-stack-item {
+          position: absolute;
+        }
+
+        .action-stack-roll {
+          bottom: calc(3rem + var(--action-stack-gap));
+          right: 0;
+        }
+
+        .action-stack-end {
+          bottom: 0;
+          right: 1.8rem;
         }
 
         @media (max-height: 760px) {
