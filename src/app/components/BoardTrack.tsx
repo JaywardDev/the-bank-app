@@ -312,6 +312,8 @@ export default function BoardTrack({
           const isOwnableTile = isPropertyTile || isRailOrUtilityTile;
           const isOwned = Boolean(ownership);
           const isOwnedByPlayer = Boolean(ownership?.owner_player_id);
+          const isOwnedOuterOwnableNonColoredTile =
+            isMapTileFace && isRailOrUtilityTile && isOwnedByPlayer;
           const housesCount = ownershipByTile[tile.index]?.houses ?? 0;
           const mapBuildingSpriteSrc = getMapBuildingSprite(housesCount);
           const isTransparentMapSpecialTile =
@@ -333,7 +335,9 @@ export default function BoardTrack({
             ? !isPropertyTile
             : Boolean(tileIconSrc);
           const showForestStyledMapIcon =
-            isMapTileFace && Boolean(tileIconSrc) && isForestStyledOuterSpecialTile(tile);
+            isMapTileFace &&
+            Boolean(tileIconSrc) &&
+            (isForestStyledOuterSpecialTile(tile) || isOwnedOuterOwnableNonColoredTile);
           const currentRent = getCurrentTileRent({
             tile,
             ownershipByTile,
