@@ -117,6 +117,21 @@ const getMapBuildingSprite = (houses: number) => {
   return "/assets/house-5.svg";
 };
 
+const isForestStyledOuterSpecialTile = (tile: BoardTile) => {
+  if (tile.type === "START") return true;
+  if (tile.type === "FREE_PARKING") return true;
+  if (tile.type === "JAIL") return true;
+  if (tile.type === "GO_TO_JAIL") return true;
+  if (tile.type === "CHANCE" || tile.type === "COMMUNITY_CHEST") return true;
+  if (tile.type === "EVENT") {
+    const tileLabel = `${tile.tile_id} ${tile.name}`.toLowerCase();
+    return tileLabel.includes("chance") || tileLabel.includes("community");
+  }
+  if (tile.type !== "TAX") return false;
+  const tileLabel = `${tile.tile_id} ${tile.name}`.toLowerCase();
+  return tileLabel.includes("income") || tileLabel.includes("super");
+};
+
 export default function BoardTrack({
   tiles,
   players,
@@ -303,6 +318,8 @@ export default function BoardTrack({
           const showMapCenteredIcon = isMapTileFace
             ? !isPropertyTile
             : Boolean(tileIconSrc);
+          const showForestStyledMapIcon =
+            isMapTileFace && Boolean(tileIconSrc) && isForestStyledOuterSpecialTile(tile);
           const currentRent = getCurrentTileRent({
             tile,
             ownershipByTile,
@@ -387,16 +404,29 @@ export default function BoardTrack({
                 style={{ backgroundColor: mapTileBaseColor }}
               >
                 {tileIconSrc && showMapCenteredIcon ? (
-                  <div className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center">
-                    <Image
-                      src={tileIconSrc}
-                      alt=""
-                      width={96}
-                      height={96}
-                      aria-hidden
-                      className="h-full w-full scale-[0.95] object-contain opacity-[0.85]"
-                    />
-                  </div>
+                  showForestStyledMapIcon ? (
+                    <div className="pointer-events-none absolute inset-0 z-0 overflow-visible bg-transparent">
+                      <Image
+                        src={tileIconSrc}
+                        alt=""
+                        width={96}
+                        height={96}
+                        aria-hidden
+                        className="absolute bottom-0 left-1/2 h-[145%] w-[145%] max-w-none -translate-x-1/2 object-contain"
+                      />
+                    </div>
+                  ) : (
+                    <div className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center">
+                      <Image
+                        src={tileIconSrc}
+                        alt=""
+                        width={96}
+                        height={96}
+                        aria-hidden
+                        className="h-full w-full scale-[0.95] object-contain opacity-[0.85]"
+                      />
+                    </div>
+                  )
                 ) : null}
 
                 {ownership && !isMapTileFace ? (
