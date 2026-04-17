@@ -721,6 +721,19 @@ export const handleTradeAction = async <
   const cashDeltas = computeTradeCashDeltas(tradeProposal);
   const offerCash = cashDeltas.offerCash;
   const requestCash = cashDeltas.requestCash;
+  const offerFreeBuildTokens = Math.max(0, tradeProposal.offer_free_build_tokens ?? 0);
+  const offerFreeUpgradeTokens = Math.max(
+    0,
+    tradeProposal.offer_free_upgrade_tokens ?? 0,
+  );
+  const requestFreeBuildTokens = Math.max(
+    0,
+    tradeProposal.request_free_build_tokens ?? 0,
+  );
+  const requestFreeUpgradeTokens = Math.max(
+    0,
+    tradeProposal.request_free_upgrade_tokens ?? 0,
+  );
   const offerTiles = tradeProposal.offer_tile_indices ?? [];
   const requestTiles = tradeProposal.request_tile_indices ?? [];
 
@@ -736,6 +749,85 @@ export const handleTradeAction = async <
   if (requestCash > counterpartyBalance) {
     return NextResponse.json(
       { error: "You no longer have enough cash for this trade." },
+      { status: 409 },
+    );
+  }
+
+  const voucherRows =
+    (await fetchFromSupabaseWithService<
+      Pick<PlayerRow, "id" | "free_build_tokens" | "free_upgrade_tokens">[]
+    >(
+      `players?select=id,free_build_tokens,free_upgrade_tokens&game_id=eq.${gameId}&id=in.(${tradeProposal.proposer_player_id},${tradeProposal.counterparty_player_id})`,
+      { method: "GET" },
+    )) ?? [];
+  const proposerVoucherRow =
+    voucherRows.find((row) => row.id === tradeProposal.proposer_player_id) ?? null;
+  const counterpartyVoucherRow =
+    voucherRows.find((row) => row.id === tradeProposal.counterparty_player_id) ?? null;
+
+  if (!proposerVoucherRow || !counterpartyVoucherRow) {
+    return NextResponse.json(
+      { error: "Unable to validate trade vouchers for both players." },
+      { status: 409 },
+    );
+  }
+
+  const proposerFreeBuildTokens = proposerVoucherRow.free_build_tokens ?? 0;
+  const proposerFreeUpgradeTokens = proposerVoucherRow.free_upgrade_tokens ?? 0;
+  const counterpartyFreeBuildTokens = counterpartyVoucherRow.free_build_tokens ?? 0;
+  const counterpartyFreeUpgradeTokens =
+    counterpartyVoucherRow.free_upgrade_tokens ?? 0;
+
+  if (offerFreeBuildTokens > proposerFreeBuildTokens) {
+    return NextResponse.json(
+      {
+        error:
+          "Proposer no longer has enough free build vouchers for this trade.",
+      },
+      { status: 409 },
+    );
+  }
+  if (offerFreeUpgradeTokens > proposerFreeUpgradeTokens) {
+    return NextResponse.json(
+      {
+        error:
+          "Proposer no longer has enough free upgrade vouchers for this trade.",
+      },
+      { status: 409 },
+    );
+  }
+  if (requestFreeBuildTokens > counterpartyFreeBuildTokens) {
+    return NextResponse.json(
+      { error: "You no longer have enough free build vouchers for this trade." },
+      { status: 409 },
+    );
+  }
+  if (requestFreeUpgradeTokens > counterpartyFreeUpgradeTokens) {
+    return NextResponse.json(
+      { error: "You no longer have enough free upgrade vouchers for this trade." },
+      { status: 409 },
+    );
+  }
+
+  const nextProposerFreeBuildTokens =
+    proposerFreeBuildTokens - offerFreeBuildTokens + requestFreeBuildTokens;
+  const nextProposerFreeUpgradeTokens =
+    proposerFreeUpgradeTokens - offerFreeUpgradeTokens + requestFreeUpgradeTokens;
+  const nextCounterpartyFreeBuildTokens =
+    counterpartyFreeBuildTokens - requestFreeBuildTokens + offerFreeBuildTokens;
+  const nextCounterpartyFreeUpgradeTokens =
+    counterpartyFreeUpgradeTokens -
+    requestFreeUpgradeTokens +
+    offerFreeUpgradeTokens;
+
+  if (
+    nextProposerFreeBuildTokens < 0 ||
+    nextProposerFreeUpgradeTokens < 0 ||
+    nextCounterpartyFreeBuildTokens < 0 ||
+    nextCounterpartyFreeUpgradeTokens < 0
+  ) {
+    return NextResponse.json(
+      { error: "Trade would result in negative voucher balances." },
       { status: 409 },
     );
   }
@@ -888,6 +980,46 @@ export const handleTradeAction = async <
   if (!updatedTrade) {
     return NextResponse.json(
       { error: "Unable to accept trade proposal." },
+      { status: 500 },
+    );
+  }
+
+  const [updatedProposerVouchers] =
+    (await fetchFromSupabaseWithService<
+      Pick<PlayerRow, "id" | "free_build_tokens" | "free_upgrade_tokens">[]
+    >(`players?id=eq.${tradeProposal.proposer_player_id}`, {
+      method: "PATCH",
+      headers: {
+        Prefer: "return=representation",
+      },
+      body: JSON.stringify({
+        free_build_tokens: nextProposerFreeBuildTokens,
+        free_upgrade_tokens: nextProposerFreeUpgradeTokens,
+      }),
+    })) ?? [];
+  if (!updatedProposerVouchers) {
+    return NextResponse.json(
+      { error: "Unable to transfer proposer vouchers." },
+      { status: 500 },
+    );
+  }
+
+  const [updatedCounterpartyVouchers] =
+    (await fetchFromSupabaseWithService<
+      Pick<PlayerRow, "id" | "free_build_tokens" | "free_upgrade_tokens">[]
+    >(`players?id=eq.${tradeProposal.counterparty_player_id}`, {
+      method: "PATCH",
+      headers: {
+        Prefer: "return=representation",
+      },
+      body: JSON.stringify({
+        free_build_tokens: nextCounterpartyFreeBuildTokens,
+        free_upgrade_tokens: nextCounterpartyFreeUpgradeTokens,
+      }),
+    })) ?? [];
+  if (!updatedCounterpartyVouchers) {
+    return NextResponse.json(
+      { error: "Unable to transfer counterparty vouchers." },
       { status: 500 },
     );
   }
