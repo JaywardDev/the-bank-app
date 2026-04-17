@@ -44,7 +44,7 @@ export const getBoardTileIconSrc = (tile: BoardTile | null): string | null => {
       return "/icons/water_facility.svg";
     }
     if (tile.utilityKind === "COMMUNICATION") {
-      return "/icons/board.svg";
+      return "/icons/communication.svg";
     }
 
     const tileLabel = `${tile.tile_id} ${tile.name}`.toLowerCase();

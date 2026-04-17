@@ -5,6 +5,7 @@ import { DEFAULT_BOARD_PACK_ECONOMY } from "@/lib/boardPacks";
 import BoardSquare from "@/app/components/BoardSquare";
 import BoardTrack from "@/app/components/BoardTrack";
 import { getBoardPackById } from "@/lib/boardPacks";
+import type { BoardTile } from "@/lib/boardPacks";
 import type { InteriorCellSelection } from "@/app/components/BoardTrack";
 import type { InlandCellRecord } from "@/lib/inlandExploration";
 
@@ -26,6 +27,7 @@ type OwnershipByTile = Record<
 
 type BoardViewportProps = {
   boardPackId: string | null;
+  boardTiles?: BoardTile[];
   players: BoardViewportPlayer[];
   ownershipByTile: OwnershipByTile;
   currentPlayerId: string | null;
@@ -59,6 +61,7 @@ type PointerPosition = {
 
 export default function BoardViewport({
   boardPackId,
+  boardTiles: resolvedBoardTiles,
   players,
   ownershipByTile,
   currentPlayerId,
@@ -71,7 +74,10 @@ export default function BoardViewport({
   onRecenterReady,
 }: BoardViewportProps) {
   const boardPack = useMemo(() => getBoardPackById(boardPackId), [boardPackId]);
-  const boardTiles = useMemo(() => boardPack?.tiles ?? [], [boardPack]);
+  const boardTiles = useMemo(
+    () => resolvedBoardTiles ?? boardPack?.tiles ?? [],
+    [boardPack, resolvedBoardTiles],
+  );
   const boardEconomy = boardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY;
   const [scale, setScale] = useState(MIN_SCALE);
   const [translateX, setTranslateX] = useState(0);

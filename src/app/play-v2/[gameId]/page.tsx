@@ -5084,6 +5084,7 @@ export default function PlayV2Page() {
         boardViewport={
           <BoardViewport
             boardPackId={gameMeta?.board_pack_id ?? null}
+            boardTiles={resolvedBoardTiles}
             players={players}
             ownershipByTile={ownershipByTile}
             currentPlayerId={turnPlayerId}
