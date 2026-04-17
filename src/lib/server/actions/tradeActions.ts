@@ -20,11 +20,14 @@ type PlayerRow = {
   display_name: string | null;
   free_build_tokens?: number;
   free_upgrade_tokens?: number;
+  is_eliminated?: boolean;
 };
 
 type GameStateRow = {
   balances: Record<string, number> | null;
   rules: Record<string, unknown> | null;
+  pending_action?: Record<string, unknown> | null;
+  pending_card_active?: boolean | null;
 };
 
 type OwnershipRow = {
@@ -268,6 +271,54 @@ export const handleTradeAction = async <
   }
 
   const balances = gameState.balances ?? {};
+  const pendingActionType =
+    gameState.pending_action &&
+    typeof gameState.pending_action === "object" &&
+    typeof gameState.pending_action.type === "string"
+      ? gameState.pending_action.type
+      : null;
+
+  if (gameState.pending_card_active) {
+    return NextResponse.json(
+      { error: "Confirm the pending card before continuing." },
+      { status: 409 },
+    );
+  }
+
+  if (pendingActionType === "MACRO_EVENT") {
+    return NextResponse.json(
+      { error: "Confirm the macro event before continuing." },
+      { status: 409 },
+    );
+  }
+
+  if (pendingActionType === "SUPER_TAX_CONFIRM") {
+    return NextResponse.json(
+      { error: "Resolve Super Tax before continuing." },
+      { status: 409 },
+    );
+  }
+
+  if (pendingActionType === "INCOME_TAX_CONFIRM") {
+    return NextResponse.json(
+      { error: "Resolve Income Tax before continuing." },
+      { status: 409 },
+    );
+  }
+
+  if (pendingActionType === "INSOLVENCY_RECOVERY") {
+    return NextResponse.json(
+      { error: "Resolve insolvency with recovery actions before continuing." },
+      { status: 409 },
+    );
+  }
+
+  if (currentUserPlayer.is_eliminated) {
+    return NextResponse.json(
+      { error: "Eliminated players cannot take actions." },
+      { status: 403 },
+    );
+  }
 
   if (body.action === "PROPOSE_TRADE") {
     const counterpartyId = body.counterpartyPlayerId;
@@ -355,6 +406,12 @@ export const handleTradeAction = async <
       return NextResponse.json(
         { error: "Counterparty is not in this game." },
         { status: 404 },
+      );
+    }
+    if (counterpartyPlayer.is_eliminated) {
+      return NextResponse.json(
+        { error: "Eliminated players cannot trade." },
+        { status: 409 },
       );
     }
 
@@ -670,6 +727,24 @@ export const handleTradeAction = async <
   }
 
   const cashDeltas = computeTradeCashDeltas(tradeProposal);
+  const proposer = players.find((player) => player.id === tradeProposal.proposer_player_id);
+  const counterparty = players.find(
+    (player) => player.id === tradeProposal.counterparty_player_id,
+  );
+
+  if (!proposer || !counterparty) {
+    return NextResponse.json(
+      { error: "Trade players are no longer in this game." },
+      { status: 409 },
+    );
+  }
+
+  if (proposer.is_eliminated || counterparty.is_eliminated) {
+    return NextResponse.json(
+      { error: "Trade proposal is no longer valid because a player was eliminated." },
+      { status: 409 },
+    );
+  }
   const offerCash = cashDeltas.offerCash;
   const requestCash = cashDeltas.requestCash;
   const offerFreeBuildTokens = Math.max(0, tradeProposal.offer_free_build_tokens ?? 0);
