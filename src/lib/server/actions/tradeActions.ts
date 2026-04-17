@@ -18,6 +18,8 @@ type PlayerRow = {
   id: string;
   user_id: string;
   display_name: string | null;
+  free_build_tokens?: number;
+  free_upgrade_tokens?: number;
 };
 
 type GameStateRow = {
@@ -101,6 +103,63 @@ const toInteger = (value: unknown): number | null => {
     return Number.isNaN(parsed) ? null : parsed;
   }
   return null;
+};
+
+const parseNonNegativeInteger = (
+  value: unknown,
+  fieldName: string,
+): { value: number; error: string | null } => {
+  if (value === undefined || value === null) {
+    return { value: 0, error: null };
+  }
+
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || Number.isNaN(value)) {
+      return {
+        value: 0,
+        error: `${fieldName} must be a non-negative integer.`,
+      };
+    }
+    if (!Number.isInteger(value)) {
+      return {
+        value: 0,
+        error: `${fieldName} must be a non-negative integer.`,
+      };
+    }
+    if (value < 0) {
+      return {
+        value: 0,
+        error: `${fieldName} must be a non-negative integer.`,
+      };
+    }
+    return { value, error: null };
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed === "") {
+      return { value: 0, error: null };
+    }
+    if (!/^\d+$/.test(trimmed)) {
+      return {
+        value: 0,
+        error: `${fieldName} must be a non-negative integer.`,
+      };
+    }
+    const parsed = Number.parseInt(trimmed, 10);
+    if (!Number.isFinite(parsed) || Number.isNaN(parsed)) {
+      return {
+        value: 0,
+        error: `${fieldName} must be a non-negative integer.`,
+      };
+    }
+    return { value: parsed, error: null };
+  }
+
+  return {
+    value: 0,
+    error: `${fieldName} must be a non-negative integer.`,
+  };
 };
 
 const normalizeTileIndices = (value: unknown): number[] => {
@@ -207,28 +266,67 @@ export const handleTradeAction = async <
 
   if (body.action === "PROPOSE_TRADE") {
     const counterpartyId = body.counterpartyPlayerId;
-    const offerCashValue = toInteger(body.offerCash) ?? 0;
-    const offerFreeBuildTokensValue =
-      Math.max(0, toInteger(body.offerFreeBuildTokens) ?? 0);
-    const offerFreeUpgradeTokensValue =
-      Math.max(0, toInteger(body.offerFreeUpgradeTokens) ?? 0);
-    const requestCashValue = toInteger(body.requestCash) ?? 0;
-    const requestFreeBuildTokensValue =
-      Math.max(0, toInteger(body.requestFreeBuildTokens) ?? 0);
-    const requestFreeUpgradeTokensValue =
-      Math.max(0, toInteger(body.requestFreeUpgradeTokens) ?? 0);
-    if (offerCashValue < 0 || requestCashValue < 0) {
+    const { value: offerCash, error: offerCashError } = parseNonNegativeInteger(
+      body.offerCash,
+      "offerCash",
+    );
+    if (offerCashError) {
+      return NextResponse.json({ error: offerCashError }, { status: 400 });
+    }
+    const { value: offerFreeBuildTokens, error: offerFreeBuildTokensError } =
+      parseNonNegativeInteger(body.offerFreeBuildTokens, "offerFreeBuildTokens");
+    if (offerFreeBuildTokensError) {
       return NextResponse.json(
-        { error: "Trade cash amounts must be zero or greater." },
+        { error: offerFreeBuildTokensError },
         { status: 400 },
       );
     }
-    const offerCash = offerCashValue;
-    const requestCash = requestCashValue;
-    const offerFreeBuildTokens = offerFreeBuildTokensValue;
-    const offerFreeUpgradeTokens = offerFreeUpgradeTokensValue;
-    const requestFreeBuildTokens = requestFreeBuildTokensValue;
-    const requestFreeUpgradeTokens = requestFreeUpgradeTokensValue;
+    const {
+      value: offerFreeUpgradeTokens,
+      error: offerFreeUpgradeTokensError,
+    } = parseNonNegativeInteger(
+      body.offerFreeUpgradeTokens,
+      "offerFreeUpgradeTokens",
+    );
+    if (offerFreeUpgradeTokensError) {
+      return NextResponse.json(
+        { error: offerFreeUpgradeTokensError },
+        { status: 400 },
+      );
+    }
+    const { value: requestCash, error: requestCashError } = parseNonNegativeInteger(
+      body.requestCash,
+      "requestCash",
+    );
+    if (requestCashError) {
+      return NextResponse.json({ error: requestCashError }, { status: 400 });
+    }
+    const {
+      value: requestFreeBuildTokens,
+      error: requestFreeBuildTokensError,
+    } = parseNonNegativeInteger(
+      body.requestFreeBuildTokens,
+      "requestFreeBuildTokens",
+    );
+    if (requestFreeBuildTokensError) {
+      return NextResponse.json(
+        { error: requestFreeBuildTokensError },
+        { status: 400 },
+      );
+    }
+    const {
+      value: requestFreeUpgradeTokens,
+      error: requestFreeUpgradeTokensError,
+    } = parseNonNegativeInteger(
+      body.requestFreeUpgradeTokens,
+      "requestFreeUpgradeTokens",
+    );
+    if (requestFreeUpgradeTokensError) {
+      return NextResponse.json(
+        { error: requestFreeUpgradeTokensError },
+        { status: 400 },
+      );
+    }
     const offerTiles = normalizeTileIndices(body.offerTiles);
     const requestTiles = normalizeTileIndices(body.requestTiles);
 
@@ -259,6 +357,20 @@ export const handleTradeAction = async <
     if (offerCash > proposerBalance) {
       return NextResponse.json(
         { error: "Not enough cash to make that offer." },
+        { status: 409 },
+      );
+    }
+    const proposerFreeBuildTokens = currentUserPlayer.free_build_tokens ?? 0;
+    if (offerFreeBuildTokens > proposerFreeBuildTokens) {
+      return NextResponse.json(
+        { error: "Not enough free build vouchers to make that offer." },
+        { status: 409 },
+      );
+    }
+    const proposerFreeUpgradeTokens = currentUserPlayer.free_upgrade_tokens ?? 0;
+    if (offerFreeUpgradeTokens > proposerFreeUpgradeTokens) {
+      return NextResponse.json(
+        { error: "Not enough free upgrade vouchers to make that offer." },
         { status: 409 },
       );
     }
