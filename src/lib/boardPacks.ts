@@ -45,6 +45,7 @@ export type BoardPackEconomy = {
   startingBalance?: number;
   passGoAmount?: number;
   inlandLandBaseValueRatio?: number;
+  houseImprovementValueMultipliers?: number[];
   jailFineAmount?: number;
   auctionMinIncrement?: number;
 };
@@ -120,6 +121,7 @@ type PropertyGroupConfig = {
 };
 
 const DEFAULT_HOUSE_RENT_MULTIPLIERS = [1, 5, 15, 45, 80];
+export const DEFAULT_HOUSE_IMPROVEMENT_VALUE_MULTIPLIERS = [0, 0.8, 0.9, 1.4, 1.9, 1.7];
 const DEFAULT_RAIL_RENT_BY_COUNT = [0, 25, 50, 100, 200];
 const DEFAULT_UTILITY_RENT_MULTIPLIERS = { single: 4, double: 10, triple: 16 };
 
@@ -174,6 +176,7 @@ const CLASSIC_US_ECONOMY: BoardPackEconomy = {
   hotelIncrementMultiplier: 1.25,
   railRentByCount: DEFAULT_RAIL_RENT_BY_COUNT,
   utilityRentMultipliers: DEFAULT_UTILITY_RENT_MULTIPLIERS,
+  houseImprovementValueMultipliers: DEFAULT_HOUSE_IMPROVEMENT_VALUE_MULTIPLIERS,
   startingBalance: 1500,
   passGoAmount: 200,
   inlandLandBaseValueRatio: 0.2,

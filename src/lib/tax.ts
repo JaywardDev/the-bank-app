@@ -46,6 +46,7 @@ type OwnershipByTileForTax = Record<
   number,
   {
     owner_player_id: string;
+    houses?: number | null;
   }
 >;
 
@@ -70,6 +71,7 @@ export type NetWorthForTaxInput = {
   boardPackEconomy?: {
     passGoAmount?: number;
     inlandLandBaseValueRatio?: number;
+    houseImprovementValueMultipliers?: number[];
   } | null;
 };
 

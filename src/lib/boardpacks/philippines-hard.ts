@@ -15,6 +15,7 @@ const PHILIPPINES_HARD_ECONOMY: BoardPackEconomy = {
     minStakePerBet: 10_000,
     maxTotalStakePerRoll: 1_000_000,
   },
+  houseImprovementValueMultipliers: [0, 0.8, 0.9, 1.4, 1.9, 1.7],
   startingBalance: 5_000_000,
   passGoAmount: 600_000,
 };

@@ -1,5 +1,6 @@
 import {
   DEFAULT_BOARD_PACK_ECONOMY,
+  DEFAULT_HOUSE_IMPROVEMENT_VALUE_MULTIPLIERS,
   type BoardPackEconomy,
   type BoardTile,
 } from "@/lib/boardPacks";
@@ -18,6 +19,7 @@ type OwnershipByTileForNetWorth = Record<
   number,
   {
     owner_player_id: string;
+    houses?: number | null;
   }
 >;
 
@@ -47,6 +49,44 @@ export type OwnedInlandAssetValueBreakdown = {
 export const getInlandLandBaseValueRatio = (
   boardPackEconomy?: Pick<BoardPackEconomy, "inlandLandBaseValueRatio" | "passGoAmount"> | null,
 ) => boardPackEconomy?.inlandLandBaseValueRatio ?? DEFAULT_INLAND_LAND_BASE_VALUE_RATIO;
+
+export const computeOwnedPropertyImprovementAssetValue = ({
+  tile,
+  ownership,
+  boardPackEconomy,
+}: {
+  tile: BoardTile;
+  ownership: { houses?: number | null } | null | undefined;
+  boardPackEconomy?: Pick<BoardPackEconomy, "houseImprovementValueMultipliers"> | null;
+}) => {
+  if (tile.type !== "PROPERTY") {
+    return 0;
+  }
+
+  const rawHouses = ownership?.houses;
+  const normalizedHouses = Number.isFinite(rawHouses) ? Math.max(0, Math.floor(rawHouses ?? 0)) : 0;
+  if (normalizedHouses <= 0) {
+    return 0;
+  }
+
+  const rawHouseCost = tile.houseCost;
+  const houseCost = Number.isFinite(rawHouseCost) ? Math.max(0, rawHouseCost ?? 0) : 0;
+  if (houseCost <= 0) {
+    return 0;
+  }
+
+  const configuredMultipliers = boardPackEconomy?.houseImprovementValueMultipliers;
+  const multipliers =
+    Array.isArray(configuredMultipliers) && configuredMultipliers.length > 0
+      ? configuredMultipliers
+      : DEFAULT_HOUSE_IMPROVEMENT_VALUE_MULTIPLIERS;
+  const highestConfiguredMultiplierLevel = Math.max(0, multipliers.length - 1);
+  const effectiveValuationLevel = Math.min(normalizedHouses, highestConfiguredMultiplierLevel);
+  const rawMultiplier = multipliers[effectiveValuationLevel];
+  const multiplier = Number.isFinite(rawMultiplier) ? Math.max(0, rawMultiplier) : 0;
+
+  return normalizedHouses * houseCost * multiplier;
+};
 
 export const computeOwnedInlandAssetValue = ({
   inlandExploredCells,
@@ -117,12 +157,16 @@ export type AuthoritativeNetWorthInput = {
   activeCollateralLoans: PlayerLoanForNetWorth[];
   activePurchaseMortgages: PurchaseMortgageForNetWorth[];
   inlandExploredCells?: unknown;
-  boardPackEconomy?: Pick<BoardPackEconomy, "inlandLandBaseValueRatio" | "passGoAmount"> | null;
+  boardPackEconomy?: Pick<
+    BoardPackEconomy,
+    "inlandLandBaseValueRatio" | "passGoAmount" | "houseImprovementValueMultipliers"
+  > | null;
 };
 
 export type AuthoritativeNetWorthBreakdown = {
   currentCash: number;
   boardAssetValue: number;
+  improvementAssetValue: number;
   inlandAssetValue: number;
   assetValue: number;
   totalLiabilities: number;
@@ -141,6 +185,7 @@ export const computeAuthoritativeNetWorthBreakdown = ({
   boardPackEconomy,
 }: AuthoritativeNetWorthInput): AuthoritativeNetWorthBreakdown => {
   let boardAssetValue = 0;
+  let improvementAssetValue = 0;
 
   for (const tile of boardTiles) {
     if (!OWNABLE_TILE_TYPES.has(tile.type)) {
@@ -153,6 +198,11 @@ export const computeAuthoritativeNetWorthBreakdown = ({
     }
 
     boardAssetValue += tile.price ?? 0;
+    improvementAssetValue += computeOwnedPropertyImprovementAssetValue({
+      tile,
+      ownership,
+      boardPackEconomy,
+    });
   }
 
   const inlandBreakdown = computeOwnedInlandAssetValue({
@@ -174,11 +224,12 @@ export const computeAuthoritativeNetWorthBreakdown = ({
 
   const totalLiabilities = collateralLiabilities + purchaseMortgageLiabilities;
   const inlandAssetValue = inlandBreakdown.total;
-  const assetValue = boardAssetValue + inlandAssetValue;
+  const assetValue = boardAssetValue + improvementAssetValue + inlandAssetValue;
 
   return {
     currentCash,
     boardAssetValue,
+    improvementAssetValue,
     inlandAssetValue,
     assetValue,
     totalLiabilities,

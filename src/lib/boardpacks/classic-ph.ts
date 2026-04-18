@@ -64,6 +64,7 @@ const CLASSIC_PH_ECONOMY: BoardPackEconomy = {
   auctionMinIncrement: 50000,
   railRentByCount: [0, 200_000, 400_000, 800_000, 1_600_000],
   utilityBaseAmount: 8000,
+  houseImprovementValueMultipliers: [0, 0.8, 0.9, 1.4, 1.9, 1.7],
 };
 
 const CLASSIC_PH_PROPERTY_GROUPS: PropertyGroupConfig[] = [

@@ -69,6 +69,7 @@ export const NEW_ZEALAND_ECONOMY: BoardPackEconomy = {
   hotelIncrementMultiplier: 1.35,
   railRentByCount: [0, 60_000, 120_000, 240_000, 480_000],
   utilityRentMultipliers: { single: 4, double: 10 },
+  houseImprovementValueMultipliers: [0, 0.8, 0.9, 1.4, 1.9, 1.7],
   utilityBaseAmount: 2_400,
   startingBalance: 4_000_000,
   passGoAmount: 480_000,
