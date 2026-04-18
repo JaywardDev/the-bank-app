@@ -34,6 +34,102 @@ export type BettingMarketState = {
   };
 };
 
+export type BettingMarketSettlementEvent = {
+  event_type: "CASH_CREDIT" | "BETTING_MARKET_BET_WON";
+  payload: Record<string, unknown>;
+};
+
+export const settleBettingMarketForRoll = ({
+  bettingMarketState,
+  balances,
+  playersById,
+  dice,
+}: {
+  bettingMarketState: unknown;
+  balances: Record<string, number>;
+  playersById: Record<string, { display_name: string | null } | undefined>;
+  dice: [number, number];
+}): {
+  bettingMarketState: BettingMarketState;
+  balances: Record<string, number>;
+  balancesChanged: boolean;
+  events: BettingMarketSettlementEvent[];
+} => {
+  const [dieOne, dieTwo] = dice;
+  const normalizedBettingState = normalizeBettingMarketState(bettingMarketState);
+  const qualifyingRollSeq = normalizedBettingState.next_roll_seq;
+  const betsForThisRoll = normalizedBettingState.bets.filter(
+    (bet) => bet.target_roll_seq === qualifyingRollSeq,
+  );
+  const futureBets = normalizedBettingState.bets.filter(
+    (bet) => bet.target_roll_seq !== qualifyingRollSeq,
+  );
+  const nextBettingTotals = futureBets.reduce<Record<string, number>>((acc, bet) => {
+    acc[bet.player_id] = (acc[bet.player_id] ?? 0) + bet.stake;
+    return acc;
+  }, {});
+
+  let updatedBalances = balances;
+  let balancesChanged = false;
+  const events: BettingMarketSettlementEvent[] = [];
+
+  for (const bet of betsForThisRoll) {
+    if (!doesBetWin(bet.kind, bet.selection, [dieOne, dieTwo])) {
+      continue;
+    }
+    const multiplier = getBetPayoutMultiplier(bet.kind, bet.selection);
+    const payout = Math.floor(bet.stake * multiplier);
+    const winnerBalance = updatedBalances[bet.player_id] ?? 0;
+    updatedBalances = {
+      ...updatedBalances,
+      [bet.player_id]: winnerBalance + payout,
+    };
+    balancesChanged = true;
+    events.push({
+      event_type: "CASH_CREDIT",
+      payload: {
+        player_id: bet.player_id,
+        amount: payout,
+        bet_id: bet.id,
+        reason: "BETTING_MARKET_BET_PAYOUT",
+        source_event_type: "BETTING_MARKET_BET_WON",
+      },
+    });
+    events.push({
+      event_type: "BETTING_MARKET_BET_WON",
+      payload: {
+        player_id: bet.player_id,
+        player_name: playersById[bet.player_id]?.display_name ?? "Player",
+        bet_id: bet.id,
+        kind: bet.kind,
+        selection: bet.selection,
+        bet_label: formatBetLabel(bet.kind, bet.selection),
+        target_roll_seq: qualifyingRollSeq,
+      },
+    });
+  }
+
+  return {
+    bettingMarketState: {
+      ...normalizedBettingState,
+      next_roll_seq: qualifyingRollSeq + 1,
+      bets: futureBets,
+      total_stake_by_player: nextBettingTotals,
+      last_resolution: {
+        roll_seq: qualifyingRollSeq,
+        dice: [dieOne, dieTwo],
+        resolved_bet_count: betsForThisRoll.length,
+        winner_count: events.filter((event) => event.event_type === "BETTING_MARKET_BET_WON")
+          .length,
+        resolved_at: new Date().toISOString(),
+      },
+    },
+    balances: updatedBalances,
+    balancesChanged,
+    events,
+  };
+};
+
 export const DEFAULT_BETTING_MARKET_STATE: BettingMarketState = {
   next_roll_seq: 1,
   bets: [],

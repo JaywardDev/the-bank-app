@@ -36,10 +36,7 @@ import {
   type PurchaseDownPaymentPercent,
 } from "@/lib/loanMath";
 import {
-  doesBetWin,
-  formatBetLabel,
-  getBetPayoutMultiplier,
-  normalizeBettingMarketState,
+  settleBettingMarketForRoll,
   type BettingMarketBetKind,
 } from "@/lib/bettingMarket";
 import {
@@ -6382,71 +6379,23 @@ export async function POST(request: Request) {
       const balances = gameState?.balances ?? {};
       let updatedBalances = balances;
       let balancesChanged = false;
-      const bettingState = normalizeBettingMarketState(gameState.betting_market_state);
-      const qualifyingRollSeq = bettingState.next_roll_seq;
-      const betsForThisRoll = bettingState.bets.filter(
-        (bet) => bet.target_roll_seq === qualifyingRollSeq,
-      );
-      const futureBets = bettingState.bets.filter(
-        (bet) => bet.target_roll_seq !== qualifyingRollSeq,
-      );
-      const nextBettingTotals = futureBets.reduce<Record<string, number>>((acc, bet) => {
-        acc[bet.player_id] = (acc[bet.player_id] ?? 0) + bet.stake;
-        return acc;
-      }, {});
-      const bettingWinEvents: Array<{ event_type: string; payload: Record<string, unknown> }> =
-        [];
-      for (const bet of betsForThisRoll) {
-        if (!doesBetWin(bet.kind, bet.selection, [dieOne, dieTwo])) {
-          continue;
-        }
-        const multiplier = getBetPayoutMultiplier(bet.kind, bet.selection);
-        const payout = Math.floor(bet.stake * multiplier);
-        const winnerBalance = updatedBalances[bet.player_id] ?? 0;
-        updatedBalances = {
-          ...updatedBalances,
-          [bet.player_id]: winnerBalance + payout,
-        };
-        balancesChanged = true;
-        bettingWinEvents.push({
-          event_type: "CASH_CREDIT",
-          payload: {
-            player_id: bet.player_id,
-            amount: payout,
-            bet_id: bet.id,
-            reason: "BETTING_MARKET_BET_PAYOUT",
-            source_event_type: "BETTING_MARKET_BET_WON",
-          },
-        });
-        bettingWinEvents.push({
-          event_type: "BETTING_MARKET_BET_WON",
-          payload: {
-            player_id: bet.player_id,
-            player_name:
-              players.find((player) => player.id === bet.player_id)?.display_name ?? "Player",
-            bet_id: bet.id,
-            kind: bet.kind,
-            selection: bet.selection,
-            bet_label: formatBetLabel(bet.kind, bet.selection),
-            target_roll_seq: qualifyingRollSeq,
-          },
-        });
-      }
-      const resolvedBettingState = {
-        ...bettingState,
-        next_roll_seq: qualifyingRollSeq + 1,
-        bets: futureBets,
-        total_stake_by_player: nextBettingTotals,
-        last_resolution: {
-          roll_seq: qualifyingRollSeq,
-          dice: [dieOne, dieTwo] as [number, number],
-          resolved_bet_count: betsForThisRoll.length,
-          winner_count: bettingWinEvents.filter(
-            (event) => event.event_type === "BETTING_MARKET_BET_WON",
-          ).length,
-          resolved_at: new Date().toISOString(),
+      const playersById = players.reduce<Record<string, { display_name: string | null }>>(
+        (acc, player) => {
+          acc[player.id] = { display_name: player.display_name };
+          return acc;
         },
-      };
+        {},
+      );
+      const bettingSettlement = settleBettingMarketForRoll({
+        bettingMarketState: gameState.betting_market_state,
+        balances: updatedBalances,
+        playersById,
+        dice: [dieOne, dieTwo],
+      });
+      updatedBalances = bettingSettlement.balances;
+      balancesChanged = balancesChanged || bettingSettlement.balancesChanged;
+      const bettingWinEvents = bettingSettlement.events;
+      const resolvedBettingState = bettingSettlement.bettingMarketState;
       const bankruptcyCandidate: BankruptcyCandidate | null = null;
       let nextChanceIndex = gameState?.chance_index ?? 0;
       let nextCommunityIndex = gameState?.community_index ?? 0;
@@ -9877,6 +9826,19 @@ export async function POST(request: Request) {
         currentPlayer.jail_turns_remaining - 1,
       );
       const shouldReleaseFromJail = isDouble || turnsRemaining === 0;
+      const playersById = players.reduce<Record<string, { display_name: string | null }>>(
+        (acc, player) => {
+          acc[player.id] = { display_name: player.display_name };
+          return acc;
+        },
+        {},
+      );
+      const bettingSettlement = settleBettingMarketForRoll({
+        bettingMarketState: gameState.betting_market_state,
+        balances: gameState?.balances ?? {},
+        playersById,
+        dice: [dieOne, dieTwo],
+      });
 
       if (!shouldReleaseFromJail) {
         const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
@@ -9920,6 +9882,7 @@ export async function POST(request: Request) {
                 dice,
               } satisfies DiceEventPayload,
             },
+            ...bettingSettlement.events,
             {
               event_type: "JAIL_DOUBLES_FAIL",
               payload: {
@@ -9930,6 +9893,12 @@ export async function POST(request: Request) {
               },
             },
           ],
+          extraGameStatePatch: {
+            ...(bettingSettlement.balancesChanged
+              ? { balances: bettingSettlement.balances }
+              : {}),
+            betting_market_state: bettingSettlement.bettingMarketState,
+          },
         });
       }
 
@@ -9962,9 +9931,9 @@ export async function POST(request: Request) {
       const activeLandingTile = landingTile;
       const activeResolvedTile = resolvedTile;
       const forcedFine = !isDouble;
-      const balances = gameState?.balances ?? {};
+      const balances = bettingSettlement.balances;
       let updatedBalances = balances;
-      let balancesChanged = false;
+      let balancesChanged = bettingSettlement.balancesChanged;
       let bankruptcyCandidate: BankruptcyCandidate | null = null;
       if (forcedFine) {
         const currentBalance =
@@ -10018,6 +9987,7 @@ export async function POST(request: Request) {
             dice,
           } satisfies DiceEventPayload,
         },
+        ...bettingSettlement.events,
       ];
 
       if (isDouble) {
@@ -10216,6 +10186,7 @@ export async function POST(request: Request) {
               last_roll: rollTotal,
               doubles_count: nextDoublesCount,
               ...(balancesChanged ? { balances: updatedBalances } : {}),
+              betting_market_state: bettingSettlement.bettingMarketState,
               ...(nextChanceIndex !== (gameState?.chance_index ?? 0)
                 ? { chance_index: nextChanceIndex }
                 : {}),
@@ -10346,6 +10317,9 @@ export async function POST(request: Request) {
         getOutOfJailFreeCountChanged,
         nextTaxExemptionPassCount,
         taxExemptionPassCountChanged,
+        extraGameStatePatch: {
+          betting_market_state: bettingSettlement.bettingMarketState,
+        },
       });
     }
 
