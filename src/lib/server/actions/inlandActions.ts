@@ -301,10 +301,8 @@ export const handleInlandAction = async ({
       const voucherReward = isBonus
         ? getInlandVoucherReward(targetCell.discoveredResourceType)
         : null;
-      const nextFreeBuildTokens =
-        (currentUserPlayer.free_build_tokens ?? 0) + (voucherReward?.freeBuildTokens ?? 0);
-      const nextFreeUpgradeTokens =
-        (currentUserPlayer.free_upgrade_tokens ?? 0) + (voucherReward?.freeUpgradeTokens ?? 0);
+      const voucherBuildDelta = voucherReward?.freeBuildTokens ?? 0;
+      const voucherUpgradeDelta = voucherReward?.freeUpgradeTokens ?? 0;
 
       inlandCells.set(key, {
         ...targetCell,
@@ -312,6 +310,31 @@ export const handleInlandAction = async ({
         discoveredResourceType: null,
         developedSiteType: null,
       });
+      let nextFreeBuildTokens = currentUserPlayer.free_build_tokens ?? 0;
+      let nextFreeUpgradeTokens = currentUserPlayer.free_upgrade_tokens ?? 0;
+      if (isBonus) {
+        const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
+          "rpc/adjust_player_construction_vouchers_atomic",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              p_game_id: gameId,
+              p_player_id: currentUserPlayer.id,
+              p_free_build_tokens_delta: voucherBuildDelta,
+              p_free_upgrade_tokens_delta: voucherUpgradeDelta,
+            }),
+          },
+        )) ?? [];
+        if (!updatedPlayer) {
+          return NextResponse.json(
+            { error: "Unable to grant inland bonus vouchers." },
+            { status: 500 },
+          );
+        }
+        nextFreeBuildTokens = updatedPlayer.free_build_tokens ?? 0;
+        nextFreeUpgradeTokens = updatedPlayer.free_upgrade_tokens ?? 0;
+      }
+
       const resolutionEvent =
         isSellResource
           ? {
@@ -387,28 +410,6 @@ export const handleInlandAction = async ({
       )) ?? [];
       if (!updatedState) {
         return NextResponse.json({ error: "Version mismatch." }, { status: 409 });
-      }
-
-      if (isBonus) {
-        const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
-          `players?id=eq.${currentUserPlayer.id}`,
-          {
-            method: "PATCH",
-            headers: {
-              Prefer: "return=representation",
-            },
-            body: JSON.stringify({
-              free_build_tokens: nextFreeBuildTokens,
-              free_upgrade_tokens: nextFreeUpgradeTokens,
-            }),
-          },
-        )) ?? [];
-        if (!updatedPlayer) {
-          return NextResponse.json(
-            { error: "Unable to grant inland bonus vouchers." },
-            { status: 500 },
-          );
-        }
       }
       await emitGameEvents(gameId, startVersion, events, user.id);
       return NextResponse.json({ gameState: updatedState });

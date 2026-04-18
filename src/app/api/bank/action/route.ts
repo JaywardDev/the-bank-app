@@ -8839,25 +8839,41 @@ export async function POST(request: Request) {
         }
 
         if (consumedVoucher) {
-          const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
-            `players?id=eq.${currentPlayer.id}`,
-            {
-              method: "PATCH",
-              headers: {
-                Prefer: "return=representation",
+          const freeBuildDelta = consumedVoucher === "BUILD" ? -1 : 0;
+          const freeUpgradeDelta = consumedVoucher === "UPGRADE" ? -1 : 0;
+          try {
+            const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
+              "rpc/adjust_player_construction_vouchers_atomic",
+              {
+                method: "POST",
+                body: JSON.stringify({
+                  p_game_id: gameId,
+                  p_player_id: currentPlayer.id,
+                  p_free_build_tokens_delta: freeBuildDelta,
+                  p_free_upgrade_tokens_delta: freeUpgradeDelta,
+                }),
               },
-              body: JSON.stringify({
-                free_build_tokens: nextFreeBuildTokens,
-                free_upgrade_tokens: nextFreeUpgradeTokens,
-              }),
-            },
-          )) ?? [];
+            )) ?? [];
 
-          if (!updatedPlayer) {
-            return NextResponse.json(
-              { error: "Unable to apply construction voucher." },
-              { status: 500 },
-            );
+            if (!updatedPlayer) {
+              return NextResponse.json(
+                { error: "Unable to apply construction voucher." },
+                { status: 500 },
+              );
+            }
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : "Unable to apply construction voucher.";
+            if (
+              message.includes("INSUFFICIENT_FREE_BUILD_TOKENS") ||
+              message.includes("INSUFFICIENT_FREE_UPGRADE_TOKENS")
+            ) {
+              return NextResponse.json(
+                { error: "Construction voucher is no longer available." },
+                { status: 409 },
+              );
+            }
+            throw error;
           }
         }
 

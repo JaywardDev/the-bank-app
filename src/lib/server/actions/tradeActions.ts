@@ -915,35 +915,13 @@ export const handleTradeAction = async <
   if (acceptResult.status === "REJECTED") {
     const rejectionMessage =
       acceptResult.rejection_reason ?? "Trade is out of date and was rejected.";
-    const events = [
-      {
-        event_type: "TRADE_REJECTED",
-        payload: {
-          trade_id: tradeProposal.id,
-          proposer_player_id: tradeProposal.proposer_player_id,
-          counterparty_player_id: tradeProposal.counterparty_player_id,
-          rejected_by_player_id: currentUserPlayer.id,
-          reason: rejectionMessage,
-        },
-      },
-    ];
-    const finalVersion = currentVersion + events.length;
     const [updatedState] =
       (await fetchFromSupabaseWithService<GameStateRow[]>(
-        `${GAME_STATE_SELECT}&game_id=eq.${gameId}`,
+        `${GAME_STATE_SELECT}&game_id=eq.${gameId}&limit=1`,
         {
-          method: "PATCH",
-          headers: {
-            Prefer: "return=representation",
-          },
-          body: JSON.stringify({
-            version: finalVersion,
-            updated_at: new Date().toISOString(),
-          }),
+          method: "GET",
         },
       )) ?? [];
-
-    await emitGameEvents(gameId, currentVersion + 1, events, user.id);
 
     return NextResponse.json(
       { error: rejectionMessage, gameState: updatedState },
@@ -1037,24 +1015,19 @@ export const handleTradeAction = async <
     ownershipByTile: refreshedOwnershipByTile,
     events,
   });
-  const finalVersion = currentVersion + events.length;
-  const [updatedState] =
-    (await fetchFromSupabaseWithService<GameStateRow[]>(
-      `${GAME_STATE_SELECT}&game_id=eq.${gameId}`,
-      {
-        method: "PATCH",
-        headers: {
-          Prefer: "return=representation",
-        },
-        body: JSON.stringify({
-          version: finalVersion,
-          rules: nextRules,
-          updated_at: new Date().toISOString(),
-        }),
+  const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+    `${GAME_STATE_SELECT}&game_id=eq.${gameId}`,
+    {
+      method: "PATCH",
+      headers: {
+        Prefer: "return=representation",
       },
-    )) ?? [];
-
-  await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+      body: JSON.stringify({
+        rules: nextRules,
+        updated_at: new Date().toISOString(),
+      }),
+    },
+  )) ?? [];
 
   return NextResponse.json({ gameState: updatedState });
 };

@@ -4114,7 +4114,7 @@ export default function PlayPage() {
         requestTiles: tradeRequestTiles,
       })
     ) {
-      setNotice("Add cash or properties to the trade.");
+      setNotice("Add cash, properties, or vouchers to the trade.");
       return;
     }
     const success = await handleBankAction({
