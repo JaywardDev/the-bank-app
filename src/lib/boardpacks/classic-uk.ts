@@ -72,6 +72,7 @@ export const CLASSIC_UK_ECONOMY: BoardPackEconomy = {
   utilityBaseAmount: 1,
   startingBalance: 1500,
   passGoAmount: 200,
+  inlandLandBaseValueRatio: 0.2,
   jailFineAmount: 50,
   auctionMinIncrement: 10,
 };

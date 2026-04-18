@@ -27,6 +27,7 @@ import {
   computeSuperTaxBreakdown,
   isCustomTaxBoardPack,
 } from "@/lib/tax";
+import { computeAuthoritativeNetWorthBreakdown } from "@/lib/netWorth";
 import {
   calculateAmortizedPaymentPerTurn,
   calculateDownPaymentAmount,
@@ -2388,22 +2389,23 @@ const computeAuthoritativeFinalStandings = async ({
       );
       const activePlayerLoans = activeLoans.filter((loan) => loan.player_id === player.id);
       const activePlayerMortgages = activeMortgages.filter((mortgage) => mortgage.player_id === player.id);
-      const liabilities =
-        activePlayerLoans.reduce((total, loan) => total + (loan.remaining_principal ?? loan.principal), 0) +
-        activePlayerMortgages.reduce(
-          (total, mortgage) =>
-            total + (mortgage.principal_remaining ?? 0) + (mortgage.accrued_interest_unpaid ?? 0),
-          0,
-        );
       const cash = gameState.balances?.[player.id] ?? 0;
-      const netWorth =
-        cash + ownedTiles.reduce((total, tile) => total + (tile.price ?? 0), 0) - liabilities;
+      const netWorthBreakdown = computeAuthoritativeNetWorthBreakdown({
+        currentCash: cash,
+        playerId: player.id,
+        boardTiles,
+        ownershipByTile,
+        activeCollateralLoans: activePlayerLoans,
+        activePurchaseMortgages: activePlayerMortgages,
+        inlandExploredCells: gameState.inland_explored_cells,
+        boardPackEconomy: boardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY,
+      });
 
       return {
         playerId: player.id,
         playerName: player.display_name ?? "Unknown player",
         cash,
-        netWorth,
+        netWorth: netWorthBreakdown.netWorth,
         isEliminated: player.is_eliminated,
         ownedCount: ownedTiles.length,
         liabilityCount: activePlayerLoans.length + activePlayerMortgages.length,
@@ -3596,6 +3598,8 @@ const finalizeMoveResolution = async ({
               accrued_interest_unpaid: number;
             }>)
           : [],
+        inlandExploredCells: gameState.inland_explored_cells,
+        boardPackEconomy,
       });
 
       taxAmount = superTaxBreakdown.taxAmount;

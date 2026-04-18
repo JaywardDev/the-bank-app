@@ -44,6 +44,7 @@ export type BoardPackEconomy = {
   utilityBaseAmount?: number;
   startingBalance?: number;
   passGoAmount?: number;
+  inlandLandBaseValueRatio?: number;
   jailFineAmount?: number;
   auctionMinIncrement?: number;
 };
@@ -175,6 +176,7 @@ const CLASSIC_US_ECONOMY: BoardPackEconomy = {
   utilityRentMultipliers: DEFAULT_UTILITY_RENT_MULTIPLIERS,
   startingBalance: 1500,
   passGoAmount: 200,
+  inlandLandBaseValueRatio: 0.2,
   jailFineAmount: 50,
 };
 

@@ -72,6 +72,7 @@ export const NEW_ZEALAND_ECONOMY: BoardPackEconomy = {
   utilityBaseAmount: 2_400,
   startingBalance: 4_000_000,
   passGoAmount: 480_000,
+  inlandLandBaseValueRatio: 0.2,
   jailFineAmount: 120_000,
   auctionMinIncrement: 24_000,
 };

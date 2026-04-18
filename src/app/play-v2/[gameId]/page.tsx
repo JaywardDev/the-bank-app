@@ -28,9 +28,9 @@ import { resolveBoardTilesForRules } from "@/lib/resolvedBoardTiles";
 import { getTileBandColor } from "@/lib/boardTileStyles";
 import { postGameActionRequest } from "@/lib/client/postGameActionRequest";
 import {
-  computeOwnedAssetValue,
   computeTaxableAssetValueForLuxuryTax,
 } from "@/lib/assetValue";
+import { computeAuthoritativeNetWorthBreakdown } from "@/lib/netWorth";
 import { getRules } from "@/lib/rules";
 import {
   getCurrentTileRent,
@@ -1311,24 +1311,29 @@ export default function PlayV2Page() {
         const playerMortgages = activePurchaseMortgages.filter(
           (mortgage) => mortgage.player_id === player.id,
         );
-        const liabilities =
-          playerLoans.reduce(
-            (total, loan) => total + (loan.remaining_principal ?? loan.principal ?? 0),
-            0,
-          ) +
-          playerMortgages.reduce(
-            (total, mortgage) =>
-              total +
-              (mortgage.principal_remaining ?? 0) +
-              (mortgage.accrued_interest_unpaid ?? 0),
-            0,
-          );
+        const netWorthBreakdown = computeAuthoritativeNetWorthBreakdown({
+          currentCash: cash,
+          playerId: player.id,
+          boardTiles: Array.from(boardTilesByIndex.values()),
+          ownershipByTile,
+          activeCollateralLoans: playerLoans.map((loan) => ({
+            principal: loan.principal ?? 0,
+            remaining_principal: loan.remaining_principal ?? null,
+          })),
+          activePurchaseMortgages: playerMortgages.map((mortgage) => ({
+            principal_remaining: mortgage.principal_remaining ?? 0,
+            accrued_interest_unpaid: mortgage.accrued_interest_unpaid ?? 0,
+          })),
+          inlandExploredCells: gameState?.inland_explored_cells,
+          boardPackEconomy:
+            getBoardPackById(gameMeta?.board_pack_id ?? null)?.economy ??
+            DEFAULT_BOARD_PACK_ECONOMY,
+        });
         return {
           playerId: player.id,
           playerName: player.display_name ?? "Unknown player",
           cash,
-          netWorth:
-            cash + ownedTiles.reduce((total, tile) => total + (tile.price ?? 0), 0) - liabilities,
+          netWorth: netWorthBreakdown.netWorth,
           isEliminated: player.is_eliminated,
           ownedCount: ownedTiles.length,
           liabilityCount: playerLoans.length + playerMortgages.length,
@@ -1397,7 +1402,9 @@ export default function PlayV2Page() {
     ownershipByTile,
     activeLoans,
     activePurchaseMortgages,
+    gameState?.inland_explored_cells,
     players,
+    gameMeta?.board_pack_id,
   ]);
 
   useEffect(() => {
@@ -2755,11 +2762,6 @@ export default function PlayV2Page() {
     );
   }, [currentUserPlayer, ownershipByTile, resolvedBoardTiles]);
 
-  const ownedTileValue = useMemo(
-    () => computeOwnedAssetValue(currentUserOwnedTiles),
-    [currentUserOwnedTiles],
-  );
-
   const collateralLoanLiability = useMemo(
     () =>
       activeLoans.reduce((total, loan) => {
@@ -2786,25 +2788,42 @@ export default function PlayV2Page() {
     [collateralLoanLiability, purchaseMortgageLiability],
   );
 
-  const totalAssets = useMemo(() => {
-    // later: assets += stockPortfolioValue
-    return ownedTileValue;
-  }, [ownedTileValue]);
+  const netWorthBreakdown = useMemo(() => {
+    if (!currentUserPlayer || !resolvedBoardTiles) {
+      return null;
+    }
+    return computeAuthoritativeNetWorthBreakdown({
+      currentCash: currentUserCash ?? 0,
+      playerId: currentUserPlayer.id,
+      boardTiles: resolvedBoardTiles,
+      ownershipByTile,
+      activeCollateralLoans: activeLoans,
+      activePurchaseMortgages: activePurchaseMortgages.map((mortgage) => ({
+        principal_remaining: mortgage.principal_remaining ?? 0,
+        accrued_interest_unpaid: mortgage.accrued_interest_unpaid ?? 0,
+      })),
+      inlandExploredCells: gameState?.inland_explored_cells,
+      boardPackEconomy: selectedBoardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY,
+    });
+  }, [
+    activeLoans,
+    activePurchaseMortgages,
+    currentUserCash,
+    currentUserPlayer,
+    gameState?.inland_explored_cells,
+    ownershipByTile,
+    resolvedBoardTiles,
+    selectedBoardPack?.economy,
+  ]);
+
+  const totalAssets = useMemo(() => netWorthBreakdown?.assetValue ?? 0, [netWorthBreakdown]);
 
   const netWorth = useMemo(() => {
-    const cash = currentUserCash ?? 0;
-    return (
-      cash +
-      ownedTileValue -
-      collateralLoanLiability -
-      purchaseMortgageLiability
-    );
-  }, [
-    collateralLoanLiability,
-    currentUserCash,
-    ownedTileValue,
-    purchaseMortgageLiability,
-  ]);
+    if (netWorthBreakdown) {
+      return netWorthBreakdown.netWorth;
+    }
+    return (currentUserCash ?? 0) - totalLiabilities;
+  }, [currentUserCash, netWorthBreakdown, totalLiabilities]);
 
   const finalStandings = useMemo(
     () => gameOverState?.standings ?? [],

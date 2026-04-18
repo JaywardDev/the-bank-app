@@ -1,4 +1,5 @@
 import type { BoardTile } from "./boardPacks";
+import { computeAuthoritativeNetWorthBreakdown } from "./netWorth";
 
 const TAX_RULE_BOARDPACK_IDS = new Set([
   "classic-ph",
@@ -65,6 +66,11 @@ export type NetWorthForTaxInput = {
   ownershipByTile: OwnershipByTileForTax;
   activeCollateralLoans: PlayerLoanForTax[];
   activePurchaseMortgages: PurchaseMortgageForTax[];
+  inlandExploredCells?: unknown;
+  boardPackEconomy?: {
+    passGoAmount?: number;
+    inlandLandBaseValueRatio?: number;
+  } | null;
 };
 
 
@@ -84,42 +90,22 @@ export const computeSuperTaxBreakdown = ({
   ownershipByTile,
   activeCollateralLoans,
   activePurchaseMortgages,
+  inlandExploredCells,
+  boardPackEconomy,
 }: NetWorthForTaxInput): SuperTaxBreakdown => {
-  let assetValue = 0;
-
-  for (const tile of boardTiles) {
-    if (
-      tile.type !== "PROPERTY" &&
-      tile.type !== "RAIL" &&
-      tile.type !== "UTILITY"
-    ) {
-      continue;
-    }
-
-    const ownership = ownershipByTile[tile.index];
-    if (!ownership || ownership.owner_player_id !== playerId) {
-      continue;
-    }
-
-    assetValue += tile.price ?? 0;
-  }
-
-  const collateralLiabilities = activeCollateralLoans.reduce((sum, loan) => {
-    const principalRemaining =
-      typeof loan.remaining_principal === "number"
-        ? loan.remaining_principal
-        : loan.principal;
-    return sum + principalRemaining;
-  }, 0);
-
-  const purchaseMortgageLiabilities = activePurchaseMortgages.reduce(
-    (sum, mortgage) =>
-      sum + mortgage.principal_remaining + mortgage.accrued_interest_unpaid,
-    0,
-  );
-
-  const totalLiabilities = collateralLiabilities + purchaseMortgageLiabilities;
-  const netWorthForTax = currentCash + assetValue - totalLiabilities;
+  const netWorthBreakdown = computeAuthoritativeNetWorthBreakdown({
+    currentCash,
+    playerId,
+    boardTiles,
+    ownershipByTile,
+    activeCollateralLoans,
+    activePurchaseMortgages,
+    inlandExploredCells,
+    boardPackEconomy,
+  });
+  const assetValue = netWorthBreakdown.assetValue;
+  const totalLiabilities = netWorthBreakdown.totalLiabilities;
+  const netWorthForTax = netWorthBreakdown.netWorth;
   const taxRate = 0.1;
 
   return {
