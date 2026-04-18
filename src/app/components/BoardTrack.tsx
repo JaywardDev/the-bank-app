@@ -91,6 +91,9 @@ const getRowCol = (tileIndex: number, boardWidth: number, boardHeight: number) =
   return { row: tileIndex - topRowEndIndex, col: boardWidth - 1 };
 };
 
+const getLayerIndex = (row: number, col: number, boardWidth: number) =>
+  row * (boardWidth + 1) + col;
+
 const getInteriorCells = (boardWidth: number, boardHeight: number) => {
   const cells: Array<{ row: number; col: number; state: InteriorCellState }> = [];
 
@@ -214,7 +217,7 @@ export default function BoardTrack({
           gridTemplateRows: `repeat(${boardHeight}, minmax(0, 1fr))`,
         }}
       >
-        <div className="absolute inset-0 z-0">
+        <div className="absolute inset-0">
           {interiorCells.map((cell) => {
             const developedSiteIconSrc = getInlandResourceIconSrc(
               cell.inlandCellRecord?.developedSiteType,
@@ -228,7 +231,7 @@ export default function BoardTrack({
                   left: `${(cell.col / boardWidth) * 100}%`,
                   width: `${100 / boardWidth}%`,
                   height: `${100 / boardHeight}%`,
-                  zIndex: cell.row * 100 + cell.col,
+                  zIndex: getLayerIndex(cell.row, cell.col, boardWidth),
                 }}
               >
                 {cell.state === "FOREST" ? (
@@ -390,7 +393,7 @@ export default function BoardTrack({
               style={{
                 gridRowStart: position.row + 1,
                 gridColumnStart: position.col + 1,
-                zIndex: 2000,
+                zIndex: getLayerIndex(position.row, position.col, boardWidth),
               }}
             >
               <div className="pointer-events-none absolute inset-x-1.5 top-2 z-20 h-[calc(100%-0.75rem)]">
