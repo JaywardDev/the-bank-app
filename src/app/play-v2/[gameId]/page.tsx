@@ -42,7 +42,7 @@ import {
   ownsFullColorSet,
 } from "@/lib/rent";
 import { formatCurrency, getCurrencyMetaFromBoardPack } from "@/lib/currency";
-import { getNextBuildCost } from "@/lib/developmentCosts";
+import { getMaxDevelopmentLevel, getNextBuildCost } from "@/lib/developmentCosts";
 import {
   canExploreInlandCell,
   getInlandBankSalePrice,
@@ -3222,15 +3222,15 @@ export default function PlayV2Page() {
   }, [selectedTile]);
 
   const selectedTileMaxUpgradeLevel = useMemo(() => {
-    if (!selectedTileIsUpgradeable || !selectedTile?.rentByHouses?.length) {
+    if (!selectedTileIsUpgradeable || !selectedTile) {
       return 0;
     }
-    return Math.max(selectedTile.rentByHouses.length - 1, 0);
+    return getMaxDevelopmentLevel(selectedTile.rentByHouses);
   }, [selectedTile, selectedTileIsUpgradeable]);
 
   const selectedTileIsFullyUpgraded =
     selectedTileIsUpgradeable &&
-    selectedTileDevelopmentCount >= selectedTileMaxUpgradeLevel;
+    selectedTileDevelopmentCount === selectedTileMaxUpgradeLevel;
 
   const selectedTileNextRent = useMemo(() => {
     if (
@@ -4846,7 +4846,7 @@ export default function PlayV2Page() {
                   purchasePriceLabel={formatMoney(selectedTile.price ?? null)}
                   currentRentLabel={formatMoney(selectedTileCurrentRent)}
                   upgradeCostLabel={
-                    selectedTileIsUpgradeable
+                    selectedTileIsUpgradeable && !selectedTileIsFullyUpgraded
                       ? formatMoney(
                           getNextBuildCost({
                             baseCost: selectedTile.houseCost ?? 0,

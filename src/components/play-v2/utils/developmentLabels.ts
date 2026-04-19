@@ -1,3 +1,5 @@
+import { getMaxDevelopmentLevel as getSharedMaxDevelopmentLevel } from "@/lib/developmentCosts";
+
 const BASE_DEVELOPMENT_LEVEL_LABELS = [
   "Land",
   "Detached House",
@@ -5,8 +7,7 @@ const BASE_DEVELOPMENT_LEVEL_LABELS = [
   "Row Houses",
   "Mid-rise Apartment",
 ] as const;
-
-const DEFAULT_MAX_DEVELOPMENT_LEVEL = 5;
+const DEFAULT_MAX_SPRITE_LEVEL = 5;
 
 const UPGRADE_LEVEL_PRESENTATIONS: Record<
   number,
@@ -60,8 +61,7 @@ const DEFAULT_UPGRADE_PRESENTATION = {
 };
 
 export const getMaxDevelopmentLevel = (rentByHouses?: number[] | null) => {
-  const inferredMax = (rentByHouses?.length ?? 0) - 1;
-  return inferredMax >= 0 ? inferredMax : DEFAULT_MAX_DEVELOPMENT_LEVEL;
+  return getSharedMaxDevelopmentLevel(rentByHouses);
 };
 
 export const getDevelopmentLevelLabel = (
@@ -87,7 +87,7 @@ export const getDevelopmentSpriteForLevel = (level: number) => {
     return null;
   }
 
-  const spriteLevel = Math.min(normalizedLevel, DEFAULT_MAX_DEVELOPMENT_LEVEL);
+  const spriteLevel = Math.min(normalizedLevel, DEFAULT_MAX_SPRITE_LEVEL);
   return `/assets/house-${spriteLevel}.svg`;
 };
 
