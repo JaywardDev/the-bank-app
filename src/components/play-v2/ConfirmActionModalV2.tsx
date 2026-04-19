@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 type ConfirmActionModalV2Props = {
   open: boolean;
   title: string;
+  titleClassName?: string;
   description: ReactNode;
   confirmLabel: string;
   cancelLabel?: string;
@@ -16,6 +17,7 @@ type ConfirmActionModalV2Props = {
 export default function ConfirmActionModalV2({
   open,
   title,
+  titleClassName,
   description,
   confirmLabel,
   cancelLabel = "Cancel",
@@ -35,7 +37,11 @@ export default function ConfirmActionModalV2({
         {showEyebrow ? (
           <p className="text-xs font-semibold uppercase tracking-wide text-amber-600">Confirm action</p>
         ) : null}
-        <p className={`${showEyebrow ? "mt-1" : ""} text-lg font-semibold text-neutral-900`}>{title}</p>
+        <p
+          className={`${showEyebrow ? "mt-1" : ""} ${titleClassName ?? "text-lg"} font-semibold text-neutral-900`}
+        >
+          {title}
+        </p>
         <div className="mt-2 text-sm text-neutral-700">{description}</div>
         <div className="mt-4 flex gap-2">
           <button

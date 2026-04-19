@@ -5642,30 +5642,31 @@ export default function PlayV2Page() {
       <ConfirmActionModalV2
         open={buildUpgradeConfirmation !== null}
         title={buildUpgradeConfirmation?.question ?? "Confirm upgrade"}
+        titleClassName="text-base"
         description={
           buildUpgradeConfirmation ? (
-            <div className="space-y-2">
-              <p className="text-sm font-semibold text-neutral-900">{buildUpgradeConfirmation.tileName}</p>
+            <div className="space-y-1.5">
+              <p className="text-xs font-semibold text-neutral-900">{buildUpgradeConfirmation.tileName}</p>
               <div className="px-1 py-1">
-                <div className="flex items-start gap-3">
-                  <div className="flex h-24 w-24 shrink-0 items-center justify-center rounded-lg bg-neutral-50">
+                <div className="flex items-center gap-4 sm:gap-5">
+                  <div className="flex h-24 w-24 shrink-0 items-center justify-center rounded-lg bg-neutral-50 sm:h-32 sm:w-32">
                     {buildUpgradeConfirmation.targetSpriteSrc ? (
                       <Image
                         src={buildUpgradeConfirmation.targetSpriteSrc}
                         alt={buildUpgradeConfirmation.targetLabel}
-                        width={72}
-                        height={72}
-                        className="h-[72px] w-[72px] object-contain"
+                        width={122}
+                        height={122}
+                        className="h-[96px] w-[96px] object-contain sm:h-[122px] sm:w-[122px]"
                       />
                     ) : (
                       <span className="text-[11px] font-medium text-neutral-500">No image</span>
                     )}
                   </div>
-                  <div className="space-y-1">
-                    <p className="text-sm font-semibold capitalize text-neutral-900">
+                  <div className="min-w-0 space-y-1">
+                    <p className="text-xs font-semibold capitalize text-neutral-900">
                       {buildUpgradeConfirmation.targetLabel}
                     </p>
-                    <p className="text-xs leading-relaxed text-neutral-600">
+                    <p className="text-[11px] leading-snug text-neutral-600">
                       {buildUpgradeConfirmation.targetNarrativeSentence1}{" "}
                       {buildUpgradeConfirmation.targetNarrativeSentence2}
                     </p>
