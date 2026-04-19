@@ -12,39 +12,51 @@ const UPGRADE_LEVEL_PRESENTATIONS: Record<
   number,
   {
     label: string;
-    narrative: string;
+    narrativeSentence1: string;
+    narrativeSentence2: string;
   }
 > = {
   1: {
     label: "single detached house",
-    narrative:
+    narrativeSentence1:
       "This development establishes a modest single detached home on the property.",
+    narrativeSentence2:
+      "It gives the lot its first meaningful residential presence.",
   },
   2: {
     label: "two-storey house",
-    narrative:
+    narrativeSentence1:
       "This upgrade expands the home into a larger two-storey residence.",
+    narrativeSentence2:
+      "The added space makes the property more attractive to tenants and buyers.",
   },
   3: {
     label: "apartment building",
-    narrative:
+    narrativeSentence1:
       "This redevelopment converts the site into an apartment building with stronger rental potential.",
+    narrativeSentence2:
+      "Multi-unit housing improves both density and long-term earning power.",
   },
   4: {
     label: "commercial-residential building",
-    narrative:
+    narrativeSentence1:
       "This upgrade transforms the property into a commercial-residential building.",
+    narrativeSentence2:
+      "Mixed-use development increases both visibility and income potential.",
   },
   5: {
     label: "luxury resort and apartments",
-    narrative:
+    narrativeSentence1:
       "This final redevelopment creates a luxury resort and apartment complex.",
+    narrativeSentence2:
+      "Prestige and scale push the property into a premium income class.",
   },
 };
 
 const DEFAULT_UPGRADE_PRESENTATION = {
   label: "building upgrade",
-  narrative: "This development improves the property for stronger long-term returns.",
+  narrativeSentence1: "This development improves the property for stronger long-term returns.",
+  narrativeSentence2: "It strengthens the lot's economic value over time.",
 };
 
 export const getMaxDevelopmentLevel = (rentByHouses?: number[] | null) => {
@@ -91,7 +103,8 @@ export const getDevelopmentUpgradePresentation = (
   return {
     level: normalizedLevel,
     label: presentation.label,
-    narrative: presentation.narrative,
+    narrativeSentence1: presentation.narrativeSentence1,
+    narrativeSentence2: presentation.narrativeSentence2,
     spriteSrc: getDevelopmentSpriteForLevel(normalizedLevel),
   };
 };
@@ -120,12 +133,8 @@ export const getBuildUpgradeConfirmationCopy = (args: {
     : hasCashCost
       ? `${actionVerb} ${labelWithArticle} for ${formattedCost}?`
       : `${actionVerb} ${labelWithArticle} for listed cash cost?`;
-  const paymentSummary = usingVoucher
-    ? `Payment: ${useConstructionVoucher === "BUILD" ? "Build" : "Upgrade"} voucher`
-    : `Payment: Cash (${hasCashCost ? formattedCost : "cost unavailable"})`;
 
   return {
     question,
-    paymentSummary,
   };
 };

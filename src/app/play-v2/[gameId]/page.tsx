@@ -328,11 +328,11 @@ type BuildUpgradeConfirmationState = {
   tileName: string;
   targetLevel: number;
   targetLabel: string;
-  targetNarrative: string;
+  targetNarrativeSentence1: string;
+  targetNarrativeSentence2: string;
   targetSpriteSrc: string | null;
   useConstructionVoucher?: "BUILD" | "UPGRADE";
   question: string;
-  paymentSummary: string;
 };
 
 type PlayerLoan = {
@@ -3700,7 +3700,7 @@ export default function PlayV2Page() {
       );
       const formattedCost = formatMoney(houseCost ?? null);
       const hasCashCost = houseCost !== undefined && houseCost !== null;
-      const { question, paymentSummary } = getBuildUpgradeConfirmationCopy({
+      const { question } = getBuildUpgradeConfirmationCopy({
         currentLevel,
         targetLabel: targetPresentation.label,
         useConstructionVoucher,
@@ -3713,11 +3713,11 @@ export default function PlayV2Page() {
         tileName,
         targetLevel: targetPresentation.level,
         targetLabel: targetPresentation.label,
-        targetNarrative: targetPresentation.narrative,
+        targetNarrativeSentence1: targetPresentation.narrativeSentence1,
+        targetNarrativeSentence2: targetPresentation.narrativeSentence2,
         targetSpriteSrc: targetPresentation.spriteSrc,
         useConstructionVoucher,
         question,
-        paymentSummary,
       });
     },
     [formatMoney],
@@ -5644,16 +5644,11 @@ export default function PlayV2Page() {
         title={buildUpgradeConfirmation?.question ?? "Confirm upgrade"}
         description={
           buildUpgradeConfirmation ? (
-            <div className="space-y-3">
-              <div className="rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2">
-                <p className="text-xs uppercase tracking-wide text-neutral-500">Property</p>
-                <p className="text-sm font-semibold text-neutral-900">
-                  {buildUpgradeConfirmation.tileName}
-                </p>
-              </div>
-              <div className="rounded-xl border border-neutral-200 bg-white px-3 py-3">
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-neutral-900">{buildUpgradeConfirmation.tileName}</p>
+              <div className="px-1 py-1">
                 <div className="flex items-start gap-3">
-                  <div className="flex h-24 w-24 shrink-0 items-center justify-center rounded-lg border border-neutral-200 bg-neutral-50">
+                  <div className="flex h-24 w-24 shrink-0 items-center justify-center rounded-lg bg-neutral-50">
                     {buildUpgradeConfirmation.targetSpriteSrc ? (
                       <Image
                         src={buildUpgradeConfirmation.targetSpriteSrc}
@@ -5667,27 +5662,30 @@ export default function PlayV2Page() {
                     )}
                   </div>
                   <div className="space-y-1">
-                    <p className="text-xs uppercase tracking-wide text-neutral-500">
-                      Target level {buildUpgradeConfirmation.targetLevel}
-                    </p>
                     <p className="text-sm font-semibold capitalize text-neutral-900">
                       {buildUpgradeConfirmation.targetLabel}
                     </p>
                     <p className="text-xs leading-relaxed text-neutral-600">
-                      {buildUpgradeConfirmation.targetNarrative}
+                      {buildUpgradeConfirmation.targetNarrativeSentence1}{" "}
+                      {buildUpgradeConfirmation.targetNarrativeSentence2}
                     </p>
                   </div>
                 </div>
               </div>
-              <div className="rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-700">
-                <p>{buildUpgradeConfirmation.paymentSummary}</p>
-              </div>
             </div>
           ) : null
         }
-        confirmLabel={actionLoading === "BUILD_HOUSE" ? "Upgrading…" : "Confirm"}
+        confirmLabel={
+          actionLoading === "BUILD_HOUSE"
+            ? "Upgrading…"
+            : buildUpgradeConfirmation?.targetLevel === 1
+              ? "Build"
+              : "Confirm Upgrade"
+        }
         cancelLabel="Cancel"
         isConfirming={actionLoading === "BUILD_HOUSE"}
+        confirmVariant="success"
+        showEyebrow={false}
         onConfirm={() => {
           if (!buildUpgradeConfirmation || actionLoading === "BUILD_HOUSE") {
             return;

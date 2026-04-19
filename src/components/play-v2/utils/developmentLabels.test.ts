@@ -9,7 +9,8 @@ test("target level 1 presentation returns single detached house narrative and sp
   const presentation = getDevelopmentUpgradePresentation(1);
 
   assert.equal(presentation.label, "single detached house");
-  assert.match(presentation.narrative, /single detached home/i);
+  assert.match(presentation.narrativeSentence1, /single detached home/i);
+  assert.match(presentation.narrativeSentence2, /residential presence/i);
   assert.equal(presentation.spriteSrc, "/assets/house-1.svg");
 });
 
@@ -29,7 +30,6 @@ test("cash confirmation wording distinguishes build vs upgrade", () => {
 
   assert.equal(buildCopy.question, "Build a single detached house for $400?");
   assert.equal(upgradeCopy.question, "Upgrade to an apartment building for $600?");
-  assert.equal(buildCopy.paymentSummary, "Payment: Cash ($400)");
 });
 
 test("voucher confirmation wording preserves voucher type semantics", () => {
@@ -56,6 +56,4 @@ test("voucher confirmation wording preserves voucher type semantics", () => {
     upgradeVoucherCopy.question,
     "Upgrade to a commercial-residential building using voucher?",
   );
-  assert.equal(buildVoucherCopy.paymentSummary, "Payment: Build voucher");
-  assert.equal(upgradeVoucherCopy.paymentSummary, "Payment: Upgrade voucher");
 });
