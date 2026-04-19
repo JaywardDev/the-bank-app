@@ -3,9 +3,9 @@ import { getMaxDevelopmentLevel as getSharedMaxDevelopmentLevel } from "@/lib/de
 const BASE_DEVELOPMENT_LEVEL_LABELS = [
   "Land",
   "Detached House",
-  "Luxury House",
+  "Two-Storey Building",
   "Row Houses",
-  "Mid-rise Apartment",
+  "Luxury Building",
 ] as const;
 const DEFAULT_MAX_SPRITE_LEVEL = 5;
 
@@ -72,7 +72,7 @@ export const getDevelopmentLevelLabel = (
   const normalizedLevel = Math.max(0, Math.min(Math.floor(level), maxLevel));
 
   if (normalizedLevel >= maxLevel) {
-    return "Luxury Hotel";
+    return "Luxury Building";
   }
 
   return (

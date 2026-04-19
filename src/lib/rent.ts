@@ -96,6 +96,17 @@ export const ownsFullColorSet = (
   );
 };
 
+export const getFullColorGroupRent = (tile: BoardTile) => {
+  if (tile.type !== "PROPERTY") {
+    return null;
+  }
+  const baseNoHouseRent = tile.rentByHouses?.[0] ?? tile.baseRent;
+  if (typeof baseNoHouseRent !== "number") {
+    return null;
+  }
+  return baseNoHouseRent * 2;
+};
+
 export const getCurrentTileRent = ({
   tile,
   ownershipByTile,
@@ -129,8 +140,7 @@ export const getCurrentTileRent = ({
       return rentWithDevelopment;
     }
 
-    const baseNoHouseRent = tile.rentByHouses?.[0] ?? tile.baseRent ?? 0;
-    return baseNoHouseRent * 2;
+    return getFullColorGroupRent(tile) ?? 0;
   }
 
   // Example assertion block (no test runner configured):

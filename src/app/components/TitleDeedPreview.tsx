@@ -5,12 +5,14 @@ import {
   type BoardTile,
 } from "@/lib/boardPacks";
 import {
+  getFullColorGroupRent,
   getPropertyRentWithDevelopment,
   ownsFullColorSet,
 } from "@/lib/rent";
 import { getBoardTileIconSrc } from "@/lib/tileIcons";
 import { getDevelopmentLevelLabel } from "@/components/play-v2/utils/developmentLabels";
 import { formatCurrency, getCurrencyMetaFromEconomy } from "@/lib/currency";
+import { getNextBuildCost } from "@/lib/developmentCosts";
 
 const getCanonicalTileType = (tileType: string) => {
   const normalized = tileType.toUpperCase();
@@ -136,25 +138,21 @@ type RentRow = { label: string; value: number | null };
 
 const PropertyRentTable = ({
   rentRows,
-  houseCost,
-  hotelIncrement,
+  nextBuildCost,
   currentRent,
   monopolyActive = false,
   currency,
   className,
 }: {
   rentRows: RentRow[];
-  houseCost: number | null;
-  hotelIncrement: number | null;
+  nextBuildCost: number | null;
   currentRent?: number | null;
   monopolyActive?: boolean;
   currency: { code?: string | null; symbol?: string | null };
   className?: string;
 }) => (
   <div
-    className={`rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 ${
-      className ?? ""
-    }`}
+    className={`px-1 py-1 ${className ?? ""}`}
   >
     <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
       Rent
@@ -172,15 +170,9 @@ const PropertyRentTable = ({
         </div>
       ))}
       <div className="flex items-center justify-between text-neutral-600">
-        <span>Hotel increment</span>
+        <span>Build cost</span>
         <span className="font-semibold text-neutral-900">
-          {hotelIncrement !== null ? `${formatSignedMoney(hotelIncrement, currency)} per hotel` : "—"}
-        </span>
-      </div>
-      <div className="flex items-center justify-between text-neutral-600">
-        <span>House cost</span>
-        <span className="font-semibold text-neutral-900">
-          {houseCost !== null ? `${formatMoney(houseCost, currency)} each` : "—"}
+          {nextBuildCost !== null ? formatMoney(nextBuildCost, currency) : "—"}
         </span>
       </div>
       {monopolyActive ? (
@@ -189,7 +181,7 @@ const PropertyRentTable = ({
         </p>
       ) : null}
       {currentRent !== undefined && currentRent !== null ? (
-        <div className="mt-2 rounded-lg border border-neutral-200 bg-white px-2 py-1 text-[11px] font-semibold text-neutral-700">
+        <div className="mt-2 border-t border-neutral-200 pt-1 text-[11px] font-semibold text-neutral-700">
           Current rent: {formatMoney(currentRent, currency)}
         </div>
       ) : null}
@@ -331,62 +323,8 @@ const formatMoney = (
   currency: { code?: string | null; symbol?: string | null },
 ) => formatCurrency(amount, currency);
 
-const formatSignedMoney = (
-  amount: number,
-  currency: { code?: string | null; symbol?: string | null },
-) => `${amount < 0 ? "-" : "+"}${formatMoney(Math.abs(amount), currency)}`;
-
-const getDevBreakdown = (dev: number) => {
-  const normalizedDev = Number.isFinite(dev) ? Math.max(0, Math.floor(dev)) : 0;
-  return {
-    hotelCount: Math.floor(normalizedDev / 5),
-    houseCount: normalizedDev % 5,
-  };
-};
-
-const getHotelIncrement = (rent4: number) => Math.ceil(rent4 * 1.25);
-
 const getPropertyRentWithDev = (tile: BoardTile, dev: number) =>
   getPropertyRentWithDevelopment(tile, dev);
-
-const DevelopmentIcons = ({
-  dev,
-  maxIcons = 8,
-}: {
-  dev: number;
-  maxIcons?: number;
-}) => {
-  const { hotelCount, houseCount } = getDevBreakdown(dev);
-  const totalIcons = hotelCount + houseCount;
-  if (totalIcons === 0) {
-    return <span className="text-xs text-neutral-400">None</span>;
-  }
-  const visibleCount = Math.min(totalIcons, maxIcons);
-  const overflow = totalIcons - visibleCount;
-  return (
-    <div className="flex flex-wrap items-center justify-end gap-1">
-      {Array.from({ length: visibleCount }).map((_, index) => {
-        const iconType = index < hotelCount ? "hotel" : "house";
-        return (
-          <Image
-            key={`${iconType}-${index}`}
-            src={iconType === "hotel" ? "/icons/hotel.svg" : "/icons/house.svg"}
-            alt=""
-            width={14}
-            height={14}
-            className="h-3.5 w-3.5 object-contain"
-            aria-hidden
-          />
-        );
-      })}
-      {overflow > 0 ? (
-        <span className="text-[10px] font-semibold text-neutral-500">
-          +{overflow}
-        </span>
-      ) : null}
-    </div>
-  );
-};
 
 const getPropertyRentDetails = ({
   tile,
@@ -417,12 +355,16 @@ const getPropertyRentDetails = ({
     baseNoHouseRent !== null && hasMonopolyNoDevelopment
       ? baseNoHouseRent * 2
       : baseNoHouseRent;
-  const rent4 =
-    rentByHouses?.[4] ?? rentByHouses?.[rentByHouses.length - 1] ?? null;
-  const hotelIncrement = rent4 !== null ? getHotelIncrement(rent4) : null;
+  const fullColorGroupRent = tile ? getFullColorGroupRent(tile) : null;
+  const nextBuildCost =
+    tile && typeof tile.houseCost === "number"
+      ? getNextBuildCost({
+          baseCost: tile.houseCost,
+          currentLevel: development,
+        })
+      : null;
   return {
-    houseCost: tile?.houseCost ?? null,
-    hotelIncrement,
+    nextBuildCost,
     monopolyActive: hasMonopolyNoDevelopment,
     rentRows: [
       {
@@ -432,10 +374,14 @@ const getPropertyRentDetails = ({
       ...Array.from({ length: Math.max((rentByHouses?.length ?? 1) - 1, 0) }, (_, index) => {
         const level = index + 1;
         return {
-          label: `Rent at Lv ${level} (${getDevelopmentLevelLabel(level, rentByHouses)})`,
+          label: getDevelopmentLevelLabel(level, rentByHouses),
           value: rentByHouses?.[level] ?? null,
         };
       }),
+      {
+        label: "Full color group rent",
+        value: fullColorGroupRent,
+      },
     ],
   };
 };
@@ -539,7 +485,7 @@ export const TitleDeedPreview = ({
             </p>
             {priceValue !== null ? (
               <p className={`${size === "compact" ? "text-[11px]" : "text-xs"} font-medium text-neutral-500`}>
-                Price {formatMoney(priceValue, currency)}
+                Value {formatMoney(priceValue, currency)}
               </p>
             ) : null}
           </div>
@@ -561,7 +507,7 @@ export const TitleDeedPreview = ({
             </p>
             {priceValue !== null ? (
               <p className={`${size === "compact" ? "text-[11px]" : "text-xs"} font-medium text-neutral-500`}>
-                Price {formatMoney(priceValue, currency)}
+                Value {formatMoney(priceValue, currency)}
               </p>
             ) : null}
           </div>
@@ -574,7 +520,7 @@ export const TitleDeedPreview = ({
       subheader={
         tile.type === "PROPERTY" && priceValue !== null ? (
           <p className={`${size === "compact" ? "text-[11px]" : "text-xs"} font-medium text-neutral-500`}>
-            Price {formatMoney(priceValue, currency)}
+            Value {formatMoney(priceValue, currency)}
           </p>
         ) : null
       }
@@ -598,20 +544,9 @@ export const TitleDeedPreview = ({
           />
         ) : (
           <div className={size === "compact" ? "space-y-1.5" : "mt-1 space-y-2"}>
-            {showDevelopment && resolvedDevelopment !== null ? (
-              <div className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-xs text-neutral-600">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-medium text-neutral-700">
-                    Upgrade: Lv {resolvedDevelopment} • {getDevelopmentLevelLabel(resolvedDevelopment, tile.rentByHouses)}
-                  </span>
-                  <DevelopmentIcons dev={resolvedDevelopment} />
-                </div>
-              </div>
-            ) : null}
             <PropertyRentTable
               rentRows={propertyRent.rentRows}
-              houseCost={propertyRent.houseCost}
-              hotelIncrement={propertyRent.hotelIncrement}
+              nextBuildCost={propertyRent.nextBuildCost}
               currentRent={resolvedDevelopment !== null ? currentRent : undefined}
               monopolyActive={propertyRent.monopolyActive}
               currency={currency}
