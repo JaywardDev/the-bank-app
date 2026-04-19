@@ -42,6 +42,7 @@ import {
   ownsFullColorSet,
 } from "@/lib/rent";
 import { formatCurrency, getCurrencyMetaFromBoardPack } from "@/lib/currency";
+import { getNextBuildCost } from "@/lib/developmentCosts";
 import {
   canExploreInlandCell,
   getInlandBankSalePrice,
@@ -3321,12 +3322,12 @@ export default function PlayV2Page() {
         const sellHouseDisabledReason = !isMyTurn
           ? "Not your turn"
           : housesCount === 0
-            ? "No upgrades to downgrade"
+            ? "No development to sell"
             : null;
         const sellHotelDisabledReason = !isMyTurn
           ? "Not your turn"
-          : housesCount < 5
-            ? "Need top level first"
+          : housesCount === 0
+            ? "No development to sell"
             : null;
         const collateralDisabledReason = !canUseWalletPropertyActions
           ? "Not your turn"
@@ -3698,8 +3699,12 @@ export default function PlayV2Page() {
         targetLevel,
         rentByHouses,
       );
-      const formattedCost = formatMoney(houseCost ?? null);
-      const hasCashCost = houseCost !== undefined && houseCost !== null;
+      const nextBuildCost =
+        typeof houseCost === "number"
+          ? getNextBuildCost({ baseCost: houseCost, currentLevel })
+          : null;
+      const formattedCost = formatMoney(nextBuildCost);
+      const hasCashCost = nextBuildCost !== null;
       const { question } = getBuildUpgradeConfirmationCopy({
         currentLevel,
         targetLabel: targetPresentation.label,
@@ -3739,6 +3744,9 @@ export default function PlayV2Page() {
         <div className="rounded-lg border border-indigo-200/20 bg-indigo-500/10 px-2.5 py-2 text-[11px] text-indigo-100/90">
           Vouchers · Build {currentPlayerFreeBuildTokens} · Upgrade {currentPlayerFreeUpgradeTokens}
         </div>
+        <p className="text-[11px] text-white/65">
+          Own the full color set to build. Each property can be upgraded independently. Selling development resets that property to undeveloped.
+        </p>
         {ownedProperties.map((entry) => {
           const {
             tile,
@@ -3865,8 +3873,8 @@ export default function PlayV2Page() {
                     }
                   >
                     {actionLoading === "SELL_HOUSE"
-                      ? "Downgrading…"
-                      : "Downgrade"}
+                      ? "Selling…"
+                      : "Sell Development"}
                   </button>
                   {activeReasonForTile?.actionKey === "SELL_HOUSE" ? (
                     <p className="text-[10px] text-red-300">
@@ -4007,7 +4015,11 @@ export default function PlayV2Page() {
             ownershipByTile[loan.collateral_tile_index]?.houses ?? 0;
           const canDefault = canAct && houses === 0;
           const defaultDisabledReason =
-            houses > 0 ? "Downgrade first" : !canAct ? "Not your turn" : null;
+            houses > 0
+              ? "Sell development first"
+              : !canAct
+                ? "Not your turn"
+                : null;
           const isPayoffLoading = actionLoading === "PAYOFF_COLLATERAL_LOAN";
           const isDefaultLoading = actionLoading === "DEFAULT_PROPERTY";
 
@@ -4835,7 +4847,12 @@ export default function PlayV2Page() {
                   currentRentLabel={formatMoney(selectedTileCurrentRent)}
                   upgradeCostLabel={
                     selectedTileIsUpgradeable
-                      ? formatMoney(selectedTile.houseCost ?? null)
+                      ? formatMoney(
+                          getNextBuildCost({
+                            baseCost: selectedTile.houseCost ?? 0,
+                            currentLevel: selectedTileDevelopmentCount,
+                          }),
+                        )
                       : null
                   }
                   nextRentLabel={

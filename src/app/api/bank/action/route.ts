@@ -50,6 +50,7 @@ import {
   serializeInlandCellRecords,
 } from "@/lib/inlandExploration";
 import { resolveBoardTilesForRules } from "@/lib/resolvedBoardTiles";
+import { getMaxDevelopmentLevel, getNextBuildCost } from "@/lib/developmentCosts";
 import {
   getRuntimeUnlocksFromRules,
   mergeCommunicationUnlockIntoRules,
@@ -947,10 +948,11 @@ const liquidateHousesForPlayer = async ({
     const entry = candidateTiles[nextIndex];
     const tile = entry.tile;
     const houseCost = tile.houseCost ?? 0;
+    const housesBefore = entry.houses;
+    const housesAfter = 0;
     const sellValue = Math.round(
-      houseCost * 0.5 * macroHouseSellMultiplier,
+      houseCost * 0.5 * macroHouseSellMultiplier * housesBefore,
     );
-    const housesAfter = entry.houses - 1;
     await fetchFromSupabaseWithService(
       `property_ownership?game_id=eq.${gameId}&tile_index=eq.${tile.index}&owner_player_id=eq.${player.id}`,
       {
@@ -973,12 +975,10 @@ const liquidateHousesForPlayer = async ({
     };
 
     entry.houses = housesAfter;
-    if (entry.houses <= 0) {
-      candidateTiles.splice(nextIndex, 1);
-    }
+    candidateTiles.splice(nextIndex, 1);
 
     nextBalance += sellValue;
-    housesSold += 1;
+    housesSold += housesBefore;
     cashRecovered += sellValue;
     updatedBalances = {
       ...updatedBalances,
@@ -993,7 +993,7 @@ const liquidateHousesForPlayer = async ({
           tile_index: tile.index,
           tile_id: tile.tile_id,
           house_cost: houseCost,
-          houses_before: housesAfter + 1,
+          houses_before: housesBefore,
           houses_after: housesAfter,
           reason: "FORCED_HOUSE_LIQUIDATION",
           effect_type: effectType,
@@ -8594,35 +8594,14 @@ export async function POST(request: Request) {
         );
       }
 
-      const groupTiles = boardTiles.filter(
-        (entry) =>
-          entry.type === "PROPERTY" && entry.colorGroup === tile.colorGroup,
-      );
-
       const houses = ownership.houses ?? 0;
       const houseCost = tile.houseCost ?? 0;
-      const adjustedHouseCost =
-        action === "BUILD_HOUSE"
-          ? Math.round(houseCost * macroDevelopmentMultiplier)
-          : houseCost;
+      const maxDevelopmentLevel = getMaxDevelopmentLevel(tile.rentByHouses);
       const requestedVoucherTypeRaw =
         "useConstructionVoucher" in body &&
         typeof body.useConstructionVoucher === "string"
           ? body.useConstructionVoucher
           : null;
-
-      const isEvenBuildAfterChange = (nextHouses: number) => {
-        const nextGroupHouses = groupTiles.map((entry) =>
-          entry.index === tileIndex
-            ? nextHouses
-            : ownershipByTile[entry.index]?.houses ?? 0,
-        );
-        const nextMin =
-          nextGroupHouses.length > 0 ? Math.min(...nextGroupHouses) : 0;
-        const nextMax =
-          nextGroupHouses.length > 0 ? Math.max(...nextGroupHouses) : 0;
-        return nextMax - nextMin <= 1;
-      };
 
       if (action === "BUILD_HOUSE") {
         if (getMacroHouseBuildBlockedV1(activeMacroEffects)) {
@@ -8638,19 +8617,21 @@ export async function POST(request: Request) {
           );
         }
         const balances = gameState.balances ?? {};
-        const currentBalance =
-          balances[currentPlayer.id] ?? startingCash;
+        const currentBalance = balances[currentPlayer.id] ?? startingCash;
 
         const nextHouses = houses + 1;
-        if (!isEvenBuildAfterChange(nextHouses)) {
+        if (nextHouses > maxDevelopmentLevel) {
           return NextResponse.json(
-            {
-              error:
-                "Houses must be built evenly across the color group.",
-            },
+            { error: "Property is already fully upgraded." },
             { status: 409 },
           );
         }
+        const adjustedHouseCost = Math.round(
+          getNextBuildCost({
+            baseCost: houseCost,
+            currentLevel: houses,
+          }) * macroDevelopmentMultiplier,
+        );
         const eligibleVoucherType = houses === 0 ? "BUILD" : "UPGRADE";
         const hasBuildVoucher = (currentPlayer.free_build_tokens ?? 0) > 0;
         const hasUpgradeVoucher = (currentPlayer.free_upgrade_tokens ?? 0) > 0;
@@ -8844,45 +8825,14 @@ export async function POST(request: Request) {
 
       const balances = gameState.balances ?? {};
       const currentBalance = balances[currentPlayer.id] ?? startingCash;
-      const sellValue =
-        action === "SELL_HOTEL"
-          ? Math.round(0.8 * 5 * houseCost)
-          : Math.round(houseCost * 0.5 * macroHouseSellMultiplier);
-      const houseReduction = action === "SELL_HOTEL" ? 5 : 1;
-      const nextHouses = houses - houseReduction;
+      const nextHouses = 0;
+      const sellValue = Math.round(
+        houseCost * 0.5 * macroHouseSellMultiplier * houses,
+      );
 
       if (houses <= 0) {
         return NextResponse.json(
           { error: "No houses to sell." },
-          { status: 409 },
-        );
-      }
-
-      if (action === "SELL_HOTEL") {
-        if (houses < 5) {
-          return NextResponse.json(
-            { error: "No hotel available to sell." },
-            { status: 409 },
-          );
-        }
-        if (houses % 5 !== 0) {
-          return NextResponse.json(
-            { error: "Hotels can only be sold at development boundaries." },
-            { status: 409 },
-          );
-        }
-      }
-
-      if (nextHouses < 0) {
-        return NextResponse.json(
-          { error: "No houses to sell." },
-          { status: 409 },
-        );
-      }
-
-      if (!isEvenBuildAfterChange(nextHouses)) {
-        return NextResponse.json(
-          { error: "Houses must be sold evenly across the color group." },
           { status: 409 },
         );
       }
@@ -8932,7 +8882,10 @@ export async function POST(request: Request) {
           payload: {
             player_id: currentPlayer.id,
             amount: sellValue,
-            reason: action === "SELL_HOTEL" ? "SELL_HOTEL" : "SELL_HOUSE",
+            reason:
+              action === "SELL_HOTEL"
+                ? "SELL_HOTEL_FULL_DEVELOPMENT"
+                : "SELL_HOUSE_FULL_DEVELOPMENT",
             tile_index: tileIndex,
           },
         },
