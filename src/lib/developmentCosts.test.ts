@@ -5,6 +5,7 @@ import {
   getBuildCostMultipliers,
   getMaxDevelopmentLevel,
   getNextBuildCost,
+  normalizeRentByHousesTiers,
 } from "./developmentCosts.ts";
 
 test("build cost multipliers remain stable", () => {
@@ -27,6 +28,14 @@ test("next build cost uses deterministic rounding", () => {
 
 test("max development level follows rent table length", () => {
   assert.equal(getMaxDevelopmentLevel([20, 100, 300, 900, 1600, 2500]), 5);
+  assert.equal(getMaxDevelopmentLevel([20, 100, 300, 900, 1600]), 5);
   assert.equal(getMaxDevelopmentLevel([12, 40]), 1);
   assert.equal(getMaxDevelopmentLevel(null), 5);
+});
+
+test("normalizes five-tier rent ladders by inserting a middle tier", () => {
+  assert.deepEqual(
+    normalizeRentByHousesTiers([20, 100, 300, 900, 1600]),
+    [20, 100, 300, 900, 1250, 1600],
+  );
 });

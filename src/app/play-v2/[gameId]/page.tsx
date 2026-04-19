@@ -3230,7 +3230,7 @@ export default function PlayV2Page() {
 
   const selectedTileIsFullyUpgraded =
     selectedTileIsUpgradeable &&
-    selectedTileDevelopmentCount === selectedTileMaxUpgradeLevel;
+    selectedTileDevelopmentCount >= selectedTileMaxUpgradeLevel;
 
   const selectedTileNextRent = useMemo(() => {
     if (

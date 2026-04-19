@@ -1,54 +1,53 @@
 import { getMaxDevelopmentLevel as getSharedMaxDevelopmentLevel } from "@/lib/developmentCosts";
 
-const BASE_DEVELOPMENT_LEVEL_LABELS = [
-  "Land",
-  "Detached House",
-  "Two-Storey Building",
-  "Row Houses",
-  "Luxury Building",
-] as const;
+const BASE_DEVELOPMENT_LEVEL_LABEL = "Undeveloped";
 const DEFAULT_MAX_SPRITE_LEVEL = 5;
 
-const UPGRADE_LEVEL_PRESENTATIONS: Record<
-  number,
-  {
-    label: string;
-    narrativeSentence1: string;
-    narrativeSentence2: string;
-  }
-> = {
+export const CANONICAL_DEVELOPMENT_LADDER = [
+  { level: 1, label: "Single Detached House" },
+  { level: 2, label: "Two-Storey House" },
+  { level: 3, label: "Apartment Building" },
+  { level: 4, label: "Commercial-Residential Building" },
+  { level: 5, label: "Luxury Resort and Hotel" },
+] as const;
+
+const UPGRADE_LEVEL_PRESENTATIONS: Record<number, {
+  label: string;
+  narrativeSentence1: string;
+  narrativeSentence2: string;
+}> = {
   1: {
-    label: "single detached house",
+    label: "Single Detached House",
     narrativeSentence1:
       "This development establishes a modest single detached home on the property.",
     narrativeSentence2:
       "It gives the lot its first meaningful residential presence.",
   },
   2: {
-    label: "two-storey house",
+    label: "Two-Storey House",
     narrativeSentence1:
       "This upgrade expands the home into a larger two-storey residence.",
     narrativeSentence2:
       "The added space makes the property more attractive to tenants and buyers.",
   },
   3: {
-    label: "apartment building",
+    label: "Apartment Building",
     narrativeSentence1:
       "This redevelopment converts the site into an apartment building with stronger rental potential.",
     narrativeSentence2:
       "Multi-unit housing improves both density and long-term earning power.",
   },
   4: {
-    label: "commercial-residential building",
+    label: "Commercial-Residential Building",
     narrativeSentence1:
       "This upgrade transforms the property into a commercial-residential building.",
     narrativeSentence2:
       "Mixed-use development increases both visibility and income potential.",
   },
   5: {
-    label: "luxury resort and apartments",
+    label: "Luxury Resort and Hotel",
     narrativeSentence1:
-      "This final redevelopment creates a luxury resort and apartment complex.",
+      "This final redevelopment creates a luxury resort and hotel destination.",
     narrativeSentence2:
       "Prestige and scale push the property into a premium income class.",
   },
@@ -70,14 +69,12 @@ export const getDevelopmentLevelLabel = (
 ) => {
   const maxLevel = getMaxDevelopmentLevel(rentByHouses);
   const normalizedLevel = Math.max(0, Math.min(Math.floor(level), maxLevel));
-
-  if (normalizedLevel >= maxLevel) {
-    return "Luxury Building";
+  if (normalizedLevel === 0) {
+    return BASE_DEVELOPMENT_LEVEL_LABEL;
   }
-
   return (
-    BASE_DEVELOPMENT_LEVEL_LABELS[normalizedLevel] ??
-    BASE_DEVELOPMENT_LEVEL_LABELS[BASE_DEVELOPMENT_LEVEL_LABELS.length - 1]
+    CANONICAL_DEVELOPMENT_LADDER.find((tier) => tier.level === normalizedLevel)
+      ?.label ?? CANONICAL_DEVELOPMENT_LADDER[CANONICAL_DEVELOPMENT_LADDER.length - 1].label
   );
 };
 
@@ -124,9 +121,8 @@ export const getBuildUpgradeConfirmationCopy = (args: {
     hasCashCost,
   } = args;
   const actionVerb = currentLevel <= 0 ? "Build" : "Upgrade to";
-  const labelWithArticle = /^[aeiou]/i.test(targetLabel)
-    ? `an ${targetLabel}`
-    : `a ${targetLabel}`;
+  const article = /^[aeiou]/i.test(targetLabel) ? "an" : "a";
+  const labelWithArticle = `${article} ${targetLabel}`;
   const usingVoucher = Boolean(useConstructionVoucher);
   const question = usingVoucher
     ? `${actionVerb} ${labelWithArticle} using voucher?`

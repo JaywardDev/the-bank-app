@@ -1,4 +1,5 @@
 import type { BoardPackEconomy, BoardTile, BoardTileType } from "@/lib/boardPacks";
+import { normalizeRentByHousesTiers } from "@/lib/developmentCosts";
 
 export type OwnershipEntry = {
   owner_player_id: string;
@@ -9,29 +10,14 @@ export type OwnershipEntry = {
 
 export type OwnershipByTile = Record<number, OwnershipEntry>;
 
-const DEFAULT_HOTEL_INCREMENT_MULTIPLIER = 1.25;
 const DEFAULT_UTILITY_ROLL = 7;
 const DEFAULT_UTILITY_TRIPLE_MULTIPLIER = 16;
-
-const getDevBreakdown = (dev: number) => {
-  const normalizedDev = Number.isFinite(dev) ? Math.max(0, Math.floor(dev)) : 0;
-  return {
-    hotelCount: Math.floor(normalizedDev / 5),
-    houseCount: normalizedDev % 5,
-  };
-};
-
-const getHotelIncrement = (
-  rent4: number,
-  hotelIncrementMultiplier: number = DEFAULT_HOTEL_INCREMENT_MULTIPLIER,
-) => Math.ceil(rent4 * hotelIncrementMultiplier);
 
 export const getPropertyRentWithDevelopment = (
   tile: BoardTile,
   development: number,
-  hotelIncrementMultiplier: number = DEFAULT_HOTEL_INCREMENT_MULTIPLIER,
 ) => {
-  const rentByHouses = tile.rentByHouses;
+  const rentByHouses = normalizeRentByHousesTiers(tile.rentByHouses);
   if (!rentByHouses || rentByHouses.length === 0) {
     return tile.baseRent ?? 0;
   }
@@ -43,16 +29,7 @@ export const getPropertyRentWithDevelopment = (
   if (normalizedDev <= rentByHouses.length - 1) {
     return rentByHouses[normalizedDev] ?? tile.baseRent ?? 0;
   }
-
-  const { hotelCount, houseCount } = getDevBreakdown(normalizedDev);
-  const rent4 =
-    rentByHouses[4] ??
-    rentByHouses[rentByHouses.length - 1] ??
-    tile.baseRent ??
-    0;
-  const hotelIncrement = getHotelIncrement(rent4, hotelIncrementMultiplier);
-  const baseRent = rentByHouses[houseCount] ?? tile.baseRent ?? 0;
-  return baseRent + hotelCount * hotelIncrement;
+  return rentByHouses[rentByHouses.length - 1] ?? tile.baseRent ?? 0;
 };
 
 const countOwnedTilesByType = (
@@ -130,7 +107,6 @@ export const getCurrentTileRent = ({
     const rentWithDevelopment = getPropertyRentWithDevelopment(
       tile,
       development,
-      economy.hotelIncrementMultiplier,
     );
 
     const hasMonopolyNoDevelopment =

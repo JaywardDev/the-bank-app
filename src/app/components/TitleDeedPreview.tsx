@@ -7,12 +7,11 @@ import {
 import {
   getFullColorGroupRent,
   getPropertyRentWithDevelopment,
-  ownsFullColorSet,
 } from "@/lib/rent";
 import { getBoardTileIconSrc } from "@/lib/tileIcons";
 import { getDevelopmentLevelLabel } from "@/components/play-v2/utils/developmentLabels";
 import { formatCurrency, getCurrencyMetaFromEconomy } from "@/lib/currency";
-import { getNextBuildCost } from "@/lib/developmentCosts";
+import { getNextBuildCost, normalizeRentByHousesTiers } from "@/lib/developmentCosts";
 
 const getCanonicalTileType = (tileType: string) => {
   const normalized = tileType.toUpperCase();
@@ -140,14 +139,12 @@ const PropertyRentTable = ({
   rentRows,
   nextBuildCost,
   currentRent,
-  monopolyActive = false,
   currency,
   className,
 }: {
   rentRows: RentRow[];
   nextBuildCost: number | null;
   currentRent?: number | null;
-  monopolyActive?: boolean;
   currency: { code?: string | null; symbol?: string | null };
   className?: string;
 }) => (
@@ -175,11 +172,6 @@ const PropertyRentTable = ({
           {nextBuildCost !== null ? formatMoney(nextBuildCost, currency) : "—"}
         </span>
       </div>
-      {monopolyActive ? (
-        <p className="pt-1 text-[11px] font-semibold text-amber-700">
-          Monopoly active: base rent doubled.
-        </p>
-      ) : null}
       {currentRent !== undefined && currentRent !== null ? (
         <div className="mt-2 border-t border-neutral-200 pt-1 text-[11px] font-semibold text-neutral-700">
           Current rent: {formatMoney(currentRent, currency)}
@@ -339,22 +331,16 @@ const getPropertyRentDetails = ({
   ownershipByTile?: OwnershipByTile;
   boardTiles?: BoardTile[];
 }) => {
+  void ownerPlayerId;
+  void ownershipByTile;
+  void boardTiles;
   const baseRent =
     tile && typeof tile.baseRent === "number" ? tile.baseRent : null;
   const rentByHouses =
     tile?.rentByHouses && tile.rentByHouses.length > 0
-      ? tile.rentByHouses
+      ? normalizeRentByHousesTiers(tile.rentByHouses)
       : null;
   const baseNoHouseRent = rentByHouses?.[0] ?? baseRent ?? null;
-  const hasMonopolyNoDevelopment =
-    tile?.type === "PROPERTY" &&
-    development === 0 &&
-    ownerPlayerId !== null &&
-    ownsFullColorSet(tile, boardTiles, ownershipByTile, ownerPlayerId);
-  const baseRentDisplay =
-    baseNoHouseRent !== null && hasMonopolyNoDevelopment
-      ? baseNoHouseRent * 2
-      : baseNoHouseRent;
   const fullColorGroupRent = tile ? getFullColorGroupRent(tile) : null;
   const nextBuildCost =
     tile && typeof tile.houseCost === "number"
@@ -365,11 +351,14 @@ const getPropertyRentDetails = ({
       : null;
   return {
     nextBuildCost,
-    monopolyActive: hasMonopolyNoDevelopment,
     rentRows: [
       {
-        label: hasMonopolyNoDevelopment ? "Base rent (Monopoly ×2)" : "Base rent",
-        value: baseRentDisplay,
+        label: "Base rent",
+        value: baseNoHouseRent,
+      },
+      {
+        label: "Full color group rent",
+        value: fullColorGroupRent,
       },
       ...Array.from({ length: Math.max((rentByHouses?.length ?? 1) - 1, 0) }, (_, index) => {
         const level = index + 1;
@@ -378,10 +367,6 @@ const getPropertyRentDetails = ({
           value: rentByHouses?.[level] ?? null,
         };
       }),
-      {
-        label: "Full color group rent",
-        value: fullColorGroupRent,
-      },
     ],
   };
 };
@@ -548,7 +533,6 @@ export const TitleDeedPreview = ({
               rentRows={propertyRent.rentRows}
               nextBuildCost={propertyRent.nextBuildCost}
               currentRent={resolvedDevelopment !== null ? currentRent : undefined}
-              monopolyActive={propertyRent.monopolyActive}
               currency={currency}
             />
           </div>

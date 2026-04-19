@@ -13,12 +13,18 @@ type PropertyGroupConfig = {
   houseCost: number;
 };
 
-const DEFAULT_HOUSE_RENT_MULTIPLIERS = [1, 5, 15, 45, 80];
+const DEFAULT_HOUSE_RENT_MULTIPLIERS = [1, 5, 15, 45, 62, 80];
 
 const buildRentByHouses = (
   baseRent: number,
   multipliers: number[] = DEFAULT_HOUSE_RENT_MULTIPLIERS,
-) => multipliers.map((multiplier) => baseRent * multiplier);
+) => {
+  const normalizedMultipliers =
+    multipliers.length === 5
+      ? [...multipliers.slice(0, 4), Math.round((multipliers[3] + multipliers[4]) / 2), multipliers[4]]
+      : multipliers;
+  return normalizedMultipliers.map((multiplier) => baseRent * multiplier);
+};
 
 const applyPropertyGroupConfig = (
   tiles: BoardTile[],

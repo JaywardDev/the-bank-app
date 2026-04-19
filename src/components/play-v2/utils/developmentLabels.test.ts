@@ -8,7 +8,7 @@ import {
 test("target level 1 presentation returns single detached house narrative and sprite", () => {
   const presentation = getDevelopmentUpgradePresentation(1);
 
-  assert.equal(presentation.label, "single detached house");
+  assert.equal(presentation.label, "Single Detached House");
   assert.match(presentation.narrativeSentence1, /single detached home/i);
   assert.match(presentation.narrativeSentence2, /residential presence/i);
   assert.equal(presentation.spriteSrc, "/assets/house-1.svg");
@@ -17,32 +17,32 @@ test("target level 1 presentation returns single detached house narrative and sp
 test("cash confirmation wording distinguishes build vs upgrade", () => {
   const buildCopy = getBuildUpgradeConfirmationCopy({
     currentLevel: 0,
-    targetLabel: "single detached house",
+    targetLabel: "Single Detached House",
     formattedCost: "$400",
     hasCashCost: true,
   });
   const upgradeCopy = getBuildUpgradeConfirmationCopy({
     currentLevel: 2,
-    targetLabel: "apartment building",
+    targetLabel: "Apartment Building",
     formattedCost: "$600",
     hasCashCost: true,
   });
 
-  assert.equal(buildCopy.question, "Build a single detached house for $400?");
-  assert.equal(upgradeCopy.question, "Upgrade to an apartment building for $600?");
+  assert.equal(buildCopy.question, "Build a Single Detached House for $400?");
+  assert.equal(upgradeCopy.question, "Upgrade to an Apartment Building for $600?");
 });
 
 test("voucher confirmation wording preserves voucher type semantics", () => {
   const buildVoucherCopy = getBuildUpgradeConfirmationCopy({
     currentLevel: 0,
-    targetLabel: "single detached house",
+    targetLabel: "Single Detached House",
     useConstructionVoucher: "BUILD",
     formattedCost: "$400",
     hasCashCost: true,
   });
   const upgradeVoucherCopy = getBuildUpgradeConfirmationCopy({
     currentLevel: 3,
-    targetLabel: "commercial-residential building",
+    targetLabel: "Commercial-Residential Building",
     useConstructionVoucher: "UPGRADE",
     formattedCost: "$600",
     hasCashCost: true,
@@ -50,10 +50,10 @@ test("voucher confirmation wording preserves voucher type semantics", () => {
 
   assert.equal(
     buildVoucherCopy.question,
-    "Build a single detached house using voucher?",
+    "Build a Single Detached House using voucher?",
   );
   assert.equal(
     upgradeVoucherCopy.question,
-    "Upgrade to a commercial-residential building using voucher?",
+    "Upgrade to a Commercial-Residential Building using voucher?",
   );
 });

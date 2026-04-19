@@ -2849,23 +2849,31 @@ const ownsFullColorSet = (
   );
 };
 
-const getDevBreakdown = (dev: number) => {
-  const normalizedDev = Number.isFinite(dev) ? Math.max(0, Math.floor(dev)) : 0;
-  return {
-    hotelCount: Math.floor(normalizedDev / 5),
-    houseCount: normalizedDev % 5,
-  };
-};
+const normalizeRentByHousesTiers = (rentByHouses?: number[] | null) => {
+  if (!rentByHouses || rentByHouses.length === 0) {
+    return rentByHouses ?? null;
+  }
+  if (rentByHouses.length !== 5) {
+    return [...rentByHouses];
+  }
 
-const getHotelIncrement = (rent4: number, hotelMultiplier: number) =>
-  Math.ceil(rent4 * hotelMultiplier);
+  const tier4 = rentByHouses[3] ?? rentByHouses[4] ?? 0;
+  const tier5 = rentByHouses[4] ?? tier4;
+  if (tier5 <= tier4) {
+    return [...rentByHouses.slice(0, 4), tier4, rentByHouses[4]];
+  }
+  const insertedTier = Math.min(
+    tier5 - 1,
+    Math.max(tier4 + 1, Math.round((tier4 + tier5) / 2)),
+  );
+  return [...rentByHouses.slice(0, 4), insertedTier, rentByHouses[4]];
+};
 
 const getPropertyRentWithDev = (
   tile: TileInfo,
   dev: number,
-  boardPackEconomy: BoardPackEconomy,
 ) => {
-  const rentByHouses = tile.rentByHouses;
+  const rentByHouses = normalizeRentByHousesTiers(tile.rentByHouses);
   if (!rentByHouses || rentByHouses.length === 0) {
     return tile.baseRent ?? 0;
   }
@@ -2873,16 +2881,7 @@ const getPropertyRentWithDev = (
   if (normalizedDev <= rentByHouses.length - 1) {
     return rentByHouses[normalizedDev] ?? tile.baseRent ?? 0;
   }
-  const { hotelCount, houseCount } = getDevBreakdown(normalizedDev);
-  const rent4 =
-    rentByHouses[4] ??
-    rentByHouses[rentByHouses.length - 1] ??
-    tile.baseRent ??
-    0;
-  const hotelMultiplier = boardPackEconomy.hotelIncrementMultiplier ?? 1.25;
-  const hotelIncrement = getHotelIncrement(rent4, hotelMultiplier);
-  const baseRent = rentByHouses[houseCount] ?? tile.baseRent ?? 0;
-  return baseRent + hotelCount * hotelIncrement;
+  return rentByHouses[rentByHouses.length - 1] ?? tile.baseRent ?? 0;
 };
 
 const calculateRent = ({
@@ -2983,7 +2982,7 @@ const calculateRent = ({
 
   if (tile.type === "PROPERTY") {
     const dev = ownershipByTile[tile.index]?.houses ?? 0;
-    const amount = getPropertyRentWithDev(tile, dev, boardPackEconomy);
+    const amount = getPropertyRentWithDev(tile, dev);
     // Monopoly (complete color set) doubles only the no-house base rent.
     // Do not apply this to developed properties; houses/hotels already define rent.
     const hasMonopolyNoDev =
