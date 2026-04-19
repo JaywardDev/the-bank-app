@@ -9,6 +9,7 @@ import type { BoardPackEconomy } from "@/lib/boardPacks";
 import { formatCurrencyCompact, getCurrentTileRent } from "@/lib/rent";
 import type { InlandCellRecord } from "@/lib/inlandExploration";
 import { getInlandResourceIconSrc } from "@/lib/inlandResourceIcons";
+import { getDevelopmentSpriteForLevel } from "@/components/play-v2/utils/developmentLabels";
 
 type BoardPlayer = {
   id: string;
@@ -109,15 +110,6 @@ const getInteriorCells = (boardWidth: number, boardHeight: number) => {
 const getForestVariantIndex = (row: number, col: number) => {
   const hash = (row * 73856093) ^ (col * 19349663);
   return Math.abs(hash) % FOREST_VARIANTS.length;
-};
-
-const getMapBuildingSprite = (houses: number) => {
-  if (houses <= 0) return null;
-  if (houses === 1) return "/assets/house-1.svg";
-  if (houses === 2) return "/assets/house-2.svg";
-  if (houses === 3) return "/assets/house-3.svg";
-  if (houses === 4) return "/assets/house-4.svg";
-  return "/assets/house-5.svg";
 };
 
 const isForestStyledOuterSpecialTile = (tile: BoardTile) => {
@@ -318,7 +310,7 @@ export default function BoardTrack({
           const isOwnedOuterOwnableNonColoredTile =
             isMapTileFace && isRailOrUtilityTile && isOwnedByPlayer;
           const housesCount = ownershipByTile[tile.index]?.houses ?? 0;
-          const mapBuildingSpriteSrc = getMapBuildingSprite(housesCount);
+          const mapBuildingSpriteSrc = getDevelopmentSpriteForLevel(housesCount);
           const isTransparentMapSpecialTile =
             isMapTileFace && isTransparentMapOuterSpecialTile(tile) && !isOwnableTile;
           const mapTileBaseColor = isMapTileFace

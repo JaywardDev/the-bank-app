@@ -22,7 +22,11 @@ import EndedGameResultsPanel from "@/components/play-v2/EndedGameResultsPanel";
 import TileInfoPanelV2 from "@/components/play-v2/TileInfoPanelV2";
 import BettingMarketPanelV2 from "@/components/play-v2/BettingMarketPanelV2";
 import { TitleDeedPreview } from "@/app/components/TitleDeedPreview";
-import { getDevelopmentLevelLabel } from "@/components/play-v2/utils/developmentLabels";
+import {
+  getBuildUpgradeConfirmationCopy,
+  getDevelopmentLevelLabel,
+  getDevelopmentUpgradePresentation,
+} from "@/components/play-v2/utils/developmentLabels";
 import { DEFAULT_BOARD_PACK_ECONOMY, getBoardPackById } from "@/lib/boardPacks";
 import { resolveBoardTilesForRules } from "@/lib/resolvedBoardTiles";
 import { getTileBandColor } from "@/lib/boardTileStyles";
@@ -319,6 +323,18 @@ type OwnershipByTile = Record<
   }
 >;
 
+type BuildUpgradeConfirmationState = {
+  tileIndex: number;
+  tileName: string;
+  targetLevel: number;
+  targetLabel: string;
+  targetNarrative: string;
+  targetSpriteSrc: string | null;
+  useConstructionVoucher?: "BUILD" | "UPGRADE";
+  question: string;
+  paymentSummary: string;
+};
+
 type PlayerLoan = {
   id: string;
   player_id: string;
@@ -455,6 +471,8 @@ export default function PlayV2Page() {
   } | null>(null);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [showEndSessionConfirm, setShowEndSessionConfirm] = useState(false);
+  const [buildUpgradeConfirmation, setBuildUpgradeConfirmation] =
+    useState<BuildUpgradeConfirmationState | null>(null);
   const [showMenuOverlay, setShowMenuOverlay] = useState(false);
   const [showTileTitleCardModal, setShowTileTitleCardModal] = useState(false);
   const [showActivityPopup, setShowActivityPopup] = useState(false);
@@ -3658,6 +3676,53 @@ export default function PlayV2Page() {
     [ownedActionReason],
   );
 
+  const openBuildUpgradeConfirmation = useCallback(
+    (args: {
+      tileIndex: number;
+      tileName: string;
+      currentLevel: number;
+      rentByHouses?: number[] | null;
+      houseCost?: number;
+      useConstructionVoucher?: "BUILD" | "UPGRADE";
+    }) => {
+      const {
+        tileIndex,
+        tileName,
+        currentLevel,
+        rentByHouses,
+        houseCost,
+        useConstructionVoucher,
+      } = args;
+      const targetLevel = currentLevel + 1;
+      const targetPresentation = getDevelopmentUpgradePresentation(
+        targetLevel,
+        rentByHouses,
+      );
+      const formattedCost = formatMoney(houseCost ?? null);
+      const hasCashCost = houseCost !== undefined && houseCost !== null;
+      const { question, paymentSummary } = getBuildUpgradeConfirmationCopy({
+        currentLevel,
+        targetLabel: targetPresentation.label,
+        useConstructionVoucher,
+        formattedCost,
+        hasCashCost,
+      });
+
+      setBuildUpgradeConfirmation({
+        tileIndex,
+        tileName,
+        targetLevel: targetPresentation.level,
+        targetLabel: targetPresentation.label,
+        targetNarrative: targetPresentation.narrative,
+        targetSpriteSrc: targetPresentation.spriteSrc,
+        useConstructionVoucher,
+        question,
+        paymentSummary,
+      });
+    },
+    [formatMoney],
+  );
+
   const walletOwnedContent = useMemo(() => {
     if (!selectedBoardPack) {
       return null;
@@ -3733,9 +3798,12 @@ export default function PlayV2Page() {
                             ? null
                             : buildHouseDisabledReason,
                         run: () =>
-                          void handleBankAction({
-                            action: "BUILD_HOUSE",
+                          openBuildUpgradeConfirmation({
                             tileIndex: tile.index,
+                            tileName: tile.name,
+                            currentLevel: housesCount,
+                            rentByHouses: tile.rentByHouses,
+                            houseCost: tile.houseCost,
                           }),
                       })
                     }
@@ -3753,9 +3821,12 @@ export default function PlayV2Page() {
                       className="w-full rounded-md border border-indigo-300/40 bg-indigo-500/25 px-2 py-1 text-[11px] font-semibold text-indigo-100"
                       disabled={actionLoading === "BUILD_HOUSE"}
                       onClick={() =>
-                        void handleBankAction({
-                          action: "BUILD_HOUSE",
+                        openBuildUpgradeConfirmation({
                           tileIndex: tile.index,
+                          tileName: tile.name,
+                          currentLevel: housesCount,
+                          rentByHouses: tile.rentByHouses,
+                          houseCost: tile.houseCost,
                           useConstructionVoucher: canUseBuildVoucher
                             ? "BUILD"
                             : "UPGRADE",
@@ -3901,6 +3972,7 @@ export default function PlayV2Page() {
     actionLoading,
     handleBankAction,
     handleOwnedActionClick,
+    openBuildUpgradeConfirmation,
     ownedActionReason,
     ownedProperties,
     selectedBoardPack,
@@ -5567,6 +5639,76 @@ export default function PlayV2Page() {
           </div>
         </div>
       ) : null}
+      <ConfirmActionModalV2
+        open={buildUpgradeConfirmation !== null}
+        title={buildUpgradeConfirmation?.question ?? "Confirm upgrade"}
+        description={
+          buildUpgradeConfirmation ? (
+            <div className="space-y-3">
+              <div className="rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2">
+                <p className="text-xs uppercase tracking-wide text-neutral-500">Property</p>
+                <p className="text-sm font-semibold text-neutral-900">
+                  {buildUpgradeConfirmation.tileName}
+                </p>
+              </div>
+              <div className="rounded-xl border border-neutral-200 bg-white px-3 py-3">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-24 w-24 shrink-0 items-center justify-center rounded-lg border border-neutral-200 bg-neutral-50">
+                    {buildUpgradeConfirmation.targetSpriteSrc ? (
+                      <Image
+                        src={buildUpgradeConfirmation.targetSpriteSrc}
+                        alt={buildUpgradeConfirmation.targetLabel}
+                        width={72}
+                        height={72}
+                        className="h-[72px] w-[72px] object-contain"
+                      />
+                    ) : (
+                      <span className="text-[11px] font-medium text-neutral-500">No image</span>
+                    )}
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-xs uppercase tracking-wide text-neutral-500">
+                      Target level {buildUpgradeConfirmation.targetLevel}
+                    </p>
+                    <p className="text-sm font-semibold capitalize text-neutral-900">
+                      {buildUpgradeConfirmation.targetLabel}
+                    </p>
+                    <p className="text-xs leading-relaxed text-neutral-600">
+                      {buildUpgradeConfirmation.targetNarrative}
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-700">
+                <p>{buildUpgradeConfirmation.paymentSummary}</p>
+              </div>
+            </div>
+          ) : null
+        }
+        confirmLabel={actionLoading === "BUILD_HOUSE" ? "Upgrading…" : "Confirm"}
+        cancelLabel="Cancel"
+        isConfirming={actionLoading === "BUILD_HOUSE"}
+        onConfirm={() => {
+          if (!buildUpgradeConfirmation || actionLoading === "BUILD_HOUSE") {
+            return;
+          }
+          const request: BankActionRequest = {
+            action: "BUILD_HOUSE",
+            tileIndex: buildUpgradeConfirmation.tileIndex,
+            ...(buildUpgradeConfirmation.useConstructionVoucher
+              ? { useConstructionVoucher: buildUpgradeConfirmation.useConstructionVoucher }
+              : {}),
+          };
+          setBuildUpgradeConfirmation(null);
+          void handleBankAction(request);
+        }}
+        onCancel={() => {
+          if (actionLoading === "BUILD_HOUSE") {
+            return;
+          }
+          setBuildUpgradeConfirmation(null);
+        }}
+      />
       <ConfirmActionModalV2
         open={showEndSessionConfirm}
         title="End session for everyone?"
