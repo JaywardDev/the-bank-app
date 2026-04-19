@@ -120,7 +120,7 @@ type PropertyGroupConfig = {
   houseCost: number;
 };
 
-const DEFAULT_HOUSE_RENT_MULTIPLIERS = [1, 5, 15, 45, 62, 80];
+const DEFAULT_HOUSE_RENT_MULTIPLIERS = [1, 5, 15, 45, 58, 80];
 export const DEFAULT_HOUSE_IMPROVEMENT_VALUE_MULTIPLIERS = [0, 0.8, 0.9, 1.4, 1.9, 1.7];
 const DEFAULT_RAIL_RENT_BY_COUNT = [0, 25, 50, 100, 200];
 const DEFAULT_UTILITY_RENT_MULTIPLIERS = { single: 4, double: 10, triple: 16 };
@@ -170,14 +170,14 @@ const CLASSIC_US_ECONOMY: BoardPackEconomy = {
     symbol: "$",
   },
   houseRentMultipliersByGroup: {
-    brown: [1, 5, 15, 45, 62, 80],
-    "light-blue": [1, 5, 14, 40, 55, 70],
-    pink: [1, 5, 13, 36, 49, 62],
-    orange: [1, 5, 12, 33, 45, 56],
-    red: [1, 5, 11, 30, 40, 50],
-    yellow: [1, 5, 10, 28, 37, 45],
-    green: [1, 5, 9, 24, 31, 38],
-    "dark-blue": [1, 5, 8, 22, 27, 32],
+    brown: [1, 5, 15, 45, 58, 80],
+    "light-blue": [1, 5, 14, 40, 52, 70],
+    pink: [1, 5, 13, 36, 46, 62],
+    orange: [1, 5, 12, 33, 42, 56],
+    red: [1, 5, 11, 30, 38, 50],
+    yellow: [1, 5, 10, 28, 34, 45],
+    green: [1, 5, 9, 24, 29, 38],
+    "dark-blue": [1, 5, 8, 22, 25, 32],
   },
   hotelIncrementMultiplier: 1.25,
   railRentByCount: DEFAULT_RAIL_RENT_BY_COUNT,

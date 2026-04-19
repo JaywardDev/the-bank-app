@@ -12,7 +12,7 @@ type PropertyGroupConfig = {
   houseCost: number;
 };
 
-const DEFAULT_HOUSE_RENT_MULTIPLIERS = [1, 5, 15, 45, 62, 80];
+const DEFAULT_HOUSE_RENT_MULTIPLIERS = [1, 5, 15, 45, 58, 80];
 
 const buildRentByHouses = (
   baseRent: number,
@@ -63,14 +63,14 @@ export const NEW_ZEALAND_ECONOMY: BoardPackEconomy = {
     maxTotalStakePerRoll: 100_000,
   },
   houseRentMultipliersByGroup: {
-    brown: [1, 12, 25, 55, 68, 80],
-    "light-blue": [1, 11, 23, 50, 60, 70],
-    pink: [1, 10, 22, 48, 55, 62],
-    orange: [1, 9, 20, 44, 50, 56],
-    red: [1, 8, 18, 40, 45, 50],
-    yellow: [1, 7, 16, 36, 41, 45],
-    green: [1, 6, 14, 32, 35, 38],
-    "dark-blue": [1, 6, 12, 28, 30, 32],
+    brown: [1, 12, 25, 55, 64, 80],
+    "light-blue": [1, 11, 23, 50, 57, 70],
+    pink: [1, 10, 22, 48, 53, 62],
+    orange: [1, 9, 20, 44, 48, 56],
+    red: [1, 8, 18, 40, 43, 50],
+    yellow: [1, 7, 16, 36, 39, 45],
+    green: [1, 6, 14, 32, 34, 38],
+    "dark-blue": [1, 6, 12, 28, 29, 32],
   },
   hotelIncrementMultiplier: 1.35,
   railRentByCount: [0, 60_000, 120_000, 240_000, 480_000],

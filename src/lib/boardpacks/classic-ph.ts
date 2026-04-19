@@ -13,7 +13,7 @@ type PropertyGroupConfig = {
   houseCost: number;
 };
 
-const DEFAULT_HOUSE_RENT_MULTIPLIERS = [1, 5, 15, 45, 62, 80];
+const DEFAULT_HOUSE_RENT_MULTIPLIERS = [1, 5, 15, 45, 58, 80];
 
 const buildRentByHouses = (
   baseRent: number,
