@@ -2032,7 +2032,7 @@ export default function PlayV2Page() {
     );
     for (const event of newCoinEvents) {
       rememberCoinEventKey(normalizeCoinEventKey(event));
-      if (event.event_type !== "CASH_DEBIT" && event.event_type !== "CASH_CREDIT") {
+      if (event.event_type !== "CASH_CREDIT") {
         continue;
       }
       const payload =
