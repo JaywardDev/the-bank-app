@@ -518,6 +518,7 @@ export default function PlayV2Page() {
   const latestGameStateVersionRef = useRef<number | null>(null);
   const auctionAutoPassSubmittedForKeyRef = useRef<string | null>(null);
   const processedCoinEventIdsRef = useRef<Set<string>>(new Set());
+  const processedCoinEventOrderRef = useRef<string[]>([]);
   const coinSoundReadyRef = useRef(false);
   const hasObservedTurnStateRef = useRef(false);
   const previousIsMyTurnRef = useRef(false);
@@ -1994,24 +1995,43 @@ export default function PlayV2Page() {
   useEffect(() => {
     if (!currentUserPlayerId) {
       processedCoinEventIdsRef.current.clear();
+      processedCoinEventOrderRef.current = [];
       coinSoundReadyRef.current = false;
       return;
     }
 
+    const normalizeCoinEventKey = (event: GameEvent) =>
+      event.id || `${event.version}:${event.created_at}:${event.event_type}`;
+    const rememberCoinEventKey = (key: string) => {
+      const seen = processedCoinEventIdsRef.current;
+      const order = processedCoinEventOrderRef.current;
+      if (seen.has(key)) {
+        return;
+      }
+      seen.add(key);
+      order.push(key);
+      if (order.length > 500) {
+        const staleKey = order.shift();
+        if (staleKey) {
+          seen.delete(staleKey);
+        }
+      }
+    };
+
     const seen = processedCoinEventIdsRef.current;
     if (!coinSoundReadyRef.current) {
       for (const event of events) {
-        if (event.id) {
-          seen.add(event.id);
-        }
+        rememberCoinEventKey(normalizeCoinEventKey(event));
       }
       coinSoundReadyRef.current = true;
       return;
     }
 
-    const newCoinEvents = events.filter((event) => !seen.has(event.id));
+    const newCoinEvents = events.filter(
+      (event) => !seen.has(normalizeCoinEventKey(event)),
+    );
     for (const event of newCoinEvents) {
-      seen.add(event.id);
+      rememberCoinEventKey(normalizeCoinEventKey(event));
       if (event.event_type !== "CASH_DEBIT" && event.event_type !== "CASH_CREDIT") {
         continue;
       }
