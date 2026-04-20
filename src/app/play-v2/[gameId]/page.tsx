@@ -80,6 +80,7 @@ import {
   toOptionalTileIndices,
 } from "@/features/trade/utils";
 import type { TradeProposal } from "@/features/trade/types";
+import { initializeSoundManager, playSound } from "@/lib/sound";
 
 type GameMeta = {
   id: string;
@@ -516,6 +517,12 @@ export default function PlayV2Page() {
   );
   const latestGameStateVersionRef = useRef<number | null>(null);
   const auctionAutoPassSubmittedForKeyRef = useRef<string | null>(null);
+  const processedCoinEventIdsRef = useRef<Set<string>>(new Set());
+  const coinSoundReadyRef = useRef(false);
+  const hasObservedTurnStateRef = useRef(false);
+  const previousIsMyTurnRef = useRef(false);
+  const hasObservedAuctionTurnStateRef = useRef(false);
+  const previousCanActInAuctionRef = useRef(false);
 
   const clearLastOpenedIfMatches = useCallback(
     (targetGameId: string | null) => {
@@ -854,6 +861,10 @@ export default function PlayV2Page() {
   useEffect(() => {
     latestLoadAllSlicesRef.current = loadAllSlices;
   }, [loadAllSlices]);
+
+  useEffect(() => {
+    initializeSoundManager();
+  }, []);
 
   useEffect(() => {
     const realtimeDirtySlices = realtimeDirtySlicesRef.current;
@@ -1979,6 +1990,70 @@ export default function PlayV2Page() {
   );
   const canActInAuction =
     auctionActive && isEligibleAuctionBidder && isCurrentAuctionBidder;
+
+  useEffect(() => {
+    if (!currentUserPlayerId) {
+      processedCoinEventIdsRef.current.clear();
+      coinSoundReadyRef.current = false;
+      return;
+    }
+
+    const seen = processedCoinEventIdsRef.current;
+    if (!coinSoundReadyRef.current) {
+      for (const event of events) {
+        if (event.id) {
+          seen.add(event.id);
+        }
+      }
+      coinSoundReadyRef.current = true;
+      return;
+    }
+
+    const newCoinEvents = events.filter((event) => !seen.has(event.id));
+    for (const event of newCoinEvents) {
+      seen.add(event.id);
+      if (event.event_type !== "CASH_DEBIT" && event.event_type !== "CASH_CREDIT") {
+        continue;
+      }
+      const payload =
+        event.payload && typeof event.payload === "object"
+          ? (event.payload as Record<string, unknown>)
+          : null;
+      if (!payload) {
+        continue;
+      }
+      if (payload.player_id !== currentUserPlayerId) {
+        continue;
+      }
+      void playSound("coin");
+    }
+  }, [currentUserPlayerId, events]);
+
+  useEffect(() => {
+    if (!hasObservedTurnStateRef.current) {
+      hasObservedTurnStateRef.current = true;
+      previousIsMyTurnRef.current = isMyTurn;
+      return;
+    }
+
+    if (!previousIsMyTurnRef.current && isMyTurn && !auctionActive) {
+      void playSound("yourTurn");
+    }
+    previousIsMyTurnRef.current = isMyTurn;
+  }, [auctionActive, isMyTurn]);
+
+  useEffect(() => {
+    if (!hasObservedAuctionTurnStateRef.current) {
+      hasObservedAuctionTurnStateRef.current = true;
+      previousCanActInAuctionRef.current = canActInAuction;
+      return;
+    }
+
+    if (!previousCanActInAuctionRef.current && canActInAuction) {
+      void playSound("auctionTurn");
+    }
+    previousCanActInAuctionRef.current = canActInAuction;
+  }, [canActInAuction]);
 
   const auctionRemainingSeconds = useMemo(() => {
     if (!auctionTurnEndsAt) {
@@ -4788,7 +4863,13 @@ export default function PlayV2Page() {
         canEndTurn={canEndTurn}
         actionLoading={actionLoading}
         rollDiceDisabledReason={rollDiceDisabledReason}
-        onRollDice={() => void handleBankAction("ROLL_DICE")}
+        onRollDice={() => {
+          if (!canRoll || actionLoading === "ROLL_DICE") {
+            return;
+          }
+          void playSound("diceRoll");
+          void handleBankAction("ROLL_DICE");
+        }}
         onEndTurn={() => void handleBankAction("END_TURN")}
         onMenuToggle={() => setShowMenuOverlay((open) => !open)}
         menuOpen={showMenuOverlay}
