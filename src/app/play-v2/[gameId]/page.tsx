@@ -677,7 +677,7 @@ export default function PlayV2Page() {
       if (!isLatestSliceRequest("gameState", requestEpoch)) {
         return;
       }
-      applyIncomingGameState(stateRow ?? null);
+      applyIncomingGameState(stateRow ?? null, { allowEqualVersion: true });
     },
     [applyIncomingGameState, isLatestSliceRequest, startSliceRequest],
   );
