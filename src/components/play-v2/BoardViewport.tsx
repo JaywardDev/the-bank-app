@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent, type WheelEvent } from "react";
+import { useCallback, useMemo, useRef, useState, type PointerEvent, type WheelEvent } from "react";
 import { DEFAULT_BOARD_PACK_ECONOMY } from "@/lib/boardPacks";
 import BoardSquare from "@/app/components/BoardSquare";
 import BoardTrack from "@/app/components/BoardTrack";
@@ -37,7 +37,7 @@ type BoardViewportProps = {
   exploredInteriorCellKeys: Set<string>;
   inlandCellsByKey: Map<string, InlandCellRecord>;
   onSelectInteriorCell: (cell: InteriorCellSelection) => void;
-  onRecenterReady?: (handler: () => void) => void;
+  allowZoom?: boolean;
 };
 
 const playerColors = [
@@ -71,7 +71,7 @@ export default function BoardViewport({
   exploredInteriorCellKeys,
   inlandCellsByKey,
   onSelectInteriorCell,
-  onRecenterReady,
+  allowZoom = true,
 }: BoardViewportProps) {
   const boardPack = useMemo(() => getBoardPackById(boardPackId), [boardPackId]);
   const boardTiles = useMemo(
@@ -178,6 +178,9 @@ export default function BoardViewport({
 
   const handlePointerDown = useCallback(
     (event: PointerEvent<HTMLDivElement>) => {
+      if (!allowZoom) {
+        return;
+      }
       pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
 
       if (pointersRef.current.size === 1) {
@@ -201,11 +204,14 @@ export default function BoardViewport({
         suppressTileInteractionRef.current = true;
       }
     },
-    [getLocalPoint, translateX, translateY],
+    [allowZoom, getLocalPoint, translateX, translateY],
   );
 
   const handlePointerMove = useCallback(
     (event: PointerEvent<HTMLDivElement>) => {
+      if (!allowZoom) {
+        return;
+      }
       if (!pointersRef.current.has(event.pointerId)) {
         return;
       }
@@ -255,11 +261,14 @@ export default function BoardViewport({
         gestureRef.current.startTranslateY + dy,
       );
     },
-    [applyTransform, getLocalPoint, scale, zoomAroundPoint],
+    [allowZoom, applyTransform, getLocalPoint, scale, zoomAroundPoint],
   );
 
   const handlePointerEnd = useCallback(
     (event: PointerEvent<HTMLDivElement>) => {
+      if (!allowZoom) {
+        return;
+      }
       pointersRef.current.delete(event.pointerId);
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
@@ -288,11 +297,14 @@ export default function BoardViewport({
         gestureRef.current.startTranslateY = translateY;
       }
     },
-    [scheduleTileInteractionReset, translateX, translateY],
+    [allowZoom, scheduleTileInteractionReset, translateX, translateY],
   );
 
   const handleWheel = useCallback(
     (event: WheelEvent<HTMLDivElement>) => {
+      if (!allowZoom) {
+        return;
+      }
       event.preventDefault();
       const delta = -event.deltaY;
       const zoomFactor = Math.exp(delta * 0.0015);
@@ -305,17 +317,12 @@ export default function BoardViewport({
       suppressTileInteractionRef.current = true;
       scheduleTileInteractionReset();
     },
-    [getLocalPoint, scale, scheduleTileInteractionReset, zoomAroundPoint],
+    [allowZoom, getLocalPoint, scale, scheduleTileInteractionReset, zoomAroundPoint],
   );
 
-  const recenterBoard = useCallback(() => {
-    suppressTileInteractionRef.current = false;
-    applyTransform(MIN_SCALE, 0, 0);
-  }, [applyTransform]);
-
-  useEffect(() => {
-    onRecenterReady?.(recenterBoard);
-  }, [onRecenterReady, recenterBoard]);
+  const effectiveScale = allowZoom ? scale : MIN_SCALE;
+  const effectiveTranslateX = allowZoom ? translateX : 0;
+  const effectiveTranslateY = allowZoom ? translateY : 0;
 
   return (
     <div className="relative h-full w-full overflow-hidden">
@@ -326,12 +333,12 @@ export default function BoardViewport({
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerEnd}
         onPointerCancel={handlePointerEnd}
-        onWheel={handleWheel}
+        onWheel={allowZoom ? handleWheel : undefined}
       >
         <div
           className="absolute inset-0"
           style={{
-            transform: `translate(${translateX}px, ${translateY}px) scale(${scale})`,
+            transform: `translate(${effectiveTranslateX}px, ${effectiveTranslateY}px) scale(${effectiveScale})`,
             transformOrigin: "center center",
           }}
         >

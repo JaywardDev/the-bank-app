@@ -119,7 +119,6 @@ type PlayV2ShellProps = {
   rightDrawerLocked?: boolean;
   auctionActive?: boolean;
   headerActions?: ReactNode;
-  onRecenterBoard?: () => void;
   onMenuToggle?: () => void;
   menuOpen?: boolean;
   boardPackEconomy: BoardPackEconomy;
@@ -169,7 +168,6 @@ export default function PlayV2Shell({
   rightDrawerLocked = false,
   auctionActive = false,
   headerActions,
-  onRecenterBoard,
   onMenuToggle,
   menuOpen = false,
   boardPackEconomy,
@@ -528,13 +526,6 @@ export default function PlayV2Shell({
               leftOpen ? "control-stack-left-open" : ""
             }`}
           >
-            <PlayV2ActionButton
-              onClick={onRecenterBoard}
-              iconSrc="/icons/recenter-icon.svg"
-              iconAlt=""
-              ariaLabel="Recenter board"
-              title="Recenter"
-            />
             <PlayV2ActionButton
               onClick={handleLeftToggle}
               iconSrc="/icons/tile-info-icon.svg"

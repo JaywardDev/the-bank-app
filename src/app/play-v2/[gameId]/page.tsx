@@ -514,7 +514,6 @@ export default function PlayV2Page() {
   const ownedReasonTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
-  const recenterBoardRef = useRef<(() => void) | null>(null);
   const latestGameStateVersionRef = useRef<number | null>(null);
   const auctionAutoPassSubmittedForKeyRef = useRef<string | null>(null);
 
@@ -4791,7 +4790,6 @@ export default function PlayV2Page() {
         rollDiceDisabledReason={rollDiceDisabledReason}
         onRollDice={() => void handleBankAction("ROLL_DICE")}
         onEndTurn={() => void handleBankAction("END_TURN")}
-        onRecenterBoard={() => recenterBoardRef.current?.()}
         onMenuToggle={() => setShowMenuOverlay((open) => !open)}
         menuOpen={showMenuOverlay}
         walletOwnedCount={ownedProperties.length}
@@ -5376,9 +5374,7 @@ export default function PlayV2Page() {
                 setOpenInlandDecisionCellKey(null);
               }
             }}
-            onRecenterReady={(handler) => {
-              recenterBoardRef.current = handler;
-            }}
+            allowZoom={false}
           />
         }
         debugPanel={
