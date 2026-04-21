@@ -1,6 +1,6 @@
 # Supabase Schema (Source of Truth)
 
-This folder is the canonical database schema for The Bank app.
+This folder is the canonical database schema for Wealth Conquest app.
 
 ## Rules
 - Before writing or changing any database queries, check `supabase/migrations/*.sql`.

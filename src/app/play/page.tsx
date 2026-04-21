@@ -6462,7 +6462,7 @@ export default function PlayPage() {
                           </div>
                         ))}
                         <div className="col-start-2 row-start-2 col-span-4 row-span-14 flex items-center justify-center rounded-lg border border-dashed border-neutral-200 bg-neutral-50 text-xs font-semibold uppercase tracking-[0.3em] text-neutral-400 sm:text-sm">
-                          The Bank
+                          Wealth Conquest
                         </div>
                       </div>
                     </div>

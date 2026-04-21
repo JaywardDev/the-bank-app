@@ -357,7 +357,7 @@ export default function Home() {
       <div className={compactLandscapeStyles.container}>
         <header className={`${compactLandscapeStyles.header} flex items-center justify-between gap-3 py-2`}>
           <h1 className="text-lg font-semibold leading-tight text-neutral-900 sm:text-xl">
-            The Bank
+            Wealth Conquest
           </h1>
           {session ? (
             <button
