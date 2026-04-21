@@ -598,8 +598,9 @@ const normalizeActiveMacroEffectsV1 = (raw: unknown): ActiveMacroEffectV1[] => {
         name: typeof data.name === "string" ? data.name : "Macroeconomic event",
         rarity: typeof data.rarity === "string" ? (data.rarity as MacroRarity) : null,
         effects,
-        roundsRemaining:
-          typeof data.roundsRemaining === "number" ? data.roundsRemaining : 0,
+        roundsRemaining: Number.isFinite(data.roundsRemaining)
+          ? (data.roundsRemaining as number)
+          : 0,
         roundsApplied:
           typeof data.roundsApplied === "number" ? data.roundsApplied : 0,
         ...(typeof data.tooltip === "string" ? { tooltip: data.tooltip } : {}),
@@ -782,8 +783,18 @@ const getMacroInterestTrendAccumulatorV1 = (
     return total;
   }, 0);
 
-const getMacroLoanMortgageBlockedV1 = (activeEffects: ActiveMacroEffectV1[]) =>
-  activeEffects.some((effect) => effect.effects.loan_mortgage_new_blocked === true);
+const isActiveLoanMortgageBlockingEffectV1 = (effect: ActiveMacroEffectV1) =>
+  // Defensive check: expired or malformed macro entries
+  // (roundsRemaining <= 0) must not block loans or mortgages.
+  // Some legacy states may persist loan_mortgage_new_blocked
+  // without a valid duration.
+  effect.effects?.loan_mortgage_new_blocked === true &&
+  typeof effect.roundsRemaining === "number" &&
+  effect.roundsRemaining > 0;
+
+const getBlockingMacroLoanMortgageEffectV1 = (
+  activeEffects: ActiveMacroEffectV1[],
+) => activeEffects.find((effect) => isActiveLoanMortgageBlockingEffectV1(effect));
 
 const getMacroPropertyPurchaseDiscountPctV1 = (
   activeEffects: ActiveMacroEffectV1[],
@@ -8323,7 +8334,12 @@ export async function POST(request: Request) {
         );
       }
       if (usingMortgage) {
-        if (getMacroLoanMortgageBlockedV1(activeMacroEffects)) {
+        const blockingMacroEffect = getBlockingMacroLoanMortgageEffectV1(activeMacroEffects);
+        if (blockingMacroEffect) {
+          console.debug("Loan blocked by macro", {
+            effectId: blockingMacroEffect.id,
+            roundsRemaining: blockingMacroEffect.roundsRemaining,
+          });
           return NextResponse.json(
             { error: "New loans and mortgages are currently blocked." },
             { status: 409 },
@@ -9318,7 +9334,12 @@ export async function POST(request: Request) {
         gameState.active_macro_effects_v1,
         rules.macroEnabled,
       );
-      if (getMacroLoanMortgageBlockedV1(activeMacroEffects)) {
+      const blockingMacroEffect = getBlockingMacroLoanMortgageEffectV1(activeMacroEffects);
+      if (blockingMacroEffect) {
+        console.debug("Loan blocked by macro", {
+          effectId: blockingMacroEffect.id,
+          roundsRemaining: blockingMacroEffect.roundsRemaining,
+        });
         return NextResponse.json(
           { error: "New loans and mortgages are currently blocked." },
           { status: 409 },
