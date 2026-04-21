@@ -2219,9 +2219,6 @@ export default function PlayV2Page() {
           if (status === 401) {
             return SESSION_EXPIRED_MESSAGE;
           }
-          if (status === 409) {
-            return "Game state updated. Please try again.";
-          }
           if (
             typeof payload?.error === "string" &&
             payload.error.trim().length > 0
@@ -2236,6 +2233,9 @@ export default function PlayV2Page() {
           }
           return "Action failed. Please try again.";
         };
+
+        const isVersionConflict = (payload: { error?: string } | null) =>
+          payload?.error?.trim() === "Version mismatch.";
 
         let accessToken = session.access_token;
         const result = await runActionRequest(accessToken);
@@ -2261,7 +2261,11 @@ export default function PlayV2Page() {
           await refetchActionSlices(routeGameId, accessToken);
           const message = isAuctionConflict
             ? "Auction updated. Synced latest state."
-            : "Game state updated. Please try again.";
+            : !isVersionConflict(result.payload) &&
+                typeof result.payload?.error === "string" &&
+                result.payload.error.trim().length > 0
+              ? result.payload.error
+              : "Game state updated. Please try again.";
           if (!uiOptions?.suppressNotice) {
             setNotice(message);
           }
