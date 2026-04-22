@@ -9,6 +9,12 @@ import { supabaseClient, type SupabaseSession } from "@/lib/supabase/client";
 import RotateToLandscapeOverlay from "@/components/play-v2/RotateToLandscapeOverlay";
 import CompactOverlayModal from "@/app/components/CompactOverlayModal";
 import { compactLandscapeStyles } from "@/app/components/compactLandscape";
+import {
+  DEFAULT_ROUND_LIMIT,
+  ROUND_LIMIT_OPTIONS,
+  isRoundLimitOption,
+  type RoundLimitOption,
+} from "@/lib/gameConfig";
 
 const lastGameKey = "bank.lastGameId";
 const SESSION_EXPIRED_MESSAGE = "Session expired — please sign in again";
@@ -49,7 +55,7 @@ export default function LobbyPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [hostGameMode, setHostGameMode] = useState<"classic" | "round_mode">("classic");
-  const [hostRoundLimit, setHostRoundLimit] = useState<100 | 150 | 200 | 300>(100);
+  const [hostRoundLimit, setHostRoundLimit] = useState<RoundLimitOption>(DEFAULT_ROUND_LIMIT);
   const [authLoading, setAuthLoading] = useState(true);
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
   const [sessionInvalid, setSessionInvalid] = useState(false);
@@ -106,9 +112,7 @@ export default function LobbyPage() {
       setActiveGame(game[0]);
       setHostGameMode(game[0].game_mode === "round_mode" ? "round_mode" : "classic");
       setHostRoundLimit(
-        game[0].round_limit === 150 || game[0].round_limit === 200 || game[0].round_limit === 300
-          ? game[0].round_limit
-          : 100,
+        isRoundLimitOption(game[0].round_limit) ? game[0].round_limit : DEFAULT_ROUND_LIMIT,
       );
       setPlayers(playerRows);
       setGameState(stateRow ?? null);
@@ -786,13 +790,12 @@ export default function LobbyPage() {
                 className="h-9 w-full rounded-md border border-neutral-300 bg-white px-2 text-sm text-neutral-900"
                 value={hostRoundLimit}
                 onChange={(event) =>
-                  setHostRoundLimit(Number(event.target.value) as 100 | 150 | 200 | 300)
+                  setHostRoundLimit(Number(event.target.value) as RoundLimitOption)
                 }
               >
-                <option value={100}>100</option>
-                <option value={150}>150</option>
-                <option value={200}>200</option>
-                <option value={300}>300</option>
+                {ROUND_LIMIT_OPTIONS.map((option) => (
+                  <option key={option} value={option}>{option} rounds</option>
+                ))}
               </select>
             </div>
           ) : null}

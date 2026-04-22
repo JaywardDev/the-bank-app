@@ -62,6 +62,7 @@ import { handleBettingAction } from "@/lib/server/actions/bettingActions";
 import { handleInlandAction } from "@/lib/server/actions/inlandActions";
 import { handleAuctionAction } from "@/lib/server/actions/auctionActions";
 import { handleTradeAction } from "@/lib/server/actions/tradeActions";
+import { isRoundLimitOption, shouldEndRoundModeGame } from "@/lib/gameConfig";
 
 const supabaseUrl = (process.env.SUPABASE_URL ?? SUPABASE_URL ?? "").trim();
 const supabaseAnonKey = (
@@ -113,12 +114,6 @@ type BaseActionRequest = {
 };
 
 type GameModeConfig = "classic" | "round_mode";
-
-const ROUND_LIMIT_OPTIONS = [100, 150, 200, 300] as const;
-type RoundLimitOption = (typeof ROUND_LIMIT_OPTIONS)[number];
-
-const isRoundLimitOption = (value: unknown): value is RoundLimitOption =>
-  typeof value === "number" && ROUND_LIMIT_OPTIONS.includes(value as RoundLimitOption);
 
 type BankActionRequest =
   | (BaseActionRequest & {
@@ -2489,11 +2484,12 @@ const resolveTurnHandoffCheckpoint = async ({
     (gameState.rounds_elapsed ?? 0) + (tableRoundAdvanced ? 1 : 0);
   const gameMode = game.game_mode ?? "classic";
   const roundLimit = game.round_limit;
-  const isRoundLimitReached =
-    gameMode === "round_mode" &&
-    typeof roundLimit === "number" &&
-    tableRoundAdvanced &&
-    nextRound >= roundLimit;
+  const isRoundLimitReached = shouldEndRoundModeGame({
+    gameMode,
+    roundLimit,
+    tableRoundAdvanced,
+    nextRound,
+  });
 
   if (!isRoundLimitReached) {
     return {
@@ -5130,7 +5126,6 @@ export async function POST(request: Request) {
       fetchFromSupabaseWithService,
       loadOwnershipByTile,
       createJoinCode,
-      isRoundLimitOption,
     });
 
     if (lobbyResponse) {

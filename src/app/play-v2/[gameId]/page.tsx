@@ -2479,6 +2479,7 @@ export default function PlayV2Page() {
     const requestBody = {
       gameId: routeGameId,
       action: "SURRENDER_GAME",
+      expectedVersion: gameState?.version ?? 0,
     };
 
     try {

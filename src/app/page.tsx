@@ -10,6 +10,7 @@ import InfoTooltip from "@/app/components/InfoTooltip";
 import CompactOverlayModal from "@/app/components/CompactOverlayModal";
 import { compactLandscapeStyles } from "@/app/components/compactLandscape";
 import RotateToLandscapeOverlay from "@/components/play-v2/RotateToLandscapeOverlay";
+import { DEFAULT_ROUND_LIMIT, ROUND_LIMIT_OPTIONS, type RoundLimitOption } from "@/lib/gameConfig";
 
 const lastGameKey = "bank.lastGameId";
 
@@ -59,7 +60,7 @@ export default function Home() {
   const [joinCode, setJoinCode] = useState("");
   const [boardPackId, setBoardPackId] = useState(defaultBoardPackId);
   const [gameMode, setGameMode] = useState<"classic" | "round_mode">("classic");
-  const [roundLimit, setRoundLimit] = useState<100 | 150 | 200 | 300>(100);
+  const [roundLimit, setRoundLimit] = useState<RoundLimitOption>(DEFAULT_ROUND_LIMIT);
   const [resumeGames, setResumeGames] = useState<ResumeGame[]>([]);
   const [lastOpenedGameId, setLastOpenedGameId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -551,12 +552,11 @@ export default function Home() {
               <select
                 className="w-full rounded-xl border border-amber-200/70 bg-[#F4EFE7] px-3 py-2 text-sm text-neutral-900"
                 value={roundLimit}
-                onChange={(event) => setRoundLimit(Number(event.target.value) as 100 | 150 | 200 | 300)}
+                onChange={(event) => setRoundLimit(Number(event.target.value) as RoundLimitOption)}
               >
-                <option value={100}>100</option>
-                <option value={150}>150</option>
-                <option value={200}>200</option>
-                <option value={300}>300</option>
+                {ROUND_LIMIT_OPTIONS.map((option) => (
+                  <option key={option} value={option}>{option} rounds</option>
+                ))}
               </select>
             </div>
           ) : null}

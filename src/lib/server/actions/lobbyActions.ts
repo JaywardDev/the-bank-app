@@ -5,6 +5,7 @@ import {
   getBoardPackById,
 } from "@/lib/boardPacks";
 import { getRules } from "@/lib/rules";
+import { resolveRoundLimitForMode } from "@/lib/gameConfig";
 
 type GameModeConfig = "classic" | "round_mode";
 
@@ -56,7 +57,6 @@ type HandleLobbyActionParams = {
   fetchFromSupabaseWithService: <T>(path: string, options: RequestInit) => Promise<T | null>;
   loadOwnershipByTile: (gameId: string) => Promise<Record<number, unknown>>;
   createJoinCode: () => string;
-  isRoundLimitOption: (value: unknown) => boolean;
 };
 
 export const handleLobbyAction = async ({
@@ -65,7 +65,6 @@ export const handleLobbyAction = async ({
   fetchFromSupabaseWithService,
   loadOwnershipByTile,
   createJoinCode,
-  isRoundLimitOption,
 }: HandleLobbyActionParams): Promise<NextResponse | null> => {
   if (body.action === "CREATE_GAME") {
     if (!body.playerName?.trim()) {
@@ -97,10 +96,10 @@ export const handleLobbyAction = async ({
           base_currency: resolvedEconomy.currency.code,
           game_mode:
             body.gameMode === "round_mode" ? "round_mode" : "classic",
-          round_limit:
-            body.gameMode === "round_mode" && isRoundLimitOption(body.roundLimit)
-              ? body.roundLimit
-              : null,
+          round_limit: resolveRoundLimitForMode({
+            gameMode: body.gameMode === "round_mode" ? "round_mode" : "classic",
+            roundLimit: body.roundLimit,
+          }),
         }),
       },
     )) ?? [];
@@ -418,9 +417,10 @@ export const handleLobbyAction = async ({
 
     const gameMode: GameModeConfig =
       body.gameMode === "round_mode" ? "round_mode" : "classic";
-    const roundLimit = gameMode === "round_mode"
-      ? (isRoundLimitOption(body.roundLimit) ? body.roundLimit : null)
-      : null;
+    const roundLimit = resolveRoundLimitForMode({
+      gameMode,
+      roundLimit: body.roundLimit,
+    });
 
     if (gameMode === "round_mode" && roundLimit === null) {
       return NextResponse.json(
