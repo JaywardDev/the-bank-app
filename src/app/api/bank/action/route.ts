@@ -6991,7 +6991,7 @@ export async function POST(request: Request) {
           headers: bankHeaders,
           body: JSON.stringify({
             game_id: gameId,
-            target_player_id: currentPlayer.id,
+            player_id: currentPlayer.id,
             expected_version: currentVersion,
             actor_user_id: user.id,
             starting_cash_input: startingCash,
