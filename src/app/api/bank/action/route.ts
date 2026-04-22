@@ -287,7 +287,7 @@ type InsolvencyReason =
 type InsolvencyPendingAction = {
   type: "INSOLVENCY_RECOVERY";
   player_id: string;
-  reason: InsolvencyReason;
+  reason: InsolvencyReason | null;
   amount_due: number;
   cash_available: number;
   shortfall: number;
@@ -1893,7 +1893,6 @@ const parsePendingInsolvencyAction = (
   const shortfall = pendingAction.shortfall;
   if (
     typeof pendingAction.player_id !== "string" ||
-    typeof pendingAction.reason !== "string" ||
     typeof amountDue !== "number" ||
     typeof cashAvailable !== "number" ||
     typeof shortfall !== "number"
@@ -1901,10 +1900,15 @@ const parsePendingInsolvencyAction = (
     return null;
   }
 
+  const reason =
+    typeof pendingAction.reason === "string" && pendingAction.reason.length > 0
+      ? (pendingAction.reason as InsolvencyReason)
+      : null;
+
   return {
     type: "INSOLVENCY_RECOVERY",
     player_id: pendingAction.player_id,
-    reason: pendingAction.reason as InsolvencyReason,
+    reason,
     amount_due: amountDue,
     cash_available: cashAvailable,
     shortfall,
@@ -7012,6 +7016,12 @@ export async function POST(request: Request) {
           return NextResponse.json(
             { error: "Only the insolvent player can declare bankruptcy." },
             { status: 403 },
+          );
+        }
+        if (errorMessage === "INVALID_PENDING_INSOLVENCY") {
+          return NextResponse.json(
+            { error: "Pending insolvency payload is invalid for bankruptcy resolution." },
+            { status: 422 },
           );
         }
 
