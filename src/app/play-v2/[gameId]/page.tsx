@@ -1146,14 +1146,8 @@ export default function PlayV2Page() {
       .subscribe((status) => {
         if (status === "SUBSCRIBED" && !hasBootstrappedRealtimeCatchup) {
           hasBootstrappedRealtimeCatchup = true;
-          markRealtimeSliceDirty("players");
           markRealtimeSliceDirty("gameState");
           markRealtimeSliceDirty("events");
-          markRealtimeSliceDirty("ownership");
-          markRealtimeSliceDirty("tradeProposals");
-          markRealtimeSliceDirty("loans");
-          markRealtimeSliceDirty("purchaseMortgages");
-          markRealtimeSliceDirty("gameMeta");
         }
       });
 
