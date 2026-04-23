@@ -1002,6 +1002,7 @@ export default function PlayV2Page() {
       return;
     }
     const realtimeDirtySlices = realtimeDirtySlicesRef.current;
+    let hasBootstrappedRealtimeCatchup = false;
 
     const flushRealtimeDirtySlices = () => {
       realtimeSliceFlushTimeoutRef.current = null;
@@ -1143,7 +1144,8 @@ export default function PlayV2Page() {
         () => markRealtimeSliceDirty("gameMeta"),
       )
       .subscribe((status) => {
-        if (status === "SUBSCRIBED") {
+        if (status === "SUBSCRIBED" && !hasBootstrappedRealtimeCatchup) {
+          hasBootstrappedRealtimeCatchup = true;
           markRealtimeSliceDirty("gameState");
           markRealtimeSliceDirty("events");
         }
