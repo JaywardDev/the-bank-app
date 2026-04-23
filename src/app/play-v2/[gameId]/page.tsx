@@ -1142,7 +1142,12 @@ export default function PlayV2Page() {
         },
         () => markRealtimeSliceDirty("gameMeta"),
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") {
+          markRealtimeSliceDirty("gameState");
+          markRealtimeSliceDirty("events");
+        }
+      });
 
     realtimeChannelRef.current = channel;
 
