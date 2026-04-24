@@ -1148,6 +1148,7 @@ export default function PlayV2Page() {
           hasBootstrappedRealtimeCatchup = true;
           markRealtimeSliceDirty("gameState");
           markRealtimeSliceDirty("events");
+          markRealtimeSliceDirty("players");
         }
       });
 
