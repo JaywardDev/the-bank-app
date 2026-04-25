@@ -29,7 +29,7 @@ export default function TokenStack({ players }: TokenStackProps) {
           bottom: 0,
           left: `calc(${index} * var(--token-overlap-step))`,
           zIndex: isActive ? 100 : 30 + index,
-          transform: isActive ? "scale(1)" : "scale(0.67)",
+          transform: isActive ? "scale(1.5)" : "scale(1)",
           transformOrigin: "bottom center",
           filter: isActive ? "none" : "saturate(0.6)",
           opacity: isActive ? 1 : 0.85,
