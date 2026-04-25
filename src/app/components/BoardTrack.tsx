@@ -15,6 +15,7 @@ type BoardPlayer = {
   id: string;
   display_name: string | null;
   position: number;
+  tokenIndex: number;
 };
 
 type OwnershipByTile = Record<
@@ -403,6 +404,7 @@ export default function BoardTrack({
                       id: player.id,
                       display_name: player.display_name,
                       color: playerColorsById[player.id] ?? "#93c5fd",
+                      tokenIndex: player.tokenIndex,
                       isCurrent: player.id === currentPlayerId,
                       isLastMoved: player.id === lastMovedPlayerId,
                     }))}

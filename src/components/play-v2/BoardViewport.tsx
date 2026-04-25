@@ -15,6 +15,13 @@ type BoardViewportPlayer = {
   position: number | null;
 };
 
+type BoardTrackPlayer = {
+  id: string;
+  display_name: string;
+  position: number;
+  tokenIndex: number;
+};
+
 type OwnershipByTile = Record<
   number,
   {
@@ -157,12 +164,13 @@ export default function BoardViewport({
     [applyTransform, scale, translateX, translateY],
   );
 
-  const boardPlayers = useMemo(
+  const boardPlayers = useMemo<BoardTrackPlayer[]>(
     () =>
-      players.map((player) => ({
+      players.map((player, globalIndex) => ({
         id: player.id,
         display_name: player.display_name,
         position: Number.isFinite(player.position) ? Number(player.position) : 0,
+        tokenIndex: (globalIndex % 8) + 1,
       })),
     [players],
   );
