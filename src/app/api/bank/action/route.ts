@@ -9934,58 +9934,40 @@ export async function POST(request: Request) {
       const cardUtilityRollOverride:
         | { total: number; dice: [number, number] }
         | null = null;
-      const eventDeck =
-        landingTile.type === "EVENT"
-          ? getEventDeckForTile(landingTile, boardPack)
-          : null;
-      if (eventDeck) {
-        const currentIndex =
-          eventDeck.indexKey === "chance_index"
-            ? nextChanceIndex
-            : nextCommunityIndex;
-        const drawResult =
-          eventDeck.indexKey === "chance_index"
-            ? prepareDeckDraw({
-                deckLength: eventDeck.cards.length,
-                deckLabel: "chance",
-                gameId,
-                state: {
-                  order: nextChanceOrder,
-                  drawPtr: nextChanceDrawPtr,
-                  seed: nextChanceSeed,
-                  reshuffleCount: nextChanceReshuffleCount,
-                },
-              })
-            : prepareDeckDraw({
-                deckLength: eventDeck.cards.length,
-                deckLabel: "community",
-                gameId,
-                state: {
-                  order: nextCommunityOrder,
-                  drawPtr: nextCommunityDrawPtr,
-                  seed: nextCommunitySeed,
-                  reshuffleCount: nextCommunityReshuffleCount,
-                },
-              });
-        const card = eventDeck.cards[drawResult.cardIndex];
-        if (!card) {
-          throw new Error("Drawn card index out of range.");
-        }
-        if (eventDeck.indexKey === "chance_index") {
-          nextChanceIndex = currentIndex + 1;
-          nextChanceOrder = drawResult.order;
-          nextChanceDrawPtr = drawResult.drawPtr;
-          nextChanceSeed = drawResult.seed;
-          nextChanceReshuffleCount = drawResult.reshuffleCount;
-          chanceStateChanged = true;
-        } else {
-          nextCommunityIndex = currentIndex + 1;
-          nextCommunityOrder = drawResult.order;
-          nextCommunityDrawPtr = drawResult.drawPtr;
-          nextCommunitySeed = drawResult.seed;
-          nextCommunityReshuffleCount = drawResult.reshuffleCount;
-          communityStateChanged = true;
-        }
+      const eventDeckState: EventDeckState = {
+        nextChanceIndex,
+        nextCommunityIndex,
+        nextChanceOrder,
+        nextCommunityOrder,
+        nextChanceDrawPtr,
+        nextCommunityDrawPtr,
+        nextChanceSeed,
+        nextCommunitySeed,
+        nextChanceReshuffleCount,
+        nextCommunityReshuffleCount,
+        chanceStateChanged,
+        communityStateChanged,
+      };
+      const drawOutcome = drawEventCardForLanding({
+        landingTile,
+        boardPack,
+        gameId,
+        state: eventDeckState,
+      });
+      if (drawOutcome) {
+        const { eventDeck, drawResult, card } = drawOutcome;
+        nextChanceIndex = eventDeckState.nextChanceIndex;
+        nextCommunityIndex = eventDeckState.nextCommunityIndex;
+        nextChanceOrder = eventDeckState.nextChanceOrder;
+        nextCommunityOrder = eventDeckState.nextCommunityOrder;
+        nextChanceDrawPtr = eventDeckState.nextChanceDrawPtr;
+        nextCommunityDrawPtr = eventDeckState.nextCommunityDrawPtr;
+        nextChanceSeed = eventDeckState.nextChanceSeed;
+        nextCommunitySeed = eventDeckState.nextCommunitySeed;
+        nextChanceReshuffleCount = eventDeckState.nextChanceReshuffleCount;
+        nextCommunityReshuffleCount = eventDeckState.nextCommunityReshuffleCount;
+        chanceStateChanged = eventDeckState.chanceStateChanged;
+        communityStateChanged = eventDeckState.communityStateChanged;
 
         events.push({
           event_type: "DRAW_CARD",
