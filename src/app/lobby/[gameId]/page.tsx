@@ -581,13 +581,18 @@ export default function LobbyPage() {
     () => players.find((player) => player.user_id === session?.user.id) ?? null,
     [players, session?.user.id],
   );
-  const allPlayersReady = players.length > 0 && players.every((player) => player.lobby_ready);
+  const unreadyPlayersCount = players.filter((player) => !player.lobby_ready).length;
+  const isCurrentPlayerFinalUnready = Boolean(
+    currentPlayer && !currentPlayer.lobby_ready && unreadyPlayersCount === 1,
+  );
   const readyActionLabel =
     activeGame?.status === "in_progress"
       ? "Started"
       : currentPlayer?.lobby_ready
-        ? "Ready · Waiting"
-        : "Start / Ready";
+        ? "Waiting for others.."
+        : isCurrentPlayerFinalUnready
+          ? "Start"
+          : "Ready";
 
   const handleCopyCode = useCallback(async () => {
     if (!activeGame?.join_code) {
@@ -671,21 +676,21 @@ export default function LobbyPage() {
                     key={player.id}
                     className="flex items-center justify-between rounded-lg border border-neutral-200/80 bg-white/85 px-3 py-2 text-sm text-neutral-700 shadow-[0_4px_10px_rgba(37,25,10,0.08)]"
                   >
-                    <span>{player.display_name ?? "Player"}</span>
                     <div className="flex items-center gap-2">
-                      <span
-                        className={`text-[10px] font-semibold uppercase tracking-[0.08em] ${
-                          player.lobby_ready ? "text-emerald-600" : "text-amber-700"
-                        }`}
-                      >
-                        {player.lobby_ready ? "Ready" : "Not ready"}
-                      </span>
+                      <span>{player.display_name ?? "Player"}</span>
                       {player.user_id === activeGame.created_by ? (
-                        <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-neutral-500">
+                        <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-neutral-500">
                           Host
                         </span>
                       ) : null}
                     </div>
+                    <span
+                      className="text-lg leading-none"
+                      role="img"
+                      aria-label={player.lobby_ready ? "ready" : "not ready"}
+                    >
+                      {player.lobby_ready ? "✅" : "❌"}
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -700,12 +705,18 @@ export default function LobbyPage() {
             <div className="mt-3 space-y-2">
               <div className="flex flex-wrap gap-2">
                 <button
-                  className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-semibold text-white disabled:bg-neutral-400"
+                  className={`rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:text-neutral-100 ${
+                    currentPlayer?.lobby_ready
+                      ? "bg-neutral-500"
+                      : isCurrentPlayerFinalUnready
+                        ? "bg-rose-600"
+                        : "bg-emerald-600"
+                  }`}
                   type="button"
                   onClick={handleSetReady}
                   disabled={loadingAction === "start" || Boolean(currentPlayer?.lobby_ready)}
                 >
-                  {loadingAction === "start" ? "Updating…" : readyActionLabel}
+                  {loadingAction === "start" ? "Loading.." : readyActionLabel}
                 </button>
                 <button
                   className="rounded-lg border border-neutral-300 bg-white/85 px-4 py-2 text-sm font-semibold text-neutral-800"
@@ -732,9 +743,6 @@ export default function LobbyPage() {
                     </button>
                   </>
                 ) : null}
-              </div>
-              <div className="text-xs text-neutral-600">
-                {allPlayersReady ? "All players ready — starting…" : "Waiting for all players to be ready."}
               </div>
             </div>
           ) : (
