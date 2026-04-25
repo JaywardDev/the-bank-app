@@ -40,6 +40,8 @@ type PlayerRow = {
   user_id: string;
   display_name: string | null;
   created_at: string | null;
+  lobby_ready: boolean;
+  lobby_ready_at: string | null;
   position: number;
   is_in_jail: boolean;
   jail_turns_remaining: number;
@@ -49,6 +51,12 @@ type PlayerRow = {
   free_upgrade_tokens: number;
   is_eliminated: boolean;
   eliminated_at: string | null;
+};
+
+type StartGameIfReadyRpcResult = {
+  started: boolean;
+  status: string;
+  rejection_reason: string | null;
 };
 
 type HandleLobbyActionParams = {
@@ -112,7 +120,7 @@ export const handleLobbyAction = async ({
     }
 
     const [hostPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
-      "players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at",
+      "players?select=id,user_id,display_name,created_at,lobby_ready,lobby_ready_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at",
       {
         method: "POST",
         headers: {
@@ -198,20 +206,31 @@ export const handleLobbyAction = async ({
       );
     }
 
-    const [player] = (await fetchFromSupabaseWithService<PlayerRow[]>(
-      "players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at&on_conflict=game_id,user_id",
-      {
-        method: "POST",
-        headers: {
-          Prefer: "resolution=merge-duplicates, return=representation",
+    let player: PlayerRow | undefined;
+    try {
+      [player] = (await fetchFromSupabaseWithService<PlayerRow[]>(
+        "players?select=id,user_id,display_name,created_at,lobby_ready,lobby_ready_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at&on_conflict=game_id,user_id",
+        {
+          method: "POST",
+          headers: {
+            Prefer: "resolution=merge-duplicates, return=representation",
+          },
+          body: JSON.stringify({
+            game_id: game.id,
+            user_id: user.id,
+            display_name: body.displayName.trim(),
+          }),
         },
-        body: JSON.stringify({
-          game_id: game.id,
-          user_id: user.id,
-          display_name: body.displayName.trim(),
-        }),
-      },
-    )) ?? [];
+      )) ?? [];
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("GAME_NOT_JOINABLE")) {
+        return NextResponse.json(
+          { error: "That game is already in progress." },
+          { status: 409 },
+        );
+      }
+      throw error;
+    }
 
     if (!player) {
       return NextResponse.json(
@@ -221,7 +240,7 @@ export const handleLobbyAction = async ({
     }
 
     const players = (await fetchFromSupabaseWithService<PlayerRow[]>(
-      `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at&game_id=eq.${game.id}&order=created_at.asc`,
+      `players?select=id,user_id,display_name,created_at,lobby_ready,lobby_ready_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at&game_id=eq.${game.id}&order=created_at.asc`,
       { method: "GET" },
     )) ?? [];
     const ownershipByTile = await loadOwnershipByTile(game.id);
@@ -245,6 +264,65 @@ export const handleLobbyAction = async ({
 
   const gameId = body.gameId;
 
+  if (body.action === "SET_LOBBY_READY") {
+    const [readyGame] = (await fetchFromSupabaseWithService<GameRow[]>(
+      `games?select=id,status&id=eq.${gameId}&limit=1`,
+      { method: "GET" },
+    )) ?? [];
+
+    if (!readyGame) {
+      return NextResponse.json({ error: "Game not found." }, { status: 404 });
+    }
+
+    if (readyGame.status !== "lobby") {
+      return NextResponse.json(
+        { error: "Game already started.", status: readyGame.status },
+        { status: 409 },
+      );
+    }
+
+    const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
+      `players?select=id,user_id,display_name,created_at,lobby_ready,lobby_ready_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at&game_id=eq.${gameId}&user_id=eq.${user.id}`,
+      {
+        method: "PATCH",
+        headers: {
+          Prefer: "return=representation",
+        },
+        body: JSON.stringify({
+          lobby_ready: true,
+          lobby_ready_at: new Date().toISOString(),
+        }),
+      },
+    )) ?? [];
+
+    if (!updatedPlayer) {
+      return NextResponse.json(
+        { error: "You are not a member of this game." },
+        { status: 403 },
+      );
+    }
+
+    const startResult = await fetchFromSupabaseWithService<StartGameIfReadyRpcResult[]>(
+      "rpc/start_game_if_all_ready_atomic",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          p_game_id: gameId,
+          p_actor_user_id: user.id,
+        }),
+      },
+    );
+
+    const rpcRow = startResult?.[0] ?? null;
+    const started = Boolean(rpcRow?.started);
+
+    return NextResponse.json({
+      ok: true,
+      started,
+      status: rpcRow?.status ?? readyGame.status ?? "lobby",
+    });
+  }
+
   if (body.action === "LEAVE_GAME") {
     const [game] = (await fetchFromSupabaseWithService<GameRow[]>(
       `games?select=id,status,created_by&id=eq.${gameId}&limit=1`,
@@ -256,9 +334,16 @@ export const handleLobbyAction = async ({
     }
 
     const [leavingPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
-      `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at&game_id=eq.${gameId}&user_id=eq.${user.id}&limit=1`,
+      `players?select=id,user_id,display_name,created_at,lobby_ready,lobby_ready_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at&game_id=eq.${gameId}&user_id=eq.${user.id}&limit=1`,
       { method: "GET" },
     )) ?? [];
+
+    if (game.status === "lobby" && leavingPlayer?.lobby_ready) {
+      return NextResponse.json(
+        { error: "Ready players cannot leave while the game is still in the lobby." },
+        { status: 409 },
+      );
+    }
 
     const [gameState] = (await fetchFromSupabaseWithService<Array<{ version: number }>>(
       `game_state?select=version&game_id=eq.${gameId}&limit=1`,
@@ -446,6 +531,17 @@ export const handleLobbyAction = async ({
     if (!updatedGame) {
       return NextResponse.json({ error: "Unable to update settings." }, { status: 409 });
     }
+
+    await fetchFromSupabaseWithService(
+      `players?game_id=eq.${gameId}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          lobby_ready: false,
+          lobby_ready_at: null,
+        }),
+      },
+    );
 
     return NextResponse.json({
       ok: true,

@@ -35,6 +35,8 @@ type Player = {
   user_id: string | null;
   display_name: string | null;
   created_at: string | null;
+  lobby_ready: boolean;
+  lobby_ready_at: string | null;
   position: number;
   is_eliminated: boolean;
   eliminated_at: string | null;
@@ -98,7 +100,7 @@ export default function LobbyPage() {
       }
 
       const playerRows = await supabaseClient.fetchFromSupabase<Player[]>(
-        `players?select=id,user_id,display_name,created_at,position,is_eliminated,eliminated_at&game_id=eq.${gameId}&order=created_at.asc`,
+        `players?select=id,user_id,display_name,created_at,lobby_ready,lobby_ready_at,position,is_eliminated,eliminated_at&game_id=eq.${gameId}&order=created_at.asc`,
         { method: "GET" },
         accessToken,
       );
@@ -509,7 +511,7 @@ export default function LobbyPage() {
     }
   };
 
-  const handleStartGame = async () => {
+  const handleSetReady = async () => {
     if (!session || !activeGame) {
       setNotice("Join a lobby before starting.");
       return;
@@ -520,21 +522,22 @@ export default function LobbyPage() {
 
     try {
       const result = await performBankActionWithRecovery({
-        action: "START_GAME",
+        action: "SET_LOBBY_READY",
         gameId: activeGame.id,
-        expectedVersion: gameState?.version ?? 0,
       });
 
       if (!result) {
         return;
       }
 
-      router.push(`/play-v2/${activeGame.id}`);
+      if ((result.response.body as { started?: boolean } | null)?.started) {
+        router.push(`/play-v2/${activeGame.id}`);
+      }
     } catch (error) {
       if (error instanceof Error) {
         setNotice(error.message);
       } else {
-        setNotice("Unable to start the game.");
+        setNotice("Unable to set ready status.");
       }
     } finally {
       setLoadingAction(null);
@@ -574,6 +577,17 @@ export default function LobbyPage() {
   const isHost = Boolean(
     session && activeGame?.created_by && session.user.id === activeGame.created_by,
   );
+  const currentPlayer = useMemo(
+    () => players.find((player) => player.user_id === session?.user.id) ?? null,
+    [players, session?.user.id],
+  );
+  const allPlayersReady = players.length > 0 && players.every((player) => player.lobby_ready);
+  const readyActionLabel =
+    activeGame?.status === "in_progress"
+      ? "Started"
+      : currentPlayer?.lobby_ready
+        ? "Ready · Waiting"
+        : "Start / Ready";
 
   const handleCopyCode = useCallback(async () => {
     if (!activeGame?.join_code) {
@@ -615,9 +629,10 @@ export default function LobbyPage() {
           </h1>
           {activeGame ? (
             <button
-              className="rounded-lg border border-amber-200/80 bg-white/80 px-3 py-1.5 text-xs font-semibold text-neutral-700"
+              className="rounded-lg border border-amber-200/80 bg-white/80 px-3 py-1.5 text-xs font-semibold text-neutral-700 disabled:cursor-not-allowed disabled:opacity-60"
               type="button"
               onClick={handleLeaveLobby}
+              disabled={Boolean(currentPlayer?.lobby_ready && activeGame.status === "lobby")}
             >
               Leave
             </button>
@@ -657,11 +672,20 @@ export default function LobbyPage() {
                     className="flex items-center justify-between rounded-lg border border-neutral-200/80 bg-white/85 px-3 py-2 text-sm text-neutral-700 shadow-[0_4px_10px_rgba(37,25,10,0.08)]"
                   >
                     <span>{player.display_name ?? "Player"}</span>
-                    {player.user_id === activeGame.created_by ? (
-                      <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-neutral-500">
-                        Host
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`text-[10px] font-semibold uppercase tracking-[0.08em] ${
+                          player.lobby_ready ? "text-emerald-600" : "text-amber-700"
+                        }`}
+                      >
+                        {player.lobby_ready ? "Ready" : "Not ready"}
                       </span>
-                    ) : null}
+                      {player.user_id === activeGame.created_by ? (
+                        <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-neutral-500">
+                          Host
+                        </span>
+                      ) : null}
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -672,37 +696,46 @@ export default function LobbyPage() {
             </section>
           )}
 
-          {isHost && activeGame?.status === "lobby" ? (
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button
-                className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-semibold text-white disabled:bg-neutral-400"
-                type="button"
-                onClick={handleStartGame}
-                disabled={loadingAction === "start"}
-              >
-                {loadingAction === "start" ? "Starting…" : "Start game"}
-              </button>
-              <button
-                className="rounded-lg border border-neutral-300 bg-white/85 px-4 py-2 text-sm font-semibold text-neutral-800"
-                type="button"
-                onClick={() => setActiveModal("invite")}
-              >
-                Invite details
-              </button>
-              <button
-                className="rounded-lg border border-neutral-300 bg-white/85 px-4 py-2 text-sm font-semibold text-neutral-800"
-                type="button"
-                onClick={() => setActiveModal("settings")}
-              >
-                Host settings
-              </button>
-              <button
-                className="rounded-lg border border-rose-200/80 bg-rose-50/85 px-4 py-2 text-sm font-semibold text-rose-800"
-                type="button"
-                onClick={() => setActiveModal("end-session")}
-              >
-                End session
-              </button>
+          {activeGame?.status === "lobby" ? (
+            <div className="mt-3 space-y-2">
+              <div className="flex flex-wrap gap-2">
+                <button
+                  className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-semibold text-white disabled:bg-neutral-400"
+                  type="button"
+                  onClick={handleSetReady}
+                  disabled={loadingAction === "start" || Boolean(currentPlayer?.lobby_ready)}
+                >
+                  {loadingAction === "start" ? "Updating…" : readyActionLabel}
+                </button>
+                <button
+                  className="rounded-lg border border-neutral-300 bg-white/85 px-4 py-2 text-sm font-semibold text-neutral-800"
+                  type="button"
+                  onClick={() => setActiveModal("invite")}
+                >
+                  Invite details
+                </button>
+                {isHost ? (
+                  <>
+                    <button
+                      className="rounded-lg border border-neutral-300 bg-white/85 px-4 py-2 text-sm font-semibold text-neutral-800"
+                      type="button"
+                      onClick={() => setActiveModal("settings")}
+                    >
+                      Host settings
+                    </button>
+                    <button
+                      className="rounded-lg border border-rose-200/80 bg-rose-50/85 px-4 py-2 text-sm font-semibold text-rose-800"
+                      type="button"
+                      onClick={() => setActiveModal("end-session")}
+                    >
+                      End session
+                    </button>
+                  </>
+                ) : null}
+              </div>
+              <div className="text-xs text-neutral-600">
+                {allPlayersReady ? "All players ready — starting…" : "Waiting for all players to be ready."}
+              </div>
             </div>
           ) : (
             <div className="mt-3 flex gap-2">

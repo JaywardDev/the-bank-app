@@ -143,6 +143,7 @@ type BankActionRequest =
         | "JOIN_GAME"
         | "LEAVE_GAME"
         | "START_GAME"
+        | "SET_LOBBY_READY"
         | "END_GAME"
         | "ROLL_DICE"
         | "END_TURN"
@@ -5207,200 +5208,55 @@ export async function POST(request: Request) {
     });
 
     if (body.action === "START_GAME") {
-      if (game.created_by && game.created_by !== user.id) {
-        return NextResponse.json(
-          { error: "Only the host can start the game." },
-          { status: 403 },
-        );
-      }
-
-      if (players.length === 0) {
-        return NextResponse.json(
-          { error: "Add at least one player before starting." },
-          { status: 400 },
-        );
-      }
-
-      const startingPlayerRowId = players[0]?.id;
-      if (!startingPlayerRowId) {
-        return NextResponse.json(
-          { error: "Unable to determine the starting player." },
-          { status: 500 },
-        );
-      }
-
-      const [startedGame] = (await fetchFromSupabaseWithService<GameRow[]>(
-        `games?select=id,status&id=eq.${gameId}&status=eq.lobby`,
-        {
-          method: "PATCH",
-          headers: {
-            Prefer: "return=representation",
-          },
+      try {
+        const rpcRows = await fetchFromSupabaseWithService<
+          Array<{ started: boolean; rejection_reason: string | null }>
+        >("rpc/start_game_if_all_ready_atomic", {
+          method: "POST",
           body: JSON.stringify({
-            status: "in_progress",
+            p_game_id: gameId,
+            p_actor_user_id: user.id,
           }),
-        },
-      )) ?? [];
+        });
 
-      if (!startedGame) {
-        const [latestGame] = (await fetchFromSupabaseWithService<GameRow[]>(
-          `games?select=id,status&id=eq.${gameId}&limit=1`,
-          { method: "GET" },
-        )) ?? [];
+        const result = rpcRows?.[0];
+        if (!result?.started) {
+          const reason = result?.rejection_reason ?? "NOT_ALL_READY";
+          if (reason === "NOT_MEMBER") {
+            return NextResponse.json(
+              { error: "You are not a member of this game." },
+              { status: 403 },
+            );
+          }
 
-        if (latestGame?.status === "in_progress") {
+          if (reason === "NOT_LOBBY") {
+            return NextResponse.json(
+              { error: "Game is not in the lobby." },
+              { status: 409 },
+            );
+          }
+
           return NextResponse.json(
-            { error: "Game already started." },
+            { error: "All players must be ready before the game can start." },
             { status: 409 },
           );
         }
-
-        return NextResponse.json(
-          { error: "Game is not in the lobby." },
-          { status: 409 },
-        );
+      } catch (error) {
+        if (error instanceof Error && error.message.includes("NOT_MEMBER")) {
+          return NextResponse.json(
+            { error: "You are not a member of this game." },
+            { status: 403 },
+          );
+        }
+        throw error;
       }
 
-      const boardPack = getBoardPackById(game.board_pack_id);
-      const boardPackEconomy = boardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY;
-      const startingCash =
-      game.starting_cash ??
-      boardPackEconomy.startingBalance ??
-      DEFAULT_BOARD_PACK_ECONOMY.startingBalance ??
-      0;
+      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,betting_market_state,inland_explored_cells,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
+        { method: "GET" },
+      )) ?? [];
 
-      if (game.starting_cash === null) {
-        await fetchFromSupabaseWithService<GameRow[]>(
-          `games?select=id&id=eq.${gameId}`,
-          {
-            method: "PATCH",
-            headers: {
-              Prefer: "return=representation",
-            },
-            body: JSON.stringify({
-              starting_cash: startingCash,
-            }),
-          },
-        );
-      }
-
-      const balances = players.reduce<Record<string, number>>((acc, player) => {
-        acc[player.id] = startingCash;
-        return acc;
-      }, {});
-      const chanceDeck =
-        boardPack?.eventDecks?.chance?.length
-          ? boardPack.eventDecks.chance
-          : chanceCards;
-      const communityDeck =
-        boardPack?.eventDecks?.community?.length
-          ? boardPack.eventDecks.community
-          : communityCards;
-
-      if (chanceDeck.length === 0) {
-        return NextResponse.json(
-          { error: "Chance deck is empty." },
-          { status: 500 },
-        );
-      }
-
-      if (communityDeck.length === 0) {
-        return NextResponse.json(
-          { error: "Community deck is empty." },
-          { status: 500 },
-        );
-      }
-
-      const chanceSeed = gameState?.chance_seed ?? createDeckSeed(gameId, "chance");
-      const communitySeed =
-        gameState?.community_seed ?? createDeckSeed(gameId, "community");
-      const chanceOrder = buildShuffledOrder(chanceDeck.length, chanceSeed, 0);
-      const communityOrder = buildShuffledOrder(
-        communityDeck.length,
-        communitySeed,
-        0,
-      );
-
-      const upsertResponse = await fetch(
-        `${supabaseUrl}/rest/v1/game_state?on_conflict=game_id&select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,betting_market_state,inland_explored_cells,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment`,
-        {
-          method: "POST",
-          headers: {
-            ...bankHeaders,
-            Prefer: "resolution=merge-duplicates, return=representation",
-          },
-          body: JSON.stringify({
-            game_id: gameId,
-            version: nextVersion,
-            current_player_id: startingPlayerRowId,
-            balances,
-            last_roll: null,
-            doubles_count: 0,
-            rounds_elapsed: 0,
-            last_macro_event_id: null,
-            active_macro_effects: [],
-            active_macro_effects_v1: [],
-            turn_phase: "AWAITING_ROLL",
-            pending_action: null,
-            chance_index: 0,
-            community_index: 0,
-            chance_order: chanceOrder,
-            community_order: communityOrder,
-            chance_draw_ptr: 0,
-            community_draw_ptr: 0,
-            chance_seed: chanceSeed,
-            community_seed: communitySeed,
-            chance_reshuffle_count: 0,
-            community_reshuffle_count: 0,
-            skip_next_roll_by_player: {},
-            income_tax_baseline_cash_by_player: balances,
-            updated_at: new Date().toISOString(),
-          }),
-        },
-      );
-
-      if (!upsertResponse.ok) {
-        const errorText = await upsertResponse.text();
-        return NextResponse.json(
-          { error: errorText || "Unable to update game state." },
-          { status: 500 },
-        );
-      }
-
-      const [updatedState] =
-        (await upsertResponse.json()) as GameStateRow[];
-
-      if (!updatedState?.current_player_id) {
-        return NextResponse.json(
-          { error: "Unable to persist the starting player." },
-          { status: 500 },
-        );
-      }
-
-      await fetchFromSupabaseWithService(
-        "game_events",
-        {
-          method: "POST",
-          headers: {
-            Prefer: "return=representation",
-          },
-          body: JSON.stringify({
-            game_id: gameId,
-            version: nextVersion,
-            event_type: "START_GAME",
-            payload: {
-              starting_cash: startingCash,
-              player_order: players.map((player) => ({
-                id: player.id,
-                name: player.display_name,
-              })),
-            },
-            created_by: user.id,
-          }),
-        },
-      );
-
-      return NextResponse.json({ gameState: updatedState });
+      return NextResponse.json({ gameState: updatedState ?? null });
     }
 
     if (body.action === "END_GAME") {
