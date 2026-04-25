@@ -171,15 +171,27 @@ test("duplicate ready clicks remain idempotent", async () => {
 });
 
 test("migration and route enforce atomic all-ready start protections", async () => {
-  const migrationPath = path.join(
+  const baseMigrationPath = path.join(
     process.cwd(),
     "src/lib/supabase/migrations/20260425103000_lobby_ready_start_atomic.sql",
   );
-  const migrationSql = fs.readFileSync(migrationPath, "utf8");
-  assert.match(migrationSql, /start_game_if_all_ready_atomic/i);
-  assert.match(migrationSql, /for update/i);
-  assert.match(migrationSql, /bool_and\(lobby_ready\)/i);
-  assert.match(migrationSql, /trg_players_join_only_lobby/i);
+  const parityMigrationPath = path.join(
+    process.cwd(),
+    "src/lib/supabase/migrations/20260425113000_start_game_atomic_startup_parity.sql",
+  );
+  const baseMigrationSql = fs.readFileSync(baseMigrationPath, "utf8");
+  const parityMigrationSql = fs.readFileSync(parityMigrationPath, "utf8");
+
+  assert.match(baseMigrationSql, /start_game_if_all_ready_atomic/i);
+  assert.match(baseMigrationSql, /for update/i);
+  assert.match(baseMigrationSql, /bool_and\(lobby_ready\)/i);
+  assert.match(baseMigrationSql, /trg_players_join_only_lobby/i);
+
+  assert.match(parityMigrationSql, /chance_order/i);
+  assert.match(parityMigrationSql, /community_order/i);
+  assert.match(parityMigrationSql, /chance_seed/i);
+  assert.match(parityMigrationSql, /community_seed/i);
+  assert.match(parityMigrationSql, /last_macro_event_id\s*=\s*excluded\.last_macro_event_id/i);
 
   const routePath = path.join(process.cwd(), "src/app/api/bank/action/route.ts");
   const routeCode = fs.readFileSync(routePath, "utf8");
