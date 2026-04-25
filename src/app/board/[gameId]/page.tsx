@@ -1684,6 +1684,16 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
     acc[player.id] = playerColorPalette[index % playerColorPalette.length];
     return acc;
   }, {});
+  const boardTrackPlayers = useMemo(
+    () =>
+      players.map((player, globalIndex) => ({
+        id: player.id,
+        display_name: player.display_name,
+        position: player.position,
+        tokenIndex: (globalIndex % 8) + 1,
+      })),
+    [players],
+  );
   const currentPlayerColor = currentPlayer?.id
     ? playerColorsById[currentPlayer.id] ?? "#e5e7eb"
     : "#e5e7eb";
@@ -1790,7 +1800,7 @@ export default function BoardDisplayPage({ params }: BoardDisplayPageProps) {
                 tiles={boardPack?.tiles}
                 economy={boardPack?.economy}
                 lastRoll={gameState?.last_roll ?? null}
-                players={players}
+                players={boardTrackPlayers}
                 ownershipByTile={ownershipByTile}
                 playerColorsById={playerColorsById}
                 currentPlayerId={currentPlayer?.id}
