@@ -179,8 +179,13 @@ test("migration and route enforce atomic all-ready start protections", async () 
     process.cwd(),
     "src/lib/supabase/migrations/20260425113000_start_game_atomic_startup_parity.sql",
   );
+  const deckFixMigrationPath = path.join(
+    process.cwd(),
+    "src/lib/supabase/migrations/20260425123000_start_game_atomic_deck_order_runtime_init.sql",
+  );
   const baseMigrationSql = fs.readFileSync(baseMigrationPath, "utf8");
   const parityMigrationSql = fs.readFileSync(parityMigrationPath, "utf8");
+  const deckFixMigrationSql = fs.readFileSync(deckFixMigrationPath, "utf8");
 
   assert.match(baseMigrationSql, /start_game_if_all_ready_atomic/i);
   assert.match(baseMigrationSql, /for update/i);
@@ -192,6 +197,16 @@ test("migration and route enforce atomic all-ready start protections", async () 
   assert.match(parityMigrationSql, /chance_seed/i);
   assert.match(parityMigrationSql, /community_seed/i);
   assert.match(parityMigrationSql, /last_macro_event_id\s*=\s*excluded\.last_macro_event_id/i);
+
+  assert.match(deckFixMigrationSql, /create or replace function public\.start_game_if_all_ready_atomic/i);
+  assert.match(deckFixMigrationSql, /chance_seed[\s\S]*null/i);
+  assert.match(deckFixMigrationSql, /community_seed[\s\S]*null/i);
+  assert.match(deckFixMigrationSql, /chance_order[\s\S]*null/i);
+  assert.match(deckFixMigrationSql, /community_order[\s\S]*null/i);
+  assert.doesNotMatch(deckFixMigrationSql, /v_default_chance_deck_size/i);
+  assert.doesNotMatch(deckFixMigrationSql, /v_default_community_deck_size/i);
+  assert.doesNotMatch(deckFixMigrationSql, /generate_series\s*\(/i);
+  assert.doesNotMatch(deckFixMigrationSql, /generate_series\s*\(\s*0\s*,\s*15\s*\)/i);
 
   const routePath = path.join(process.cwd(), "src/app/api/bank/action/route.ts");
   const routeCode = fs.readFileSync(routePath, "utf8");
