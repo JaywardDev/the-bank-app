@@ -705,7 +705,7 @@ export default function LobbyPage() {
             <div className="mt-3 space-y-2">
               <div className="flex flex-wrap gap-2">
                 <button
-                  className={`rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:text-neutral-100 ${
+                  className={`min-w-[140px] rounded-lg px-4 py-2 text-center text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-400 disabled:text-neutral-100 ${
                     currentPlayer?.lobby_ready
                       ? "bg-neutral-500"
                       : isCurrentPlayerFinalUnready
