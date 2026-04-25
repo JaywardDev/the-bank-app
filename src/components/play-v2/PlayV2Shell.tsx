@@ -17,6 +17,23 @@ type WalletPanelProps = {
   mortgagesContent?: ReactNode;
 };
 
+function formatLastDiceDisplay(lastDiceLabel?: string | null) {
+  if (!lastDiceLabel) {
+    return null;
+  }
+
+  const diceValues = lastDiceLabel.match(/\d+/g);
+  if (!diceValues || diceValues.length === 0) {
+    return null;
+  }
+
+  if (diceValues.length === 1) {
+    return `🎲 ${diceValues[0]}`;
+  }
+
+  return diceValues.map((value) => `🎲 ${value}`).join(" + ");
+}
+
 function WalletPanel({
   ownedCount,
   loanCount,
@@ -129,7 +146,7 @@ export default function PlayV2Shell({
   netWorthLabel,
   netWorthBreakdown,
   turnPlayerLabel,
-  lastRollLabel,
+  lastRollLabel: _lastRollLabel,
   lastDiceLabel = null,
   isDoubleRoll = false,
   loading,
@@ -185,6 +202,8 @@ export default function PlayV2Shell({
   const leftDrawerMode = controlledLeftDrawerMode ?? uncontrolledLeftDrawerMode;
   const rightOpen = controlledRightOpen ?? uncontrolledRightOpen;
   const rightDrawerMode = controlledRightDrawerMode ?? uncontrolledRightDrawerMode;
+  void _lastRollLabel;
+  const formattedLastDiceDisplay = formatLastDiceDisplay(lastDiceLabel);
 
   useEffect(() => {
     if (!showNetWorthPopover) {
@@ -474,16 +493,15 @@ export default function PlayV2Shell({
               <p className="font-semibold leading-tight text-white">{turnPlayerLabel}</p>
             </div>
             <div className="min-w-0">
-              <p className="text-[10px] uppercase tracking-wide text-white/70">Last Roll</p>
-              <p className="flex flex-wrap items-center gap-1 font-semibold leading-tight text-white">
-                <span>{lastRollLabel}</span>
-                {lastDiceLabel ? <span className="text-white/80">· {lastDiceLabel}</span> : null}
+              <div className="flex flex-nowrap items-center justify-start gap-2 whitespace-nowrap">
+                <p className="text-[10px] uppercase tracking-wide text-white/70">Last Roll</p>
+                <p className="text-lg font-semibold leading-tight text-white">{formattedLastDiceDisplay ?? "—"}</p>
                 {isDoubleRoll ? (
                   <span className="rounded-full border border-white/35 bg-[#6A4520]/55 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white/90">
                     DOUBLE!
                   </span>
                 ) : null}
-              </p>
+              </div>
             </div>
           </div>
           {headerActions ? (
