@@ -18,6 +18,7 @@ import JailDecisionModalV2 from "@/components/play-v2/JailDecisionModalV2";
 import ConfirmActionModalV2 from "@/components/play-v2/ConfirmActionModalV2";
 import RotateToLandscapeOverlay from "@/components/play-v2/RotateToLandscapeOverlay";
 import ActivityPopupV2 from "@/components/play-v2/ActivityPopupV2";
+import TokenLegendPopupV2 from "@/components/play-v2/TokenLegendPopupV2";
 import EndedGameResultsPanel from "@/components/play-v2/EndedGameResultsPanel";
 import TileInfoPanelV2 from "@/components/play-v2/TileInfoPanelV2";
 import BettingMarketPanelV2 from "@/components/play-v2/BettingMarketPanelV2";
@@ -479,6 +480,7 @@ export default function PlayV2Page() {
   const [showMenuOverlay, setShowMenuOverlay] = useState(false);
   const [showTileTitleCardModal, setShowTileTitleCardModal] = useState(false);
   const [showActivityPopup, setShowActivityPopup] = useState(false);
+  const [showTokenLegendPopup, setShowTokenLegendPopup] = useState(false);
   const [bettingInlineError, setBettingInlineError] = useState<string | null>(
     null,
   );
@@ -5892,15 +5894,42 @@ export default function PlayV2Page() {
           </div>
         </div>
       ) : null}
-      <button
-        type="button"
-        onClick={() => setShowActivityPopup((open) => !open)}
-        className="fixed bottom-1 left-1 z-[20] inline-flex h-8 items-center justify-center rounded-full border border-[#5E3D1D]/85 bg-[#744820] px-3 text-xs font-semibold leading-none text-white/95 shadow-md shadow-black/25 transition hover:bg-[#6A411D] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8A5B2C]/55"
-        aria-label="Open activity and wallet transactions"
-        aria-expanded={showActivityPopup}
-      >
-        Log
-      </button>
+      <div className="fixed bottom-1 left-1 z-[20] inline-flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() =>
+            setShowActivityPopup((open) => {
+              const next = !open;
+              if (next) {
+                setShowTokenLegendPopup(false);
+              }
+              return next;
+            })
+          }
+          className="inline-flex h-8 items-center justify-center rounded-full border border-[#5E3D1D]/85 bg-[#744820] px-3 text-xs font-semibold leading-none text-white/95 shadow-md shadow-black/25 transition hover:bg-[#6A411D] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8A5B2C]/55"
+          aria-label="Open activity and wallet transactions"
+          aria-expanded={showActivityPopup}
+        >
+          Log
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            setShowTokenLegendPopup((open) => {
+              const next = !open;
+              if (next) {
+                setShowActivityPopup(false);
+              }
+              return next;
+            })
+          }
+          className="inline-flex h-8 items-center justify-center rounded-full border border-[#5E3D1D]/85 bg-[#744820] px-3 text-xs font-semibold leading-none text-white/95 shadow-md shadow-black/25 transition hover:bg-[#6A411D] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8A5B2C]/55"
+          aria-label="Open token legend"
+          aria-expanded={showTokenLegendPopup}
+        >
+          Tokens
+        </button>
+      </div>
       <ActivityPopupV2
         isOpen={showActivityPopup}
         onClose={() => setShowActivityPopup(false)}
@@ -5909,6 +5938,11 @@ export default function PlayV2Page() {
         boardPack={selectedBoardPack}
         currencySymbol={currencySymbol}
         currentPlayerId={currentUserPlayerId}
+      />
+      <TokenLegendPopupV2
+        isOpen={showTokenLegendPopup}
+        onClose={() => setShowTokenLegendPopup(false)}
+        players={players}
       />
       {showMenuOverlay ? (
         <div
