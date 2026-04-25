@@ -12,15 +12,6 @@ type TokenStackProps = {
   players: TokenPlayer[];
 };
 
-const getInitials = (name: string | null) => {
-  if (!name) return "P";
-  const parts = name.trim().split(/\s+/);
-  if (parts.length === 1) {
-    return parts[0]?.slice(0, 2).toUpperCase() ?? "P";
-  }
-  return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
-};
-
 export default function TokenStack({ players }: TokenStackProps) {
   if (players.length === 0) {
     return null;
@@ -32,25 +23,30 @@ export default function TokenStack({ players }: TokenStackProps) {
       style={{ "--token-overlap-step": "calc(var(--token-size) * 0.6)" } as CSSProperties}
     >
       {players.map((player, index) => {
+        const tokenIndex = (index % 8) + 1;
+        const isActive = Boolean(player.isCurrent);
         const style: CSSProperties = {
-          backgroundColor: player.color,
           bottom: 0,
           left: `calc(${index} * var(--token-overlap-step))`,
           zIndex: 30 + index,
+          transform: isActive ? "scale(1.5)" : "scale(1)",
+          filter: isActive ? "none" : "saturate(0.6)",
+          opacity: isActive ? 1 : 0.85,
+          transition: "transform 150ms ease, filter 150ms ease, opacity 150ms ease",
         };
 
         return (
-          <span
+          <img
             key={player.id}
-            style={style}
+            src={`/assets/token/token-${tokenIndex}.svg`}
+            alt={`Player ${player.display_name ?? "Player"}`}
             title={player.display_name ?? "Player"}
-            className={`absolute inline-flex h-[var(--token-size)] w-[var(--token-size)] items-center justify-center overflow-hidden rounded-full border border-black/30 font-bold text-[clamp(6px,100%,11px)] leading-none text-black shadow-[0_3px_6px_rgba(0,0,0,0.35)] ${
+            style={style}
+            className={`absolute h-[var(--token-size)] w-[var(--token-size)] ${
               player.isCurrent ? "ring-2 ring-emerald-300" : ""
             } ${player.isLastMoved ? "ring-2 ring-amber-300" : ""}`}
             aria-label={player.display_name ?? "Player token"}
-          >
-            {getInitials(player.display_name)}
-          </span>
+          />
         );
       })}
     </div>
