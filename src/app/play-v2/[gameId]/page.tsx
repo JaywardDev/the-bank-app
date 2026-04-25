@@ -382,6 +382,7 @@ const MIN_LOADING_SCREEN_MS = 4000;
 const lastGameKey = "bank.lastGameId";
 const RESUME_REFRESH_DEBOUNCE_MS = 400;
 const REALTIME_SLICE_COALESCE_MS = 80;
+const REALTIME_SUBSCRIBE_WATCHDOG_MS = 4000;
 const sliceNames = [
   "gameMeta",
   "players",
@@ -1073,6 +1074,19 @@ export default function PlayV2Page() {
     }
     const realtimeDirtySlices = realtimeDirtySlicesRef.current;
     let hasBootstrappedRealtimeCatchup = false;
+    let hasRetriedSubscription = false;
+    let recoveryAttempt = 0;
+    let isRealtimeEffectActive = true;
+    let activeChannelInstanceId = 0;
+    let activeChannel: RealtimeChannel | null = null;
+    let subscribeWatchdogTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const clearSubscribeWatchdog = () => {
+      if (subscribeWatchdogTimeout) {
+        clearTimeout(subscribeWatchdogTimeout);
+      }
+      subscribeWatchdogTimeout = null;
+    };
 
     const flushRealtimeDirtySlices = () => {
       realtimeSliceFlushTimeoutRef.current = null;
@@ -1167,121 +1181,178 @@ export default function PlayV2Page() {
       markRealtimeSliceDirty(sliceName);
     };
 
-    logRealtimeAudit("channel_create", { channel: `play-v2:${routeGameId}` });
-    const channel = realtimeClient
-      .channel(`play-v2:${routeGameId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "players",
-          filter: `game_id=eq.${routeGameId}`,
-        },
-        (payload) => handleRealtimeTableEvent("players", "players", payload),
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "game_state",
-          filter: `game_id=eq.${routeGameId}`,
-        },
-        (payload) =>
-          handleRealtimeTableEvent("gameState", "game_state", payload),
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "game_events",
-          filter: `game_id=eq.${routeGameId}`,
-        },
-        (payload) =>
-          handleRealtimeTableEvent("events", "game_events", payload),
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "property_ownership",
-          filter: `game_id=eq.${routeGameId}`,
-        },
-        (payload) =>
-          handleRealtimeTableEvent("ownership", "property_ownership", payload),
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "trade_proposals",
-          filter: `game_id=eq.${routeGameId}`,
-        },
-        (payload) =>
-          handleRealtimeTableEvent("tradeProposals", "trade_proposals", payload),
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "player_loans",
-          filter: `game_id=eq.${routeGameId}`,
-        },
-        (payload) => handleRealtimeTableEvent("loans", "player_loans", payload),
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "purchase_mortgages",
-          filter: `game_id=eq.${routeGameId}`,
-        },
-        (payload) =>
-          handleRealtimeTableEvent(
-            "purchaseMortgages",
-            "purchase_mortgages",
-            payload,
-          ),
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "games",
-          filter: `id=eq.${routeGameId}`,
-        },
-        (payload) => handleRealtimeTableEvent("gameMeta", "games", payload),
-      )
-      .subscribe((status) => {
-        logRealtimeAudit("channel_subscribe_status", { status });
-        if (status === "SUBSCRIBED" && !hasBootstrappedRealtimeCatchup) {
-          hasBootstrappedRealtimeCatchup = true;
-          logRealtimeAudit("channel_bootstrap_catchup");
-          markRealtimeSliceDirty("gameState");
-          markRealtimeSliceDirty("events");
-          markRealtimeSliceDirty("players");
-        }
-      });
+    const createRealtimeChannel = () => {
+      const channelInstanceId = activeChannelInstanceId + 1;
+      activeChannelInstanceId = channelInstanceId;
+      logRealtimeAudit("channel_create", { channel: `play-v2:${routeGameId}` });
+      const channel = realtimeClient
+        .channel(`play-v2:${routeGameId}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "players",
+            filter: `game_id=eq.${routeGameId}`,
+          },
+          (payload) => handleRealtimeTableEvent("players", "players", payload),
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "game_state",
+            filter: `game_id=eq.${routeGameId}`,
+          },
+          (payload) =>
+            handleRealtimeTableEvent("gameState", "game_state", payload),
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "game_events",
+            filter: `game_id=eq.${routeGameId}`,
+          },
+          (payload) =>
+            handleRealtimeTableEvent("events", "game_events", payload),
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "property_ownership",
+            filter: `game_id=eq.${routeGameId}`,
+          },
+          (payload) =>
+            handleRealtimeTableEvent("ownership", "property_ownership", payload),
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "trade_proposals",
+            filter: `game_id=eq.${routeGameId}`,
+          },
+          (payload) =>
+            handleRealtimeTableEvent("tradeProposals", "trade_proposals", payload),
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "player_loans",
+            filter: `game_id=eq.${routeGameId}`,
+          },
+          (payload) => handleRealtimeTableEvent("loans", "player_loans", payload),
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "purchase_mortgages",
+            filter: `game_id=eq.${routeGameId}`,
+          },
+          (payload) =>
+            handleRealtimeTableEvent(
+              "purchaseMortgages",
+              "purchase_mortgages",
+              payload,
+            ),
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "games",
+            filter: `id=eq.${routeGameId}`,
+          },
+          (payload) => handleRealtimeTableEvent("gameMeta", "games", payload),
+        )
+        .subscribe((status) => {
+          if (!isRealtimeEffectActive || channelInstanceId !== activeChannelInstanceId) {
+            return;
+          }
+          logRealtimeAudit("channel_subscribe_status", { status });
+          if (status === "SUBSCRIBED") {
+            clearSubscribeWatchdog();
+            if (!hasBootstrappedRealtimeCatchup) {
+              hasBootstrappedRealtimeCatchup = true;
+              logRealtimeAudit("channel_bootstrap_catchup");
+              markRealtimeSliceDirty("gameState");
+              markRealtimeSliceDirty("events");
+              markRealtimeSliceDirty("players");
+            }
+            return;
+          }
+          if (
+            (status === "CHANNEL_ERROR" ||
+              status === "TIMED_OUT" ||
+              status === "CLOSED") &&
+            !hasRetriedSubscription
+          ) {
+            hasRetriedSubscription = true;
+            recoveryAttempt += 1;
+            console.info("[PlayV2RT-RECOVERY]", {
+              reason: "status_error",
+              attempt: recoveryAttempt,
+            });
+            clearSubscribeWatchdog();
+            realtimeClient.removeChannel(channel);
+            if (!isRealtimeEffectActive) {
+              return;
+            }
+            createRealtimeChannel();
+          }
+        });
 
-    realtimeChannelRef.current = channel;
+      activeChannel = channel;
+      realtimeChannelRef.current = channel;
+      clearSubscribeWatchdog();
+      subscribeWatchdogTimeout = setTimeout(() => {
+        if (
+          !isRealtimeEffectActive ||
+          channelInstanceId !== activeChannelInstanceId ||
+          hasRetriedSubscription
+        ) {
+          return;
+        }
+        hasRetriedSubscription = true;
+        recoveryAttempt += 1;
+        console.info("[PlayV2RT-RECOVERY]", {
+          reason: "watchdog",
+          attempt: recoveryAttempt,
+        });
+        realtimeClient.removeChannel(channel);
+        if (!isRealtimeEffectActive) {
+          return;
+        }
+        createRealtimeChannel();
+      }, REALTIME_SUBSCRIBE_WATCHDOG_MS);
+    };
+
+    createRealtimeChannel();
 
     return () => {
       logRealtimeAudit("realtime_effect_cleanup");
+      isRealtimeEffectActive = false;
+      clearSubscribeWatchdog();
       if (realtimeSliceFlushTimeoutRef.current) {
         clearTimeout(realtimeSliceFlushTimeoutRef.current);
       }
       realtimeSliceFlushTimeoutRef.current = null;
       realtimeDirtySlices.clear();
-      if (realtimeChannelRef.current) {
-        realtimeClient.removeChannel(realtimeChannelRef.current);
+      if (activeChannel) {
+        realtimeClient.removeChannel(activeChannel);
       }
+      activeChannel = null;
       realtimeChannelRef.current = null;
     };
   }, [
