@@ -2064,11 +2064,17 @@ export default function PlayV2Page() {
     isMyTurn && !isEliminated && !auctionActive && !hasBlockingPendingAction;
   const canUseRecoveryActions =
     isMyTurn && !isEliminated && !auctionActive && isInsolvencyRecoveryMode;
+  const isStandardTurnDoublesActive =
+    gameState?.last_roll != null &&
+    (gameState?.doubles_count ?? 0) > 0 &&
+    !isJailDecisionActor &&
+    !hasBlockingPendingAction;
   const canRoll =
     canAct &&
     !isJailDecisionActor &&
     (gameState?.last_roll == null || (gameState?.doubles_count ?? 0) > 0);
-  const canEndTurn = canAct && gameState?.last_roll != null;
+  const canEndTurn =
+    canAct && gameState?.last_roll != null && !isStandardTurnDoublesActive;
   const isHost = Boolean(
     session?.user.id && gameMeta?.created_by === session.user.id,
   );
