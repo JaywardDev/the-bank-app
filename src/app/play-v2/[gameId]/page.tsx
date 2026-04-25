@@ -524,6 +524,25 @@ export default function PlayV2Page() {
   const previousIsMyTurnRef = useRef(false);
   const hasObservedAuctionTurnStateRef = useRef(false);
   const previousCanActInAuctionRef = useRef(false);
+  const realtimeAuditInstanceRef = useRef(
+    `playv2-${Math.random().toString(36).slice(2, 8)}`,
+  );
+  const realtimeAuditSeqRef = useRef(0);
+
+  const logRealtimeAudit = useCallback(
+    (event: string, detail?: Record<string, unknown>) => {
+      realtimeAuditSeqRef.current += 1;
+      console.info("[PlayV2RT-AUDIT]", {
+        event,
+        seq: realtimeAuditSeqRef.current,
+        instance: realtimeAuditInstanceRef.current,
+        routeGameId,
+        sessionUserId: session?.user.id ?? null,
+        ...detail,
+      });
+    },
+    [routeGameId, session?.user.id],
+  );
 
   const clearLastOpenedIfMatches = useCallback(
     (targetGameId: string | null) => {
@@ -651,35 +670,70 @@ export default function PlayV2Page() {
   const loadPlayers = useCallback(
     async (gameId: string, accessToken?: string) => {
       const requestEpoch = startSliceRequest("players");
+      logRealtimeAudit("load_players_start", { gameId, requestEpoch });
       const rows = await supabaseClient.fetchFromSupabase<Player[]>(
         `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at&game_id=eq.${gameId}&order=created_at.asc`,
         { method: "GET" },
         accessToken,
       );
       if (!isLatestSliceRequest("players", requestEpoch)) {
+        logRealtimeAudit("load_players_apply_skipped", {
+          gameId,
+          requestEpoch,
+          reason: "stale_epoch",
+        });
         return rows;
       }
+      logRealtimeAudit("load_players_apply_start", {
+        gameId,
+        requestEpoch,
+        rowCount: rows.length,
+        positions: rows.map((row) => ({
+          id: row.id,
+          position: row.position,
+          display_name: row.display_name,
+        })),
+      });
       setPlayers(rows);
       setPlayersLoaded(true);
       return rows;
     },
-    [isLatestSliceRequest, startSliceRequest],
+    [isLatestSliceRequest, logRealtimeAudit, startSliceRequest],
   );
 
   const loadGameState = useCallback(
     async (gameId: string, accessToken?: string) => {
       const requestEpoch = startSliceRequest("gameState");
+      logRealtimeAudit("load_game_state_start", { gameId, requestEpoch });
       const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
         `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,active_macro_effects_v1,skip_next_roll_by_player,betting_market_state,inland_explored_cells,income_tax_baseline_cash_by_player,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
         { method: "GET" },
         accessToken,
       );
       if (!isLatestSliceRequest("gameState", requestEpoch)) {
+        logRealtimeAudit("load_game_state_apply_skipped", {
+          gameId,
+          requestEpoch,
+          reason: "stale_epoch",
+          version: stateRow?.version ?? null,
+        });
         return;
       }
+      logRealtimeAudit("load_game_state_apply_start", {
+        gameId,
+        requestEpoch,
+        version: stateRow?.version ?? null,
+        currentPlayerId: stateRow?.current_player_id ?? null,
+        turnPhase: stateRow?.turn_phase ?? null,
+      });
       applyIncomingGameState(stateRow ?? null, { allowEqualVersion: true });
     },
-    [applyIncomingGameState, isLatestSliceRequest, startSliceRequest],
+    [
+      applyIncomingGameState,
+      isLatestSliceRequest,
+      logRealtimeAudit,
+      startSliceRequest,
+    ],
   );
 
   const loadEvents = useCallback(
@@ -795,6 +849,7 @@ export default function PlayV2Page() {
 
   const loadAllSlices = useCallback(
     async (gameId: string, accessToken?: string) => {
+      logRealtimeAudit("load_all_slices_start", { source: "callsite", gameId });
       const playerRows = await loadPlayers(gameId, accessToken);
       const currentPlayerId =
         playerRows.find((player) => player.user_id === session?.user.id)?.id ??
@@ -808,6 +863,7 @@ export default function PlayV2Page() {
         loadLoans(gameId, accessToken, currentPlayerId),
         loadPurchaseMortgages(gameId, accessToken, currentPlayerId),
       ]);
+      logRealtimeAudit("load_all_slices_end", { source: "callsite", gameId });
       return loadedGameMeta;
     },
     [
@@ -819,6 +875,7 @@ export default function PlayV2Page() {
       loadPlayers,
       loadPurchaseMortgages,
       loadTradeProposals,
+      logRealtimeAudit,
       session?.user.id,
     ],
   );
@@ -868,9 +925,11 @@ export default function PlayV2Page() {
   }, []);
 
   useEffect(() => {
+    logRealtimeAudit("page_mount");
     const realtimeDirtySlices = realtimeDirtySlicesRef.current;
     isMountedRef.current = true;
     return () => {
+      logRealtimeAudit("page_unmount");
       isMountedRef.current = false;
       if (realtimeSliceFlushTimeoutRef.current) {
         clearTimeout(realtimeSliceFlushTimeoutRef.current);
@@ -880,7 +939,7 @@ export default function PlayV2Page() {
       resumeRefreshQueuedRef.current = false;
       isRunningQueuedResumeRefreshRef.current = false;
     };
-  }, []);
+  }, [logRealtimeAudit]);
 
   const requestResumeRefresh = useCallback(() => {
     if (resumeRefreshTimeoutRef.current) {
@@ -934,8 +993,13 @@ export default function PlayV2Page() {
     let isMounted = true;
 
     const hydrate = async () => {
+      logRealtimeAudit("hydrate_start");
       const currentSession = await supabaseClient.getSession();
       if (!isMounted) return;
+      logRealtimeAudit("hydrate_session_resolved", {
+        hasSession: Boolean(currentSession),
+        sessionUserId: currentSession?.user.id ?? null,
+      });
       setSession(currentSession);
       setGameMetaError(null);
       setPlayersLoaded(false);
@@ -954,7 +1018,9 @@ export default function PlayV2Page() {
       }
 
       try {
+        logRealtimeAudit("load_all_slices_start", { source: "hydrate" });
         const loadedGameMeta = await loadAllSlices(routeGameId, accessToken);
+        logRealtimeAudit("load_all_slices_end", { source: "hydrate" });
         // stale game-meta requests are intentionally ignored; they are not a
         // confirmed missing game and should not trigger the terminal state.
         if (loadedGameMeta?.status === "missing") {
@@ -972,6 +1038,7 @@ export default function PlayV2Page() {
       }
 
       setLoading(false);
+      logRealtimeAudit("hydrate_end");
     };
 
     void hydrate();
@@ -979,7 +1046,7 @@ export default function PlayV2Page() {
     return () => {
       isMounted = false;
     };
-  }, [loadAllSlices, routeGameId, router]);
+  }, [loadAllSlices, logRealtimeAudit, routeGameId, router]);
 
   useEffect(() => {
     if (
@@ -996,6 +1063,9 @@ export default function PlayV2Page() {
     if (!routeGameId || !session?.access_token) {
       return;
     }
+    logRealtimeAudit("realtime_effect_start", {
+      hasSessionToken: Boolean(session?.access_token),
+    });
 
     const realtimeClient = supabaseClient.getRealtimeClient();
     if (!realtimeClient) {
@@ -1007,10 +1077,14 @@ export default function PlayV2Page() {
     const flushRealtimeDirtySlices = () => {
       realtimeSliceFlushTimeoutRef.current = null;
       if (!isMountedRef.current || realtimeDirtySlices.size === 0) {
+        logRealtimeAudit("dirty_flush_skipped", {
+          reason: !isMountedRef.current ? "not_mounted" : "no_dirty_slices",
+        });
         realtimeDirtySlices.clear();
         return;
       }
       const dirtySlices = Array.from(realtimeDirtySlices);
+      logRealtimeAudit("dirty_flush_start", { dirtySlices });
       realtimeDirtySlices.clear();
       for (const sliceName of dirtySlices) {
         switch (sliceName) {
@@ -1048,19 +1122,52 @@ export default function PlayV2Page() {
             break;
         }
       }
+      logRealtimeAudit("dirty_flush_complete", { dirtySlices });
     };
 
     const markRealtimeSliceDirty = (sliceName: SliceName) => {
       realtimeDirtySlices.add(sliceName);
+      logRealtimeAudit("dirty_marked", {
+        sliceName,
+        dirtySlices: Array.from(realtimeDirtySlices),
+      });
       if (realtimeSliceFlushTimeoutRef.current) {
+        logRealtimeAudit("dirty_flush_timer_already_scheduled", { sliceName });
         return;
       }
       realtimeSliceFlushTimeoutRef.current = setTimeout(
         flushRealtimeDirtySlices,
         REALTIME_SLICE_COALESCE_MS,
       );
+      logRealtimeAudit("dirty_flush_timer_scheduled", {
+        coalesceMs: REALTIME_SLICE_COALESCE_MS,
+      });
     };
 
+    const handleRealtimeTableEvent = (
+      sliceName: SliceName,
+      table: string,
+      payload: {
+        eventType?: string;
+        schema?: string;
+        table?: string;
+        new?: { game_id?: string | null };
+        old?: { game_id?: string | null };
+      },
+    ) => {
+      const payloadGameId = payload.new?.game_id ?? payload.old?.game_id ?? null;
+      const filterMatched = payloadGameId === routeGameId;
+      logRealtimeAudit("realtime_callback", {
+        table,
+        eventType: payload.eventType ?? null,
+        payloadGameId,
+        filterMatched,
+        dirtySlice: sliceName,
+      });
+      markRealtimeSliceDirty(sliceName);
+    };
+
+    logRealtimeAudit("channel_create", { channel: `play-v2:${routeGameId}` });
     const channel = realtimeClient
       .channel(`play-v2:${routeGameId}`)
       .on(
@@ -1071,7 +1178,7 @@ export default function PlayV2Page() {
           table: "players",
           filter: `game_id=eq.${routeGameId}`,
         },
-        () => markRealtimeSliceDirty("players"),
+        (payload) => handleRealtimeTableEvent("players", "players", payload),
       )
       .on(
         "postgres_changes",
@@ -1081,7 +1188,8 @@ export default function PlayV2Page() {
           table: "game_state",
           filter: `game_id=eq.${routeGameId}`,
         },
-        () => markRealtimeSliceDirty("gameState"),
+        (payload) =>
+          handleRealtimeTableEvent("gameState", "game_state", payload),
       )
       .on(
         "postgres_changes",
@@ -1091,7 +1199,8 @@ export default function PlayV2Page() {
           table: "game_events",
           filter: `game_id=eq.${routeGameId}`,
         },
-        () => markRealtimeSliceDirty("events"),
+        (payload) =>
+          handleRealtimeTableEvent("events", "game_events", payload),
       )
       .on(
         "postgres_changes",
@@ -1101,7 +1210,8 @@ export default function PlayV2Page() {
           table: "property_ownership",
           filter: `game_id=eq.${routeGameId}`,
         },
-        () => markRealtimeSliceDirty("ownership"),
+        (payload) =>
+          handleRealtimeTableEvent("ownership", "property_ownership", payload),
       )
       .on(
         "postgres_changes",
@@ -1111,7 +1221,8 @@ export default function PlayV2Page() {
           table: "trade_proposals",
           filter: `game_id=eq.${routeGameId}`,
         },
-        () => markRealtimeSliceDirty("tradeProposals"),
+        (payload) =>
+          handleRealtimeTableEvent("tradeProposals", "trade_proposals", payload),
       )
       .on(
         "postgres_changes",
@@ -1121,7 +1232,7 @@ export default function PlayV2Page() {
           table: "player_loans",
           filter: `game_id=eq.${routeGameId}`,
         },
-        () => markRealtimeSliceDirty("loans"),
+        (payload) => handleRealtimeTableEvent("loans", "player_loans", payload),
       )
       .on(
         "postgres_changes",
@@ -1131,7 +1242,12 @@ export default function PlayV2Page() {
           table: "purchase_mortgages",
           filter: `game_id=eq.${routeGameId}`,
         },
-        () => markRealtimeSliceDirty("purchaseMortgages"),
+        (payload) =>
+          handleRealtimeTableEvent(
+            "purchaseMortgages",
+            "purchase_mortgages",
+            payload,
+          ),
       )
       .on(
         "postgres_changes",
@@ -1141,11 +1257,13 @@ export default function PlayV2Page() {
           table: "games",
           filter: `id=eq.${routeGameId}`,
         },
-        () => markRealtimeSliceDirty("gameMeta"),
+        (payload) => handleRealtimeTableEvent("gameMeta", "games", payload),
       )
       .subscribe((status) => {
+        logRealtimeAudit("channel_subscribe_status", { status });
         if (status === "SUBSCRIBED" && !hasBootstrappedRealtimeCatchup) {
           hasBootstrappedRealtimeCatchup = true;
+          logRealtimeAudit("channel_bootstrap_catchup");
           markRealtimeSliceDirty("gameState");
           markRealtimeSliceDirty("events");
           markRealtimeSliceDirty("players");
@@ -1155,6 +1273,7 @@ export default function PlayV2Page() {
     realtimeChannelRef.current = channel;
 
     return () => {
+      logRealtimeAudit("realtime_effect_cleanup");
       if (realtimeSliceFlushTimeoutRef.current) {
         clearTimeout(realtimeSliceFlushTimeoutRef.current);
       }
@@ -1174,6 +1293,7 @@ export default function PlayV2Page() {
     loadPlayers,
     loadPurchaseMortgages,
     loadTradeProposals,
+    logRealtimeAudit,
     routeGameId,
     session,
   ]);
@@ -3013,6 +3133,41 @@ export default function PlayV2Page() {
     (loadingElapsedMs / MIN_LOADING_SCREEN_MS) * 100,
     100,
   );
+
+  useEffect(() => {
+    logRealtimeAudit("session_set", {
+      hasSession: Boolean(session),
+      sessionUserId: session?.user.id ?? null,
+    });
+  }, [logRealtimeAudit, session, session?.user.id]);
+
+  useEffect(() => {
+    logRealtimeAudit("is_game_ready_changed", { isGameReady });
+  }, [isGameReady, logRealtimeAudit]);
+
+  useEffect(() => {
+    logRealtimeAudit("players_state_changed", {
+      playerCount: players.length,
+      positions: players.map((player) => ({
+        id: player.id,
+        position: player.position,
+        display_name: player.display_name,
+      })),
+    });
+  }, [logRealtimeAudit, players]);
+
+  useEffect(() => {
+    logRealtimeAudit("game_state_changed", {
+      version: gameState?.version ?? null,
+      currentPlayerId: gameState?.current_player_id ?? null,
+      turnPhase: gameState?.turn_phase ?? null,
+    });
+  }, [
+    gameState?.current_player_id,
+    gameState?.turn_phase,
+    gameState?.version,
+    logRealtimeAudit,
+  ]);
 
   const selectedTile = useMemo(() => {
     if (selectedTileIndex === null) {

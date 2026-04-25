@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState, type PointerEvent, type WheelEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent, type WheelEvent } from "react";
 import { DEFAULT_BOARD_PACK_ECONOMY } from "@/lib/boardPacks";
 import BoardSquare from "@/app/components/BoardSquare";
 import BoardTrack from "@/app/components/BoardTrack";
@@ -166,6 +166,28 @@ export default function BoardViewport({
       })),
     [players],
   );
+
+  useEffect(() => {
+    console.info("[PlayV2RT-AUDIT]", {
+      event: "board_viewport_players_props",
+      players: players.map((player) => ({
+        id: player.id,
+        display_name: player.display_name,
+        position: player.position,
+      })),
+    });
+  }, [players]);
+
+  useEffect(() => {
+    console.info("[PlayV2RT-AUDIT]", {
+      event: "board_viewport_render_positions",
+      boardPlayers: boardPlayers.map((player) => ({
+        id: player.id,
+        display_name: player.display_name,
+        position: player.position,
+      })),
+    });
+  }, [boardPlayers]);
 
   const playerColorsById = useMemo(
     () =>
