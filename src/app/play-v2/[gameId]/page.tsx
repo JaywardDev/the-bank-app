@@ -3764,6 +3764,8 @@ export default function PlayV2Page() {
         const isCollateralized = Boolean(ownership?.collateral_loan_id);
         const isPurchaseMortgaged = Boolean(ownership?.purchase_mortgage_id);
         const housesCount = ownership?.houses ?? 0;
+        const maxDevelopmentLevel = getMaxDevelopmentLevel(tile.rentByHouses);
+        const isFullyUpgraded = housesCount >= maxDevelopmentLevel;
         const developmentLabel = getDevelopmentLevelLabel(
           housesCount,
           tile.rentByHouses,
@@ -3800,7 +3802,9 @@ export default function PlayV2Page() {
               ? "Already collateralized"
               : housesCount > 0 && !hasFullyBuiltSet
                 ? "Build on every property in this color set before upgrading."
-                : null;
+                : isFullyUpgraded
+                  ? "Fully upgraded"
+                  : null;
         const sellHouseDisabledReason = !isMyTurn
           ? "Not your turn"
           : housesCount === 0
@@ -3839,6 +3843,7 @@ export default function PlayV2Page() {
           isCollateralized,
           isPurchaseMortgaged,
           housesCount,
+          isFullyUpgraded,
           developmentLabel,
           hasFullSet,
           tilePrice,
@@ -4176,6 +4181,10 @@ export default function PlayV2Page() {
         houseCost,
         useConstructionVoucher,
       } = args;
+      const maxDevelopmentLevel = getMaxDevelopmentLevel(rentByHouses);
+      if (currentLevel >= maxDevelopmentLevel) {
+        return;
+      }
       const targetLevel = currentLevel + 1;
       const targetPresentation = getDevelopmentUpgradePresentation(
         targetLevel,
@@ -4240,6 +4249,7 @@ export default function PlayV2Page() {
           const {
             tile,
             housesCount,
+            isFullyUpgraded,
             developmentLabel,
             isCollateralized,
             isPurchaseMortgaged,
@@ -4327,6 +4337,8 @@ export default function PlayV2Page() {
                       ? housesCount > 0
                         ? "Upgrading…"
                         : "Building…"
+                      : isFullyUpgraded
+                        ? "Fully upgraded"
                       : housesCount > 0
                         ? "Upgrade"
                         : "Build"}
@@ -4474,7 +4486,18 @@ export default function PlayV2Page() {
                 </div>
               </div>
               <div className="flex items-center gap-1.5 text-[10px] text-white/65">
-                <span>{developmentLabel}</span>
+                <span>
+                  {developmentLabel}
+                  {isFullyUpgraded ? (
+                    <>
+                      {" "}
+                      •
+                      <span className="text-red-300">
+                        Time to diversify your investment
+                      </span>  
+                    </>
+                  ) : null}
+                </span>
                 {isPurchaseMortgaged ? (
                   <span className="rounded-full border border-amber-400/50 px-1.5 py-0.5 text-amber-200">
                     Mortgaged
@@ -5405,18 +5428,24 @@ export default function PlayV2Page() {
                   currentRentLabel={formatMoney(selectedTileCurrentRent)}
                   currentRentUnavailable={selectedTileIsCollateralized}
                   upgradeCostLabel={
-                    selectedTileIsUpgradeable && !selectedTileIsFullyUpgraded
-                      ? formatMoney(
-                          getNextBuildCost({
-                            baseCost: selectedTile.houseCost ?? 0,
-                            currentLevel: selectedTileDevelopmentCount,
-                          }),
-                        )
+                    selectedTileIsUpgradeable
+                      ? selectedTileIsFullyUpgraded
+                        ? "Fully upgraded"
+                        : formatMoney(
+                            getNextBuildCost({
+                              baseCost: selectedTile.houseCost ?? 0,
+                              currentLevel: selectedTileDevelopmentCount,
+                            }),
+                          )
                       : null
                   }
                   nextRentLabel={
-                    selectedTileNextRent !== null
-                      ? formatMoney(selectedTileNextRent)
+                    selectedTileIsUpgradeable
+                      ? selectedTileIsFullyUpgraded
+                        ? "Fully upgraded"
+                        : selectedTileNextRent !== null
+                          ? formatMoney(selectedTileNextRent)
+                          : null
                       : null
                   }
                   isFullyUpgraded={selectedTileIsFullyUpgraded}
@@ -6295,6 +6324,19 @@ export default function PlayV2Page() {
         showEyebrow={false}
         onConfirm={() => {
           if (!buildUpgradeConfirmation || actionLoading === "BUILD_HOUSE") {
+            return;
+          }
+          const tile = resolvedBoardTiles?.find(
+            (entry) => entry.index === buildUpgradeConfirmation.tileIndex,
+          );
+          const currentLevel =
+            ownershipByTile[buildUpgradeConfirmation.tileIndex]?.houses ?? 0;
+          const maxDevelopmentLevel = getMaxDevelopmentLevel(tile?.rentByHouses);
+          if (
+            tile?.type === "PROPERTY" &&
+            currentLevel >= maxDevelopmentLevel
+          ) {
+            setBuildUpgradeConfirmation(null);
             return;
           }
           const request: BankActionRequest = {

@@ -129,7 +129,7 @@ export default function TileInfoPanelV2({
       <div className="pl-2">
         <p className="text-sm font-semibold text-white">{tile.name}</p>
         <div className="mt-2 space-y-1.5">
-          <StatRow label="Purchase price" value={purchasePriceLabel ?? "—"} />
+          <StatRow label="Market price" value={purchasePriceLabel ?? "—"} />
           <StatRow label="Owner" value={ownerLabel ?? "—"} />
           <StatRow label="Status" value={statusLabel ?? "—"} />
           <StatRow
