@@ -1,4 +1,5 @@
 import type { BoardTile } from "@/lib/boardPacks";
+import { getTileBandColor } from "@/lib/boardTileStyles";
 
 type PendingPurchase = {
   type: "BUY_PROPERTY";
@@ -61,13 +62,24 @@ export default function PendingPurchaseModalV2({
     return null;
   }
 
+  const tileBandColor = getTileBandColor(pendingTile);
+
   return (
     <div className="w-full rounded-3xl border border-amber-200 bg-white/95 p-5 shadow-2xl ring-1 ring-black/10 backdrop-blur">
       <p className="text-xs font-semibold uppercase tracking-wide text-amber-600">Pending decision</p>
-      <p className="mt-1 text-lg font-semibold text-neutral-900">
-        {pendingTile?.name ?? `Tile ${pendingPurchase.tile_index}`}
-      </p>
-      <p className="mt-1 text-sm text-neutral-600">Price: {priceLabel}</p>
+      <div className="mt-1 flex items-stretch gap-2">
+        <span
+          aria-hidden="true"
+          className="w-1 shrink-0 rounded-full"
+          style={{ backgroundColor: tileBandColor }}
+        />
+        <div className="min-w-0">
+          <p className="truncate text-lg font-semibold text-neutral-900">
+            {pendingTile?.name ?? `Tile ${pendingPurchase.tile_index}`}
+          </p>
+          <p className="mt-1 text-sm text-neutral-600">Price: {priceLabel}</p>
+        </div>
+      </div>
       {discountSummary ? (
         <p className="mt-1 text-xs text-neutral-500">{discountSummary}</p>
       ) : null}
