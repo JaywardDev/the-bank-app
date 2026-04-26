@@ -14,6 +14,7 @@ import SuperTaxModalV2 from "@/components/play-v2/SuperTaxModalV2";
 import IncomeTaxModalV2 from "@/components/play-v2/IncomeTaxModalV2";
 import PendingPurchaseModalV2 from "@/components/play-v2/PendingPurchaseModalV2";
 import AuctionOverlayV2 from "@/components/play-v2/AuctionOverlayV2";
+import TaxSuccessAnimationOverlay from "@/components/play-v2/TaxSuccessAnimationOverlay";
 import JailDecisionModalV2 from "@/components/play-v2/JailDecisionModalV2";
 import ConfirmActionModalV2 from "@/components/play-v2/ConfirmActionModalV2";
 import RotateToLandscapeOverlay from "@/components/play-v2/RotateToLandscapeOverlay";
@@ -499,6 +500,7 @@ export default function PlayV2Page() {
   const [showTileTitleCardModal, setShowTileTitleCardModal] = useState(false);
   const [showActivityPopup, setShowActivityPopup] = useState(false);
   const [showTokenLegendPopup, setShowTokenLegendPopup] = useState(false);
+  const [taxSuccessAnimationRunId, setTaxSuccessAnimationRunId] = useState<number | null>(null);
   const [bettingInlineError, setBettingInlineError] = useState<string | null>(
     null,
   );
@@ -514,6 +516,8 @@ export default function PlayV2Page() {
   const resumeRefreshInFlightRef = useRef(false);
   const resumeRefreshQueuedRef = useRef(false);
   const isRunningQueuedResumeRefreshRef = useRef(false);
+  const taxActionInFlightRef = useRef(false);
+  const taxAnimationRunIdRef = useRef(0);
   const isMountedRef = useRef(true);
   const latestRouteGameIdRef = useRef<string | null>(routeGameId ?? null);
   const latestAccessTokenRef = useRef<string | null>(session?.access_token ?? null);
@@ -2539,12 +2543,36 @@ export default function PlayV2Page() {
     void handleBankAction("CONFIRM_MACRO_EVENT");
   }, [handleBankAction]);
 
-  const handleConfirmIncomeTax = useCallback(() => {
-    void handleBankAction("CONFIRM_INCOME_TAX");
+  const handleConfirmIncomeTax = useCallback(async () => {
+    if (taxActionInFlightRef.current) {
+      return;
+    }
+    taxActionInFlightRef.current = true;
+    try {
+      const result = await handleBankAction("CONFIRM_INCOME_TAX");
+      if (result.ok) {
+        taxAnimationRunIdRef.current += 1;
+        setTaxSuccessAnimationRunId(taxAnimationRunIdRef.current);
+      }
+    } finally {
+      taxActionInFlightRef.current = false;
+    }
   }, [handleBankAction]);
 
-  const handleConfirmSuperTax = useCallback(() => {
-    void handleBankAction("CONFIRM_SUPER_TAX");
+  const handleConfirmSuperTax = useCallback(async () => {
+    if (taxActionInFlightRef.current) {
+      return;
+    }
+    taxActionInFlightRef.current = true;
+    try {
+      const result = await handleBankAction("CONFIRM_SUPER_TAX");
+      if (result.ok) {
+        taxAnimationRunIdRef.current += 1;
+        setTaxSuccessAnimationRunId(taxAnimationRunIdRef.current);
+      }
+    } finally {
+      taxActionInFlightRef.current = false;
+    }
   }, [handleBankAction]);
 
   const handleUseTaxExemptionPass = useCallback(() => {
@@ -6443,6 +6471,12 @@ export default function PlayV2Page() {
         onBid={handleAuctionBid}
         onPass={handleAuctionPass}
       />
+      {taxSuccessAnimationRunId !== null ? (
+        <TaxSuccessAnimationOverlay
+          runId={taxSuccessAnimationRunId}
+          onComplete={() => setTaxSuccessAnimationRunId(null)}
+        />
+      ) : null}
       {openInlandDecisionCellKey &&
       selectedInteriorCell &&
       isOwnedDiscoveredDecisionCell &&
