@@ -3021,12 +3021,27 @@ export default function PlayV2Page() {
       return null;
     }
     const marketValue = tile.price ?? 0;
+    const mayBreakFullColorSet =
+      tile.type === "PROPERTY" && currentUserPlayer
+        ? ownsFullColorSet(
+            tile,
+            resolvedBoardTiles,
+            ownershipByTile,
+            currentUserPlayer.id,
+          )
+        : false;
     return {
       name: tile.name,
       marketValue,
       payout: Math.round(marketValue * 0.7),
+      mayBreakFullColorSet,
     };
-  }, [sellToMarketTileIndex, resolvedBoardTiles]);
+  }, [
+    currentUserPlayer,
+    ownershipByTile,
+    sellToMarketTileIndex,
+    resolvedBoardTiles,
+  ]);
 
   const sellBuildingSelection = useMemo<OwnedPropertyActionConfirmation | null>(() => {
     if (sellBuildingTileIndex === null || !resolvedBoardTiles) {
@@ -6292,22 +6307,16 @@ export default function PlayV2Page() {
         }
         description={
           sellToMarketSelection ? (
-            <div className="space-y-2">
-              <p>
-                <span className="font-semibold text-emerald-700">You receive:</span>{" "}
-                {formatMoney(sellToMarketSelection.payout)}
+            <div className="space-y-1.5">
+              <p>You will receive {formatMoney(sellToMarketSelection.payout)} in cash.</p>
+              <p className="text-red-700">
+                You will lose ownership and future rent from this property.
               </p>
-              <p className="text-amber-700">
-                <span className="font-semibold">You lose:</span> Ownership of this lot and future rent.
-              </p>
-              <p>
-                <span className="font-semibold text-neutral-800">Terms:</span>{" "}
-                Payout is 70% of market value ({formatMoney(sellToMarketSelection.marketValue)}).
-              </p>
-              <p className="font-medium text-red-600">
-                <span className="font-semibold">Warning:</span> Selling this lot removes your ownership. You
-                lose future rent income and it may break your full color set.
-              </p>
+              {sellToMarketSelection.mayBreakFullColorSet ? (
+                <p className="text-neutral-600">
+                  This may break your full color set.
+                </p>
+              ) : null}
             </div>
           ) : (
             "Review sale details before confirming."
@@ -6323,26 +6332,15 @@ export default function PlayV2Page() {
         open={sellBuildingSelection !== null}
         title={
           sellBuildingSelection
-            ? `Sell building on ${sellBuildingSelection.name}?`
+            ? `Sell development on ${sellBuildingSelection.name}?`
             : "Sell building?"
         }
         description={
           sellBuildingSelection ? (
-            <div className="space-y-2">
-              <p className="text-emerald-700">
-                <span className="font-semibold">You receive:</span>{" "}
-                You will receive the current building liquidation value.
-              </p>
-              <p className="text-amber-700">
-                <span className="font-semibold">You lose:</span> All development on this property.
-              </p>
-              <p>
-                <span className="font-semibold text-neutral-800">Terms:</span>{" "}
-                This property resets to a vacant lot after selling.
-              </p>
-              <p className="font-medium text-red-600">
-                <span className="font-semibold">Warning:</span> Selling buildings resets this property to a
-                vacant lot. You cannot continue upgrading this property until you build again.
+            <div className="space-y-1.5">
+              <p>You will receive cash for your current building.</p>
+              <p className="text-red-700">
+                This property will return to a vacant lot.
               </p>
             </div>
           ) : (
@@ -6364,24 +6362,15 @@ export default function PlayV2Page() {
         }
         description={
           collateralizeSelection ? (
-            <div className="space-y-2">
-              <p className="text-emerald-700">
-                <span className="font-semibold">You receive:</span>{" "}
-                {formatMoney(collateralizeSelection.principal)} loan principal.
-              </p>
-              <p className="text-amber-700">
-                <span className="font-semibold">You lose:</span> Rent collection while collateralized.
-              </p>
+            <div className="space-y-1.5">
               <p>
-                <span className="font-semibold text-neutral-800">Terms:</span>{" "}
-                {formatMoney(collateralizeSelection.paymentPerTurn)} per turn for{" "}
-                {collateralizeSelection.termTurns} turns at{" "}
-                {(collateralizeSelection.ratePerTurn * 100).toFixed(2)}% interest per turn.
+                You will receive {formatMoney(collateralizeSelection.principal)} as a
+                loan secured by this property.
               </p>
-              <p className="font-medium text-red-600">
-                <span className="font-semibold">Warning:</span> Collateralized properties cannot collect rent
-                until the loan is paid off.
+              <p className="text-red-700">
+                This property cannot collect rent until the loan is repaid.
               </p>
+              <p className="text-neutral-600">Payments will be deducted each turn.</p>
             </div>
           ) : (
             "Review loan terms before confirming."
