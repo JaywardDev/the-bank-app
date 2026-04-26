@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 
 import type { BoardPackEconomy, BoardTile } from "@/lib/boardPacks";
+import { getTileBandColor } from "@/lib/boardTileStyles";
 import { formatCurrency, getCurrencyMetaFromEconomy } from "@/lib/currency";
 
 type AuctionOverlayV2Props = {
@@ -128,6 +129,7 @@ export default function AuctionOverlayV2({
     [highestBid, minIncrement],
   );
   const secondsLeft = auctionRemainingSeconds;
+  const auctionTileBandColor = useMemo(() => getTileBandColor(auctionTile), [auctionTile]);
 
   if (!auctionActive) {
     return null;
@@ -143,12 +145,21 @@ export default function AuctionOverlayV2({
               <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-600">
                 Auction in progress
               </p>
-              <p className="truncate text-lg font-semibold text-neutral-900 sm:text-xl">
-                {auctionTile?.name ?? "Unowned tile"}
-              </p>
-              <p className="text-xs text-neutral-500">
-                {auctionTile?.price != null ? formatCurrency(auctionTile.price, currency) : "—"}
-              </p>
+              <div className="mt-0.5 flex items-stretch gap-2">
+                <span
+                  aria-hidden
+                  className="w-1 shrink-0 rounded-full"
+                  style={{ backgroundColor: auctionTileBandColor }}
+                />
+                <div className="min-w-0">
+                  <p className="truncate text-lg font-semibold text-neutral-900 sm:text-xl">
+                    {auctionTile?.name ?? "Unowned tile"}
+                  </p>
+                  <p className="text-xs text-neutral-500">
+                    {auctionTile?.price != null ? formatCurrency(auctionTile.price, currency) : "—"}
+                  </p>
+                </div>
+              </div>
             </div>
             <div className="rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-1.5 sm:justify-self-end">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Current bid</p>
