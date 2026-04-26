@@ -35,7 +35,10 @@ import { postGameActionRequest } from "@/lib/client/postGameActionRequest";
 import {
   computeTaxableAssetValueForLuxuryTax,
 } from "@/lib/assetValue";
-import { computeAuthoritativeNetWorthBreakdown } from "@/lib/netWorth";
+import {
+  computeAuthoritativeNetWorthBreakdown,
+  computeOwnedPropertyCollateralPrincipal,
+} from "@/lib/netWorth";
 import { getRules } from "@/lib/rules";
 import {
   getCurrentTileRent,
@@ -338,6 +341,11 @@ type BuildUpgradeConfirmationState = {
   question: string;
 };
 
+type OwnedPropertyActionConfirmation = {
+  tileIndex: number;
+  name: string;
+};
+
 type PlayerLoan = {
   id: string;
   player_id: string;
@@ -451,6 +459,12 @@ export default function PlayV2Page() {
     "decision" | "trade" | "macro"
   >("decision");
   const [sellToMarketTileIndex, setSellToMarketTileIndex] = useState<
+    number | null
+  >(null);
+  const [sellBuildingTileIndex, setSellBuildingTileIndex] = useState<
+    number | null
+  >(null);
+  const [collateralizeTileIndex, setCollateralizeTileIndex] = useState<
     number | null
   >(null);
   const [payoffLoanId, setPayoffLoanId] = useState<string | null>(null);
@@ -3010,9 +3024,63 @@ export default function PlayV2Page() {
     return {
       name: tile.name,
       marketValue,
-      payout: Math.floor(marketValue * 0.7),
+      payout: Math.round(marketValue * 0.7),
     };
   }, [sellToMarketTileIndex, resolvedBoardTiles]);
+
+  const sellBuildingSelection = useMemo<OwnedPropertyActionConfirmation | null>(() => {
+    if (sellBuildingTileIndex === null || !resolvedBoardTiles) {
+      return null;
+    }
+    const tile = resolvedBoardTiles.find(
+      (boardTile) => boardTile.index === sellBuildingTileIndex,
+    );
+    if (!tile) {
+      return null;
+    }
+    return {
+      tileIndex: tile.index,
+      name: tile.name,
+    };
+  }, [sellBuildingTileIndex, resolvedBoardTiles]);
+
+  const collateralizeSelection = useMemo(() => {
+    if (collateralizeTileIndex === null || !resolvedBoardTiles) {
+      return null;
+    }
+    const tile = resolvedBoardTiles.find(
+      (boardTile) => boardTile.index === collateralizeTileIndex,
+    );
+    if (!tile) {
+      return null;
+    }
+    const ownership = ownershipByTile[tile.index] ?? null;
+    const principal = computeOwnedPropertyCollateralPrincipal({
+      tile,
+      ownership,
+      boardPackEconomy: selectedBoardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY,
+    });
+    const paymentPerTurn = calculateAmortizedPaymentPerTurn(
+      principal,
+      rules.collateralRatePerTurn,
+      rules.collateralTermTurns,
+    );
+    return {
+      tileIndex: tile.index,
+      name: tile.name,
+      principal,
+      paymentPerTurn,
+      termTurns: rules.collateralTermTurns,
+      ratePerTurn: rules.collateralRatePerTurn,
+    };
+  }, [
+    collateralizeTileIndex,
+    ownershipByTile,
+    resolvedBoardTiles,
+    rules.collateralRatePerTurn,
+    rules.collateralTermTurns,
+    selectedBoardPack?.economy,
+  ]);
 
   const macroTooltipById = useMemo(() => {
     const lookup = new Map<string, string>();
@@ -4237,10 +4305,7 @@ export default function PlayV2Page() {
                             ? null
                             : sellHouseDisabledReason,
                         run: () =>
-                          void handleBankAction({
-                            action: "SELL_HOUSE",
-                            tileIndex: tile.index,
-                          }),
+                          setSellBuildingTileIndex(tile.index),
                       })
                     }
                   >
@@ -4312,10 +4377,7 @@ export default function PlayV2Page() {
                             ? null
                             : collateralDisabledReason,
                         run: () =>
-                          void handleBankAction({
-                            action: "TAKE_COLLATERAL_LOAN",
-                            tileIndex: tile.index,
-                          }),
+                          setCollateralizeTileIndex(tile.index),
                       })
                     }
                   >
@@ -4375,6 +4437,28 @@ export default function PlayV2Page() {
     });
     setSellToMarketTileIndex(null);
   }, [handleBankAction, sellToMarketTileIndex]);
+
+  const handleConfirmSellBuilding = useCallback(() => {
+    if (sellBuildingTileIndex === null) {
+      return;
+    }
+    void handleBankAction({
+      action: "SELL_HOUSE",
+      tileIndex: sellBuildingTileIndex,
+    });
+    setSellBuildingTileIndex(null);
+  }, [handleBankAction, sellBuildingTileIndex]);
+
+  const handleConfirmCollateralize = useCallback(() => {
+    if (collateralizeTileIndex === null) {
+      return;
+    }
+    void handleBankAction({
+      action: "TAKE_COLLATERAL_LOAN",
+      tileIndex: collateralizeTileIndex,
+    });
+    setCollateralizeTileIndex(null);
+  }, [collateralizeTileIndex, handleBankAction]);
 
   const walletLoansContent = useMemo(() => {
     if (activeLoans.length === 0) {
@@ -6208,9 +6292,22 @@ export default function PlayV2Page() {
         }
         description={
           sellToMarketSelection ? (
-            <div className="space-y-1">
-              <p>Market value: {formatMoney(sellToMarketSelection.marketValue)}</p>
-              <p>Bank payout: {formatMoney(sellToMarketSelection.payout)}</p>
+            <div className="space-y-2">
+              <p>
+                <span className="font-semibold text-emerald-700">You receive:</span>{" "}
+                {formatMoney(sellToMarketSelection.payout)}
+              </p>
+              <p className="text-amber-700">
+                <span className="font-semibold">You lose:</span> Ownership of this lot and future rent.
+              </p>
+              <p>
+                <span className="font-semibold text-neutral-800">Terms:</span>{" "}
+                Payout is 70% of market value ({formatMoney(sellToMarketSelection.marketValue)}).
+              </p>
+              <p className="font-medium text-red-600">
+                <span className="font-semibold">Warning:</span> Selling this lot removes your ownership. You
+                lose future rent income and it may break your full color set.
+              </p>
             </div>
           ) : (
             "Review sale details before confirming."
@@ -6221,6 +6318,80 @@ export default function PlayV2Page() {
         isConfirming={actionLoading === "SELL_TO_MARKET"}
         onConfirm={handleConfirmSellToMarket}
         onCancel={() => setSellToMarketTileIndex(null)}
+      />
+      <ConfirmActionModalV2
+        open={sellBuildingSelection !== null}
+        title={
+          sellBuildingSelection
+            ? `Sell building on ${sellBuildingSelection.name}?`
+            : "Sell building?"
+        }
+        description={
+          sellBuildingSelection ? (
+            <div className="space-y-2">
+              <p className="text-emerald-700">
+                <span className="font-semibold">You receive:</span>{" "}
+                You will receive the current building liquidation value.
+              </p>
+              <p className="text-amber-700">
+                <span className="font-semibold">You lose:</span> All development on this property.
+              </p>
+              <p>
+                <span className="font-semibold text-neutral-800">Terms:</span>{" "}
+                This property resets to a vacant lot after selling.
+              </p>
+              <p className="font-medium text-red-600">
+                <span className="font-semibold">Warning:</span> Selling buildings resets this property to a
+                vacant lot. You cannot continue upgrading this property until you build again.
+              </p>
+            </div>
+          ) : (
+            "Review sale details before confirming."
+          )
+        }
+        confirmLabel="Sell Building"
+        cancelLabel="Cancel"
+        isConfirming={actionLoading === "SELL_HOUSE"}
+        onConfirm={handleConfirmSellBuilding}
+        onCancel={() => setSellBuildingTileIndex(null)}
+      />
+      <ConfirmActionModalV2
+        open={collateralizeSelection !== null}
+        title={
+          collateralizeSelection
+            ? `Collateralize ${collateralizeSelection.name}?`
+            : "Collateralize property?"
+        }
+        description={
+          collateralizeSelection ? (
+            <div className="space-y-2">
+              <p className="text-emerald-700">
+                <span className="font-semibold">You receive:</span>{" "}
+                {formatMoney(collateralizeSelection.principal)} loan principal.
+              </p>
+              <p className="text-amber-700">
+                <span className="font-semibold">You lose:</span> Rent collection while collateralized.
+              </p>
+              <p>
+                <span className="font-semibold text-neutral-800">Terms:</span>{" "}
+                {formatMoney(collateralizeSelection.paymentPerTurn)} per turn for{" "}
+                {collateralizeSelection.termTurns} turns at{" "}
+                {(collateralizeSelection.ratePerTurn * 100).toFixed(2)}% interest per turn.
+              </p>
+              <p className="font-medium text-red-600">
+                <span className="font-semibold">Warning:</span> Collateralized properties cannot collect rent
+                until the loan is paid off.
+              </p>
+            </div>
+          ) : (
+            "Review loan terms before confirming."
+          )
+        }
+        confirmLabel="Collateralize"
+        cancelLabel="Cancel"
+        isConfirming={actionLoading === "TAKE_COLLATERAL_LOAN"}
+        onConfirm={handleConfirmCollateralize}
+        onCancel={() => setCollateralizeTileIndex(null)}
       />
       <AuctionOverlayV2
         auctionActive={auctionActive}
