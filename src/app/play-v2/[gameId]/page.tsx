@@ -3656,7 +3656,7 @@ export default function PlayV2Page() {
         const buildHouseDisabledReason = !isMyTurn
           ? "Not your turn"
           : !hasFullSet
-            ? "Need full set"
+            ? "Own the full color set to build"
             : isCollateralized
               ? "Already collateralized"
               : null;
@@ -4080,14 +4080,21 @@ export default function PlayV2Page() {
       );
     }
 
+    const voucherSegments: string[] = [];
+    if (currentPlayerFreeBuildTokens > 0) {
+      voucherSegments.push(`Free Build ${currentPlayerFreeBuildTokens}`);
+    }
+    if (currentPlayerFreeUpgradeTokens > 0) {
+      voucherSegments.push(`Free Upgrade ${currentPlayerFreeUpgradeTokens}`);
+    }
+
     return (
       <div className="space-y-2">
-        <div className="rounded-lg border border-indigo-200/20 bg-indigo-500/10 px-2.5 py-2 text-[11px] text-indigo-100/90">
-          Vouchers · Build {currentPlayerFreeBuildTokens} · Upgrade {currentPlayerFreeUpgradeTokens}
-        </div>
-        <p className="text-[11px] text-white/65">
-          Own the full color set to build. Each property can be upgraded independently. Selling buildings resets that property to undeveloped.
-        </p>
+        {voucherSegments.length > 0 ? (
+          <div className="rounded-lg border border-indigo-200/20 bg-indigo-500/10 px-2.5 py-2 text-[11px] text-indigo-100/90">
+            {voucherSegments.join(" · ")}
+          </div>
+        ) : null}
         {ownedProperties.map((entry) => {
           const {
             tile,
@@ -4170,7 +4177,13 @@ export default function PlayV2Page() {
                       })
                     }
                   >
-                    {actionLoading === "BUILD_HOUSE" ? "Upgrading…" : "Upgrade"}
+                    {actionLoading === "BUILD_HOUSE"
+                      ? housesCount > 0
+                        ? "Upgrading…"
+                        : "Building…"
+                      : housesCount > 0
+                        ? "Upgrade"
+                        : "Build"}
                   </button>
                   {activeReasonForTile?.actionKey === "BUILD_HOUSE" ? (
                     <p className="text-[10px] text-red-300">
@@ -4208,7 +4221,11 @@ export default function PlayV2Page() {
                         ? "border-white/30 text-white"
                         : "cursor-not-allowed border-white/10 text-white/40"
                     }`}
-                    title={sellHouseDisabledReason ?? undefined}
+                    title={
+                      sellHouseDisabledReason
+                        ? `${sellHouseDisabledReason} — Selling buildings resets the property to vacant lot.`
+                        : "Selling buildings resets the property to vacant lot."
+                    }
                     disabled={!canSellHouse || actionLoading === "SELL_HOUSE"}
                     onClick={() =>
                       handleOwnedActionClick({
@@ -4264,7 +4281,7 @@ export default function PlayV2Page() {
                   >
                     {actionLoading === "SELL_TO_MARKET"
                       ? "Selling…"
-                      : "Sell to Market"}
+                      : "Sell Lot"}
                   </button>
                   {activeReasonForTile?.actionKey === "SELL_TO_MARKET" ? (
                     <p className="text-[10px] text-red-300">
@@ -4317,9 +4334,7 @@ export default function PlayV2Page() {
                 </div>
               </div>
               <div className="flex items-center gap-1.5 text-[10px] text-white/65">
-                <span>
-                  Upgrade: Lv {housesCount} • {developmentLabel}
-                </span>
+                <span>{developmentLabel}</span>
                 {isPurchaseMortgaged ? (
                   <span className="rounded-full border border-amber-400/50 px-1.5 py-0.5 text-amber-200">
                     Mortgaged
