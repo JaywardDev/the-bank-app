@@ -4116,6 +4116,7 @@ export default function PlayV2Page() {
             canBuildHouse &&
             housesCount > 0 &&
             currentPlayerFreeUpgradeTokens > 0;
+          const tileBandColor = getTileBandColor(tile);
 
           return (
             <div
@@ -4123,8 +4124,19 @@ export default function PlayV2Page() {
               className="space-y-2 rounded-lg border border-white/15 bg-white/5 p-2.5"
             >
               <div className="flex items-start justify-between gap-2 text-xs">
-                <p className="font-semibold text-white">{tile.name}</p>
-                <p className="text-white/80">Rent {formatMoney(currentRent)}</p>
+                <div className="flex min-w-0 items-start gap-2">
+                  <span
+                    aria-hidden
+                    className="mt-0.5 h-4 w-1 shrink-0 rounded-full"
+                    style={{ backgroundColor: tileBandColor }}
+                  />
+                  <p className="min-w-0 truncate font-semibold text-white">
+                    {tile.name}
+                  </p>
+                </div>
+                <p className="shrink-0 text-white/80">
+                  Rent {formatMoney(currentRent)}
+                </p>
               </div>
               <div className="grid grid-cols-2 gap-1.5">
                 <div className="space-y-1">
@@ -4352,6 +4364,7 @@ export default function PlayV2Page() {
         {activeLoans.map((loan) => {
           const tile =
             boardTilesByIndex.get(loan.collateral_tile_index) ?? null;
+          const tileBandColor = tile ? getTileBandColor(tile) : "rgb(107 114 128)";
           const houses =
             ownershipByTile[loan.collateral_tile_index]?.houses ?? 0;
           const canDefault = canAct && houses === 0;
@@ -4401,19 +4414,26 @@ export default function PlayV2Page() {
                   }
                 />
               ) : null}
-              <div className="space-y-1 px-1 text-xs text-white/80">
-                <p className="text-sm font-semibold text-white">
-                  {tile?.name ?? `Tile ${loan.collateral_tile_index}`}
-                </p>
-                <p>
-                  Remaining principal:{" "}
-                  {formatMoney(loan.remaining_principal ?? loan.principal)}
-                </p>
-                <p>Payment / turn: {formatMoney(loan.payment_per_turn)}</p>
-                <p>Turns remaining: {loan.turns_remaining}</p>
-                <p>
-                  Rate / turn: {((loan.rate_per_turn ?? 0) * 100).toFixed(2)}%
-                </p>
+              <div className="flex items-start gap-2 px-1">
+                <span
+                  aria-hidden
+                  className="mt-0.5 h-12 w-1 shrink-0 rounded-full"
+                  style={{ backgroundColor: tileBandColor }}
+                />
+                <div className="min-w-0 space-y-1 text-xs text-white/80">
+                  <p className="truncate text-sm font-semibold text-white">
+                    {tile?.name ?? `Tile ${loan.collateral_tile_index}`}
+                  </p>
+                  <p>
+                    Remaining principal:{" "}
+                    {formatMoney(loan.remaining_principal ?? loan.principal)}
+                  </p>
+                  <p>Payment / turn: {formatMoney(loan.payment_per_turn)}</p>
+                  <p>Turns remaining: {loan.turns_remaining}</p>
+                  <p>
+                    Rate / turn: {((loan.rate_per_turn ?? 0) * 100).toFixed(2)}%
+                  </p>
+                </div>
               </div>
               <div className="flex flex-wrap gap-2 px-1 pb-1">
                 <button
@@ -4524,6 +4544,7 @@ export default function PlayV2Page() {
       <div className="space-y-3">
         {activePurchaseMortgages.map((mortgage) => {
           const tile = boardTilesByIndex.get(mortgage.tile_index) ?? null;
+          const tileBandColor = tile ? getTileBandColor(tile) : "rgb(107 114 128)";
           const payoffAmount =
             (mortgage.principal_remaining ?? 0) +
             (mortgage.accrued_interest_unpaid ?? 0);
@@ -4545,21 +4566,28 @@ export default function PlayV2Page() {
               key={mortgage.id}
               className="space-y-2 rounded-xl border border-white/15 bg-white/5 p-2"
             >
-              <div className="space-y-1 px-1 text-xs text-white/80">
-                <p className="text-sm font-semibold text-white">
-                  {tile?.name ?? `Tile ${mortgage.tile_index}`}
-                </p>
-                <p>
-                  Principal remaining:{" "}
-                  {formatMoney(mortgage.principal_remaining)}
-                </p>
-                <p>
-                  Accrued interest:{" "}
-                  {formatMoney(mortgage.accrued_interest_unpaid)}
-                </p>
-                <p>Payment / turn: {formatMoney(mortgage.payment_per_turn)}</p>
-                <p>Turns remaining: {mortgage.turns_remaining}</p>
-                <p>Payoff amount: {formatMoney(payoffAmount)}</p>
+              <div className="flex items-start gap-2 px-1">
+                <span
+                  aria-hidden
+                  className="mt-0.5 h-12 w-1 shrink-0 rounded-full"
+                  style={{ backgroundColor: tileBandColor }}
+                />
+                <div className="min-w-0 space-y-1 text-xs text-white/80">
+                  <p className="truncate text-sm font-semibold text-white">
+                    {tile?.name ?? `Tile ${mortgage.tile_index}`}
+                  </p>
+                  <p>
+                    Principal remaining:{" "}
+                    {formatMoney(mortgage.principal_remaining)}
+                  </p>
+                  <p>
+                    Accrued interest:{" "}
+                    {formatMoney(mortgage.accrued_interest_unpaid)}
+                  </p>
+                  <p>Payment / turn: {formatMoney(mortgage.payment_per_turn)}</p>
+                  <p>Turns remaining: {mortgage.turns_remaining}</p>
+                  <p>Payoff amount: {formatMoney(payoffAmount)}</p>
+                </div>
               </div>
               <div className="flex flex-wrap gap-2 px-1 pb-1">
                 <button
