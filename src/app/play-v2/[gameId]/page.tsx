@@ -44,6 +44,7 @@ import {
   getCurrentTileRent,
   getPropertyRentWithDevelopment,
   ownsFullColorSet,
+  ownsFullyBuiltColorSet,
 } from "@/lib/rent";
 import { formatCurrency, getCurrencyMetaFromBoardPack } from "@/lib/currency";
 import { getMaxDevelopmentLevel, getNextBuildCost } from "@/lib/developmentCosts";
@@ -3749,13 +3750,25 @@ export default function PlayV2Page() {
           economy: selectedBoardPack.economy,
         });
 
+        const hasFullyBuiltSet =
+          housesCount > 0
+            ? ownsFullyBuiltColorSet(
+                tile,
+                resolvedBoardTiles,
+                ownershipByTile,
+                currentUserPlayer.id,
+              )
+            : false;
+
         const buildHouseDisabledReason = !isMyTurn
           ? "Not your turn"
           : !hasFullSet
             ? "Own the full color set to build"
             : isCollateralized
               ? "Already collateralized"
-              : null;
+              : housesCount > 0 && !hasFullyBuiltSet
+                ? "Build on every property in this color set before upgrading."
+                : null;
         const sellHouseDisabledReason = !isMyTurn
           ? "Not your turn"
           : housesCount === 0

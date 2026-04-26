@@ -73,6 +73,33 @@ export const ownsFullColorSet = (
   );
 };
 
+export const ownsFullyBuiltColorSet = (
+  tile: BoardTile,
+  boardTiles: BoardTile[],
+  ownershipByTile: OwnershipByTile,
+  ownerPlayerId: string,
+) => {
+  if (tile.type !== "PROPERTY" || !tile.colorGroup) {
+    return false;
+  }
+
+  const groupTiles = boardTiles.filter(
+    (entry) => entry.type === "PROPERTY" && entry.colorGroup === tile.colorGroup,
+  );
+
+  if (groupTiles.length === 0) {
+    return false;
+  }
+
+  return groupTiles.every((entry) => {
+    const ownership = ownershipByTile[entry.index];
+    return (
+      ownership?.owner_player_id === ownerPlayerId &&
+      (ownership.houses ?? 0) > 0
+    );
+  });
+};
+
 export const getFullColorGroupRent = (tile: BoardTile) => {
   if (tile.type !== "PROPERTY") {
     return null;

@@ -63,7 +63,7 @@ import {
   mergeCommunicationUnlockIntoRules,
   shouldUnlockCommunicationUtility,
 } from "@/lib/runtimeUnlocks";
-import { getUtilityRentMultiplierForOwnedCount } from "@/lib/rent";
+import { getUtilityRentMultiplierForOwnedCount, ownsFullyBuiltColorSet } from "@/lib/rent";
 import { handleLobbyAction } from "@/lib/server/actions/lobbyActions";
 import { handleBettingAction } from "@/lib/server/actions/bettingActions";
 import { handleInlandAction } from "@/lib/server/actions/inlandActions";
@@ -8497,6 +8497,23 @@ export async function POST(request: Request) {
         if (nextHouses > maxDevelopmentLevel) {
           return NextResponse.json(
             { error: "Property is already fully upgraded." },
+            { status: 409 },
+          );
+        }
+        if (
+          houses > 0 &&
+          !ownsFullyBuiltColorSet(
+            tile,
+            boardTiles,
+            ownershipByTile,
+            currentPlayer.id,
+          )
+        ) {
+          return NextResponse.json(
+            {
+              error:
+                "Build on every property in this color set before upgrading.",
+            },
             { status: 409 },
           );
         }
