@@ -22,6 +22,7 @@ import TokenLegendPopupV2 from "@/components/play-v2/TokenLegendPopupV2";
 import EndedGameResultsPanel from "@/components/play-v2/EndedGameResultsPanel";
 import TileInfoPanelV2 from "@/components/play-v2/TileInfoPanelV2";
 import BettingMarketPanelV2 from "@/components/play-v2/BettingMarketPanelV2";
+import RentUnavailableIndicator from "@/components/play-v2/RentUnavailableIndicator";
 import { TitleDeedPreview } from "@/app/components/TitleDeedPreview";
 import {
   getBuildUpgradeConfirmationCopy,
@@ -3595,6 +3596,9 @@ export default function PlayV2Page() {
     selectedTileIndex === null
       ? null
       : (ownershipByTile[selectedTileIndex]?.owner_player_id ?? null);
+  const selectedOwnership =
+    selectedTileIndex === null ? null : (ownershipByTile[selectedTileIndex] ?? null);
+  const selectedTileIsCollateralized = Boolean(selectedOwnership?.collateral_loan_id);
 
   const selectedOwnerLabel = useMemo(() => {
     if (!selectedOwnerId) {
@@ -4251,7 +4255,12 @@ export default function PlayV2Page() {
                   </p>
                 </div>
                 <p className="shrink-0 text-white/80">
-                  Rent {formatMoney(currentRent)}
+                  <span className="inline-flex items-center gap-1">
+                    <span>Rent {formatMoney(currentRent)}</span>
+                    {isCollateralized ? (
+                      <RentUnavailableIndicator className="inline-flex" />
+                    ) : null}
+                  </span>
                 </p>
               </div>
               <div className="grid grid-cols-2 gap-1.5">
@@ -5366,6 +5375,7 @@ export default function PlayV2Page() {
                   statusLabel={selectedTileStatusLabel}
                   purchasePriceLabel={formatMoney(selectedTile.price ?? null)}
                   currentRentLabel={formatMoney(selectedTileCurrentRent)}
+                  currentRentUnavailable={selectedTileIsCollateralized}
                   upgradeCostLabel={
                     selectedTileIsUpgradeable && !selectedTileIsFullyUpgraded
                       ? formatMoney(

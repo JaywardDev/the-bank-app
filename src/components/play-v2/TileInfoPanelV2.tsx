@@ -1,4 +1,6 @@
 import type { BoardTile } from "@/lib/boardPacks";
+import RentUnavailableIndicator from "@/components/play-v2/RentUnavailableIndicator";
+import type { ReactNode } from "react";
 
 type InlandDevelopedSiteInfo = {
   name: string;
@@ -24,6 +26,7 @@ type TileInfoPanelV2Props = {
   statusLabel?: string;
   purchasePriceLabel?: string;
   currentRentLabel?: string;
+  currentRentUnavailable?: boolean;
   upgradeCostLabel?: string | null;
   nextRentLabel?: string | null;
   isFullyUpgraded?: boolean;
@@ -31,7 +34,7 @@ type TileInfoPanelV2Props = {
   inlandSiteInfo?: InlandDevelopedSiteInfo | null;
 };
 
-const StatRow = ({ label, value }: { label: string; value: string }) => (
+const StatRow = ({ label, value }: { label: string; value: ReactNode }) => (
   <div className="flex items-center justify-between gap-3 text-xs">
     <span className="font-medium uppercase tracking-wide text-white/55">
       {label}
@@ -47,6 +50,7 @@ export default function TileInfoPanelV2({
   statusLabel,
   purchasePriceLabel,
   currentRentLabel,
+  currentRentUnavailable,
   upgradeCostLabel,
   nextRentLabel,
   isFullyUpgraded,
@@ -128,7 +132,21 @@ export default function TileInfoPanelV2({
           <StatRow label="Purchase price" value={purchasePriceLabel ?? "—"} />
           <StatRow label="Owner" value={ownerLabel ?? "—"} />
           <StatRow label="Status" value={statusLabel ?? "—"} />
-          <StatRow label="Current rent" value={currentRentLabel ?? "—"} />
+          <StatRow
+            label="Current rent"
+            value={
+              currentRentLabel ? (
+                <span className="inline-flex items-center gap-1">
+                  <span>{currentRentLabel}</span>
+                  {currentRentUnavailable ? (
+                    <RentUnavailableIndicator className="inline-flex" />
+                  ) : null}
+                </span>
+              ) : (
+                "—"
+              )
+            }
+          />
           {upgradeCostLabel ? (
             <StatRow label="Upgrade cost" value={upgradeCostLabel} />
           ) : null}
