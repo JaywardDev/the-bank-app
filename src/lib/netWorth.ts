@@ -88,6 +88,37 @@ export const computeOwnedPropertyImprovementAssetValue = ({
   return normalizedHouses * houseCost * multiplier;
 };
 
+
+export const COLLATERAL_LOAN_LTV = 0.6;
+
+export const computeOwnedPropertyCollateralBaseValue = ({
+  tile,
+  ownership,
+  boardPackEconomy,
+}: {
+  tile: BoardTile;
+  ownership: { houses?: number | null } | null | undefined;
+  boardPackEconomy?: Pick<BoardPackEconomy, "houseImprovementValueMultipliers"> | null;
+}) => {
+  const tilePrice = Number.isFinite(tile.price) ? Math.max(0, tile.price ?? 0) : 0;
+  const improvementAssetValue = computeOwnedPropertyImprovementAssetValue({
+    tile,
+    ownership,
+    boardPackEconomy,
+  });
+
+  return tilePrice + improvementAssetValue;
+};
+
+export const computeOwnedPropertyCollateralPrincipal = ({
+  tile,
+  ownership,
+  boardPackEconomy,
+}: {
+  tile: BoardTile;
+  ownership: { houses?: number | null } | null | undefined;
+  boardPackEconomy?: Pick<BoardPackEconomy, "houseImprovementValueMultipliers"> | null;
+}) => Math.round(computeOwnedPropertyCollateralBaseValue({ tile, ownership, boardPackEconomy }) * COLLATERAL_LOAN_LTV);
 export const computeOwnedInlandAssetValue = ({
   inlandExploredCells,
   boardPackEconomy,

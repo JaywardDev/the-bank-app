@@ -3676,10 +3676,10 @@ export default function PlayV2Page() {
             ? "Already collateralized"
             : isPurchaseMortgaged
               ? "Mortgaged at purchase"
-              : housesCount > 0
-                ? "Remove upgrades first"
-                : !rules.loanCollateralEnabled
-                  ? "Collateral loans disabled"
+              : !rules.loanCollateralEnabled
+                ? "Collateral loans disabled"
+                : loanBlockedByMacro
+                  ? "Loans are currently unavailable"
                   : null;
         const sellToMarketDisabledReason = !canUseWalletPropertyActions
           ? "Not your turn"
@@ -4086,7 +4086,7 @@ export default function PlayV2Page() {
           Vouchers · Build {currentPlayerFreeBuildTokens} · Upgrade {currentPlayerFreeUpgradeTokens}
         </div>
         <p className="text-[11px] text-white/65">
-          Own the full color set to build. Each property can be upgraded independently. Selling development resets that property to undeveloped.
+          Own the full color set to build. Each property can be upgraded independently. Selling buildings resets that property to undeveloped.
         </p>
         {ownedProperties.map((entry) => {
           const {
@@ -4143,11 +4143,12 @@ export default function PlayV2Page() {
                   <button
                     type="button"
                     className={`w-full rounded-md px-2 py-1 text-[11px] font-semibold text-white ${
-                      canBuildHouse
+                      canBuildHouse && actionLoading !== "BUILD_HOUSE"
                         ? "bg-emerald-600"
-                        : "cursor-pointer bg-emerald-900/40 text-white/60"
+                        : "cursor-not-allowed bg-emerald-900/40 text-white/60"
                     }`}
                     title={buildHouseDisabledReason ?? undefined}
+                    disabled={!canBuildHouse || actionLoading === "BUILD_HOUSE"}
                     onClick={() =>
                       handleOwnedActionClick({
                         tileIndex: tile.index,
@@ -4203,11 +4204,12 @@ export default function PlayV2Page() {
                   <button
                     type="button"
                     className={`w-full rounded-md border px-2 py-1 text-[11px] font-semibold ${
-                      canSellHouse
+                      canSellHouse && actionLoading !== "SELL_HOUSE"
                         ? "border-white/30 text-white"
-                        : "cursor-pointer border-white/10 text-white/40"
+                        : "cursor-not-allowed border-white/10 text-white/40"
                     }`}
                     title={sellHouseDisabledReason ?? undefined}
+                    disabled={!canSellHouse || actionLoading === "SELL_HOUSE"}
                     onClick={() =>
                       handleOwnedActionClick({
                         tileIndex: tile.index,
@@ -4227,7 +4229,7 @@ export default function PlayV2Page() {
                   >
                     {actionLoading === "SELL_HOUSE"
                       ? "Selling…"
-                      : "Sell Development"}
+                      : "Sell Building"}
                   </button>
                   {activeReasonForTile?.actionKey === "SELL_HOUSE" ? (
                     <p className="text-[10px] text-red-300">
@@ -4240,11 +4242,12 @@ export default function PlayV2Page() {
                   <button
                     type="button"
                     className={`w-full rounded-md border px-2 py-1 text-[11px] font-semibold ${
-                      canSellToMarket
+                      canSellToMarket && actionLoading !== "SELL_TO_MARKET"
                         ? "border-white/30 text-white"
-                        : "cursor-pointer border-white/10 text-white/40"
+                        : "cursor-not-allowed border-white/10 text-white/40"
                     }`}
                     title={sellToMarketDisabledReason ?? undefined}
+                    disabled={!canSellToMarket || actionLoading === "SELL_TO_MARKET"}
                     onClick={() =>
                       handleOwnedActionClick({
                         tileIndex: tile.index,
@@ -4274,11 +4277,12 @@ export default function PlayV2Page() {
                   <button
                     type="button"
                     className={`w-full rounded-md px-2 py-1 text-[11px] font-semibold ${
-                      collateralDisabledReason === null
+                      collateralDisabledReason === null && actionLoading !== "TAKE_COLLATERAL_LOAN"
                         ? "bg-white/90 text-neutral-900"
-                        : "cursor-pointer bg-white/20 text-white/50"
+                        : "cursor-not-allowed bg-white/20 text-white/50"
                     }`}
                     title={collateralDisabledReason ?? undefined}
+                    disabled={collateralDisabledReason !== null || actionLoading === "TAKE_COLLATERAL_LOAN"}
                     onClick={() =>
                       handleOwnedActionClick({
                         tileIndex: tile.index,
@@ -4306,6 +4310,9 @@ export default function PlayV2Page() {
                     <p className="text-[10px] text-red-300">
                       {activeReasonForTile.reason}
                     </p>
+                  ) : null}
+                  {loanBlockedByMacro ? (
+                    <p className="text-[10px] text-red-300">Loans are currently unavailable</p>
                   ) : null}
                 </div>
               </div>

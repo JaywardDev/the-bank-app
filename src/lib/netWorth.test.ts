@@ -6,6 +6,9 @@ import {
   computeAuthoritativeNetWorthBreakdown,
   computeOwnedPropertyImprovementAssetValue,
   computeOwnedInlandAssetValue,
+  computeOwnedPropertyCollateralPrincipal,
+  computeOwnedPropertyCollateralBaseValue,
+  COLLATERAL_LOAN_LTV,
 } from "@/lib/netWorth";
 import type { BoardTile } from "@/lib/boardPacks";
 
@@ -82,6 +85,47 @@ test("malformed ownership.houses fails safe to zero improvement value", () => {
   });
 
   assert.equal(value, 0);
+});
+
+test("collateral principal uses 60% of tile price when property has no development", () => {
+  const collateralBase = computeOwnedPropertyCollateralBaseValue({
+    tile: developedPropertyTile,
+    ownership: { houses: 0 },
+    boardPackEconomy: { houseImprovementValueMultipliers: [0, 0.8, 0.9, 1.4, 1.9, 1.7] },
+  });
+
+  const principal = computeOwnedPropertyCollateralPrincipal({
+    tile: developedPropertyTile,
+    ownership: { houses: 0 },
+    boardPackEconomy: { houseImprovementValueMultipliers: [0, 0.8, 0.9, 1.4, 1.9, 1.7] },
+  });
+
+  assert.equal(collateralBase, developedPropertyTile.price);
+  assert.equal(principal, Math.round((developedPropertyTile.price ?? 0) * COLLATERAL_LOAN_LTV));
+});
+
+test("collateral principal includes net-worth improvement asset value", () => {
+  const ownership = { houses: 4 };
+  const boardPackEconomy = { houseImprovementValueMultipliers: [0, 0.8, 0.9, 1.4, 1.9, 1.7] };
+  const improvementValue = computeOwnedPropertyImprovementAssetValue({
+    tile: developedPropertyTile,
+    ownership,
+    boardPackEconomy,
+  });
+
+  const collateralBase = computeOwnedPropertyCollateralBaseValue({
+    tile: developedPropertyTile,
+    ownership,
+    boardPackEconomy,
+  });
+  const principal = computeOwnedPropertyCollateralPrincipal({
+    tile: developedPropertyTile,
+    ownership,
+    boardPackEconomy,
+  });
+
+  assert.equal(collateralBase, (developedPropertyTile.price ?? 0) + improvementValue);
+  assert.equal(principal, Math.round(collateralBase * COLLATERAL_LOAN_LTV));
 });
 
 test("undeveloped owned inland explored-empty contributes only land-base value", () => {

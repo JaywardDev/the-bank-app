@@ -6046,7 +6046,7 @@ export default function PlayPage() {
                                 }
                                 title={
                                   loanBlockedByMacro
-                                    ? `Blocked by macro: ${loanBlockedByMacro.name ?? "Macroeconomic event"}`
+                                    ? "Loans are currently unavailable"
                                     : undefined
                                 }
                               >
@@ -6055,15 +6055,8 @@ export default function PlayPage() {
                                   : "Collateralize"}
                               </button>
                               {loanBlockedByMacro ? (
-                                <p className="text-xs text-neutral-400">
-                                  <span>Blocked by macro: {loanBlockedByMacro.name ?? "Macroeconomic event"}</span>{" "}
-                                  {loanBlockedByMacro.id &&
-                                  macroTooltipById.get(loanBlockedByMacro.id) ? (
-                                    <InfoTooltip
-                                      text={macroTooltipById.get(loanBlockedByMacro.id) ?? ""}
-                                      className="align-middle"
-                                    />
-                                  ) : null}
+                                <p className="text-xs text-red-500">
+                                  Loans are currently unavailable
                                 </p>
                               ) : null}
                             </div>

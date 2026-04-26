@@ -27,7 +27,11 @@ import {
   computeSuperTaxBreakdown,
   isCustomTaxBoardPack,
 } from "@/lib/tax";
-import { computeAuthoritativeNetWorthBreakdown } from "@/lib/netWorth";
+import {
+  COLLATERAL_LOAN_LTV,
+  computeAuthoritativeNetWorthBreakdown,
+  computeOwnedPropertyCollateralPrincipal,
+} from "@/lib/netWorth";
 import {
   calculateAmortizedPaymentPerTurn,
   calculateDownPaymentAmount,
@@ -9264,6 +9268,18 @@ export async function POST(request: Request) {
         );
       }
 
+      const collateralPrincipal = computeOwnedPropertyCollateralPrincipal({
+        tile,
+        ownership,
+        boardPackEconomy,
+      });
+      if (collateralPrincipal <= 0) {
+        return NextResponse.json(
+          { error: "Collateral value unavailable for this tile." },
+          { status: 409 },
+        );
+      }
+
       const rpcResponse = await fetch(
         `${supabaseUrl}/rest/v1/rpc/take_collateral_loan`,
         {
@@ -9278,7 +9294,8 @@ export async function POST(request: Request) {
             tile_type: tile.type,
             tile_id: tile.tile_id,
             actor_user_id: user.id,
-            collateral_ltv_input: rules.collateralLtv,
+            collateral_ltv_input: COLLATERAL_LOAN_LTV,
+            collateral_principal_input: collateralPrincipal,
             rate_per_turn_input: rules.collateralRatePerTurn,
             term_turns_input: rules.collateralTermTurns,
           }),
