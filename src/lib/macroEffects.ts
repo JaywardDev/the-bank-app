@@ -35,3 +35,18 @@ export const normalizeMacroEffects = (effects: MacroEventEffect[]) =>
   effects
     .map((effect) => normalizeMacroEffect(effect))
     .filter((effect): effect is MacroEventEffect => Boolean(effect));
+
+type HouseSellMultiplierLikeEffect = {
+  effects?: Record<string, unknown> | null;
+};
+
+export const getMacroHouseSellMultiplierV1 = (
+  activeEffects: HouseSellMultiplierLikeEffect[] | null | undefined,
+) =>
+  (activeEffects ?? []).reduce((product, effect) => {
+    const multiplier = effect.effects?.house_sell_multiplier;
+    if (typeof multiplier === "number") {
+      return product * multiplier;
+    }
+    return product;
+  }, 1);

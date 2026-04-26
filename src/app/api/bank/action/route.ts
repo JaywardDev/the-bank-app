@@ -11,7 +11,10 @@ import {
   MACRO_EVENT_INTERVAL_ROUNDS,
   type MacroEventEffect,
 } from "@/lib/macroDecks";
-import { normalizeMacroEffects } from "@/lib/macroEffects";
+import {
+  getMacroHouseSellMultiplierV1,
+  normalizeMacroEffects,
+} from "@/lib/macroEffects";
 import {
   MACRO_DECK_V1,
   drawMacroCardV1,
@@ -727,15 +730,6 @@ const getMacroUtilityRentBonusPctPerHouseV1 = (
 const getMacroBuildCostMultiplierV1 = (activeEffects: ActiveMacroEffectV1[]) =>
   activeEffects.reduce((product, effect) => {
     const multiplier = effect.effects.build_cost_multiplier;
-    if (typeof multiplier === "number") {
-      return product * multiplier;
-    }
-    return product;
-  }, 1);
-
-const getMacroHouseSellMultiplierV1 = (activeEffects: ActiveMacroEffectV1[]) =>
-  activeEffects.reduce((product, effect) => {
-    const multiplier = effect.effects.house_sell_multiplier;
     if (typeof multiplier === "number") {
       return product * multiplier;
     }

@@ -77,6 +77,7 @@ import {
   type BettingMarketBetKind,
   type BettingMarketBetSelection,
 } from "@/lib/bettingMarket";
+import { getMacroHouseSellMultiplierV1 } from "@/lib/macroEffects";
 import {
   hasTradeValue,
   normalizeTradeSnapshot,
@@ -344,6 +345,7 @@ type BuildUpgradeConfirmationState = {
 type OwnedPropertyActionConfirmation = {
   tileIndex: number;
   name: string;
+  payout?: number;
 };
 
 type PlayerLoan = {
@@ -3053,11 +3055,22 @@ export default function PlayV2Page() {
     if (!tile) {
       return null;
     }
+    const ownership = ownershipByTile[tile.index] ?? null;
+    const houses = Math.max(0, ownership?.houses ?? 0);
+    const houseCost = tile.houseCost ?? 0;
+    const macroHouseSellMultiplier = getMacroHouseSellMultiplierV1(activeMacroEffectsV1);
+    const payout = Math.round(houseCost * 0.5 * macroHouseSellMultiplier * houses);
     return {
       tileIndex: tile.index,
       name: tile.name,
+      payout,
     };
-  }, [sellBuildingTileIndex, resolvedBoardTiles]);
+  }, [
+    activeMacroEffectsV1,
+    ownershipByTile,
+    sellBuildingTileIndex,
+    resolvedBoardTiles,
+  ]);
 
   const collateralizeSelection = useMemo(() => {
     if (collateralizeTileIndex === null || !resolvedBoardTiles) {
@@ -6300,6 +6313,7 @@ export default function PlayV2Page() {
       />
       <ConfirmActionModalV2
         open={sellToMarketSelection !== null}
+        showEyebrow={false}
         title={
           sellToMarketSelection
             ? `Sell ${sellToMarketSelection.name} to the Bank?`
@@ -6330,17 +6344,20 @@ export default function PlayV2Page() {
       />
       <ConfirmActionModalV2
         open={sellBuildingSelection !== null}
+        showEyebrow={false}
         title={
           sellBuildingSelection
-            ? `Sell development on ${sellBuildingSelection.name}?`
+            ? `Sell building on ${sellBuildingSelection.name}?`
             : "Sell building?"
         }
         description={
           sellBuildingSelection ? (
             <div className="space-y-1.5">
-              <p>You will receive cash for your current building.</p>
+              <p>
+                You will receive {formatMoney(sellBuildingSelection.payout ?? 0)} in cash for your current building.
+              </p>
               <p className="text-red-700">
-                This property will return to a vacant lot.
+                This returns the property to a vacant lot, so the rest of this area cannot be upgraded until you build again.
               </p>
             </div>
           ) : (
@@ -6355,6 +6372,7 @@ export default function PlayV2Page() {
       />
       <ConfirmActionModalV2
         open={collateralizeSelection !== null}
+        showEyebrow={false}
         title={
           collateralizeSelection
             ? `Collateralize ${collateralizeSelection.name}?`
@@ -6364,13 +6382,14 @@ export default function PlayV2Page() {
           collateralizeSelection ? (
             <div className="space-y-1.5">
               <p>
-                You will receive {formatMoney(collateralizeSelection.principal)} as a
-                loan secured by this property.
+                The bank approved a {formatMoney(collateralizeSelection.principal)} loan secured by this property.
               </p>
               <p className="text-red-700">
                 This property cannot collect rent until the loan is repaid.
               </p>
-              <p className="text-neutral-600">Payments will be deducted each turn.</p>
+              <p className="text-neutral-600">
+                You will pay {formatMoney(collateralizeSelection.paymentPerTurn)} each turn until the loan is paid off.
+              </p>
             </div>
           ) : (
             "Review loan terms before confirming."
