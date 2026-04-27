@@ -2781,10 +2781,18 @@ export default function PlayV2Page() {
     setActionLoading("SURRENDER_GAME");
     setNotice(null);
 
+    const expectedVersion = gameState?.version;
+    if (typeof expectedVersion !== "number") {
+      await loadAllSlices(routeGameId, session.access_token);
+      setNotice("Game state is syncing. Please try surrendering again.");
+      setActionLoading(null);
+      return;
+    }
+
     const requestBody = {
       gameId: routeGameId,
       action: "SURRENDER_GAME",
-      expectedVersion: gameState?.version ?? 0,
+      expectedVersion,
     };
 
     try {
@@ -2799,6 +2807,7 @@ export default function PlayV2Page() {
         });
 
       let response = await performLeave(session.access_token);
+      let activeAccessToken = session.access_token;
       if (response.status === 401) {
         const refreshedSession = await supabaseClient.refreshSession();
         setSession(refreshedSession);
@@ -2807,12 +2816,19 @@ export default function PlayV2Page() {
           setNotice(SESSION_EXPIRED_MESSAGE);
           return;
         }
-        response = await performLeave(refreshedSession.access_token);
+        activeAccessToken = refreshedSession.access_token;
+        response = await performLeave(activeAccessToken);
       }
 
       if (response.status === 401) {
         setNeedsAuth(true);
         setNotice(SESSION_EXPIRED_MESSAGE);
+        return;
+      }
+
+      if (response.status === 409) {
+        await loadAllSlices(routeGameId, activeAccessToken);
+        setNotice("Game state updated. Synced latest state. Please try again.");
         return;
       }
 
@@ -2831,7 +2847,15 @@ export default function PlayV2Page() {
     } finally {
       setActionLoading(null);
     }
-  }, [actionLoading, clearPlayV2State, routeGameId, router, session]);
+  }, [
+    actionLoading,
+    clearPlayV2State,
+    gameState?.version,
+    loadAllSlices,
+    routeGameId,
+    router,
+    session,
+  ]);
 
   const handleEndSessionV2 = useCallback(async () => {
     if (actionLoading !== null) {
