@@ -16,6 +16,8 @@ export default function TaxSuccessAnimationOverlay({
 }: TaxSuccessAnimationOverlayProps) {
   const [animationData, setAnimationData] = useState<object | null>(null);
   const hasCompletedRef = useRef(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const hasPlayedSoundForRunRef = useRef<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -57,6 +59,35 @@ export default function TaxSuccessAnimationOverlay({
       window.clearTimeout(timeoutId);
     };
   }, [onComplete, runId]);
+
+  useEffect(() => {
+    if (hasPlayedSoundForRunRef.current === runId) {
+      return;
+    }
+
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      audioRef.current = null;
+    }
+
+    const audio = new Audio("/sounds/payment-sound.mp3");
+    audio.loop = false;
+    audioRef.current = audio;
+    hasPlayedSoundForRunRef.current = runId;
+
+    void audio.play().catch(() => {
+      // Autoplay can fail depending on browser policies; do not block animation flow.
+    });
+
+    return () => {
+      audio.pause();
+      audio.currentTime = 0;
+      if (audioRef.current === audio) {
+        audioRef.current = null;
+      }
+    };
+  }, [runId]);
 
   return (
     <div className="fixed inset-0 z-[240] flex items-center justify-center bg-black/60">
