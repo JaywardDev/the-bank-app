@@ -2628,15 +2628,13 @@ export default function PlayV2Page() {
     if (!isInsolvencyReadyToPay) {
       return;
     }
-    const insolvencyReason = pendingInsolvencyRecovery?.reason ?? null;
     const result = await handleBankAction("CONFIRM_INSOLVENCY_PAYMENT");
-    if (result.ok && insolvencyReason === "PAY_TAX") {
+    if (result.ok) {
       triggerTaxSuccessAnimation();
     }
   }, [
     handleBankAction,
     isInsolvencyReadyToPay,
-    pendingInsolvencyRecovery?.reason,
     triggerTaxSuccessAnimation,
   ]);
 
