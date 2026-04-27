@@ -8,6 +8,7 @@ type AuctionActionRequest = {
 };
 
 type GameStateRow = {
+  rounds_elapsed?: number | null;
   auction_active: boolean | null;
   auction_tile_index: number | null;
   auction_passed_player_ids: string[] | null;
@@ -78,6 +79,7 @@ type HandleAuctionActionParams = {
     gameId: string;
     tileIndex: number;
     ownerPlayerId: string;
+    acquiredRound: number;
   }) => Promise<{ ok: boolean; alreadyOwned?: boolean; errorText?: string }>;
   maybeUnlockCommunicationUtility: (params: {
     gameState: unknown;
@@ -382,6 +384,7 @@ export const handleAuctionAction = async ({
         gameId,
         tileIndex: auctionTileIndex,
         ownerPlayerId: winnerId,
+        acquiredRound: gameState.rounds_elapsed ?? 0,
       });
 
       if (!ownershipResult.ok) {

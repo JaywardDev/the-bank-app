@@ -50,6 +50,7 @@ import {
 } from "@/lib/rent";
 import { formatCurrency, getCurrencyMetaFromBoardPack } from "@/lib/currency";
 import { getMaxDevelopmentLevel, getNextBuildCost } from "@/lib/developmentCosts";
+import { isPropertySaleLocked } from "@/lib/propertySaleLock";
 import {
   canExploreInlandCell,
   getInlandBankSalePrice,
@@ -318,6 +319,7 @@ type BankActionRequest = {
 type OwnershipRow = {
   tile_index: number;
   owner_player_id: string | null;
+  acquired_round: number | null;
   collateral_loan_id: string | null;
   purchase_mortgage_id: string | null;
   houses: number | null;
@@ -327,6 +329,7 @@ type OwnershipByTile = Record<
   number,
   {
     owner_player_id: string;
+    acquired_round: number | null;
     collateral_loan_id: string | null;
     purchase_mortgage_id: string | null;
     houses: number;
@@ -781,7 +784,7 @@ export default function PlayV2Page() {
     async (gameId: string, accessToken?: string) => {
       const requestEpoch = startSliceRequest("ownership");
       const rows = await supabaseClient.fetchFromSupabase<OwnershipRow[]>(
-        `property_ownership?select=tile_index,owner_player_id,collateral_loan_id,purchase_mortgage_id,houses&game_id=eq.${gameId}`,
+        `property_ownership?select=tile_index,owner_player_id,acquired_round,collateral_loan_id,purchase_mortgage_id,houses&game_id=eq.${gameId}`,
         { method: "GET" },
         accessToken,
       );
@@ -789,6 +792,7 @@ export default function PlayV2Page() {
         if (row.owner_player_id) {
           acc[row.tile_index] = {
             owner_player_id: row.owner_player_id,
+            acquired_round: row.acquired_round ?? null,
             collateral_loan_id: row.collateral_loan_id ?? null,
             purchase_mortgage_id: row.purchase_mortgage_id ?? null,
             houses: row.houses ?? 0,
@@ -3834,6 +3838,11 @@ export default function PlayV2Page() {
               ? "Already collateralized"
               : isPurchaseMortgaged
                 ? "Mortgaged at purchase"
+                : isPropertySaleLocked(
+                    ownership.acquired_round,
+                    gameState?.rounds_elapsed ?? 0,
+                  )
+                  ? "Hold for 3 rounds after acquisition"
                 : null;
 
         return {
@@ -3866,6 +3875,8 @@ export default function PlayV2Page() {
     canAct,
     canUseRecoveryActions,
     currentUserPlayer,
+    gameState?.rounds_elapsed,
+    loanBlockedByMacro,
     ownershipByTile,
     rules.loanCollateralEnabled,
     selectedBoardPack?.economy,

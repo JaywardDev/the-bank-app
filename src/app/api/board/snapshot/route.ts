@@ -74,6 +74,7 @@ type GameEvent = {
 type OwnershipRow = {
   tile_index: number;
   owner_player_id: string | null;
+  acquired_round: number | null;
   collateral_loan_id: string | null;
   purchase_mortgage_id: string | null;
   houses: number | null;
@@ -135,7 +136,7 @@ export async function POST(request: Request) {
         `game_events?select=id,event_type,payload,created_at,version&game_id=eq.${encodeURIComponent(gameId)}&order=version.desc&limit=12`,
       ),
       fetchTable<OwnershipRow[]>(
-        `property_ownership?select=tile_index,owner_player_id,collateral_loan_id,purchase_mortgage_id,houses&game_id=eq.${encodeURIComponent(gameId)}`,
+        `property_ownership?select=tile_index,owner_player_id,acquired_round,collateral_loan_id,purchase_mortgage_id,houses&game_id=eq.${encodeURIComponent(gameId)}`,
       ),
     ]);
 

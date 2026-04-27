@@ -70,6 +70,7 @@ import { handleInlandAction } from "@/lib/server/actions/inlandActions";
 import { handleAuctionAction } from "@/lib/server/actions/auctionActions";
 import { handleTradeAction } from "@/lib/server/actions/tradeActions";
 import { isRoundLimitOption, shouldEndRoundModeGame } from "@/lib/gameConfig";
+import { isPropertySaleLocked } from "@/lib/propertySaleLock";
 
 const supabaseUrl = (process.env.SUPABASE_URL ?? SUPABASE_URL ?? "").trim();
 const supabaseAnonKey = (
@@ -431,6 +432,7 @@ type GameStateRow = {
 type OwnershipRow = {
   tile_index: number;
   owner_player_id: string | null;
+  acquired_round: number | null;
   collateral_loan_id: string | null;
   purchase_mortgage_id: string | null;
   houses: number | null;
@@ -440,6 +442,7 @@ type OwnershipByTile = Record<
   number,
   {
     owner_player_id: string;
+    acquired_round: number | null;
     collateral_loan_id: string | null;
     purchase_mortgage_id: string | null;
     houses: number;
@@ -973,6 +976,7 @@ const liquidateHousesForPlayer = async ({
 
     ownershipByTile[tile.index] = {
       owner_player_id: player.id,
+      acquired_round: ownershipByTile[tile.index]?.acquired_round ?? null,
       collateral_loan_id: ownershipByTile[tile.index]?.collateral_loan_id ?? null,
       purchase_mortgage_id:
         ownershipByTile[tile.index]?.purchase_mortgage_id ?? null,
@@ -1323,7 +1327,7 @@ const loadOwnershipByTile = async (
   gameId: string,
 ): Promise<OwnershipByTile> => {
   const ownershipRows = (await fetchFromSupabaseWithService<OwnershipRow[]>(
-    `property_ownership?select=tile_index,owner_player_id,collateral_loan_id,purchase_mortgage_id,houses&game_id=eq.${gameId}`,
+    `property_ownership?select=tile_index,owner_player_id,acquired_round,collateral_loan_id,purchase_mortgage_id,houses&game_id=eq.${gameId}`,
     { method: "GET" },
   )) ?? [];
 
@@ -1331,6 +1335,7 @@ const loadOwnershipByTile = async (
     if (row.owner_player_id) {
       acc[row.tile_index] = {
         owner_player_id: row.owner_player_id,
+        acquired_round: row.acquired_round ?? null,
         collateral_loan_id: row.collateral_loan_id ?? null,
         purchase_mortgage_id: row.purchase_mortgage_id ?? null,
         houses: row.houses ?? 0,
@@ -1345,11 +1350,13 @@ const assignPropertyOwnership = async ({
   tileIndex,
   ownerPlayerId,
   purchaseMortgageId,
+  acquiredRound,
 }: {
   gameId: string;
   tileIndex: number;
   ownerPlayerId: string;
   purchaseMortgageId?: string | null;
+  acquiredRound: number;
 }): Promise<{
   ok: boolean;
   alreadyOwned?: boolean;
@@ -1367,6 +1374,7 @@ const assignPropertyOwnership = async ({
         },
         body: JSON.stringify({
           owner_player_id: ownerPlayerId,
+          acquired_round: acquiredRound,
           collateral_loan_id: null,
           purchase_mortgage_id: purchaseMortgageId ?? null,
           houses: 0,
@@ -1388,6 +1396,7 @@ const assignPropertyOwnership = async ({
       game_id: gameId,
       tile_index: tileIndex,
       owner_player_id: ownerPlayerId,
+      acquired_round: acquiredRound,
       collateral_loan_id: null,
       purchase_mortgage_id: purchaseMortgageId ?? null,
       houses: 0,
@@ -2639,6 +2648,7 @@ const resolvePlayerElimination = async ({
         method: "PATCH",
         body: JSON.stringify({
           owner_player_id: null,
+          acquired_round: null,
           collateral_loan_id: null,
           purchase_mortgage_id: null,
           houses: 0,
@@ -4634,6 +4644,7 @@ const applyLoanPaymentsForPlayer = async ({
           method: "PATCH",
           body: JSON.stringify({
             owner_player_id: null,
+            acquired_round: null,
             purchase_mortgage_id: null,
             collateral_loan_id: null,
             houses: 0,
@@ -8306,6 +8317,7 @@ export async function POST(request: Request) {
         tileIndex,
         ownerPlayerId: currentPlayer.id,
         purchaseMortgageId: mortgageId,
+        acquiredRound: gameState.rounds_elapsed ?? 0,
       });
 
       if (!ownershipResult.ok) {
@@ -8894,6 +8906,17 @@ export async function POST(request: Request) {
           { status: 409 },
         );
       }
+      const currentRound = gameState.rounds_elapsed ?? 0;
+      if (isPropertySaleLocked(ownership.acquired_round, currentRound)) {
+        return NextResponse.json(
+          {
+            errorCode: "PROPERTY_SALE_LOCKED",
+            error:
+              "This property cannot be sold yet. Hold it for 3 rounds after acquisition.",
+          },
+          { status: 409 },
+        );
+      }
 
       const houses = ownership.houses ?? 0;
       if (houses > 0) {
@@ -8941,6 +8964,7 @@ export async function POST(request: Request) {
           },
           body: JSON.stringify({
             owner_player_id: null,
+            acquired_round: null,
             collateral_loan_id: null,
             purchase_mortgage_id: null,
             houses: 0,
@@ -9134,6 +9158,7 @@ export async function POST(request: Request) {
           },
           body: JSON.stringify({
             owner_player_id: null,
+            acquired_round: null,
             collateral_loan_id: null,
             purchase_mortgage_id: null,
             houses: 0,
