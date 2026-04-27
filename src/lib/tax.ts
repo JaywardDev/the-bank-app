@@ -46,6 +46,7 @@ type OwnershipByTileForTax = Record<
   number,
   {
     owner_player_id: string;
+    acquired_round?: number | null;
     houses?: number | null;
   }
 >;
@@ -62,6 +63,7 @@ type PurchaseMortgageForTax = {
 
 export type NetWorthForTaxInput = {
   currentCash: number;
+  currentRound?: number | null;
   playerId: string;
   boardTiles: BoardTile[];
   ownershipByTile: OwnershipByTileForTax;
@@ -87,6 +89,7 @@ export type SuperTaxBreakdown = {
 
 export const computeSuperTaxBreakdown = ({
   currentCash,
+  currentRound,
   playerId,
   boardTiles,
   ownershipByTile,
@@ -97,6 +100,7 @@ export const computeSuperTaxBreakdown = ({
 }: NetWorthForTaxInput): SuperTaxBreakdown => {
   const netWorthBreakdown = computeAuthoritativeNetWorthBreakdown({
     currentCash,
+    currentRound,
     playerId,
     boardTiles,
     ownershipByTile,

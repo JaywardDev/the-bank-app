@@ -71,6 +71,7 @@ import { handleAuctionAction } from "@/lib/server/actions/auctionActions";
 import { handleTradeAction } from "@/lib/server/actions/tradeActions";
 import { isRoundLimitOption, shouldEndRoundModeGame } from "@/lib/gameConfig";
 import { isPropertySaleLocked } from "@/lib/propertySaleLock";
+import { getPropertyMarketValue } from "@/lib/propertyMarketValue";
 
 const supabaseUrl = (process.env.SUPABASE_URL ?? SUPABASE_URL ?? "").trim();
 const supabaseAnonKey = (
@@ -2410,6 +2411,7 @@ const computeAuthoritativeFinalStandings = async ({
       const cash = gameState.balances?.[player.id] ?? 0;
       const netWorthBreakdown = computeAuthoritativeNetWorthBreakdown({
         currentCash: cash,
+        currentRound: gameState.rounds_elapsed ?? 0,
         playerId: player.id,
         boardTiles,
         ownershipByTile,
@@ -3605,6 +3607,7 @@ const finalizeMoveResolution = async ({
 
       superTaxBreakdown = computeSuperTaxBreakdown({
         currentCash: currentCashForTax,
+        currentRound: gameState.rounds_elapsed ?? 0,
         playerId: currentPlayer.id,
         boardTiles,
         ownershipByTile,
@@ -8946,7 +8949,12 @@ export async function POST(request: Request) {
         );
       }
 
-      const payout = Math.round(price * 0.7);
+      const marketPriceAtSale = getPropertyMarketValue({
+        basePrice: price,
+        acquiredRound: ownership.acquired_round,
+        currentRound,
+      }).marketPrice;
+      const payout = Math.round(marketPriceAtSale * 0.7);
       const balances = gameState.balances ?? {};
       const currentBalance =
         balances[currentPlayer.id] ?? startingCash;
@@ -8990,6 +8998,7 @@ export async function POST(request: Request) {
             tile_id: tileResult.tile.tile_id,
             player_id: currentPlayer.id,
             price,
+            market_price_at_sale: marketPriceAtSale,
             payout,
           },
         },
@@ -9296,8 +9305,12 @@ export async function POST(request: Request) {
         );
       }
 
-      const purchasePrice = tile.price ?? 0;
-      if (purchasePrice <= 0) {
+      const marketPrice = getPropertyMarketValue({
+        basePrice: tile.price ?? 0,
+        acquiredRound: ownership.acquired_round,
+        currentRound: gameState.rounds_elapsed ?? 0,
+      }).marketPrice;
+      if (marketPrice <= 0) {
         return NextResponse.json(
           { error: "Collateral value unavailable for this tile." },
           { status: 409 },
@@ -9307,6 +9320,7 @@ export async function POST(request: Request) {
       const collateralPrincipal = computeOwnedPropertyCollateralPrincipal({
         tile,
         ownership,
+        currentRound: gameState.rounds_elapsed ?? 0,
         boardPackEconomy,
       });
       if (collateralPrincipal <= 0) {
@@ -9326,7 +9340,7 @@ export async function POST(request: Request) {
             player_id: currentPlayer.id,
             tile_index: tileIndex,
             expected_version: currentVersion,
-            tile_price: purchasePrice,
+            tile_price: marketPrice,
             tile_type: tile.type,
             tile_id: tile.tile_id,
             actor_user_id: user.id,

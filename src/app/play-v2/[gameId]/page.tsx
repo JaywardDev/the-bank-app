@@ -1571,6 +1571,7 @@ export default function PlayV2Page() {
         );
         const netWorthBreakdown = computeAuthoritativeNetWorthBreakdown({
           currentCash: cash,
+          currentRound: gameState?.rounds_elapsed ?? 0,
           playerId: player.id,
           boardTiles: Array.from(boardTilesByIndex.values()),
           ownershipByTile,
@@ -3057,7 +3058,12 @@ export default function PlayV2Page() {
     if (!tile) {
       return null;
     }
-    const marketValue = tile.price ?? 0;
+    const ownership = ownershipByTile[tile.index] ?? null;
+    const marketValue = getPropertyMarketValue({
+      basePrice: tile.price ?? 0,
+      acquiredRound: ownership?.acquired_round,
+      currentRound: gameState?.rounds_elapsed ?? 0,
+    }).marketPrice;
     const mayBreakFullColorSet =
       tile.type === "PROPERTY" && currentUserPlayer
         ? ownsFullColorSet(
@@ -3074,6 +3080,7 @@ export default function PlayV2Page() {
       mayBreakFullColorSet,
     };
   }, [
+    gameState?.rounds_elapsed,
     currentUserPlayer,
     ownershipByTile,
     sellToMarketTileIndex,
@@ -3121,6 +3128,7 @@ export default function PlayV2Page() {
     const principal = computeOwnedPropertyCollateralPrincipal({
       tile,
       ownership,
+      currentRound: gameState?.rounds_elapsed ?? 0,
       boardPackEconomy: selectedBoardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY,
     });
     const paymentPerTurn = calculateAmortizedPaymentPerTurn(
@@ -3138,6 +3146,7 @@ export default function PlayV2Page() {
     };
   }, [
     collateralizeTileIndex,
+    gameState?.rounds_elapsed,
     ownershipByTile,
     resolvedBoardTiles,
     rules.collateralRatePerTurn,
@@ -3250,6 +3259,7 @@ export default function PlayV2Page() {
     }
     return computeAuthoritativeNetWorthBreakdown({
       currentCash: currentUserCash ?? 0,
+      currentRound: gameState?.rounds_elapsed ?? 0,
       playerId: currentUserPlayer.id,
       boardTiles: resolvedBoardTiles,
       ownershipByTile,

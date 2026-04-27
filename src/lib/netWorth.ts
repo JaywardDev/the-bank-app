@@ -10,6 +10,7 @@ import {
   normalizeInlandCellRecords,
   type InlandCellRecord,
 } from "@/lib/inlandExploration";
+import { getPropertyMarketValue } from "@/lib/propertyMarketValue";
 
 const OWNABLE_TILE_TYPES = new Set<BoardTile["type"]>(["PROPERTY", "RAIL", "UTILITY"]);
 
@@ -19,6 +20,7 @@ type OwnershipByTileForNetWorth = Record<
   number,
   {
     owner_player_id: string;
+    acquired_round?: number | null;
     houses?: number | null;
   }
 >;
@@ -94,31 +96,48 @@ export const COLLATERAL_LOAN_LTV = 0.6;
 export const computeOwnedPropertyCollateralBaseValue = ({
   tile,
   ownership,
+  currentRound,
   boardPackEconomy,
 }: {
   tile: BoardTile;
-  ownership: { houses?: number | null } | null | undefined;
+  ownership: { acquired_round?: number | null; houses?: number | null } | null | undefined;
+  currentRound?: number | null;
   boardPackEconomy?: Pick<BoardPackEconomy, "houseImprovementValueMultipliers"> | null;
 }) => {
   const tilePrice = Number.isFinite(tile.price) ? Math.max(0, tile.price ?? 0) : 0;
+  const marketPrice = getPropertyMarketValue({
+    basePrice: tilePrice,
+    acquiredRound: ownership?.acquired_round,
+    currentRound,
+  }).marketPrice;
   const improvementAssetValue = computeOwnedPropertyImprovementAssetValue({
     tile,
     ownership,
     boardPackEconomy,
   });
 
-  return tilePrice + improvementAssetValue;
+  return marketPrice + improvementAssetValue;
 };
 
 export const computeOwnedPropertyCollateralPrincipal = ({
   tile,
   ownership,
+  currentRound,
   boardPackEconomy,
 }: {
   tile: BoardTile;
-  ownership: { houses?: number | null } | null | undefined;
+  ownership: { acquired_round?: number | null; houses?: number | null } | null | undefined;
+  currentRound?: number | null;
   boardPackEconomy?: Pick<BoardPackEconomy, "houseImprovementValueMultipliers"> | null;
-}) => Math.round(computeOwnedPropertyCollateralBaseValue({ tile, ownership, boardPackEconomy }) * COLLATERAL_LOAN_LTV);
+}) =>
+  Math.round(
+    computeOwnedPropertyCollateralBaseValue({
+      tile,
+      ownership,
+      currentRound,
+      boardPackEconomy,
+    }) * COLLATERAL_LOAN_LTV,
+  );
 export const computeOwnedInlandAssetValue = ({
   inlandExploredCells,
   boardPackEconomy,
@@ -182,6 +201,7 @@ export const computeOwnedInlandAssetValue = ({
 
 export type AuthoritativeNetWorthInput = {
   currentCash: number;
+  currentRound?: number | null;
   playerId: string;
   boardTiles: BoardTile[];
   ownershipByTile: OwnershipByTileForNetWorth;
@@ -207,6 +227,7 @@ export type AuthoritativeNetWorthBreakdown = {
 
 export const computeAuthoritativeNetWorthBreakdown = ({
   currentCash,
+  currentRound,
   playerId,
   boardTiles,
   ownershipByTile,
@@ -228,7 +249,12 @@ export const computeAuthoritativeNetWorthBreakdown = ({
       continue;
     }
 
-    boardAssetValue += tile.price ?? 0;
+    const tilePrice = Number.isFinite(tile.price) ? Math.max(0, tile.price ?? 0) : 0;
+    boardAssetValue += getPropertyMarketValue({
+      basePrice: tilePrice,
+      acquiredRound: ownership.acquired_round,
+      currentRound,
+    }).marketPrice;
     improvementAssetValue += computeOwnedPropertyImprovementAssetValue({
       tile,
       ownership,

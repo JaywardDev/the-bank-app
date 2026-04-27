@@ -61,6 +61,8 @@ import {
   toOptionalPositiveCash,
   toOptionalTileIndices,
 } from "@/features/trade/utils";
+import { getPropertyMarketValue } from "@/lib/propertyMarketValue";
+import { computeOwnedPropertyCollateralPrincipal } from "@/lib/netWorth";
 
 const lastGameKey = "bank.lastGameId";
 const DEBUG = process.env.NEXT_PUBLIC_DEBUG === "true";
@@ -647,6 +649,7 @@ type GameState = {
   balances: Record<string, number> | null;
   last_roll: number | null;
   doubles_count: number | null;
+  rounds_elapsed: number | null;
   turn_phase: string | null;
   pending_action: Record<string, unknown> | null;
   pending_card_active: boolean | null;
@@ -697,6 +700,7 @@ type TransactionItem = {
 type OwnershipRow = {
   tile_index: number;
   owner_player_id: string | null;
+  acquired_round: number | null;
   collateral_loan_id: string | null;
   purchase_mortgage_id: string | null;
   houses?: number | null;
@@ -706,6 +710,7 @@ type OwnershipByTile = Record<
   number,
   {
     owner_player_id: string;
+    acquired_round: number | null;
     collateral_loan_id: string | null;
     purchase_mortgage_id: string | null;
     houses: number;
@@ -1593,7 +1598,7 @@ export default function PlayPage() {
       const ownershipRows = await supabaseClient.fetchFromSupabase<
         OwnershipRow[]
       >(
-        `property_ownership?select=tile_index,owner_player_id,collateral_loan_id,purchase_mortgage_id,houses&game_id=eq.${activeGameId}`,
+        `property_ownership?select=tile_index,owner_player_id,acquired_round,collateral_loan_id,purchase_mortgage_id,houses&game_id=eq.${activeGameId}`,
         { method: "GET" },
         accessToken,
       );
@@ -1601,6 +1606,7 @@ export default function PlayPage() {
         if (row.owner_player_id) {
           acc[row.tile_index] = {
             owner_player_id: row.owner_player_id,
+            acquired_round: row.acquired_round ?? null,
             collateral_loan_id: row.collateral_loan_id ?? null,
             purchase_mortgage_id: row.purchase_mortgage_id ?? null,
             houses: row.houses ?? 0,
@@ -1728,7 +1734,7 @@ export default function PlayPage() {
   const loadGameState = useCallback(
     async (activeGameId: string, accessToken?: string) => {
       const [stateRow] = await supabaseClient.fetchFromSupabase<GameState[]>(
-        `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,active_macro_effects_v1,skip_next_roll_by_player,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${activeGameId}&limit=1`,
+        `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,active_macro_effects_v1,skip_next_roll_by_player,chance_index,community_index,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${activeGameId}&limit=1`,
         { method: "GET" },
         accessToken,
       );
@@ -3047,9 +3053,16 @@ export default function PlayPage() {
     if (!propertyActionModal || propertyActionModal.action !== "SELL_TO_MARKET") {
       return 0;
     }
-    const price = propertyActionTile?.price ?? 0;
-    return Math.round(price * 0.7);
-  }, [propertyActionModal, propertyActionTile]);
+    const ownership = propertyActionTile
+      ? ownershipByTile[propertyActionTile.index]
+      : null;
+    const marketPrice = getPropertyMarketValue({
+      basePrice: propertyActionTile?.price ?? 0,
+      acquiredRound: ownership?.acquired_round,
+      currentRound: gameState?.rounds_elapsed ?? 0,
+    }).marketPrice;
+    return Math.round(marketPrice * 0.7);
+  }, [gameState?.rounds_elapsed, ownershipByTile, propertyActionModal, propertyActionTile]);
   const availableTradeCounterparties = useMemo(() => {
     if (!currentUserPlayer) {
       return [];
@@ -3109,7 +3122,14 @@ export default function PlayPage() {
       if (entry.isCollateralized || entry.isPurchaseMortgaged) {
         return total;
       }
-      return total + (entry.tile.price ?? 0);
+      return (
+        total +
+        getPropertyMarketValue({
+          basePrice: entry.tile.price ?? 0,
+          acquiredRound: ownershipByTile[entry.tile.index]?.acquired_round,
+          currentRound: gameState?.rounds_elapsed ?? 0,
+        }).marketPrice
+      );
     }, 0);
     const outstandingPrincipal = activeLoans.reduce((total, loan) => {
       if (typeof loan.remaining_principal === "number") {
@@ -3126,6 +3146,7 @@ export default function PlayPage() {
   }, [
     activeLoans,
     activePurchaseMortgages,
+    gameState?.rounds_elapsed,
     myPlayerBalance,
     ownedProperties,
   ]);
@@ -3979,6 +4000,10 @@ export default function PlayPage() {
               ...prev,
               [tileIndex]: {
                 owner_player_id: responseBody.ownership.owner_player_id,
+                acquired_round:
+                  responseBody.ownership.acquired_round ??
+                  existing?.acquired_round ??
+                  null,
                 collateral_loan_id:
                   responseBody.ownership.collateral_loan_id ??
                   existing?.collateral_loan_id ??
@@ -5750,9 +5775,12 @@ export default function PlayPage() {
                       sellToMarketDisabledReason,
                       houseBuildMacroBlocked,
                     }) => {
-                      const principalPreview = Math.round(
-                        (tile.price ?? 0) * rules.collateralLtv,
-                      );
+                      const principalPreview = computeOwnedPropertyCollateralPrincipal({
+                        tile,
+                        ownership: ownershipByTile[tile.index] ?? null,
+                        currentRound: gameState?.rounds_elapsed ?? 0,
+                        boardPackEconomy: boardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY,
+                      });
                       const isProperty = tile.type === "PROPERTY";
                       const isRail = tile.type === "RAIL";
                       const isUtility = tile.type === "UTILITY";
