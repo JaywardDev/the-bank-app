@@ -457,10 +457,8 @@ export const TitleDeedPreview = ({
     currentRound,
   });
   const marketPriceValue = priceValue === null ? null : marketValueDetails.marketPrice;
-  const marketPriceMetaLabel =
-    priceValue !== null && marketValueDetails.isAppreciated
-      ? `Base ${formatMoney(marketValueDetails.basePrice, currency)} · +${marketValueDetails.appreciationPercent}%`
-      : null;
+  const isMarketPriceAppreciated =
+    priceValue !== null && marketValueDetails.isAppreciated;
 
   return (
     <TitleDeedCard
@@ -487,11 +485,7 @@ export const TitleDeedPreview = ({
             {priceValue !== null ? (
               <p className={`${size === "compact" ? "text-[11px]" : "text-xs"} font-medium text-neutral-500`}>
                 Market price {formatMoney(marketPriceValue ?? 0, currency)}
-              </p>
-            ) : null}
-            {marketPriceMetaLabel ? (
-              <p className={`${size === "compact" ? "text-[10px]" : "text-[11px]"} text-neutral-400`}>
-                {marketPriceMetaLabel}
+                {isMarketPriceAppreciated ? " ⬆️" : ""}
               </p>
             ) : null}
           </div>
@@ -514,11 +508,7 @@ export const TitleDeedPreview = ({
             {priceValue !== null ? (
               <p className={`${size === "compact" ? "text-[11px]" : "text-xs"} font-medium text-neutral-500`}>
                 Market price {formatMoney(marketPriceValue ?? 0, currency)}
-              </p>
-            ) : null}
-            {marketPriceMetaLabel ? (
-              <p className={`${size === "compact" ? "text-[10px]" : "text-[11px]"} text-neutral-400`}>
-                {marketPriceMetaLabel}
+                {isMarketPriceAppreciated ? " ⬆️" : ""}
               </p>
             ) : null}
           </div>
@@ -533,12 +523,8 @@ export const TitleDeedPreview = ({
           <div>
             <p className={`${size === "compact" ? "text-[11px]" : "text-xs"} font-medium text-neutral-500`}>
               Market price {formatMoney(marketPriceValue ?? 0, currency)}
+              {isMarketPriceAppreciated ? " ⬆️" : ""}
             </p>
-            {marketPriceMetaLabel ? (
-              <p className={`${size === "compact" ? "text-[10px]" : "text-[11px]"} text-neutral-400`}>
-                {marketPriceMetaLabel}
-              </p>
-            ) : null}
           </div>
         ) : null
       }

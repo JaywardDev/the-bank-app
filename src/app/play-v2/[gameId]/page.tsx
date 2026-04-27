@@ -4291,9 +4291,6 @@ export default function PlayV2Page() {
             isCollateralized,
             isPurchaseMortgaged,
             currentRent,
-            marketPrice,
-            appreciationPercent,
-            isAppreciated,
             canBuildHouse,
             canSellHouse,
             canSellToMarket,
@@ -4342,15 +4339,6 @@ export default function PlayV2Page() {
                   </span>
                 </p>
               </div>
-              <p className="text-[11px] text-white/70">
-                Market {formatMoney(marketPrice)}
-                {isAppreciated ? (
-                  <span className="text-white/60">
-                    {" "}
-                    · Base {formatMoney(tile.price ?? 0)} · +{appreciationPercent}%
-                  </span>
-                ) : null}
-              </p>
               <div className="grid grid-cols-2 gap-1.5">
                 <div className="space-y-1">
                   <button
@@ -5491,11 +5479,7 @@ export default function PlayV2Page() {
                       selectedTile.price ??
                       null,
                   )}
-                  marketPriceSubLabel={
-                    selectedTileMarketValue?.isAppreciated
-                      ? `Base: ${formatMoney(selectedTileMarketValue.basePrice)} · +${selectedTileMarketValue.appreciationPercent}%`
-                      : null
-                  }
+                  isMarketPriceAppreciated={Boolean(selectedTileMarketValue?.isAppreciated)}
                   currentRentLabel={formatMoney(selectedTileCurrentRent)}
                   currentRentUnavailable={selectedTileIsCollateralized}
                   upgradeCostLabel={
