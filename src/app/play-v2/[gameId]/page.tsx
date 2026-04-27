@@ -50,7 +50,7 @@ import {
 } from "@/lib/rent";
 import { formatCurrency, getCurrencyMetaFromBoardPack } from "@/lib/currency";
 import { getMaxDevelopmentLevel, getNextBuildCost } from "@/lib/developmentCosts";
-import { isPropertySaleLocked } from "@/lib/propertySaleLock";
+import { getPropertySaleLockInfo } from "@/lib/propertySaleLock";
 import {
   canExploreInlandCell,
   getInlandBankSalePrice,
@@ -3830,6 +3830,10 @@ export default function PlayV2Page() {
                 : loanBlockedByMacro
                   ? "Loans are currently unavailable"
                   : null;
+        const saleLockInfo = getPropertySaleLockInfo(
+          ownership.acquired_round,
+          gameState?.rounds_elapsed ?? 0,
+        );
         const sellToMarketDisabledReason = !canUseWalletPropertyActions
           ? "Not your turn"
           : housesCount > 0
@@ -3838,10 +3842,7 @@ export default function PlayV2Page() {
               ? "Already collateralized"
               : isPurchaseMortgaged
                 ? "Mortgaged at purchase"
-                : isPropertySaleLocked(
-                    ownership.acquired_round,
-                    gameState?.rounds_elapsed ?? 0,
-                  )
+                : saleLockInfo.isLocked
                   ? "Hold for 3 rounds after acquisition"
                 : null;
 
@@ -3868,6 +3869,7 @@ export default function PlayV2Page() {
           sellHouseDisabledReason,
           sellHotelDisabledReason,
           sellToMarketDisabledReason,
+          saleLockInfo,
           collateralDisabledReason,
         };
       });
@@ -4271,6 +4273,7 @@ export default function PlayV2Page() {
             buildHouseDisabledReason,
             sellHouseDisabledReason,
             sellToMarketDisabledReason,
+            saleLockInfo,
             collateralDisabledReason,
           } = entry;
           const activeReasonForTile =
@@ -4447,7 +4450,16 @@ export default function PlayV2Page() {
                   >
                     {actionLoading === "SELL_TO_MARKET"
                       ? "Selling…"
-                      : "Sell Lot"}
+                      : saleLockInfo.isLocked
+                        ? (
+                            <>
+                              Sell Lot |{" "}
+                              <span className="font-semibold text-rose-500">
+                                {saleLockInfo.roundsRemaining}
+                              </span>
+                            </>
+                          )
+                        : "Sell Lot"}
                   </button>
                   {activeReasonForTile?.actionKey === "SELL_TO_MARKET" ? (
                     <p className="text-[10px] text-red-300">
