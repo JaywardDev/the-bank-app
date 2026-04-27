@@ -746,7 +746,7 @@ export default function PlayV2Page() {
           reason: "stale_epoch",
           version: stateRow?.version ?? null,
         });
-        return;
+        return null;
       }
       logRealtimeAudit("load_game_state_apply_start", {
         gameId,
@@ -756,6 +756,7 @@ export default function PlayV2Page() {
         turnPhase: stateRow?.turn_phase ?? null,
       });
       applyIncomingGameState(stateRow ?? null, { allowEqualVersion: true });
+      return stateRow ?? null;
     },
     [
       applyIncomingGameState,
@@ -912,7 +913,9 @@ export default function PlayV2Page() {
 
   const refetchActionSlices = useCallback(
     async (gameId: string, accessToken?: string) => {
-      await Promise.all([
+      const [
+        gameStateRow,
+      ] = await Promise.all([
         loadGameState(gameId, accessToken),
         loadPlayers(gameId, accessToken),
         loadOwnership(gameId, accessToken),
@@ -921,6 +924,7 @@ export default function PlayV2Page() {
         loadTradeProposals(gameId, accessToken),
         loadEvents(gameId, accessToken),
       ]);
+      return { gameState: gameStateRow };
     },
     [
       currentUserPlayerId,
@@ -2361,7 +2365,12 @@ export default function PlayV2Page() {
       actionOrRequest: BankAction | BankActionRequest,
       options?: Omit<BankActionRequest, "action">,
       uiOptions?: { suppressNotice?: boolean },
-    ): Promise<{ ok: boolean; error?: string }> => {
+    ): Promise<{
+      ok: boolean;
+      error?: string;
+      resultingPendingActionType?: string | null;
+      resultingPendingActionReason?: string | null;
+    }> => {
       if (!routeGameId || !session?.access_token) {
         return { ok: false, error: "Missing game session." };
       }
@@ -2518,8 +2527,23 @@ export default function PlayV2Page() {
           return { ok: false, error: message };
         }
 
-        await refetchActionSlices(routeGameId, accessToken);
-        return { ok: true };
+        const refetched = await refetchActionSlices(routeGameId, accessToken);
+        const resultingPendingAction =
+          refetched.gameState?.pending_action &&
+          typeof refetched.gameState.pending_action === "object"
+            ? (refetched.gameState.pending_action as Record<string, unknown>)
+            : null;
+        return {
+          ok: true,
+          resultingPendingActionType:
+            typeof resultingPendingAction?.type === "string"
+              ? resultingPendingAction.type
+              : null,
+          resultingPendingActionReason:
+            typeof resultingPendingAction?.reason === "string"
+              ? resultingPendingAction.reason
+              : null,
+        };
       } catch (error) {
         const message =
           error instanceof Error
@@ -2549,6 +2573,11 @@ export default function PlayV2Page() {
     void handleBankAction("CONFIRM_MACRO_EVENT");
   }, [handleBankAction]);
 
+  const triggerTaxSuccessAnimation = useCallback(() => {
+    taxAnimationRunIdRef.current += 1;
+    setTaxSuccessAnimationRunId(taxAnimationRunIdRef.current);
+  }, []);
+
   const handleConfirmIncomeTax = useCallback(async () => {
     if (taxActionInFlightRef.current) {
       return;
@@ -2556,14 +2585,19 @@ export default function PlayV2Page() {
     taxActionInFlightRef.current = true;
     try {
       const result = await handleBankAction("CONFIRM_INCOME_TAX");
-      if (result.ok) {
-        taxAnimationRunIdRef.current += 1;
-        setTaxSuccessAnimationRunId(taxAnimationRunIdRef.current);
+      if (
+        result.ok &&
+        !(
+          result.resultingPendingActionType === "INSOLVENCY_RECOVERY" &&
+          result.resultingPendingActionReason === "PAY_TAX"
+        )
+      ) {
+        triggerTaxSuccessAnimation();
       }
     } finally {
       taxActionInFlightRef.current = false;
     }
-  }, [handleBankAction]);
+  }, [handleBankAction, triggerTaxSuccessAnimation]);
 
   const handleConfirmSuperTax = useCallback(async () => {
     if (taxActionInFlightRef.current) {
@@ -2572,25 +2606,39 @@ export default function PlayV2Page() {
     taxActionInFlightRef.current = true;
     try {
       const result = await handleBankAction("CONFIRM_SUPER_TAX");
-      if (result.ok) {
-        taxAnimationRunIdRef.current += 1;
-        setTaxSuccessAnimationRunId(taxAnimationRunIdRef.current);
+      if (
+        result.ok &&
+        !(
+          result.resultingPendingActionType === "INSOLVENCY_RECOVERY" &&
+          result.resultingPendingActionReason === "PAY_TAX"
+        )
+      ) {
+        triggerTaxSuccessAnimation();
       }
     } finally {
       taxActionInFlightRef.current = false;
     }
-  }, [handleBankAction]);
+  }, [handleBankAction, triggerTaxSuccessAnimation]);
 
   const handleUseTaxExemptionPass = useCallback(() => {
     void handleBankAction("USE_TAX_EXEMPTION_PASS");
   }, [handleBankAction]);
 
-  const handleConfirmInsolvencyPayment = useCallback(() => {
+  const handleConfirmInsolvencyPayment = useCallback(async () => {
     if (!isInsolvencyReadyToPay) {
       return;
     }
-    void handleBankAction("CONFIRM_INSOLVENCY_PAYMENT");
-  }, [handleBankAction, isInsolvencyReadyToPay]);
+    const insolvencyReason = pendingInsolvencyRecovery?.reason ?? null;
+    const result = await handleBankAction("CONFIRM_INSOLVENCY_PAYMENT");
+    if (result.ok && insolvencyReason === "PAY_TAX") {
+      triggerTaxSuccessAnimation();
+    }
+  }, [
+    handleBankAction,
+    isInsolvencyReadyToPay,
+    pendingInsolvencyRecovery?.reason,
+    triggerTaxSuccessAnimation,
+  ]);
 
   const handleDeclareBankruptcy = useCallback(() => {
     if (!isInsolvencyRecoveryMode) {
