@@ -2895,8 +2895,11 @@ export default function PlayV2Page() {
         throw new Error(payload?.error ?? "Unable to end the session.");
       }
 
-      clearPlayV2State(routeGameId);
-      router.push("/");
+      try {
+        await loadAllSlices(routeGameId, activeAccessToken);
+      } catch {
+        requestResumeRefresh();
+      }
     } catch (error) {
       setNotice(
         error instanceof Error ? error.message : "Unable to end the session.",
@@ -2909,6 +2912,7 @@ export default function PlayV2Page() {
     clearPlayV2State,
     gameState?.version,
     loadAllSlices,
+    requestResumeRefresh,
     routeGameId,
     router,
     session,
