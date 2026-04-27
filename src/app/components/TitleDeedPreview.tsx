@@ -12,6 +12,7 @@ import { getBoardTileIconSrc } from "@/lib/tileIcons";
 import { getDevelopmentLevelLabel } from "@/components/play-v2/utils/developmentLabels";
 import { formatCurrency, getCurrencyMetaFromEconomy } from "@/lib/currency";
 import { getNextBuildCost, normalizeRentByHousesTiers } from "@/lib/developmentCosts";
+import { getPropertyMarketValue } from "@/lib/propertyMarketValue";
 
 const getCanonicalTileType = (tileType: string) => {
   const normalized = tileType.toUpperCase();
@@ -306,6 +307,7 @@ type OwnershipByTile = Record<
     owner_player_id: string;
     collateral_loan_id: string | null;
     purchase_mortgage_id: string | null;
+    acquired_round?: number | null;
     houses: number;
   }
 >;
@@ -388,6 +390,7 @@ export type TitleDeedPreviewProps = {
   ownershipByTile?: OwnershipByTile;
   boardTiles?: BoardTile[];
   size?: "default" | "compact";
+  currentRound?: number | null;
 };
 
 export const TitleDeedPreview = ({
@@ -407,6 +410,7 @@ export const TitleDeedPreview = ({
   ownershipByTile = {},
   boardTiles = [],
   size = "default",
+  currentRound = null,
 }: TitleDeedPreviewProps) => {
   if (!tile || !isOwnableTileType(tile.type)) {
     return null;
@@ -446,6 +450,18 @@ export const TitleDeedPreview = ({
     ? { ...resolvedCurrency, symbol: currencySymbol }
     : resolvedCurrency;
 
+  const ownership = ownershipByTile[tile.index];
+  const marketValueDetails = getPropertyMarketValue({
+    basePrice: priceValue ?? 0,
+    acquiredRound: ownership?.acquired_round,
+    currentRound,
+  });
+  const marketPriceValue = priceValue === null ? null : marketValueDetails.marketPrice;
+  const marketPriceMetaLabel =
+    priceValue !== null && marketValueDetails.isAppreciated
+      ? `Base ${formatMoney(marketValueDetails.basePrice, currency)} · +${marketValueDetails.appreciationPercent}%`
+      : null;
+
   return (
     <TitleDeedCard
       bandColor={bandColor}
@@ -470,7 +486,12 @@ export const TitleDeedPreview = ({
             </p>
             {priceValue !== null ? (
               <p className={`${size === "compact" ? "text-[11px]" : "text-xs"} font-medium text-neutral-500`}>
-                Value {formatMoney(priceValue, currency)}
+                Market price {formatMoney(marketPriceValue ?? 0, currency)}
+              </p>
+            ) : null}
+            {marketPriceMetaLabel ? (
+              <p className={`${size === "compact" ? "text-[10px]" : "text-[11px]"} text-neutral-400`}>
+                {marketPriceMetaLabel}
               </p>
             ) : null}
           </div>
@@ -492,7 +513,12 @@ export const TitleDeedPreview = ({
             </p>
             {priceValue !== null ? (
               <p className={`${size === "compact" ? "text-[11px]" : "text-xs"} font-medium text-neutral-500`}>
-                Value {formatMoney(priceValue, currency)}
+                Market price {formatMoney(marketPriceValue ?? 0, currency)}
+              </p>
+            ) : null}
+            {marketPriceMetaLabel ? (
+              <p className={`${size === "compact" ? "text-[10px]" : "text-[11px]"} text-neutral-400`}>
+                {marketPriceMetaLabel}
               </p>
             ) : null}
           </div>
@@ -504,9 +530,16 @@ export const TitleDeedPreview = ({
       }
       subheader={
         tile.type === "PROPERTY" && priceValue !== null ? (
-          <p className={`${size === "compact" ? "text-[11px]" : "text-xs"} font-medium text-neutral-500`}>
-            Value {formatMoney(priceValue, currency)}
-          </p>
+          <div>
+            <p className={`${size === "compact" ? "text-[11px]" : "text-xs"} font-medium text-neutral-500`}>
+              Market price {formatMoney(marketPriceValue ?? 0, currency)}
+            </p>
+            {marketPriceMetaLabel ? (
+              <p className={`${size === "compact" ? "text-[10px]" : "text-[11px]"} text-neutral-400`}>
+                {marketPriceMetaLabel}
+              </p>
+            ) : null}
+          </div>
         ) : null
       }
       rentSection={

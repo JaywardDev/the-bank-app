@@ -50,6 +50,7 @@ import {
 } from "@/lib/rent";
 import { formatCurrency, getCurrencyMetaFromBoardPack } from "@/lib/currency";
 import { getMaxDevelopmentLevel, getNextBuildCost } from "@/lib/developmentCosts";
+import { getPropertyMarketValue } from "@/lib/propertyMarketValue";
 import { getPropertySaleLockInfo } from "@/lib/propertySaleLock";
 import {
   canExploreInlandCell,
@@ -3681,6 +3682,20 @@ export default function PlayV2Page() {
     });
   }, [ownershipByTile, selectedBoardPack, selectedTile]);
 
+  const currentRound = gameState?.rounds_elapsed ?? 0;
+
+  const selectedTileMarketValue = useMemo(() => {
+    if (!selectedTile) {
+      return null;
+    }
+
+    return getPropertyMarketValue({
+      basePrice: selectedTile.price ?? 0,
+      acquiredRound: selectedOwnership?.acquired_round,
+      currentRound,
+    });
+  }, [currentRound, selectedOwnership?.acquired_round, selectedTile]);
+
   const selectedTileDevelopmentCount = useMemo(() => {
     if (selectedTileIndex === null) {
       return 0;
@@ -3781,6 +3796,11 @@ export default function PlayV2Page() {
           currentUserPlayer.id,
         );
         const tilePrice = tile.price ?? 0;
+        const marketValueDetails = getPropertyMarketValue({
+          basePrice: tilePrice,
+          acquiredRound: ownership?.acquired_round,
+          currentRound,
+        });
         const currentRent = getCurrentTileRent({
           tile,
           ownershipByTile,
@@ -3857,6 +3877,9 @@ export default function PlayV2Page() {
           developmentLabel,
           hasFullSet,
           tilePrice,
+          marketPrice: marketValueDetails.marketPrice,
+          appreciationPercent: marketValueDetails.appreciationPercent,
+          isAppreciated: marketValueDetails.isAppreciated,
           currentRent,
           canBuildHouse:
             tile.type === "PROPERTY" && buildHouseDisabledReason === null,
@@ -3876,6 +3899,7 @@ export default function PlayV2Page() {
   }, [
     canAct,
     canUseRecoveryActions,
+    currentRound,
     currentUserPlayer,
     gameState?.rounds_elapsed,
     loanBlockedByMacro,
@@ -4267,6 +4291,9 @@ export default function PlayV2Page() {
             isCollateralized,
             isPurchaseMortgaged,
             currentRent,
+            marketPrice,
+            appreciationPercent,
+            isAppreciated,
             canBuildHouse,
             canSellHouse,
             canSellToMarket,
@@ -4315,6 +4342,15 @@ export default function PlayV2Page() {
                   </span>
                 </p>
               </div>
+              <p className="text-[11px] text-white/70">
+                Market {formatMoney(marketPrice)}
+                {isAppreciated ? (
+                  <span className="text-white/60">
+                    {" "}
+                    · Base {formatMoney(tile.price ?? 0)} · +{appreciationPercent}%
+                  </span>
+                ) : null}
+              </p>
               <div className="grid grid-cols-2 gap-1.5">
                 <div className="space-y-1">
                   <button
@@ -4626,6 +4662,7 @@ export default function PlayV2Page() {
                   ownerPlayerId={currentUserPlayer?.id ?? null}
                   ownershipByTile={ownershipByTile}
                   boardTiles={resolvedBoardTiles ?? []}
+                  currentRound={currentRound}
                   ownedRailCount={
                     resolvedBoardTiles.filter(
                       (boardTile) =>
@@ -4756,11 +4793,13 @@ export default function PlayV2Page() {
     activeLoans,
     boardTilesByIndex,
     canAct,
+    currentRound,
     currentUserPlayer?.id,
     handleBankAction,
     ownershipByTile,
     payoffLoanId,
     defaultLoanTileIndex,
+    resolvedBoardTiles,
     selectedBoardPack,
     formatMoney,
   ]);
@@ -5447,7 +5486,16 @@ export default function PlayV2Page() {
                   bandColor={getTileBandColor(selectedTile)}
                   ownerLabel={selectedOwnerLabel || "Unowned"}
                   statusLabel={selectedTileStatusLabel}
-                  purchasePriceLabel={formatMoney(selectedTile.price ?? null)}
+                  purchasePriceLabel={formatMoney(
+                    selectedTileMarketValue?.marketPrice ??
+                      selectedTile.price ??
+                      null,
+                  )}
+                  marketPriceSubLabel={
+                    selectedTileMarketValue?.isAppreciated
+                      ? `Base: ${formatMoney(selectedTileMarketValue.basePrice)} · +${selectedTileMarketValue.appreciationPercent}%`
+                      : null
+                  }
                   currentRentLabel={formatMoney(selectedTileCurrentRent)}
                   currentRentUnavailable={selectedTileIsCollateralized}
                   upgradeCostLabel={
@@ -6293,6 +6341,7 @@ export default function PlayV2Page() {
               ownerPlayerId={selectedOwnerId}
               ownershipByTile={ownershipByTile}
               boardTiles={resolvedBoardTiles ?? []}
+              currentRound={currentRound}
             />
           </div>
         </div>

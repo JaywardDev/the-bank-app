@@ -25,6 +25,7 @@ type TileInfoPanelV2Props = {
   ownerLabel?: string;
   statusLabel?: string;
   purchasePriceLabel?: string;
+  marketPriceSubLabel?: string | null;
   currentRentLabel?: string;
   currentRentUnavailable?: boolean;
   upgradeCostLabel?: string | null;
@@ -49,6 +50,7 @@ export default function TileInfoPanelV2({
   ownerLabel,
   statusLabel,
   purchasePriceLabel,
+  marketPriceSubLabel,
   currentRentLabel,
   currentRentUnavailable,
   upgradeCostLabel,
@@ -129,7 +131,12 @@ export default function TileInfoPanelV2({
       <div className="pl-2">
         <p className="text-sm font-semibold text-white">{tile.name}</p>
         <div className="mt-2 space-y-1.5">
-          <StatRow label="Market price" value={purchasePriceLabel ?? "—"} />
+          <div className="space-y-0.5">
+            <StatRow label="Market price" value={purchasePriceLabel ?? "—"} />
+            {marketPriceSubLabel ? (
+              <p className="text-right text-[10px] text-white/60">{marketPriceSubLabel}</p>
+            ) : null}
+          </div>
           <StatRow label="Owner" value={ownerLabel ?? "—"} />
           <StatRow label="Status" value={statusLabel ?? "—"} />
           <StatRow
