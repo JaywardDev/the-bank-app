@@ -91,7 +91,7 @@ export default function TaxSuccessAnimationOverlay({
 
   return (
     <div className="fixed inset-0 z-[240] flex items-center justify-center bg-black/60">
-      <div className="flex h-[min(78vh,26rem)] w-[min(88vw,22rem)] items-center justify-center rounded-3xl border border-emerald-200 bg-white/95 p-3 shadow-2xl ring-1 ring-black/10 backdrop-blur sm:p-4">
+      <div className="flex h-[min(78vh,26rem)] w-[min(88vw,22rem)] items-center justify-center rounded-3xl border border-white/10 bg-neutral-900/95 p-3 shadow-2xl ring-1 ring-white/10 backdrop-blur sm:p-4">
         <div className="flex h-full w-full items-center justify-center overflow-hidden">
           {animationData ? (
             <Lottie
