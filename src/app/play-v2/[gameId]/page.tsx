@@ -15,6 +15,7 @@ import IncomeTaxModalV2 from "@/components/play-v2/IncomeTaxModalV2";
 import PendingPurchaseModalV2 from "@/components/play-v2/PendingPurchaseModalV2";
 import AuctionOverlayV2 from "@/components/play-v2/AuctionOverlayV2";
 import TaxSuccessAnimationOverlay from "@/components/play-v2/TaxSuccessAnimationOverlay";
+import GoToJailAnimationOverlay from "@/components/play-v2/GoToJailAnimationOverlay";
 import JailDecisionModalV2 from "@/components/play-v2/JailDecisionModalV2";
 import ConfirmActionModalV2 from "@/components/play-v2/ConfirmActionModalV2";
 import RotateToLandscapeOverlay from "@/components/play-v2/RotateToLandscapeOverlay";
@@ -505,6 +506,7 @@ export default function PlayV2Page() {
   const [showActivityPopup, setShowActivityPopup] = useState(false);
   const [showTokenLegendPopup, setShowTokenLegendPopup] = useState(false);
   const [taxSuccessAnimationRunId, setTaxSuccessAnimationRunId] = useState<number | null>(null);
+  const [goToJailAnimationRunId, setGoToJailAnimationRunId] = useState<number | null>(null);
   const [bettingInlineError, setBettingInlineError] = useState<string | null>(
     null,
   );
@@ -522,6 +524,10 @@ export default function PlayV2Page() {
   const isRunningQueuedResumeRefreshRef = useRef(false);
   const taxActionInFlightRef = useRef(false);
   const taxAnimationRunIdRef = useRef(0);
+  const goToJailAnimationRunIdRef = useRef(0);
+  const goToJailAnimationPendingKeyRef = useRef<string | null>(null);
+  const goToJailConfirmInFlightRef = useRef(false);
+  const goToJailConfirmedRunIdRef = useRef<number | null>(null);
   const isMountedRef = useRef(true);
   const latestRouteGameIdRef = useRef<string | null>(routeGameId ?? null);
   const latestAccessTokenRef = useRef<string | null>(session?.access_token ?? null);
@@ -2694,12 +2700,62 @@ export default function PlayV2Page() {
     });
   }, []);
 
-  const handleConfirmGoToJail = useCallback(() => {
+  const handleConfirmGoToJail = useCallback(async () => {
     if (!isGoToJailActor) {
       return;
     }
-    void handleBankAction("CONFIRM_GO_TO_JAIL");
+    await handleBankAction("CONFIRM_GO_TO_JAIL");
   }, [handleBankAction, isGoToJailActor]);
+
+  useEffect(() => {
+    if (!shouldShowGoToJailConfirm || !isGoToJailActor) {
+      if (!shouldShowGoToJailConfirm) {
+        goToJailAnimationPendingKeyRef.current = null;
+        goToJailConfirmInFlightRef.current = false;
+        goToJailConfirmedRunIdRef.current = null;
+        setGoToJailAnimationRunId(null);
+      }
+      return;
+    }
+
+    const pendingKey = `${gameState?.version ?? "0"}:${pendingGoToJail?.playerId ?? "unknown"}`;
+    if (goToJailAnimationPendingKeyRef.current === pendingKey) {
+      return;
+    }
+
+    goToJailAnimationPendingKeyRef.current = pendingKey;
+    goToJailConfirmedRunIdRef.current = null;
+    goToJailAnimationRunIdRef.current += 1;
+    setGoToJailAnimationRunId(goToJailAnimationRunIdRef.current);
+  }, [
+    gameState?.version,
+    isGoToJailActor,
+    pendingGoToJail?.playerId,
+    shouldShowGoToJailConfirm,
+  ]);
+
+  const handleGoToJailAnimationComplete = useCallback(
+    (completedRunId: number) => {
+      setGoToJailAnimationRunId((currentRunId) =>
+        currentRunId === completedRunId ? null : currentRunId,
+      );
+
+      if (
+        goToJailConfirmInFlightRef.current ||
+        goToJailConfirmedRunIdRef.current === completedRunId
+      ) {
+        return;
+      }
+
+      goToJailConfirmedRunIdRef.current = completedRunId;
+      goToJailConfirmInFlightRef.current = true;
+
+      void handleConfirmGoToJail().finally(() => {
+        goToJailConfirmInFlightRef.current = false;
+      });
+    },
+    [handleConfirmGoToJail],
+  );
 
   const handleAuctionBid = useCallback(
     (amount: number) => {
@@ -5280,6 +5336,9 @@ export default function PlayV2Page() {
 
     switch (activeDecisionType) {
       case "GO_TO_JAIL":
+        if (isGoToJailActor) {
+          return null;
+        }
         return (
           <GoToJailModalV2
             isOpen={shouldShowGoToJailConfirm}
@@ -5516,7 +5575,7 @@ export default function PlayV2Page() {
         walletLoansContent={walletLoansContent}
         walletMortgagesContent={walletMortgagesContent}
         decisionActive={drawerDecisionNode !== null}
-        rightDrawerLocked={fullscreenEventNode !== null}
+        rightDrawerLocked={fullscreenEventNode !== null || goToJailAnimationRunId !== null}
         auctionActive={auctionActive}
         headerActions={
           roundModeProgressLabel ? (
@@ -6657,6 +6716,12 @@ export default function PlayV2Page() {
         <TaxSuccessAnimationOverlay
           runId={taxSuccessAnimationRunId}
           onComplete={() => setTaxSuccessAnimationRunId(null)}
+        />
+      ) : null}
+      {goToJailAnimationRunId !== null ? (
+        <GoToJailAnimationOverlay
+          runId={goToJailAnimationRunId}
+          onComplete={() => handleGoToJailAnimationComplete(goToJailAnimationRunId)}
         />
       ) : null}
       {openInlandDecisionCellKey &&
