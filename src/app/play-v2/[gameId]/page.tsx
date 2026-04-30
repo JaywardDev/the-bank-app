@@ -6613,7 +6613,7 @@ export default function PlayV2Page() {
           ) : null
         }
         confirmLabel="OK"
-        cancelLabel={null}
+        cancelLabel={undefined}
         onConfirm={() =>
           setMortgagePaidQueue((current) => current.slice(1))
         }
