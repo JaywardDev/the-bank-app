@@ -355,6 +355,11 @@ type OwnedPropertyActionConfirmation = {
   name: string;
   payout?: number;
 };
+type MortgagePaidModalItem = {
+  eventId: string;
+  propertyName: string;
+  completionReason: "TERM_COMPLETE" | "PAID_OFF" | null;
+};
 
 type PlayerLoan = {
   id: string;
@@ -429,6 +434,7 @@ export default function PlayV2Page() {
   const [playersLoaded, setPlayersLoaded] = useState(false);
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [events, setEvents] = useState<GameEvent[]>([]);
+  const [mortgagePaidQueue, setMortgagePaidQueue] = useState<MortgagePaidModalItem[]>([]);
   const [ownershipByTile, setOwnershipByTile] = useState<OwnershipByTile>({});
   const [tradeProposals, setTradeProposals] = useState<TradeProposal[]>([]);
   const [tradeCounterpartyId, setTradeCounterpartyId] = useState<string>("");
@@ -4075,6 +4081,8 @@ export default function PlayV2Page() {
         tileIndex: tile.index,
         tileName: tile.name,
         houses: ownershipByTile[tile.index]?.houses ?? 0,
+        collateralLoanId: ownershipByTile[tile.index]?.collateral_loan_id ?? null,
+        purchaseMortgageId: ownershipByTile[tile.index]?.purchase_mortgage_id ?? null,
       }));
   }, [ownershipByTile, resolvedBoardTiles, tradeCounterpartyId]);
 
@@ -4283,9 +4291,39 @@ export default function PlayV2Page() {
         tileIndex: entry.tile.index,
         tileName: entry.tile.name,
         houses: entry.housesCount,
+        collateralLoanId: ownershipByTile[entry.tile.index]?.collateral_loan_id ?? null,
+        purchaseMortgageId: ownershipByTile[entry.tile.index]?.purchase_mortgage_id ?? null,
       })),
-    [ownedProperties],
+    [ownedProperties, ownershipByTile],
   );
+
+  useEffect(() => {
+    if (!currentUserPlayerId || events.length === 0) {
+      return;
+    }
+    setMortgagePaidQueue((currentQueue) => {
+      const seen = new Set(currentQueue.map((entry) => entry.eventId));
+      const additions: MortgagePaidModalItem[] = [];
+      for (const event of [...events].reverse()) {
+        if (seen.has(event.id) || event.event_type !== "PURCHASE_MORTGAGE_PAID") {
+          continue;
+        }
+        const payload = event.payload ?? {};
+        const playerId = typeof payload.player_id === "string" ? payload.player_id : null;
+        if (playerId !== currentUserPlayerId) {
+          continue;
+        }
+        const tileIndex = typeof payload.tile_index === "number" ? payload.tile_index : null;
+        const propertyName = tileIndex !== null ? getTileNameByIndex(tileIndex) : "your property";
+        const completionReason =
+          payload.completion_reason === "TERM_COMPLETE" || payload.completion_reason === "PAID_OFF"
+            ? payload.completion_reason
+            : null;
+        additions.push({ eventId: event.id, propertyName, completionReason });
+      }
+      return additions.length > 0 ? [...currentQueue, ...additions] : currentQueue;
+    });
+  }, [currentUserPlayerId, events, getTileNameByIndex]);
 
   const handleOwnedActionClick = useCallback(
     (args: {
@@ -5781,13 +5819,14 @@ export default function PlayV2Page() {
                           {ownTradePropertyOptions.map((tile) => (
                             <label
                               key={`offer-${tile.tileIndex}`}
-                              className="flex items-center gap-2 text-white/90"
+                              className={`flex items-center gap-2 ${tile.purchaseMortgageId || tile.collateralLoanId ? "text-white/55" : "text-white/90"}`}
                             >
                               <input
                                 type="checkbox"
                                 checked={tradeOfferTiles.includes(
                                   tile.tileIndex,
                                 )}
+                                disabled={Boolean(tile.purchaseMortgageId || tile.collateralLoanId)}
                                 onChange={(event) =>
                                   toggleOfferTile(
                                     tile.tileIndex,
@@ -5800,6 +5839,8 @@ export default function PlayV2Page() {
                                 {tile.houses > 0
                                   ? ` · ${tile.houses} ${tile.houses === 1 ? "house" : "houses"}`
                                   : ""}
+                                {tile.purchaseMortgageId ? " · Mortgaged properties cannot be traded" : ""}
+                                {tile.collateralLoanId ? " · Collateralized properties cannot be traded" : ""}
                               </span>
                             </label>
                           ))}
@@ -5871,13 +5912,14 @@ export default function PlayV2Page() {
                           {counterpartyOwnedProperties.map((tile) => (
                             <label
                               key={`request-${tile.tileIndex}`}
-                              className="flex items-center gap-2 text-white/90"
+                              className={`flex items-center gap-2 ${tile.purchaseMortgageId || tile.collateralLoanId ? "text-white/55" : "text-white/90"}`}
                             >
                               <input
                                 type="checkbox"
                                 checked={tradeRequestTiles.includes(
                                   tile.tileIndex,
                                 )}
+                                disabled={Boolean(tile.purchaseMortgageId || tile.collateralLoanId)}
                                 onChange={(event) =>
                                   toggleRequestTile(
                                     tile.tileIndex,
@@ -5890,6 +5932,8 @@ export default function PlayV2Page() {
                                 {tile.houses > 0
                                   ? ` · ${tile.houses} ${tile.houses === 1 ? "house" : "houses"}`
                                   : ""}
+                                {tile.purchaseMortgageId ? " · Mortgaged properties cannot be traded" : ""}
+                                {tile.collateralLoanId ? " · Collateralized properties cannot be traded" : ""}
                               </span>
                             </label>
                           ))}
@@ -6554,6 +6598,28 @@ export default function PlayV2Page() {
           }
           setBuildUpgradeConfirmation(null);
         }}
+      />
+      <ConfirmActionModalV2
+        open={mortgagePaidQueue.length > 0}
+        showEyebrow={false}
+        title="Mortgage Completed"
+        description={
+          mortgagePaidQueue.length > 0 ? (
+            mortgagePaidQueue[0].completionReason === "TERM_COMPLETE" ? (
+              `Your mortgage term for ${mortgagePaidQueue[0].propertyName} has ended. The remaining balance has been cleared and the property is now mortgage-free.`
+            ) : (
+              `Your mortgage on ${mortgagePaidQueue[0].propertyName} has been fully paid. The property is now free from mortgage obligations.`
+            )
+          ) : null
+        }
+        confirmLabel="OK"
+        cancelLabel={null}
+        onConfirm={() =>
+          setMortgagePaidQueue((current) => current.slice(1))
+        }
+        onCancel={() =>
+          setMortgagePaidQueue((current) => current.slice(1))
+        }
       />
       <ConfirmActionModalV2
         open={showEndSessionConfirm}

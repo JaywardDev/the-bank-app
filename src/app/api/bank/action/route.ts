@@ -4606,6 +4606,46 @@ const applyLoanPaymentsForPlayer = async ({
   }
 
   for (const mortgage of activeMortgages) {
+    const termEnded =
+      (mortgage.turns_remaining ?? 0) <= 0 ||
+      (mortgage.turns_elapsed ?? 0) >= (mortgage.term_turns ?? 0);
+    const principalCleared = (mortgage.principal_remaining ?? 0) <= 0;
+    if (termEnded || principalCleared) {
+      await fetchFromSupabaseWithService(`purchase_mortgages?id=eq.${mortgage.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          principal_remaining: 0,
+          accrued_interest_unpaid: 0,
+          turns_remaining: 0,
+          status: "paid",
+          updated_at: new Date().toISOString(),
+        }),
+      });
+      await fetchFromSupabaseWithService(
+        `property_ownership?game_id=eq.${gameId}&tile_index=eq.${mortgage.tile_index}&purchase_mortgage_id=eq.${mortgage.id}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            purchase_mortgage_id: null,
+          }),
+        },
+      );
+      events.push({
+        event_type: "PURCHASE_MORTGAGE_PAID",
+        payload: {
+          player_id: player.id,
+          mortgage_id: mortgage.id,
+          tile_index: mortgage.tile_index,
+          completion_reason: termEnded ? "TERM_COMPLETE" : "PAID_OFF",
+          principal_remaining_after: 0,
+          accrued_interest_unpaid_after: 0,
+          turns_remaining_after: 0,
+          turns_elapsed_after: mortgage.turns_elapsed ?? 0,
+        },
+      });
+      continue;
+    }
+
     const effectiveRatePerTurn =
       mortgage.rate_per_turn +
       macroInterestTrendAccumulator +
@@ -4672,15 +4712,18 @@ const applyLoanPaymentsForPlayer = async ({
       0,
       mortgage.principal_remaining - principalComponent,
     );
-    const isPaid = principalRemainingAfter <= 0;
+    const isPaid =
+      principalRemainingAfter <= 0 ||
+      turnsRemainingAfter <= 0 ||
+      turnsElapsedAfter >= (mortgage.term_turns ?? 0);
 
     await fetchFromSupabaseWithService(`purchase_mortgages?id=eq.${mortgage.id}`, {
       method: "PATCH",
       body: JSON.stringify({
-        principal_remaining: principalRemainingAfter,
-        accrued_interest_unpaid: mortgage.accrued_interest_unpaid ?? 0,
+        principal_remaining: isPaid ? 0 : principalRemainingAfter,
+        accrued_interest_unpaid: isPaid ? 0 : mortgage.accrued_interest_unpaid ?? 0,
         turns_elapsed: turnsElapsedAfter,
-        turns_remaining: turnsRemainingAfter,
+        turns_remaining: isPaid ? 0 : turnsRemainingAfter,
         status: isPaid ? "paid" : "active",
         updated_at: new Date().toISOString(),
       }),
@@ -4748,6 +4791,13 @@ const applyLoanPaymentsForPlayer = async ({
           tile_index: mortgage.tile_index,
           payment_amount: paymentAmount,
           turns_elapsed_after: turnsElapsedAfter,
+          completion_reason:
+            turnsRemainingAfter <= 0 || turnsElapsedAfter >= (mortgage.term_turns ?? 0)
+              ? "TERM_COMPLETE"
+              : "PAID_OFF",
+          principal_remaining_after: 0,
+          accrued_interest_unpaid_after: 0,
+          turns_remaining_after: 0,
         },
       });
     }
@@ -9638,6 +9688,10 @@ export async function POST(request: Request) {
             principal_paid: mortgage.principal_remaining,
             interest_paid: mortgage.accrued_interest_unpaid,
             total_paid: payoffAmount,
+            completion_reason: "PAID_OFF",
+            principal_remaining_after: 0,
+            accrued_interest_unpaid_after: 0,
+            turns_remaining_after: 0,
           },
         },
       ];

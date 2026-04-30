@@ -482,6 +482,18 @@ export const handleTradeAction = async <
           { status: 409 },
         );
       }
+      if (ownership.purchase_mortgage_id) {
+        return NextResponse.json(
+          { error: "Mortgaged properties cannot be traded." },
+          { status: 409 },
+        );
+      }
+      if (ownership.collateral_loan_id) {
+        return NextResponse.json(
+          { error: "Collateralized properties cannot be traded." },
+          { status: 409 },
+        );
+      }
     }
 
     for (const tileIndex of requestTiles) {
@@ -495,6 +507,18 @@ export const handleTradeAction = async <
       if (ownership.owner_player_id !== counterpartyId) {
         return NextResponse.json(
           { error: `Counterparty does not own tile ${tileIndex}.` },
+          { status: 409 },
+        );
+      }
+      if (ownership.purchase_mortgage_id) {
+        return NextResponse.json(
+          { error: "Mortgaged properties cannot be traded." },
+          { status: 409 },
+        );
+      }
+      if (ownership.collateral_loan_id) {
+        return NextResponse.json(
+          { error: "Collateralized properties cannot be traded." },
           { status: 409 },
         );
       }
@@ -906,6 +930,18 @@ export const handleTradeAction = async <
     if (message.includes("VERSION_MISMATCH")) {
       return NextResponse.json(
         { error: "Game state changed before this trade was accepted. Please retry." },
+        { status: 409 },
+      );
+    }
+    if (message.includes("TRADE_TILE_MORTGAGED")) {
+      return NextResponse.json(
+        { error: "Mortgaged properties cannot be traded." },
+        { status: 409 },
+      );
+    }
+    if (message.includes("TRADE_TILE_COLLATERALIZED")) {
+      return NextResponse.json(
+        { error: "Collateralized properties cannot be traded." },
         { status: 409 },
       );
     }
