@@ -449,12 +449,12 @@ export default function PlayV2Shell({
     <main className="relative h-screen w-screen overflow-hidden bg-[#2F1D10] text-white">
       <div className="play-v2-shell-content">
         <section className="absolute inset-x-0 top-0 z-20 h-9 border-b border-[#6A4520]/80 bg-gradient-to-b from-[#9F6C37] to-[#845628] px-2.5 text-white md:h-10 md:px-3">
-          <div className="grid h-full grid-cols-2 items-center gap-2 pr-28 text-[11px] sm:grid-cols-4 sm:pr-64 sm:text-xs">
-            <div>
+          <div className="flex h-full items-center gap-2 pr-20 text-[11px] sm:gap-2.5 sm:pr-36 sm:text-xs">
+            <div className="min-w-0 shrink-0">
               <p className="text-[10px] uppercase tracking-wide text-white/70">Cash</p>
               <p className="font-semibold leading-tight text-white">{cashLabel}</p>
             </div>
-            <div className="relative" ref={netWorthPopoverRef}>
+            <div className="relative min-w-0 shrink-0" ref={netWorthPopoverRef}>
               <button
                 type="button"
                 className="-mx-1 -my-0.5 rounded px-1 py-0.5 text-left transition hover:bg-[#6E4521]/45"
@@ -494,15 +494,15 @@ export default function PlayV2Shell({
                 </div>
               ) : null}
             </div>
-            <div>
+            <div className="min-w-0 shrink-0">
               <p className="text-[10px] uppercase tracking-wide text-white/70">Turn</p>
               <p className="font-semibold leading-tight text-white">{turnPlayerLabel}</p>
             </div>
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <p className="text-[10px] uppercase tracking-wide text-white/70">Latest Event</p>
               <p
                 key={latestEventMotionKey}
-                className="truncate text-xs font-semibold leading-tight text-white latest-event-slide-up sm:text-[13px]"
+                className="truncate text-[11px] font-medium leading-tight text-white/85 latest-event-slide-up sm:text-xs"
                 title={latestEventDisplay}
               >
                 {latestEventDisplay}
@@ -791,7 +791,7 @@ export default function PlayV2Shell({
 
         .dice-panel {
           left: calc(var(--stack-side-offset) + env(safe-area-inset-left, 0px));
-          bottom: calc(var(--action-stack-offset) + env(safe-area-inset-bottom, 0px));
+          bottom: calc(var(--action-stack-offset) + env(safe-area-inset-bottom, 0px) + 3.75rem);
           width: min(38vw, 16rem);
           max-width: calc(100vw - 8.5rem);
         }
