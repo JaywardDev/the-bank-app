@@ -5653,6 +5653,44 @@ export default function PlayV2Page() {
             </span>
           ) : null
         }
+        bottomLeftOverlay={
+          <div className="inline-flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() =>
+                setShowActivityPopup((open) => {
+                  const next = !open;
+                  if (next) {
+                    setShowTokenLegendPopup(false);
+                  }
+                  return next;
+                })
+              }
+              className="inline-flex h-8 items-center justify-center rounded-full border border-[#5E3D1D]/85 bg-[#744820] px-3 text-xs font-semibold leading-none text-white/95 shadow-md shadow-black/25 transition hover:bg-[#6A411D] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8A5B2C]/55"
+              aria-label="Open activity and wallet transactions"
+              aria-expanded={showActivityPopup}
+            >
+              Log
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                setShowTokenLegendPopup((open) => {
+                  const next = !open;
+                  if (next) {
+                    setShowActivityPopup(false);
+                  }
+                  return next;
+                })
+              }
+              className="inline-flex h-8 items-center justify-center rounded-full border border-[#5E3D1D]/85 bg-[#744820] px-3 text-xs font-semibold leading-none text-white/95 shadow-md shadow-black/25 transition hover:bg-[#6A411D] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8A5B2C]/55"
+              aria-label="Open token legend"
+              aria-expanded={showTokenLegendPopup}
+            >
+              Tokens
+            </button>
+          </div>
+        }
         marketDrawerContent={
           <BettingMarketPanelV2
             bettingConfig={bettingConfig}
@@ -6409,42 +6447,6 @@ export default function PlayV2Page() {
           </div>
         </div>
       ) : null}
-      <div className="fixed bottom-1 left-1 z-[20] inline-flex items-center gap-1.5">
-        <button
-          type="button"
-          onClick={() =>
-            setShowActivityPopup((open) => {
-              const next = !open;
-              if (next) {
-                setShowTokenLegendPopup(false);
-              }
-              return next;
-            })
-          }
-          className="inline-flex h-8 items-center justify-center rounded-full border border-[#5E3D1D]/85 bg-[#744820] px-3 text-xs font-semibold leading-none text-white/95 shadow-md shadow-black/25 transition hover:bg-[#6A411D] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8A5B2C]/55"
-          aria-label="Open activity and wallet transactions"
-          aria-expanded={showActivityPopup}
-        >
-          Log
-        </button>
-        <button
-          type="button"
-          onClick={() =>
-            setShowTokenLegendPopup((open) => {
-              const next = !open;
-              if (next) {
-                setShowActivityPopup(false);
-              }
-              return next;
-            })
-          }
-          className="inline-flex h-8 items-center justify-center rounded-full border border-[#5E3D1D]/85 bg-[#744820] px-3 text-xs font-semibold leading-none text-white/95 shadow-md shadow-black/25 transition hover:bg-[#6A411D] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8A5B2C]/55"
-          aria-label="Open token legend"
-          aria-expanded={showTokenLegendPopup}
-        >
-          Tokens
-        </button>
-      </div>
       <ActivityPopupV2
         isOpen={showActivityPopup}
         onClose={() => setShowActivityPopup(false)}

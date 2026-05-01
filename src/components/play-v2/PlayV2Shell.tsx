@@ -105,6 +105,7 @@ type PlayV2ShellProps = {
   notice: string | null;
   debugPanel?: ReactNode;
   boardViewport: ReactNode;
+  bottomLeftOverlay?: ReactNode;
   leftDrawerContent?: ReactNode;
   marketDrawerContent?: ReactNode;
   decisionDrawerContent?: ReactNode;
@@ -156,6 +157,7 @@ export default function PlayV2Shell({
   loading,
   notice,
   boardViewport,
+  bottomLeftOverlay,
   leftDrawerContent,
   marketDrawerContent,
   decisionDrawerContent,
@@ -578,20 +580,23 @@ export default function PlayV2Shell({
               isActive={leftOpen && leftDrawerMode === "market"}
             />
           </div>
-          <div className="dice-panel pointer-events-none absolute bottom-0 left-0 z-20">
-            <div className="rounded-2xl border border-white/25 bg-[#3D260F]/80 px-3 py-2 shadow-lg backdrop-blur-[1.5px]">
-              <p className="text-[10px] uppercase tracking-wide text-white/65">Last Roll</p>
-              <div className="mt-1 flex items-center gap-2">
-                <p className="truncate text-[clamp(1.05rem,2vw,1.4rem)] font-semibold leading-none text-white">
-                  {formattedLastDiceDisplay ?? "—"}
-                </p>
-                {isDoubleRoll ? (
-                  <span className="rounded-full border border-white/35 bg-[#6A4520]/55 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white/90">
-                    DOUBLE!
-                  </span>
-                ) : null}
+          <div className="absolute bottom-0 left-0 z-20 flex flex-col gap-1.5">
+            <div className="dice-panel pointer-events-none">
+              <div className="rounded-2xl border border-white/25 bg-[#3D260F]/80 px-3 py-2 shadow-lg backdrop-blur-[1.5px]">
+                <p className="text-[10px] uppercase tracking-wide text-white/65">Last Roll</p>
+                <div className="mt-1 flex items-center gap-2">
+                  <p className="truncate text-[clamp(1.05rem,2vw,1.4rem)] font-semibold leading-none text-white">
+                    {formattedLastDiceDisplay ?? "—"}
+                  </p>
+                  {isDoubleRoll ? (
+                    <span className="rounded-full border border-white/35 bg-[#6A4520]/55 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white/90">
+                      DOUBLE!
+                    </span>
+                  ) : null}
+                </div>
               </div>
             </div>
+            {bottomLeftOverlay ? <div className="pl-1">{bottomLeftOverlay}</div> : null}
           </div>
 
           <div
@@ -789,8 +794,8 @@ export default function PlayV2Shell({
         }
 
         .dice-panel {
-          left: calc(var(--stack-side-offset) + env(safe-area-inset-left, 0px));
-          bottom: calc(var(--action-stack-offset) + env(safe-area-inset-bottom, 0px) + var(--dice-panel-bottom-clearance));
+          margin-left: calc(var(--stack-side-offset) + env(safe-area-inset-left, 0px));
+          margin-bottom: calc(var(--action-stack-offset) + env(safe-area-inset-bottom, 0px) + var(--dice-panel-bottom-clearance));
           width: min(38vw, 16rem);
           max-width: calc(100vw - 8.5rem);
         }
