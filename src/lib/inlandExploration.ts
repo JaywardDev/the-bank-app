@@ -57,8 +57,8 @@ export const INLAND_RESOURCE_CONFIG: Record<InlandResourceType, InlandResourceCo
     icon: "🛢️",
     category: "DEVELOP",
     weight: 7.5,
-    developmentCostMultiplier: 3,
-    passiveIncomeMultiplierPerTurn: 0.15,
+    developmentCostMultiplier: 2,
+    passiveIncomeMultiplierPerTurn: 0.25,
   },
   DEEP_WELL: {
     type: "DEEP_WELL",
@@ -66,8 +66,8 @@ export const INLAND_RESOURCE_CONFIG: Record<InlandResourceType, InlandResourceCo
     icon: "🕳️",
     category: "DEVELOP",
     weight: 7.5,
-    developmentCostMultiplier: 2.5,
-    passiveIncomeMultiplierPerTurn: 0.1,
+    developmentCostMultiplier: 1.5,
+    passiveIncomeMultiplierPerTurn: 0.18,
   },
   COAL: {
     type: "COAL",
@@ -75,8 +75,8 @@ export const INLAND_RESOURCE_CONFIG: Record<InlandResourceType, InlandResourceCo
     icon: "⚫",
     category: "DEVELOP",
     weight: 7.5,
-    developmentCostMultiplier: 3,
-    passiveIncomeMultiplierPerTurn: 0.12,
+    developmentCostMultiplier: 1.8,
+    passiveIncomeMultiplierPerTurn: 0.22,
   },
   TIMBER: {
     type: "TIMBER",
@@ -134,7 +134,7 @@ const validateResourceWeightsTotal = () => {
 
 validateResourceWeightsTotal();
 
-export const getInlandExplorationCost = (goSalary: number) => roundInlandMoney(goSalary * 1);
+export const getInlandExplorationCost = (goSalary: number) => roundInlandMoney(goSalary * 0.8);
 
 export const getInlandSellValue = (resourceType: InlandResourceType, goSalary: number) => {
   const multiplier = INLAND_RESOURCE_CONFIG[resourceType].sellMultiplier;
