@@ -449,7 +449,8 @@ export default function PlayV2Shell({
     <main className="relative h-screen w-screen overflow-hidden bg-[#2F1D10] text-white">
       <div className="play-v2-shell-content">
         <section className="absolute inset-x-0 top-0 z-20 h-9 border-b border-[#6A4520]/80 bg-gradient-to-b from-[#9F6C37] to-[#845628] px-2.5 text-white md:h-10 md:px-3">
-          <div className="flex h-full items-center gap-2 pr-20 text-[11px] sm:gap-2.5 sm:pr-36 sm:text-xs">
+          <div className="flex h-full items-center justify-between gap-2 text-[11px] sm:gap-2.5 sm:text-xs">
+            <div className="flex items-center gap-3 shrink-0">
             <div className="min-w-0 shrink-0">
               <p className="text-[10px] uppercase tracking-wide text-white/70">Cash</p>
               <p className="font-semibold leading-tight text-white">{cashLabel}</p>
@@ -498,22 +499,19 @@ export default function PlayV2Shell({
               <p className="text-[10px] uppercase tracking-wide text-white/70">Turn</p>
               <p className="font-semibold leading-tight text-white">{turnPlayerLabel}</p>
             </div>
-            <div className="min-w-0 flex-1">
+            </div>
+            <div className="flex-1 min-w-0 px-3">
               <p className="text-[10px] uppercase tracking-wide text-white/70">Latest Event</p>
               <p
                 key={latestEventMotionKey}
-                className="truncate text-[11px] font-medium leading-tight text-white/85 latest-event-slide-up sm:text-xs"
+                className="truncate text-[9px] font-medium leading-tight text-white/80 latest-event-slide-up"
                 title={latestEventDisplay}
               >
                 {latestEventDisplay}
               </p>
             </div>
+            <div className="flex items-center shrink-0">{headerActions}</div>
           </div>
-          {headerActions ? (
-            <div className="absolute right-2 top-1/2 z-10 flex -translate-y-1/2 items-center gap-1.5 md:right-3">
-              {headerActions}
-            </div>
-          ) : null}
         </section>
 
         {loading ? (
@@ -782,6 +780,7 @@ export default function PlayV2Shell({
         .action-stack {
           --action-stack-offset: 0.875rem;
           --action-stack-gap: 0.75rem;
+          --dice-panel-bottom-clearance: 7.5rem;
           bottom: calc(var(--action-stack-offset) + env(safe-area-inset-bottom, 0px));
           right: calc(var(--action-stack-offset) + env(safe-area-inset-right, 0px));
           position: relative;
@@ -791,7 +790,7 @@ export default function PlayV2Shell({
 
         .dice-panel {
           left: calc(var(--stack-side-offset) + env(safe-area-inset-left, 0px));
-          bottom: calc(var(--action-stack-offset) + env(safe-area-inset-bottom, 0px) + 3.75rem);
+          bottom: calc(var(--action-stack-offset) + env(safe-area-inset-bottom, 0px) + var(--dice-panel-bottom-clearance));
           width: min(38vw, 16rem);
           max-width: calc(100vw - 8.5rem);
         }
