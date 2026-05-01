@@ -58,7 +58,7 @@ export const INLAND_RESOURCE_CONFIG: Record<InlandResourceType, InlandResourceCo
     category: "DEVELOP",
     weight: 7.5,
     developmentCostMultiplier: 2,
-    passiveIncomeMultiplierPerTurn: 0.25,
+    passiveIncomeMultiplierPerTurn: 0.28,
   },
   DEEP_WELL: {
     type: "DEEP_WELL",
@@ -67,7 +67,7 @@ export const INLAND_RESOURCE_CONFIG: Record<InlandResourceType, InlandResourceCo
     category: "DEVELOP",
     weight: 7.5,
     developmentCostMultiplier: 1.5,
-    passiveIncomeMultiplierPerTurn: 0.18,
+    passiveIncomeMultiplierPerTurn: 0.19,
   },
   COAL: {
     type: "COAL",
@@ -76,14 +76,14 @@ export const INLAND_RESOURCE_CONFIG: Record<InlandResourceType, InlandResourceCo
     category: "DEVELOP",
     weight: 7.5,
     developmentCostMultiplier: 1.8,
-    passiveIncomeMultiplierPerTurn: 0.22,
+    passiveIncomeMultiplierPerTurn: 0.24,
   },
   TIMBER: {
     type: "TIMBER",
     label: "Timber Grove",
     icon: "🪵",
     category: "BONUS",
-    weight: 23.5,
+    weight: 20.5,
     voucherReward: {
       freeBuildTokens: 1,
     },
@@ -93,7 +93,7 @@ export const INLAND_RESOURCE_CONFIG: Record<InlandResourceType, InlandResourceCo
     label: "Rare Earth Cache",
     icon: "🧪",
     category: "BONUS",
-    weight: 18,
+    weight: 19,
     voucherReward: {
       freeUpgradeTokens: 1,
     },
@@ -103,7 +103,7 @@ export const INLAND_RESOURCE_CONFIG: Record<InlandResourceType, InlandResourceCo
     label: "Bronze Deposit",
     icon: "🥉",
     category: "SELL",
-    weight: 16,
+    weight: 17,
     sellMultiplier: 1.2,
   },
   GOLD: {
@@ -111,7 +111,7 @@ export const INLAND_RESOURCE_CONFIG: Record<InlandResourceType, InlandResourceCo
     label: "Gold Vein",
     icon: "🥇",
     category: "SELL",
-    weight: 9,
+    weight: 10,
     sellMultiplier: 5,
   },
   EMPTY: {
