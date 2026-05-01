@@ -452,7 +452,7 @@ export default function PlayV2Shell({
       <div className="play-v2-shell-content">
         <section className="absolute inset-x-0 top-0 z-20 h-9 border-b border-[#6A4520]/80 bg-gradient-to-b from-[#9F6C37] to-[#845628] px-2.5 text-white md:h-10 md:px-3">
           <div className="flex h-full items-center justify-between gap-2 text-[11px] sm:gap-2.5 sm:text-xs">
-            <div className="flex items-center gap-3 shrink-0">
+            <div className="flex items-center gap-4 sm:gap-5 shrink-0">
             <div className="min-w-0 shrink-0">
               <p className="text-[10px] uppercase tracking-wide text-white/70">Cash</p>
               <p className="font-semibold leading-tight text-white">{cashLabel}</p>
