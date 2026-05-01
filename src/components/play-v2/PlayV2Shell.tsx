@@ -99,6 +99,8 @@ type PlayV2ShellProps = {
   lastRollLabel: string;
   lastDiceLabel?: string | null;
   isDoubleRoll?: boolean;
+  latestEventLabel?: string | null;
+  latestEventAnimationKey?: string | null;
   loading: boolean;
   notice: string | null;
   debugPanel?: ReactNode;
@@ -149,6 +151,8 @@ export default function PlayV2Shell({
   lastRollLabel: _lastRollLabel,
   lastDiceLabel = null,
   isDoubleRoll = false,
+  latestEventLabel = null,
+  latestEventAnimationKey = null,
   loading,
   notice,
   boardViewport,
@@ -204,6 +208,8 @@ export default function PlayV2Shell({
   const rightDrawerMode = controlledRightDrawerMode ?? uncontrolledRightDrawerMode;
   void _lastRollLabel;
   const formattedLastDiceDisplay = formatLastDiceDisplay(lastDiceLabel);
+  const latestEventDisplay = latestEventLabel?.trim() || "Waiting for updates";
+  const latestEventMotionKey = latestEventAnimationKey ?? latestEventDisplay;
 
   useEffect(() => {
     if (!showNetWorthPopover) {
@@ -493,15 +499,14 @@ export default function PlayV2Shell({
               <p className="font-semibold leading-tight text-white">{turnPlayerLabel}</p>
             </div>
             <div className="min-w-0">
-              <div className="flex flex-nowrap items-center justify-start gap-2 whitespace-nowrap">
-                <p className="text-[10px] uppercase tracking-wide text-white/70">Last Roll</p>
-                <p className="text-lg font-semibold leading-tight text-white">{formattedLastDiceDisplay ?? "—"}</p>
-                {isDoubleRoll ? (
-                  <span className="rounded-full border border-white/35 bg-[#6A4520]/55 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white/90">
-                    DOUBLE!
-                  </span>
-                ) : null}
-              </div>
+              <p className="text-[10px] uppercase tracking-wide text-white/70">Latest Event</p>
+              <p
+                key={latestEventMotionKey}
+                className="truncate text-xs font-semibold leading-tight text-white latest-event-slide-up sm:text-[13px]"
+                title={latestEventDisplay}
+              >
+                {latestEventDisplay}
+              </p>
             </div>
           </div>
           {headerActions ? (
@@ -574,6 +579,21 @@ export default function PlayV2Shell({
               aria-controls="left-drawer"
               isActive={leftOpen && leftDrawerMode === "market"}
             />
+          </div>
+          <div className="dice-panel pointer-events-none absolute bottom-0 left-0 z-20">
+            <div className="rounded-2xl border border-white/25 bg-[#3D260F]/80 px-3 py-2 shadow-lg backdrop-blur-[1.5px]">
+              <p className="text-[10px] uppercase tracking-wide text-white/65">Last Roll</p>
+              <div className="mt-1 flex items-center gap-2">
+                <p className="truncate text-[clamp(1.05rem,2vw,1.4rem)] font-semibold leading-none text-white">
+                  {formattedLastDiceDisplay ?? "—"}
+                </p>
+                {isDoubleRoll ? (
+                  <span className="rounded-full border border-white/35 bg-[#6A4520]/55 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white/90">
+                    DOUBLE!
+                  </span>
+                ) : null}
+              </div>
+            </div>
           </div>
 
           <div
@@ -767,6 +787,28 @@ export default function PlayV2Shell({
           position: relative;
           width: calc(3.5rem + 1.8rem);
           height: calc(3rem + var(--action-stack-gap) + 3.5rem);
+        }
+
+        .dice-panel {
+          left: calc(var(--stack-side-offset) + env(safe-area-inset-left, 0px));
+          bottom: calc(var(--action-stack-offset) + env(safe-area-inset-bottom, 0px));
+          width: min(38vw, 16rem);
+          max-width: calc(100vw - 8.5rem);
+        }
+
+        .latest-event-slide-up {
+          animation: latestEventSlideUp 180ms ease-out;
+        }
+
+        @keyframes latestEventSlideUp {
+          from {
+            opacity: 0.25;
+            transform: translateY(6px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
         }
 
         .action-stack-item {

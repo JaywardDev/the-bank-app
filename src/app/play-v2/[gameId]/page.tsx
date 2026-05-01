@@ -92,6 +92,7 @@ import {
 } from "@/features/trade/utils";
 import type { TradeProposal } from "@/features/trade/types";
 import { initializeSoundManager, playSound } from "@/lib/sound";
+import { formatEventDescription } from "@/lib/eventFeedFormatters";
 
 type GameMeta = {
   id: string;
@@ -1986,6 +1987,34 @@ export default function PlayV2Page() {
       latestRolledDoubleConfirmed || latestDiceValues[0] === latestDiceValues[1]
     );
   }, [latestDiceValues, latestRolledDoubleConfirmed]);
+  const hiddenActivityEventTypes = useMemo(() => {
+    const hiddenTypes = new Set<string>();
+    for (const event of events) {
+      const description = formatEventDescription(event, {
+        players,
+        boardPack: selectedBoardPack,
+        currencySymbol,
+      });
+      if (description === "Update received") {
+        hiddenTypes.add(event.event_type);
+      }
+    }
+    return hiddenTypes;
+  }, [currencySymbol, events, players, selectedBoardPack]);
+  const latestVisibleEvent = useMemo(
+    () => events.find((event) => !hiddenActivityEventTypes.has(event.event_type)) ?? null,
+    [events, hiddenActivityEventTypes],
+  );
+  const latestEventLabel = useMemo(() => {
+    if (!latestVisibleEvent) {
+      return null;
+    }
+    return formatEventDescription(latestVisibleEvent, {
+      players,
+      boardPack: selectedBoardPack,
+      currencySymbol,
+    });
+  }, [currencySymbol, latestVisibleEvent, players, selectedBoardPack]);
   const shouldShowGoToJailConfirm = Boolean(
     gameState?.turn_phase === "AWAITING_GO_TO_JAIL_CONFIRM" && pendingGoToJail,
   );
@@ -5579,6 +5608,8 @@ export default function PlayV2Page() {
         lastRollLabel={lastRollLabel}
         lastDiceLabel={latestDiceDisplay}
         isDoubleRoll={latestIsDouble}
+        latestEventLabel={latestEventLabel}
+        latestEventAnimationKey={latestVisibleEvent?.id ?? latestEventLabel ?? null}
         loading={loading}
         notice={notice}
         leftOpen={isLeftDrawerOpen}
