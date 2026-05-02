@@ -5607,6 +5607,7 @@ export default function PlayV2Page() {
         turnPlayerLabel={turnPlayerLabel}
         lastRollLabel={lastRollLabel}
         lastDiceLabel={latestDiceDisplay}
+        lastDiceValues={latestDiceValues}
         isDoubleRoll={latestIsDouble}
         latestEventLabel={latestEventLabel}
         latestEventAnimationKey={latestVisibleEvent?.id ?? latestEventLabel ?? null}

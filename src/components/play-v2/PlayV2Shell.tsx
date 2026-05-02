@@ -17,21 +17,10 @@ type WalletPanelProps = {
   mortgagesContent?: ReactNode;
 };
 
-function formatLastDiceDisplay(lastDiceLabel?: string | null) {
-  if (!lastDiceLabel) {
-    return null;
-  }
-
-  const diceValues = lastDiceLabel.match(/\d+/g);
-  if (!diceValues || diceValues.length === 0) {
-    return null;
-  }
-
-  if (diceValues.length === 1) {
-    return `🎲 ${diceValues[0]}`;
-  }
-
-  return diceValues.map((value) => `🎲 ${value}`).join(" + ");
+function toValidDieValue(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 6
+    ? value
+    : null;
 }
 
 function WalletPanel({
@@ -98,6 +87,7 @@ type PlayV2ShellProps = {
   turnPlayerLabel: string;
   lastRollLabel: string;
   lastDiceLabel?: string | null;
+  lastDiceValues?: readonly [number, number] | null;
   isDoubleRoll?: boolean;
   latestEventLabel?: string | null;
   latestEventAnimationKey?: string | null;
@@ -151,6 +141,7 @@ export default function PlayV2Shell({
   turnPlayerLabel,
   lastRollLabel: _lastRollLabel,
   lastDiceLabel = null,
+  lastDiceValues = null,
   isDoubleRoll = false,
   latestEventLabel = null,
   latestEventAnimationKey = null,
@@ -209,7 +200,10 @@ export default function PlayV2Shell({
   const rightOpen = controlledRightOpen ?? uncontrolledRightOpen;
   const rightDrawerMode = controlledRightDrawerMode ?? uncontrolledRightDrawerMode;
   void _lastRollLabel;
-  const formattedLastDiceDisplay = formatLastDiceDisplay(lastDiceLabel);
+  void lastDiceLabel;
+  const firstDieValue = toValidDieValue(lastDiceValues?.[0]);
+  const secondDieValue = toValidDieValue(lastDiceValues?.[1]);
+  const hasValidLastDice = firstDieValue !== null && secondDieValue !== null;
   const latestEventDisplay = latestEventLabel?.trim() || "Waiting for updates";
   const latestEventMotionKey = latestEventAnimationKey ?? latestEventDisplay;
 
@@ -585,9 +579,14 @@ export default function PlayV2Shell({
               <div className="rounded-2xl border border-white/25 bg-[#3D260F]/80 px-3 py-2 shadow-lg backdrop-blur-[1.5px]">
                 <p className="text-[10px] uppercase tracking-wide text-white/65">Last Roll</p>
                 <div className="mt-1 flex items-center gap-2">
-                  <p className="truncate text-[clamp(1.05rem,2vw,1.4rem)] font-semibold leading-none text-white">
-                    {formattedLastDiceDisplay ?? "—"}
-                  </p>
+                  {hasValidLastDice ? (
+                    <div className="flex items-center gap-1" aria-label="Last roll dice values">
+                      <Image src={`/assets/dice/dice-${firstDieValue}.svg`} alt={`Die value ${firstDieValue}`} width={26} height={26} />
+                      <Image src={`/assets/dice/dice-${secondDieValue}.svg`} alt={`Die value ${secondDieValue}`} width={26} height={26} />
+                    </div>
+                  ) : (
+                    <p className="truncate text-[clamp(1.05rem,2vw,1.4rem)] font-semibold leading-none text-white">—</p>
+                  )}
                   {isDoubleRoll ? (
                     <span className="rounded-full border border-white/35 bg-[#6A4520]/55 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white/90">
                       DOUBLE!
