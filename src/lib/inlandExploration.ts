@@ -104,7 +104,7 @@ export const INLAND_RESOURCE_CONFIG: Record<InlandResourceType, InlandResourceCo
     icon: "🥉",
     category: "SELL",
     weight: 17,
-    sellMultiplier: 1.2,
+    sellMultiplier: 0.98,
   },
   GOLD: {
     type: "GOLD",
