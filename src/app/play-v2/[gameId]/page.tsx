@@ -6458,7 +6458,8 @@ export default function PlayV2Page() {
       <BankruptcyCompensationModalV2
         isOpen={Boolean(pendingBankruptcyCompensationEvent)}
         debtorName={bankruptcyCompensationDebtorName}
-        formattedAmount={formatMoney(bankruptcyCompensationAmount)}
+        compensationAmount={bankruptcyCompensationAmount}
+        currency={currency}
         onConfirm={() => {
           const eventId = pendingBankruptcyCompensationEvent?.id;
           if (!eventId) return;

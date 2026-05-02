@@ -6970,21 +6970,10 @@ export async function POST(request: Request) {
           },
         );
 
-        if (!compensationResponse.ok) {
-          const errorText = await compensationResponse.text();
-          const errorMessage = parseRpcErrorMessage(errorText);
-          if (errorMessage === "VERSION_MISMATCH") {
-            return NextResponse.json({ error: "Version mismatch." }, { status: 409 });
-          }
-          console.error("[Bank][Insolvency] Compensation update failed", {
-            status: compensationResponse.status,
-            error: errorText,
-          });
-          return NextResponse.json(
-            { error: "Bankruptcy compensation could not be completed." },
-            { status: 500 },
-          );
+        if (!compensationResponse) {
+          throw new Error("Compensation response missing");
         }
+
         currentVersion += 1;
       }
 

@@ -1,16 +1,20 @@
 "use client";
 
+import { formatCurrency } from "@/lib/currency";
+
 type BankruptcyCompensationModalV2Props = {
   isOpen: boolean;
   debtorName: string;
-  formattedAmount: string;
+  compensationAmount: number;
+  currency: Parameters<typeof formatCurrency>[1];
   onConfirm: () => void;
 };
 
 export default function BankruptcyCompensationModalV2({
   isOpen,
   debtorName,
-  formattedAmount,
+  compensationAmount,
+  currency,
   onConfirm,
 }: BankruptcyCompensationModalV2Props) {
   if (!isOpen) {
@@ -23,7 +27,7 @@ export default function BankruptcyCompensationModalV2({
         <p className="text-xs uppercase tracking-[0.18em] text-amber-200/80">Notice</p>
         <h2 className="mt-2 text-xl font-semibold text-white">Debtor Defaulted</h2>
         <p className="mt-3 whitespace-pre-line text-sm leading-6 text-amber-50/90">
-          {`${debtorName} was unable to fulfill their financial obligation and has declared bankruptcy.\n\nThe bank has intervened to settle part of the debt.\n\nYou receive ${formattedAmount} as compensation.`}
+          {`${debtorName} was unable to fulfill their financial obligation and has declared bankruptcy.\n\nThe bank has intervened to settle part of the debt.\n\nYou receive ${formatCurrency(compensationAmount, currency)} as compensation.`}
         </p>
         <p className="mt-3 text-xs italic text-amber-200/75">
           Not all investments pay in full... but the system moves forward.
