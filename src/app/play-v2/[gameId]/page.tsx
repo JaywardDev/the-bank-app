@@ -18,6 +18,7 @@ import TaxSuccessAnimationOverlay from "@/components/play-v2/TaxSuccessAnimation
 import GoToJailAnimationOverlay from "@/components/play-v2/GoToJailAnimationOverlay";
 import JailDecisionModalV2 from "@/components/play-v2/JailDecisionModalV2";
 import ConfirmActionModalV2 from "@/components/play-v2/ConfirmActionModalV2";
+import BankruptcyCompensationModalV2 from "@/components/play-v2/BankruptcyCompensationModalV2";
 import RotateToLandscapeOverlay from "@/components/play-v2/RotateToLandscapeOverlay";
 import ActivityPopupV2 from "@/components/play-v2/ActivityPopupV2";
 import TokenLegendPopupV2 from "@/components/play-v2/TokenLegendPopupV2";
@@ -521,6 +522,7 @@ export default function PlayV2Page() {
     string | null
   >(null);
   const [cancelingBetId, setCancelingBetId] = useState<string | null>(null);
+  const [dismissedCompensationEventIds, setDismissedCompensationEventIds] = useState<string[]>([]);
 
   const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
   const resumeRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
@@ -3038,6 +3040,20 @@ export default function PlayV2Page() {
     () => events.find((event) => !hiddenActivityEventTypes.has(event.event_type)) ?? null,
     [events, hiddenActivityEventTypes],
   );
+  const pendingBankruptcyCompensationEvent = useMemo(() => {
+    if (!currentUserPlayerId) return null;
+    return (
+      events.find((event) => {
+        if (event.event_type !== "BANKRUPTCY_COMPENSATION") return false;
+        if (dismissedCompensationEventIds.includes(event.id)) return false;
+        const payload =
+          event.payload && typeof event.payload === "object"
+            ? (event.payload as Record<string, unknown>)
+            : null;
+        return payload?.creditor_player_id === currentUserPlayerId;
+      }) ?? null
+    );
+  }, [currentUserPlayerId, dismissedCompensationEventIds, events]);
   const latestEventLabel = useMemo(() => {
     if (!latestVisibleEvent) {
       return null;
@@ -5469,6 +5485,22 @@ export default function PlayV2Page() {
     currencySymbol,
     macroTooltipById,
   ]);
+  const bankruptcyCompensationPayload =
+    pendingBankruptcyCompensationEvent?.payload &&
+    typeof pendingBankruptcyCompensationEvent.payload === "object"
+      ? (pendingBankruptcyCompensationEvent.payload as Record<string, unknown>)
+      : null;
+  const bankruptcyCompensationDebtorId =
+    typeof bankruptcyCompensationPayload?.debtor_player_id === "string"
+      ? bankruptcyCompensationPayload.debtor_player_id
+      : null;
+  const bankruptcyCompensationDebtorName = bankruptcyCompensationDebtorId
+    ? getPlayerNameById(bankruptcyCompensationDebtorId)
+    : "A player";
+  const bankruptcyCompensationAmount =
+    typeof bankruptcyCompensationPayload?.compensation_amount === "number"
+      ? bankruptcyCompensationPayload.compensation_amount
+      : 0;
 
   useEffect(() => {
     // Keep loadingMinElapsed sticky: resetting it during ready transition can deadlock shouldShowLoadingScreen.
@@ -6423,6 +6455,18 @@ export default function PlayV2Page() {
           </div>
         </div>
       ) : null}
+      <BankruptcyCompensationModalV2
+        isOpen={Boolean(pendingBankruptcyCompensationEvent)}
+        debtorName={bankruptcyCompensationDebtorName}
+        formattedAmount={formatMoney(bankruptcyCompensationAmount)}
+        onConfirm={() => {
+          const eventId = pendingBankruptcyCompensationEvent?.id;
+          if (!eventId) return;
+          setDismissedCompensationEventIds((prev) =>
+            prev.includes(eventId) ? prev : [...prev, eventId],
+          );
+        }}
+      />
       {selectedInteriorCell && !selectedInlandCellRecord ? (
         <div className="fixed bottom-3 left-1/2 z-[45] w-[min(460px,calc(100vw-1rem))] -translate-x-1/2 rounded-xl border border-emerald-200/35 bg-[#4E3018]/92 p-2 shadow-2xl backdrop-blur">
           <div className="flex items-center justify-between gap-2">

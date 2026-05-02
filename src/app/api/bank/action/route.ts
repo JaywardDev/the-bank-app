@@ -5254,7 +5254,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const currentVersion = gameState?.version ?? 0;
+    let currentVersion = gameState?.version ?? 0;
 
     if (body.expectedVersion !== currentVersion) {
       return NextResponse.json(
@@ -6902,6 +6902,92 @@ export async function POST(request: Request) {
     }
 
     if (body.action === "DECLARE_BANKRUPTCY") {
+      const pendingRecovery = parsePendingInsolvencyAction(gameState.pending_action);
+      const creditorPlayerId =
+        pendingRecovery?.type === "INSOLVENCY_RECOVERY"
+          ? pendingRecovery.owed_to_player_id
+          : null;
+      const originalAmount =
+        pendingRecovery?.type === "INSOLVENCY_RECOVERY"
+          ? pendingRecovery.amount_due
+          : 0;
+      const compensationAmount = Math.floor(originalAmount * 0.5);
+      const shouldPayRentBankruptcyCompensation =
+        pendingRecovery?.type === "INSOLVENCY_RECOVERY" &&
+        pendingRecovery.reason === "PAY_RENT" &&
+        typeof creditorPlayerId === "string" &&
+        creditorPlayerId.length > 0 &&
+        compensationAmount > 0 &&
+        originalAmount > 0 &&
+        creditorPlayerId !== currentPlayer.id &&
+        !players.some((player) => player.id === creditorPlayerId && player.is_eliminated);
+
+      if (shouldPayRentBankruptcyCompensation && creditorPlayerId) {
+        const currentCreditorBalance = gameState.balances?.[creditorPlayerId] ?? startingCash;
+        const compensationBalances = {
+          ...(gameState.balances ?? {}),
+          [creditorPlayerId]: currentCreditorBalance + compensationAmount,
+        };
+        const compensationEvents = [
+          {
+            event_type: "BANKRUPTCY_COMPENSATION",
+            payload: {
+              creditor_player_id: creditorPlayerId,
+              debtor_player_id: currentPlayer.id,
+              original_amount: originalAmount,
+              compensation_amount: compensationAmount,
+              tile_label: pendingRecovery.label,
+              reason: "BANKRUPTCY_RENT_COMPENSATION",
+            },
+          },
+          {
+            event_type: "CASH_CREDIT",
+            payload: {
+              player_id: creditorPlayerId,
+              amount: compensationAmount,
+              balance_after: currentCreditorBalance + compensationAmount,
+              source_event_type: "BANKRUPTCY_COMPENSATION",
+            },
+          },
+        ] as Array<{ event_type: string; payload: Record<string, unknown> }>;
+
+        const compensationResponse = await fetchFromSupabaseWithService<{
+          game_state: GameStateRow;
+          events: Array<{ event_type: string; payload: Record<string, unknown> }>;
+        }[]>(
+          "rpc/update_game_state_and_emit_events",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              p_game_id: gameId,
+              p_expected_version: currentVersion,
+              p_patch: {
+                balances: compensationBalances,
+              },
+              p_events: compensationEvents,
+              p_user_id: user.id,
+            }),
+          },
+        );
+
+        if (!compensationResponse.ok) {
+          const errorText = await compensationResponse.text();
+          const errorMessage = parseRpcErrorMessage(errorText);
+          if (errorMessage === "VERSION_MISMATCH") {
+            return NextResponse.json({ error: "Version mismatch." }, { status: 409 });
+          }
+          console.error("[Bank][Insolvency] Compensation update failed", {
+            status: compensationResponse.status,
+            error: errorText,
+          });
+          return NextResponse.json(
+            { error: "Bankruptcy compensation could not be completed." },
+            { status: 500 },
+          );
+        }
+        currentVersion += 1;
+      }
+
       const rpcResponse = await fetch(
         `${supabaseUrl}/rest/v1/rpc/declare_bankruptcy`,
         {
