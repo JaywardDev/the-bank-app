@@ -18,9 +18,12 @@ These Phase 4 rules are **approximations only**. They are for designer feedback 
 - Purchase mortgages are modeled as acquisition obligations with scheduled payments and default behavior.
 - Passive inland income, betting, and auctions are simplified approximations for macro-economy pressure testing.
 - Generated fixtures now include boardpack-derived `loan_rules` from runtime `GameRules` resolution.
+- Generated fixtures now include boardpack-derived `tax_rules` (`income_tax_rate`, `super_tax_rate`) from runtime `GameRules` resolution.
 - The simulator uses fixture `loan_rules` by default.
+- The simulator uses fixture `tax_rules` by default.
 - CLI values override fixture loan values only when explicitly passed.
 - Collateral principal currently uses effective runtime parity LTV `0.6` even if `rules.collateralLtv` differs.
+- `philippines-hard` currently overrides super tax to `3%` (`superTaxRate: 0.03`).
 
 1. Export a sanitized simulation fixture from `src/lib/boardPacks.ts` boardpack data:
 
@@ -56,6 +59,13 @@ python tools/python/simulations/simulate_basic_game.py --fixture tools/python/ex
 
 ```bash
 python tools/python/simulations/simulate_basic_game.py --fixture tools/python/exports/generated_boardpack_fixture.json --games 500 --seed 42 --max-rounds 150 --player-policy balanced --passive-income-per-owned-property 50 --enable-auctions --auction-bid-ratio 0.7
+```
+
+After changing tax rules, re-export and rerun:
+
+```bash
+npm run export:sim-boardpack
+python tools/python/simulations/simulate_basic_game.py --fixture tools/python/exports/generated_boardpack_fixture.json --games 500 --seed 42 --max-rounds 150 --player-policy balanced --passive-income-per-owned-property 10000
 ```
 
 7. Output includes console stats and generated summary JSON files under:

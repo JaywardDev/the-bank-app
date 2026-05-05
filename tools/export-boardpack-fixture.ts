@@ -108,6 +108,10 @@ const fixture = {
       payment_model: "fixed_payment_from_backend_schedule",
     },
   },
+  tax_rules: {
+    income_tax_rate: rules.incomeTaxRate,
+    super_tax_rate: rules.superTaxRate,
+  },
   tiles,
 } satisfies Record<string, JsonValue>;
 

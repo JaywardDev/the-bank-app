@@ -34,6 +34,7 @@ export const philippinesHardBoardPack: BoardPack = {
     collateralLtv: 0.5,
     collateralRatePerTurn: 0.02,
     collateralTermTurns: 12,
+    superTaxRate: 0.03,
   },
   macroDeck: {
     id: "macro-ph-hard-v1",

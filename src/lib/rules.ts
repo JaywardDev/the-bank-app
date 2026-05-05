@@ -1,4 +1,6 @@
 export type GameRules = {
+  incomeTaxRate: number;
+  superTaxRate: number;
   freeParkingJackpotEnabled: boolean;
   loanCollateralEnabled: boolean;
   mortgageRatePerTurn: number;
@@ -19,6 +21,8 @@ export type GameRules = {
 };
 
 export const DEFAULT_RULES: GameRules = {
+  incomeTaxRate: 0.2,
+  superTaxRate: 0.1,
   freeParkingJackpotEnabled: false,
   loanCollateralEnabled: true,
   mortgageRatePerTurn: 0.015,

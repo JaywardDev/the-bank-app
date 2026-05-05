@@ -146,6 +146,7 @@ def load_boardpack(path: Path) -> dict[str, Any]:
         "board_size": board_size,
         "tiles": normalized_tiles,
         "loan_rules": boardpack.get("loan_rules"),
+        "tax_rules": boardpack.get("tax_rules"),
     }
 
 
@@ -436,11 +437,17 @@ def main() -> None:
     args = parse_args()
     boardpack = load_boardpack(args.fixture)
     loan_rules = boardpack.get("loan_rules") if isinstance(boardpack.get("loan_rules"), dict) else None
+    tax_rules = boardpack.get("tax_rules") if isinstance(boardpack.get("tax_rules"), dict) else None
     loan_warning: str | None = None
+    tax_warning: str | None = None
     sources: set[str] = set()
+    tax_sources: set[str] = set()
     if loan_rules is None:
         loan_warning = "Fixture loan_rules missing; using simulator fallback defaults."
         sources.add("fallback")
+    if tax_rules is None:
+        tax_warning = "Fixture tax_rules missing; using simulator fallback tax defaults."
+        tax_sources.add("fallback")
 
     mortgage = loan_rules.get("mortgage", {}) if loan_rules else {}
     collateral = loan_rules.get("collateral", {}) if loan_rules else {}
@@ -486,6 +493,13 @@ def main() -> None:
         sources.add("cli_override")
 
     loan_rules_source = "mixed" if len(sources) > 1 else (next(iter(sources)) if sources else "fallback")
+    fallback_income_tax_rate = 0.2
+    fallback_super_tax_rate = 0.1
+    income_tax_rate = float(tax_rules.get("income_tax_rate", fallback_income_tax_rate)) if tax_rules else fallback_income_tax_rate
+    super_tax_rate = float(tax_rules.get("super_tax_rate", fallback_super_tax_rate)) if tax_rules else fallback_super_tax_rate
+    if tax_rules is not None:
+        tax_sources.add("fixture")
+    tax_rules_source = "mixed" if len(tax_sources) > 1 else (next(iter(tax_sources)) if tax_sources else "fallback")
 
     cfg = SimulationConfig(
         player_policy=args.player_policy, cash_reserve_ratio=args.cash_reserve_ratio, low_cash_threshold_ratio=args.low_cash_threshold_ratio,
@@ -508,6 +522,8 @@ def main() -> None:
         "purchase_mortgage_payment_model": "amortized_fixed_payment", "collateral_ltv_effective_used": collateral_ltv_effective,
         "collateral_ltv_rules_field_exported": collateral_ltv_rules_field, "collateral_rate_per_turn_used": collateral_rate,
         "collateral_term_turns_used": collateral_term, "loan_config_warning": loan_warning,
+        "tax_rules_source": tax_rules_source, "income_tax_rate_used": income_tax_rate, "super_tax_rate_used": super_tax_rate,
+        "tax_config_warning": tax_warning,
     }
     summary = summarize_results(boardpack, results, settings, cfg)
     path = write_summary(summary)
@@ -531,6 +547,8 @@ def main() -> None:
     print(f"Liquidity settings used: {summary['liquidity_settings']}")
     if loan_warning:
         print(f"Loan config warning: {loan_warning}")
+    if tax_warning:
+        print(f"Tax config warning: {tax_warning}")
     print(f"Summary JSON: {path}")
 
 

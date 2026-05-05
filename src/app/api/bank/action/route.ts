@@ -3588,8 +3588,13 @@ const finalizeMoveResolution = async ({
     incomeTaxBreakdown = computeIncomeTaxBreakdown({
       currentCash: currentCashForTax,
       baselineCash,
+      taxRate: rules.incomeTaxRate,
     });
-    taxAmount = computeIncomeTaxAmount(currentCashForTax, baselineCash);
+    taxAmount = computeIncomeTaxAmount(
+      currentCashForTax,
+      baselineCash,
+      rules.incomeTaxRate,
+    );
   }
 
   if (isSuperTax) {
@@ -3622,6 +3627,7 @@ const finalizeMoveResolution = async ({
           : [],
         inlandExploredCells: gameState.inland_explored_cells,
         boardPackEconomy,
+        taxRate: rules.superTaxRate,
       });
 
       taxAmount = superTaxBreakdown.taxAmount;

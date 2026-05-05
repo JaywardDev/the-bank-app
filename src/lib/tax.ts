@@ -13,7 +13,8 @@ export const isCustomTaxBoardPack = (boardPackId?: string | null) =>
 export const computeIncomeTaxAmount = (
   currentCash: number,
   baselineCash: number,
-) => Math.floor(0.2 * Math.max(0, currentCash - baselineCash));
+  taxRate = 0.2,
+) => Math.floor(taxRate * Math.max(0, currentCash - baselineCash));
 
 export type IncomeTaxBreakdown = {
   currentCash: number;
@@ -75,6 +76,7 @@ export type NetWorthForTaxInput = {
     inlandLandBaseValueRatio?: number;
     houseImprovementValueMultipliers?: number[];
   } | null;
+  taxRate?: number;
 };
 
 
@@ -97,6 +99,7 @@ export const computeSuperTaxBreakdown = ({
   activePurchaseMortgages,
   inlandExploredCells,
   boardPackEconomy,
+  taxRate = 0.1,
 }: NetWorthForTaxInput): SuperTaxBreakdown => {
   const netWorthBreakdown = computeAuthoritativeNetWorthBreakdown({
     currentCash,
@@ -112,7 +115,6 @@ export const computeSuperTaxBreakdown = ({
   const assetValue = netWorthBreakdown.assetValue;
   const totalLiabilities = netWorthBreakdown.totalLiabilities;
   const netWorthForTax = netWorthBreakdown.netWorth;
-  const taxRate = 0.1;
 
   return {
     currentCash,
