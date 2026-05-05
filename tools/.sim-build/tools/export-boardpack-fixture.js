@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const node_fs_1 = require("node:fs");
 const node_path_1 = require("node:path");
 const boardPacks_1 = require("../src/lib/boardPacks");
+const rules_1 = require("../src/lib/rules");
 const selectedBoardPackId = process.argv[2] ?? "philippines-hard";
 const boardPack = boardPacks_1.boardPacks.find((candidate) => candidate.id === selectedBoardPackId);
 if (!boardPack) {
@@ -46,8 +47,9 @@ const tiles = boardPack.tiles.map((tile) => {
     }
     return exportTile;
 });
+const rules = (0, rules_1.getRules)(boardPack.rules);
 const fixture = {
-    source: "offline_python_simulation_lab_phase_2",
+    source: "offline_python_simulation_lab_phase_4",
     generated_at: new Date().toISOString(),
     boardpack: {
         id: boardPack.id,
@@ -60,6 +62,25 @@ const fixture = {
     starting_cash: boardPack.economy.startingBalance ?? 1500,
     go_salary: boardPack.economy.passGoAmount ?? 200,
     board_size: tiles.length,
+    loan_rules: {
+        source: "game_rules_v1",
+        mortgage: {
+            enabled: true,
+            ltv: rules.mortgageLtv,
+            rate_per_turn: rules.mortgageRatePerTurn,
+            term_turns: rules.mortgageTermTurns,
+            payment_model: "amortized_fixed_payment",
+            allowed_down_payment_percents: [30, 40, 50, 60, 70, 80],
+        },
+        collateral: {
+            enabled: true,
+            ltv_effective: 0.6,
+            ltv_rules_field: rules.collateralLtv,
+            rate_per_turn: rules.collateralRatePerTurn,
+            term_turns: rules.collateralTermTurns,
+            payment_model: "fixed_payment_from_backend_schedule",
+        },
+    },
     tiles,
 };
 const outputPath = (0, node_path_1.resolve)("tools/python/exports/generated_boardpack_fixture.json");
