@@ -1,0 +1,692 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.getBoardPackById = exports.defaultBoardPackId = exports.boardPacks = exports.classicUsCommunityCards = exports.classicUsChanceCards = exports.communityCards = exports.chanceCards = exports.DEFAULT_BOARD_PACK_ECONOMY = exports.DEFAULT_HOUSE_IMPROVEMENT_VALUE_MULTIPLIERS = exports.classicUkCommunityCards = exports.classicUkChanceCards = void 0;
+const classic_ph_1 = require("./boardpacks/classic-ph");
+const classic_uk_1 = require("./boardpacks/classic-uk");
+const new_zealand_1 = require("./boardpacks/new-zealand");
+const philippines_hard_1 = require("./boardpacks/philippines-hard");
+var classic_uk_2 = require("./boardpacks/classic-uk");
+Object.defineProperty(exports, "classicUkChanceCards", { enumerable: true, get: function () { return classic_uk_2.classicUkChanceCards; } });
+Object.defineProperty(exports, "classicUkCommunityCards", { enumerable: true, get: function () { return classic_uk_2.classicUkCommunityCards; } });
+const DEFAULT_HOUSE_RENT_MULTIPLIERS = [1, 5, 15, 45, 58, 80];
+exports.DEFAULT_HOUSE_IMPROVEMENT_VALUE_MULTIPLIERS = [0, 0.8, 0.9, 1.4, 1.9, 1.7];
+const DEFAULT_RAIL_RENT_BY_COUNT = [0, 25, 50, 100, 200];
+const DEFAULT_UTILITY_RENT_MULTIPLIERS = { single: 4, double: 10, triple: 16 };
+const buildRentByHouses = (baseRent, multipliers = DEFAULT_HOUSE_RENT_MULTIPLIERS) => {
+    const normalizedMultipliers = multipliers.length === 5
+        ? [...multipliers.slice(0, 4), Math.round((multipliers[3] + multipliers[4]) / 2), multipliers[4]]
+        : multipliers;
+    return normalizedMultipliers.map((multiplier) => baseRent * multiplier);
+};
+const applyPropertyGroupConfig = (tiles, groups, economy) => tiles.map((tile) => {
+    if (tile.type !== "PROPERTY") {
+        return tile;
+    }
+    const group = groups.find((entry) => entry.tileIds.includes(tile.tile_id));
+    if (!group) {
+        return tile;
+    }
+    const baseRent = tile.baseRent ?? 0;
+    const rentMultipliers = economy.houseRentMultipliersByGroup[group.id] ??
+        DEFAULT_HOUSE_RENT_MULTIPLIERS;
+    return {
+        ...tile,
+        colorGroup: group.id,
+        houseCost: group.houseCost,
+        rentByHouses: tile.rentByHouses ??
+            buildRentByHouses(baseRent, rentMultipliers),
+    };
+});
+const CLASSIC_US_ECONOMY = {
+    currency: {
+        code: "USD",
+        symbol: "$",
+    },
+    houseRentMultipliersByGroup: {
+        brown: [1, 5, 15, 45, 58, 80],
+        "light-blue": [1, 5, 14, 40, 52, 70],
+        pink: [1, 5, 13, 36, 46, 62],
+        orange: [1, 5, 12, 33, 42, 56],
+        red: [1, 5, 11, 30, 38, 50],
+        yellow: [1, 5, 10, 28, 34, 45],
+        green: [1, 5, 9, 24, 29, 38],
+        "dark-blue": [1, 5, 8, 22, 25, 32],
+    },
+    hotelIncrementMultiplier: 1.25,
+    railRentByCount: DEFAULT_RAIL_RENT_BY_COUNT,
+    utilityRentMultipliers: DEFAULT_UTILITY_RENT_MULTIPLIERS,
+    houseImprovementValueMultipliers: exports.DEFAULT_HOUSE_IMPROVEMENT_VALUE_MULTIPLIERS,
+    startingBalance: 1500,
+    passGoAmount: 200,
+    inlandLandBaseValueRatio: 0.2,
+    jailFineAmount: 50,
+};
+exports.DEFAULT_BOARD_PACK_ECONOMY = CLASSIC_US_ECONOMY;
+exports.chanceCards = [
+    {
+        id: "chance-advance-go",
+        title: "Advance to Go (Collect $200)",
+        kind: "MOVE_TO",
+        payload: { tile_index: 0 },
+    },
+    {
+        id: "chance-dividend",
+        title: "Bank pays you dividend of $50",
+        kind: "RECEIVE",
+        payload: { amount: 50 },
+    },
+    {
+        id: "chance-go-to-jail",
+        title: "Go to Jail",
+        kind: "GO_TO_JAIL",
+        payload: {},
+    },
+    {
+        id: "chance-go-back",
+        title: "Go back 3 spaces",
+        kind: "MOVE_REL",
+        payload: { spaces: -3 },
+    },
+    {
+        id: "chance-poor-tax",
+        title: "Pay poor tax of $15",
+        kind: "PAY",
+        payload: { amount: 15 },
+    },
+    {
+        id: "chance-illinois",
+        title: "Advance to Illinois Avenue",
+        kind: "MOVE_TO",
+        payload: { tile_index: 24 },
+    },
+];
+exports.communityCards = [
+    {
+        id: "community-advance-go",
+        title: "Advance to Go (Collect $200)",
+        kind: "MOVE_TO",
+        payload: { tile_index: 0 },
+    },
+    {
+        id: "community-bank-error",
+        title: "Bank error in your favor. Collect $200",
+        kind: "RECEIVE",
+        payload: { amount: 200 },
+    },
+    {
+        id: "community-doctor",
+        title: "Doctor's fees. Pay $50",
+        kind: "PAY",
+        payload: { amount: 50 },
+    },
+    {
+        id: "community-go-to-jail",
+        title: "Go to Jail",
+        kind: "GO_TO_JAIL",
+        payload: {},
+    },
+    {
+        id: "community-stock",
+        title: "From sale of stock you get $50",
+        kind: "RECEIVE",
+        payload: { amount: 50 },
+    },
+    {
+        id: "community-get-out-of-jail-free",
+        title: "Get Out of Jail Free",
+        kind: "GET_OUT_OF_JAIL_FREE",
+        payload: {},
+    },
+    {
+        id: "community-hospital",
+        title: "Pay hospital fees of $100",
+        kind: "PAY",
+        payload: { amount: 100 },
+    },
+];
+exports.classicUsChanceCards = [
+    {
+        id: "classic-us-chance-advance-go",
+        title: "Move to Go and collect salary",
+        kind: "MOVE_TO",
+        payload: { target_tile_id: "go" },
+    },
+    {
+        id: "classic-us-chance-illinois",
+        title: "Advance to Illinois Avenue",
+        kind: "MOVE_TO",
+        payload: { target_tile_id: "illinois-avenue" },
+    },
+    {
+        id: "classic-us-chance-st-charles",
+        title: "Advance to St. Charles Place",
+        kind: "MOVE_TO",
+        payload: { target_tile_id: "st-charles-place" },
+    },
+    {
+        id: "classic-us-chance-nearest-utility",
+        title: "Head to the nearest utility",
+        kind: "MOVE_TO",
+        payload: { nearest_kind: "UTILITY" },
+    },
+    {
+        id: "classic-us-chance-nearest-railroad-1",
+        title: "Proceed to the nearest railroad",
+        kind: "MOVE_TO",
+        payload: { nearest_kind: "RAILROAD" },
+    },
+    {
+        id: "classic-us-chance-nearest-railroad-2",
+        title: "Catch the next railroad ahead",
+        kind: "MOVE_TO",
+        payload: { nearest_kind: "RAILROAD" },
+    },
+    {
+        id: "classic-us-chance-reading-railroad",
+        title: "Travel to Reading Railroad",
+        kind: "MOVE_TO",
+        payload: { target_tile_id: "reading-railroad" },
+    },
+    {
+        id: "classic-us-chance-boardwalk",
+        title: "Stroll to Boardwalk",
+        kind: "MOVE_TO",
+        payload: { target_tile_id: "boardwalk" },
+    },
+    {
+        id: "classic-us-chance-back-three",
+        title: "Move back three spaces",
+        kind: "MOVE_REL",
+        payload: { relative_spaces: -3 },
+    },
+    {
+        id: "classic-us-chance-dividend",
+        title: "Collect a dividend from the bank",
+        kind: "RECEIVE",
+        payload: { amount: 50 },
+    },
+    {
+        id: "classic-us-chance-building-loan",
+        title: "Building loan matures",
+        kind: "RECEIVE",
+        payload: { amount: 150 },
+    },
+    {
+        id: "classic-us-chance-crossword",
+        title: "Win a competition prize",
+        kind: "RECEIVE",
+        payload: { amount: 100 },
+    },
+    {
+        id: "classic-us-chance-speeding-fine",
+        title: "Pay a speeding fine",
+        kind: "PAY",
+        payload: { amount: 15 },
+    },
+    {
+        id: "classic-us-chance-poor-tax",
+        title: "Pay the poor tax",
+        kind: "PAY",
+        payload: { amount: 15 },
+    },
+    {
+        id: "classic-us-chance-go-to-jail",
+        title: "Head straight to jail",
+        kind: "GO_TO_JAIL",
+        payload: {},
+    },
+    {
+        id: "classic-us-chance-get-out-of-jail",
+        title: "Keep a get out of jail free pass",
+        kind: "GET_OUT_OF_JAIL_FREE",
+        payload: {},
+    },
+    {
+        id: "classic-us-chance-tax-exemption-pass-1",
+        title: "Tax Exemption Pass",
+        text: "Keep this card until needed. Use it to avoid paying Income Tax or Super Tax when you land on a tax tile.",
+        kind: "TAX_EXEMPTION_PASS",
+        payload: {},
+    },
+    {
+        id: "classic-us-chance-tax-exemption-pass-2",
+        title: "Tax Exemption Pass",
+        text: "Keep this card until needed. Use it to avoid paying Income Tax or Super Tax when you land on a tax tile.",
+        kind: "TAX_EXEMPTION_PASS",
+        payload: {},
+    },
+];
+exports.classicUsCommunityCards = [
+    {
+        id: "classic-us-community-advance-go",
+        title: "Advance to Go and collect salary",
+        kind: "MOVE_TO",
+        payload: { target_tile_id: "go" },
+    },
+    {
+        id: "classic-us-community-bank-error",
+        title: "Bank correction in your favor",
+        kind: "RECEIVE",
+        payload: { amount: 200 },
+    },
+    {
+        id: "classic-us-community-doctor",
+        title: "Pay the doctor's bill",
+        kind: "PAY",
+        payload: { amount: 50 },
+    },
+    {
+        id: "classic-us-community-stock",
+        title: "Collect proceeds from a stock sale",
+        kind: "RECEIVE",
+        payload: { amount: 50 },
+    },
+    {
+        id: "classic-us-community-holiday-fund",
+        title: "Holiday fund matures",
+        kind: "RECEIVE",
+        payload: { amount: 100 },
+    },
+    {
+        id: "classic-us-community-tax-refund",
+        title: "Receive an income tax refund",
+        kind: "RECEIVE",
+        payload: { amount: 20 },
+    },
+    {
+        id: "classic-us-community-life-insurance",
+        title: "Life insurance matures",
+        kind: "RECEIVE",
+        payload: { amount: 100 },
+    },
+    {
+        id: "classic-us-community-hospital",
+        title: "Pay hospital fees",
+        kind: "PAY",
+        payload: { amount: 100 },
+    },
+    {
+        id: "classic-us-community-school-fees",
+        title: "Pay school fees",
+        kind: "PAY",
+        payload: { amount: 50 },
+    },
+    {
+        id: "classic-us-community-consultancy",
+        title: "Receive a consultancy fee",
+        kind: "RECEIVE",
+        payload: { amount: 25 },
+    },
+    {
+        id: "classic-us-community-inherit",
+        title: "Receive an inheritance",
+        kind: "RECEIVE",
+        payload: { amount: 100 },
+    },
+    {
+        id: "classic-us-community-beauty-contest",
+        title: "Collect a contest prize",
+        kind: "RECEIVE",
+        payload: { amount: 10 },
+    },
+    {
+        id: "classic-us-community-get-out-of-jail",
+        title: "Keep a get out of jail free pass",
+        kind: "GET_OUT_OF_JAIL_FREE",
+        payload: {},
+    },
+    {
+        id: "classic-us-community-go-to-jail",
+        title: "Go directly to jail",
+        kind: "GO_TO_JAIL",
+        payload: {},
+    },
+    {
+        id: "classic-us-community-birthday",
+        title: "Receive a birthday gift from the bank",
+        kind: "RECEIVE",
+        payload: { amount: 50 },
+    },
+    {
+        id: "classic-us-community-street-repairs",
+        title: "Pay for neighborhood repairs",
+        kind: "PAY",
+        payload: { amount: 40 },
+    },
+];
+const CLASSIC_US_PROPERTY_GROUPS = [
+    {
+        id: "brown",
+        houseCost: 50,
+        tileIds: ["mediterranean-avenue", "baltic-avenue"],
+    },
+    {
+        id: "light-blue",
+        houseCost: 50,
+        tileIds: ["oriental-avenue", "vermont-avenue", "connecticut-avenue"],
+    },
+    {
+        id: "pink",
+        houseCost: 100,
+        tileIds: ["st-charles-place", "states-avenue", "virginia-avenue"],
+    },
+    {
+        id: "orange",
+        houseCost: 100,
+        tileIds: ["st-james-place", "tennessee-avenue", "new-york-avenue"],
+    },
+    {
+        id: "red",
+        houseCost: 150,
+        tileIds: ["kentucky-avenue", "indiana-avenue", "illinois-avenue"],
+    },
+    {
+        id: "yellow",
+        houseCost: 150,
+        tileIds: ["atlantic-avenue", "ventnor-avenue", "marvin-gardens"],
+    },
+    {
+        id: "green",
+        houseCost: 200,
+        tileIds: ["pacific-avenue", "north-carolina-avenue", "pennsylvania-avenue"],
+    },
+    {
+        id: "dark-blue",
+        houseCost: 200,
+        tileIds: ["park-place", "boardwalk"],
+    },
+];
+exports.boardPacks = [
+    {
+        id: "classic-us",
+        displayName: "Classic (US)",
+        properties: [],
+        economy: CLASSIC_US_ECONOMY,
+        eventDecks: {
+            chance: exports.classicUsChanceCards,
+            community: exports.classicUsCommunityCards,
+        },
+        tiles: applyPropertyGroupConfig([
+            { index: 0, tile_id: "go", type: "START", name: "Go" },
+            {
+                index: 1,
+                tile_id: "mediterranean-avenue",
+                type: "PROPERTY",
+                name: "Mediterranean Avenue",
+                price: 60,
+                baseRent: 2,
+            },
+            {
+                index: 2,
+                tile_id: "community-chest-1",
+                type: "EVENT",
+                name: "Community Chest",
+            },
+            {
+                index: 3,
+                tile_id: "baltic-avenue",
+                type: "PROPERTY",
+                name: "Baltic Avenue",
+                price: 60,
+                baseRent: 4,
+            },
+            {
+                index: 4,
+                tile_id: "income-tax",
+                type: "TAX",
+                name: "Income Tax",
+                taxAmount: 100,
+            },
+            {
+                index: 5,
+                tile_id: "reading-railroad",
+                type: "RAIL",
+                name: "Reading Railroad",
+                price: 200,
+                baseRent: 25,
+            },
+            {
+                index: 6,
+                tile_id: "oriental-avenue",
+                type: "PROPERTY",
+                name: "Oriental Avenue",
+                price: 100,
+                baseRent: 6,
+            },
+            { index: 7, tile_id: "chance-1", type: "EVENT", name: "Chance" },
+            {
+                index: 8,
+                tile_id: "vermont-avenue",
+                type: "PROPERTY",
+                name: "Vermont Avenue",
+                price: 100,
+                baseRent: 6,
+            },
+            {
+                index: 9,
+                tile_id: "connecticut-avenue",
+                type: "PROPERTY",
+                name: "Connecticut Avenue",
+                price: 120,
+                baseRent: 8,
+            },
+            { index: 10, tile_id: "jail", type: "JAIL", name: "Jail" },
+            {
+                index: 11,
+                tile_id: "st-charles-place",
+                type: "PROPERTY",
+                name: "St. Charles Place",
+                price: 140,
+                baseRent: 10,
+            },
+            {
+                index: 12,
+                tile_id: "electric-company",
+                type: "UTILITY",
+                utilityKind: "ELECTRIC",
+                name: "Electric Company",
+                price: 150,
+            },
+            {
+                index: 13,
+                tile_id: "states-avenue",
+                type: "PROPERTY",
+                name: "States Avenue",
+                price: 140,
+                baseRent: 10,
+            },
+            {
+                index: 14,
+                tile_id: "virginia-avenue",
+                type: "PROPERTY",
+                name: "Virginia Avenue",
+                price: 160,
+                baseRent: 12,
+            },
+            {
+                index: 15,
+                tile_id: "pennsylvania-railroad",
+                type: "RAIL",
+                name: "Pennsylvania Railroad",
+                price: 200,
+                baseRent: 25,
+            },
+            {
+                index: 16,
+                tile_id: "st-james-place",
+                type: "PROPERTY",
+                name: "St. James Place",
+                price: 180,
+                baseRent: 14,
+            },
+            {
+                index: 17,
+                tile_id: "community-chest-2",
+                type: "EVENT",
+                name: "Community Chest",
+            },
+            {
+                index: 18,
+                tile_id: "tennessee-avenue",
+                type: "PROPERTY",
+                name: "Tennessee Avenue",
+                price: 180,
+                baseRent: 14,
+            },
+            {
+                index: 19,
+                tile_id: "new-york-avenue",
+                type: "PROPERTY",
+                name: "New York Avenue",
+                price: 200,
+                baseRent: 16,
+            },
+            {
+                index: 20,
+                tile_id: "free-parking",
+                type: "FREE_PARKING",
+                name: "Free Parking",
+            },
+            {
+                index: 21,
+                tile_id: "kentucky-avenue",
+                type: "PROPERTY",
+                name: "Kentucky Avenue",
+                price: 220,
+                baseRent: 18,
+            },
+            { index: 22, tile_id: "chance-2", type: "EVENT", name: "Chance" },
+            {
+                index: 23,
+                tile_id: "indiana-avenue",
+                type: "PROPERTY",
+                name: "Indiana Avenue",
+                price: 220,
+                baseRent: 18,
+            },
+            {
+                index: 24,
+                tile_id: "illinois-avenue",
+                type: "PROPERTY",
+                name: "Illinois Avenue",
+                price: 240,
+                baseRent: 20,
+            },
+            {
+                index: 25,
+                tile_id: "b-and-o-railroad",
+                type: "RAIL",
+                name: "B. & O. Railroad",
+                price: 200,
+                baseRent: 25,
+            },
+            {
+                index: 26,
+                tile_id: "atlantic-avenue",
+                type: "PROPERTY",
+                name: "Atlantic Avenue",
+                price: 260,
+                baseRent: 22,
+            },
+            {
+                index: 27,
+                tile_id: "ventnor-avenue",
+                type: "PROPERTY",
+                name: "Ventnor Avenue",
+                price: 260,
+                baseRent: 22,
+            },
+            {
+                index: 28,
+                tile_id: "water-works",
+                type: "UTILITY",
+                utilityKind: "WATER",
+                name: "Water Works",
+                price: 150,
+            },
+            {
+                index: 29,
+                tile_id: "marvin-gardens",
+                type: "PROPERTY",
+                name: "Marvin Gardens",
+                price: 280,
+                baseRent: 24,
+            },
+            {
+                index: 30,
+                tile_id: "go-to-jail",
+                type: "GO_TO_JAIL",
+                name: "Go To Jail",
+            },
+            {
+                index: 31,
+                tile_id: "pacific-avenue",
+                type: "PROPERTY",
+                name: "Pacific Avenue",
+                price: 300,
+                baseRent: 26,
+            },
+            {
+                index: 32,
+                tile_id: "north-carolina-avenue",
+                type: "PROPERTY",
+                name: "North Carolina Avenue",
+                price: 300,
+                baseRent: 26,
+            },
+            {
+                index: 33,
+                tile_id: "community-chest-3",
+                type: "EVENT",
+                name: "Community Chest",
+            },
+            {
+                index: 34,
+                tile_id: "pennsylvania-avenue",
+                type: "PROPERTY",
+                name: "Pennsylvania Avenue",
+                price: 320,
+                baseRent: 28,
+            },
+            {
+                index: 35,
+                tile_id: "short-line",
+                type: "RAIL",
+                name: "Short Line",
+                price: 200,
+                baseRent: 25,
+            },
+            { index: 36, tile_id: "chance-3", type: "EVENT", name: "Chance" },
+            {
+                index: 37,
+                tile_id: "park-place",
+                type: "PROPERTY",
+                name: "Park Place",
+                price: 350,
+                baseRent: 35,
+            },
+            {
+                index: 38,
+                tile_id: "luxury-tax",
+                type: "TAX",
+                name: "Luxury Tax",
+                taxAmount: 200,
+            },
+            {
+                index: 39,
+                tile_id: "boardwalk",
+                type: "PROPERTY",
+                name: "Boardwalk",
+                price: 400,
+                baseRent: 50,
+            },
+        ], CLASSIC_US_PROPERTY_GROUPS, CLASSIC_US_ECONOMY),
+    },
+    classic_uk_1.classicUkBoardPack,
+    classic_ph_1.classicPhBoardPack,
+    philippines_hard_1.philippinesHardBoardPack,
+    new_zealand_1.newZealandBoardPack,
+];
+exports.defaultBoardPackId = exports.boardPacks[0]?.id ?? "classic";
+const getBoardPackById = (id) => exports.boardPacks.find((pack) => pack.id === id) ?? exports.boardPacks[0] ?? null;
+exports.getBoardPackById = getBoardPackById;

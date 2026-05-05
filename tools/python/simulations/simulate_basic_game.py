@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run a simple offline-only property game simulation."""
+"""Run a simple offline-only property game simulation (Phase 3 approximations)."""
 
 from __future__ import annotations
 
@@ -21,17 +21,51 @@ DEFAULT_BOARDPACK_PATH = EXPORTS_DIR / "sample_boardpack_basic.json"
 DEFAULT_GAME_COUNT = 250
 DEFAULT_MAX_ROUNDS = 75
 PLAYER_COUNT = 4
-CASH_RESERVE = 100
 DEFAULT_RANDOM_SEED = 20260505
+
+
+@dataclass
+class PurchaseMortgage:
+    tile_index: int
+    financed_amount: int
+    payment_per_turn: int
+    remaining_turns: int
 
 
 @dataclass
 class Player:
     name: str
     cash: int
+    starting_cash: int
     position: int = 0
     bankrupt: bool = False
+    pending_insolvency: bool = False
     owned_tiles: list[int] = field(default_factory=list)
+    collateralized_tiles: set[int] = field(default_factory=set)
+    active_collateral_loans: list[int] = field(default_factory=list)
+    purchase_mortgages: dict[int, PurchaseMortgage] = field(default_factory=dict)
+
+
+@dataclass
+class SimulationConfig:
+    player_policy: str
+    cash_reserve_ratio: float
+    low_cash_threshold_ratio: float
+    healthy_cash_threshold_ratio: float
+    max_collateral_loans_per_player: int
+    collateral_loan_value_ratio: float
+    enable_purchase_mortgage: bool
+    down_payment_ratio: float
+    purchase_mortgage_payment_ratio: float
+    purchase_mortgage_term_turns: int
+    passive_income_per_owned_property: int
+    enable_betting: bool
+    bet_probability: float
+    bet_stake: int
+    bet_win_probability: float
+    bet_payout_multiplier: float
+    enable_auctions: bool
+    auction_bid_ratio: float
 
 
 @dataclass
@@ -42,7 +76,27 @@ class GameResult:
     owned_counter: Counter[int]
     landed_counter: Counter[int]
     rent_earned_by_tile: Counter[int]
+    insolvency_entries: int
+    insolvency_by_reason: Counter[str]
+    recovery_successes: int
+    collateral_loans_taken: int
+    collateral_cash_raised: int
+    collateralized_properties_count: int
+    purchase_mortgages_created: int
+    purchase_mortgage_defaults: int
+    passive_income_total: int
+    passive_income_events: int
+    bets_placed: int
+    betting_staked: int
+    betting_winnings: int
+    auctions_started: int
+    auctions_completed: int
+    auction_cash_drained: int
+    tax_paid: int
+    tax_events: int
 
+
+# helpers omitted comments for brevity
 
 def _read_int(data: dict[str, Any], keys: list[str], fallback: int | None = None) -> int | None:
     for key in keys:
@@ -55,124 +109,196 @@ def _read_int(data: dict[str, Any], keys: list[str], fallback: int | None = None
 def load_boardpack(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as boardpack_file:
         boardpack = json.load(boardpack_file)
-
     tiles = boardpack.get("tiles")
     if not isinstance(tiles, list) or not tiles:
         raise ValueError("boardpack must define a non-empty 'tiles' list")
-
     board_size = _read_int(boardpack, ["board_size", "tile_count"], len(tiles))
     starting_cash = _read_int(boardpack, ["starting_cash", "starting_cash_amount", "starting_balance"])
     go_salary = _read_int(boardpack, ["go_salary", "pass_go_amount"])
-
     if not isinstance(board_size, int) or board_size <= 0:
         raise ValueError("boardpack must define a positive board_size")
     if len(tiles) != board_size:
         raise ValueError("boardpack tile count must match board_size")
-    if starting_cash is None:
-        raise ValueError("boardpack missing required starting cash field")
-    if go_salary is None:
-        raise ValueError("boardpack missing required GO salary field")
-
-    normalized_tiles: list[dict[str, Any]] = []
+    if starting_cash is None or go_salary is None:
+        raise ValueError("boardpack missing required starting cash or GO salary field")
+    normalized_tiles = []
     for index, tile in enumerate(tiles):
         if not isinstance(tile, dict):
             continue
-        tile_index = tile.get("index", index)
-        if tile_index != index:
+        if tile.get("index", index) != index:
             raise ValueError("boardpack tiles must be ordered by contiguous tile index")
         name = tile.get("name")
-        tile_type = str(tile.get("type", "unknown")).lower()
         if not isinstance(name, str):
             raise ValueError(f"tile at index {index} missing name")
-        normalized_tiles.append({**tile, "index": index, "type": tile_type, "name": name})
-
-    return {
-        "name": boardpack.get("name") or boardpack.get("boardpack", {}).get("name") or "Unknown Boardpack",
-        "id": boardpack.get("id") or boardpack.get("boardpack", {}).get("id") or "unknown",
-        "starting_cash": starting_cash,
-        "go_salary": go_salary,
-        "board_size": board_size,
-        "tiles": normalized_tiles,
-    }
+        normalized_tiles.append({**tile, "index": index, "type": str(tile.get("type", "unknown")).lower(), "name": name})
+    return {"name": boardpack.get("name") or "Unknown Boardpack", "id": boardpack.get("id") or "unknown", "starting_cash": starting_cash, "go_salary": go_salary, "board_size": board_size, "tiles": normalized_tiles}
 
 
 def roll_two_dice(rng: random.Random) -> int:
     return rng.randint(1, 6) + rng.randint(1, 6)
 
 
-def move_player(player: Player, roll: int, board_size: int, go_salary: int) -> None:
-    previous_position = player.position
-    player.position = (player.position + roll) % board_size
-    if previous_position + roll >= board_size:
-        player.cash += go_salary
+def _reserve(player: Player, cfg: SimulationConfig) -> int:
+    return int(player.starting_cash * cfg.cash_reserve_ratio)
 
 
-def tile_rent(tile: dict[str, Any], roll: int, owned_tile_count_for_owner: int) -> int:
-    tile_type = tile["type"]
-    if tile_type in {"property", "rail", "railroad", "transport"}:
-        if tile_type in {"rail", "railroad", "transport"} and isinstance(tile.get("rail_rent_by_count"), list):
-            ladder = [value for value in tile["rail_rent_by_count"] if isinstance(value, int)]
-            if ladder:
-                count = min(owned_tile_count_for_owner, len(ladder) - 1)
-                return max(0, ladder[count])
-        return int(tile.get("base_rent") or tile.get("rent") or tile.get("price", 0) * 0.1)
-    if tile_type == "utility":
-        multiplier = tile.get("utility_multiplier")
-        if isinstance(multiplier, int):
-            return roll * multiplier
-        base = tile.get("utility_base_amount")
-        if isinstance(base, int):
-            return base
-        return int(tile.get("base_rent") or 30)
-    return 0
+def _debit(player: Player, amount: int, reason: str, counters: Counter[str]) -> None:
+    player.cash -= max(0, amount)
+    if player.cash < 0 and not player.pending_insolvency:
+        player.pending_insolvency = True
+        counters[reason] += 1
 
 
-def play_game(boardpack: dict[str, Any], rng: random.Random, max_rounds: int) -> GameResult:
-    players = [Player(name=f"Player {i}", cash=boardpack["starting_cash"]) for i in range(1, PLAYER_COUNT + 1)]
+def _price(tile: dict[str, Any]) -> int:
+    return int(tile.get("price") or tile.get("value") or 0)
+
+
+def play_game(boardpack: dict[str, Any], rng: random.Random, max_rounds: int, cfg: SimulationConfig) -> GameResult:
+    players = [Player(name=f"Player {i}", cash=boardpack["starting_cash"], starting_cash=boardpack["starting_cash"]) for i in range(1, PLAYER_COUNT + 1)]
     owners_by_tile: dict[int, Player] = {}
     landed_counter: Counter[int] = Counter()
     rent_earned_by_tile: Counter[int] = Counter()
+    insolvency_by_reason: Counter[str] = Counter()
+    stats = Counter()
     rounds_played = 0
 
     for round_number in range(1, max_rounds + 1):
         rounds_played = round_number
-        active_players = [player for player in players if not player.bankrupt]
+        active_players = [p for p in players if not p.bankrupt]
         if len(active_players) <= 1:
             break
-
         for player in active_players:
+            if player.bankrupt:
+                continue
+
+            # scheduled purchase mortgage payments
+            for tile_idx in list(player.purchase_mortgages.keys()):
+                mtg = player.purchase_mortgages[tile_idx]
+                _debit(player, mtg.payment_per_turn, "PURCHASE_MORTGAGE_PAYMENT", insolvency_by_reason)
+                if player.pending_insolvency:
+                    if tile_idx in player.owned_tiles:
+                        player.owned_tiles.remove(tile_idx)
+                    owners_by_tile.pop(tile_idx, None)
+                    player.purchase_mortgages.pop(tile_idx, None)
+                    stats["purchase_mortgage_defaults"] += 1
+                    break
+                mtg.remaining_turns -= 1
+                if mtg.remaining_turns <= 0:
+                    player.purchase_mortgages.pop(tile_idx, None)
+
+            if player.pending_insolvency:
+                if player.cash >= 0:
+                    player.pending_insolvency = False
+                    stats["recovery_successes"] += 1
+                else:
+                    player.bankrupt = True
+                    continue
+
+            low_threshold = int(player.starting_cash * cfg.low_cash_threshold_ratio)
+            healthy_threshold = int(player.starting_cash * cfg.healthy_cash_threshold_ratio)
+
+            # proactive collateral loan
+            if 0 <= player.cash < low_threshold and len(player.active_collateral_loans) < cfg.max_collateral_loans_per_player:
+                candidates = [idx for idx in player.owned_tiles if idx not in player.collateralized_tiles]
+                if candidates:
+                    tile_idx = max(candidates, key=lambda t: _price(boardpack["tiles"][t]))
+                    loan_cash = int(_price(boardpack["tiles"][tile_idx]) * cfg.collateral_loan_value_ratio)
+                    if loan_cash > 0:
+                        player.cash += loan_cash
+                        player.collateralized_tiles.add(tile_idx)
+                        player.active_collateral_loans.append(tile_idx)
+                        stats["collateral_loans_taken"] += 1
+                        stats["collateral_cash_raised"] += loan_cash
+
+            # optional betting
+            if cfg.enable_betting and player.cash > healthy_threshold and rng.random() < cfg.bet_probability:
+                stats["bets_placed"] += 1
+                stats["betting_staked"] += cfg.bet_stake
+                _debit(player, cfg.bet_stake, "OTHER", insolvency_by_reason)
+                if not player.pending_insolvency and rng.random() < cfg.bet_win_probability:
+                    winnings = int(cfg.bet_stake * cfg.bet_payout_multiplier)
+                    player.cash += winnings
+                    stats["betting_winnings"] += winnings
+
+            if player.pending_insolvency:
+                if player.cash < 0:
+                    player.bankrupt = True
+                    continue
+                player.pending_insolvency = False
+                stats["recovery_successes"] += 1
+
             roll = roll_two_dice(rng)
-            move_player(player, roll, boardpack["board_size"], boardpack["go_salary"])
+            prev = player.position
+            player.position = (player.position + roll) % boardpack["board_size"]
+            if prev + roll >= boardpack["board_size"]:
+                player.cash += boardpack["go_salary"]
             tile = boardpack["tiles"][player.position]
             landed_counter[player.position] += 1
             ttype = tile["type"]
 
             if ttype == "tax":
-                tax = tile.get("tax_amount")
-                if isinstance(tax, int):
-                    player.cash -= tax
-                    if player.cash < 0:
-                        player.bankrupt = True
-                continue
+                tax = int(tile.get("tax_amount") or 0)
+                if tax > 0:
+                    _debit(player, tax, "TAX", insolvency_by_reason)
+                    stats["tax_paid"] += tax
+                    stats["tax_events"] += 1
+            elif ttype in {"property", "rail", "railroad", "transport", "utility"}:
+                owner = owners_by_tile.get(player.position)
+                if owner is None and not player.pending_insolvency:
+                    price = _price(tile)
+                    reserve = _reserve(player, cfg)
+                    if price > 0 and player.cash - price >= reserve:
+                        player.cash -= price
+                        player.owned_tiles.append(player.position)
+                        owners_by_tile[player.position] = player
+                    elif cfg.enable_purchase_mortgage and price > 0:
+                        down = int(price * cfg.down_payment_ratio)
+                        if player.cash - down >= reserve and down > 0:
+                            player.cash -= down
+                            financed = max(0, price - down)
+                            payment = max(1, int(financed * cfg.purchase_mortgage_payment_ratio)) if financed else 0
+                            if payment > 0:
+                                player.purchase_mortgages[player.position] = PurchaseMortgage(player.position, financed, payment, cfg.purchase_mortgage_term_turns)
+                            player.owned_tiles.append(player.position)
+                            owners_by_tile[player.position] = player
+                            stats["purchase_mortgages_created"] += 1
+                        elif cfg.enable_auctions:
+                            stats["auctions_started"] += 1
+                            bid = int(price * cfg.auction_bid_ratio)
+                            bidders = [p for p in players if not p.bankrupt and p is not owner and p.cash - bid >= _reserve(p, cfg)]
+                            if bidders and bid > 0:
+                                winner = max(bidders, key=lambda p: p.cash)
+                                _debit(winner, bid, "AUCTION_PAYMENT", insolvency_by_reason)
+                                if winner.pending_insolvency and winner.cash < 0:
+                                    winner.bankrupt = True
+                                else:
+                                    winner.owned_tiles.append(player.position)
+                                    owners_by_tile[player.position] = winner
+                                    stats["auctions_completed"] += 1
+                                    stats["auction_cash_drained"] += bid
+                elif owner is not player and owner is not None and not owner.bankrupt:
+                    rent = int(tile.get("base_rent") or tile.get("rent") or max(0, _price(tile) * 0.1))
+                    if ttype == "utility":
+                        rent = int(tile.get("utility_base_amount") or rent)
+                    _debit(player, rent, "RENT", insolvency_by_reason)
+                    if not player.bankrupt:
+                        owner.cash += rent
+                        rent_earned_by_tile[player.position] += rent
 
-            if ttype not in {"property", "rail", "railroad", "transport", "utility"}:
-                continue
-
-            owner = owners_by_tile.get(player.position)
-            if owner is None:
-                price = tile.get("price") or tile.get("value")
-                if isinstance(price, int) and price > 0 and player.cash - price >= CASH_RESERVE:
-                    player.cash -= price
-                    player.owned_tiles.append(player.position)
-                    owners_by_tile[player.position] = player
-            elif owner is not player and not owner.bankrupt:
-                rent = tile_rent(tile, roll, len(owner.owned_tiles))
-                if rent > 0:
-                    player.cash -= rent
-                    owner.cash += rent
-                    rent_earned_by_tile[player.position] += rent
+            if player.pending_insolvency:
                 if player.cash < 0:
                     player.bankrupt = True
+                    continue
+                player.pending_insolvency = False
+                stats["recovery_successes"] += 1
+
+            # passive income approximation
+            if not player.bankrupt and cfg.passive_income_per_owned_property > 0:
+                payout = cfg.passive_income_per_owned_property * len(player.owned_tiles)
+                if payout > 0:
+                    player.cash += payout
+                    stats["passive_income_total"] += payout
+                    stats["passive_income_events"] += 1
 
     return GameResult(
         rounds=rounds_played,
@@ -181,89 +307,132 @@ def play_game(boardpack: dict[str, Any], rng: random.Random, max_rounds: int) ->
         owned_counter=Counter([idx for p in players for idx in p.owned_tiles]),
         landed_counter=landed_counter,
         rent_earned_by_tile=rent_earned_by_tile,
+        insolvency_entries=sum(insolvency_by_reason.values()),
+        insolvency_by_reason=insolvency_by_reason,
+        recovery_successes=stats["recovery_successes"],
+        collateral_loans_taken=stats["collateral_loans_taken"],
+        collateral_cash_raised=stats["collateral_cash_raised"],
+        collateralized_properties_count=sum(len(p.collateralized_tiles) for p in players),
+        purchase_mortgages_created=stats["purchase_mortgages_created"],
+        purchase_mortgage_defaults=stats["purchase_mortgage_defaults"],
+        passive_income_total=stats["passive_income_total"],
+        passive_income_events=stats["passive_income_events"],
+        bets_placed=stats["bets_placed"],
+        betting_staked=stats["betting_staked"],
+        betting_winnings=stats["betting_winnings"],
+        auctions_started=stats["auctions_started"],
+        auctions_completed=stats["auctions_completed"],
+        auction_cash_drained=stats["auction_cash_drained"],
+        tax_paid=stats["tax_paid"],
+        tax_events=stats["tax_events"],
     )
 
 
 def top_tiles(counter: Counter[int], boardpack: dict[str, Any], n: int = 5) -> list[dict[str, Any]]:
-    return [
-        {"index": idx, "name": boardpack["tiles"][idx]["name"], "count": count}
-        for idx, count in counter.most_common(n)
-    ]
+    return [{"index": idx, "name": boardpack["tiles"][idx]["name"], "count": count} for idx, count in counter.most_common(n)]
 
 
-def summarize_results(boardpack: dict[str, Any], results: list[GameResult], settings: dict[str, Any]) -> dict[str, Any]:
-    bankruptcy_count = sum(result.bankruptcy_count for result in results)
+def summarize_results(boardpack: dict[str, Any], results: list[GameResult], settings: dict[str, Any], cfg: SimulationConfig) -> dict[str, Any]:
+    agg = Counter()
+    insolvency_by_reason = Counter()
+    owned_totals, landed_totals, rent_totals = Counter(), Counter(), Counter()
+    for r in results:
+        agg.update({
+            "bankruptcies": r.bankruptcy_count, "insolvency_entries": r.insolvency_entries, "recovery_successes": r.recovery_successes,
+            "collateral_loans_taken": r.collateral_loans_taken, "collateral_cash_raised": r.collateral_cash_raised,
+            "collateralized_properties_count": r.collateralized_properties_count, "purchase_mortgages_created": r.purchase_mortgages_created,
+            "purchase_mortgage_defaults": r.purchase_mortgage_defaults, "passive_income_total": r.passive_income_total,
+            "passive_income_events": r.passive_income_events, "bets_placed": r.bets_placed, "betting_staked": r.betting_staked,
+            "betting_winnings": r.betting_winnings, "auctions_started": r.auctions_started, "auctions_completed": r.auctions_completed,
+            "auction_cash_drained": r.auction_cash_drained, "tax_paid": r.tax_paid, "tax_events": r.tax_events,
+        })
+        insolvency_by_reason.update(r.insolvency_by_reason)
+        owned_totals.update(r.owned_counter); landed_totals.update(r.landed_counter); rent_totals.update(r.rent_earned_by_tile)
     total_player_games = len(results) * PLAYER_COUNT
-    all_ending_cash = [cash for result in results for cash in result.ending_cash]
-    owned_totals: Counter[int] = Counter()
-    landed_totals: Counter[int] = Counter()
-    rent_totals: Counter[int] = Counter()
-    for result in results:
-        owned_totals.update(result.owned_counter)
-        landed_totals.update(result.landed_counter)
-        rent_totals.update(result.rent_earned_by_tile)
-
-    return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "source": "offline_python_simulation_lab_phase_2",
-        "boardpack": {"id": boardpack["id"], "name": boardpack["name"]},
-        "settings": settings,
-        "stats": {
-            "games_simulated": len(results),
-            "average_rounds": round(mean(result.rounds for result in results), 2),
-            "bankruptcy_count": bankruptcy_count,
-            "bankruptcy_rate": round(bankruptcy_count / total_player_games, 4),
-            "average_ending_cash": round(mean(all_ending_cash), 2),
-            "most_owned_tiles_top_5": top_tiles(owned_totals, boardpack),
-            "most_landed_on_tiles_top_5": top_tiles(landed_totals, boardpack),
-            "highest_rent_earning_tiles_top_5": top_tiles(rent_totals, boardpack),
-        },
-    }
+    return {"generated_at": datetime.now(timezone.utc).isoformat(), "source": "offline_python_simulation_lab_phase_3", "boardpack": {"id": boardpack["id"], "name": boardpack["name"]}, "settings": settings, "liquidity_settings": cfg.__dict__, "stats": {
+        "games_simulated": len(results), "player_policy": cfg.player_policy, "average_rounds": round(mean(r.rounds for r in results), 2),
+        "bankruptcy_count": agg["bankruptcies"], "bankruptcy_rate": round(agg["bankruptcies"] / total_player_games, 4),
+        "insolvency_entries": agg["insolvency_entries"], "insolvency_by_reason": dict(insolvency_by_reason), "recovery_successes": agg["recovery_successes"],
+        "collateral_loans_taken": agg["collateral_loans_taken"], "collateral_cash_raised": agg["collateral_cash_raised"], "collateralized_properties_count": agg["collateralized_properties_count"],
+        "purchase_mortgages_created": agg["purchase_mortgages_created"], "purchase_mortgage_defaults": agg["purchase_mortgage_defaults"],
+        "passive_income_total": agg["passive_income_total"], "passive_income_events": agg["passive_income_events"],
+        "betting": {"enabled": cfg.enable_betting, "bets_placed": agg["bets_placed"], "betting_staked": agg["betting_staked"], "betting_winnings": agg["betting_winnings"], "betting_net": agg["betting_winnings"] - agg["betting_staked"]},
+        "auctions": {"enabled": cfg.enable_auctions, "auctions_started": agg["auctions_started"], "auctions_completed": agg["auctions_completed"], "auction_cash_drained": agg["auction_cash_drained"]},
+        "tax_paid": agg["tax_paid"], "tax_events": agg["tax_events"],
+        "most_owned_tiles_top_5": top_tiles(owned_totals, boardpack), "most_landed_on_tiles_top_5": top_tiles(landed_totals, boardpack), "highest_rent_earning_tiles_top_5": top_tiles(rent_totals, boardpack),
+    }}
 
 
 def write_summary(summary: dict[str, Any]) -> Path:
     EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    path = EXPORTS_DIR / f"simulation_summary_{timestamp}.json"
-    with path.open("w", encoding="utf-8") as f:
-        json.dump(summary, f, indent=2)
-        f.write("\n")
+    path = EXPORTS_DIR / f"simulation_summary_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json"
+    path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     return path
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Offline-only Python simulation lab")
-    parser.add_argument("--fixture", type=Path, default=DEFAULT_BOARDPACK_PATH)
-    parser.add_argument("--games", type=int, default=DEFAULT_GAME_COUNT)
-    parser.add_argument("--seed", type=int, default=DEFAULT_RANDOM_SEED)
-    parser.add_argument("--max-rounds", type=int, default=DEFAULT_MAX_ROUNDS)
-    return parser.parse_args()
+    p = argparse.ArgumentParser(description="Offline-only Python simulation lab")
+    p.add_argument("--fixture", type=Path, default=DEFAULT_BOARDPACK_PATH)
+    p.add_argument("--games", type=int, default=DEFAULT_GAME_COUNT)
+    p.add_argument("--seed", type=int, default=DEFAULT_RANDOM_SEED)
+    p.add_argument("--max-rounds", type=int, default=DEFAULT_MAX_ROUNDS)
+    p.add_argument("--player-policy", default="balanced", choices=["balanced"])
+    p.add_argument("--cash-reserve-ratio", type=float, default=0.25)
+    p.add_argument("--low-cash-threshold-ratio", type=float, default=0.35)
+    p.add_argument("--healthy-cash-threshold-ratio", type=float, default=0.60)
+    p.add_argument("--max-collateral-loans-per-player", type=int, default=2)
+    p.add_argument("--collateral-loan-value-ratio", type=float, default=0.50)
+    p.add_argument("--enable-purchase-mortgage", action="store_true", default=True)
+    p.add_argument("--disable-purchase-mortgage", action="store_true")
+    p.add_argument("--down-payment-ratio", type=float, default=0.30)
+    p.add_argument("--purchase-mortgage-payment-ratio", type=float, default=0.05)
+    p.add_argument("--purchase-mortgage-term-turns", type=int, default=20)
+    p.add_argument("--passive-income-per-owned-property", type=int, default=0)
+    p.add_argument("--enable-betting", action="store_true")
+    p.add_argument("--bet-probability", type=float, default=0.2)
+    p.add_argument("--bet-stake", type=int, default=100)
+    p.add_argument("--bet-win-probability", type=float, default=0.45)
+    p.add_argument("--bet-payout-multiplier", type=float, default=2.0)
+    p.add_argument("--enable-auctions", action="store_true")
+    p.add_argument("--auction-bid-ratio", type=float, default=0.70)
+    return p.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    cfg = SimulationConfig(
+        player_policy=args.player_policy, cash_reserve_ratio=args.cash_reserve_ratio, low_cash_threshold_ratio=args.low_cash_threshold_ratio,
+        healthy_cash_threshold_ratio=args.healthy_cash_threshold_ratio, max_collateral_loans_per_player=args.max_collateral_loans_per_player,
+        collateral_loan_value_ratio=args.collateral_loan_value_ratio, enable_purchase_mortgage=args.enable_purchase_mortgage and not args.disable_purchase_mortgage,
+        down_payment_ratio=args.down_payment_ratio, purchase_mortgage_payment_ratio=args.purchase_mortgage_payment_ratio,
+        purchase_mortgage_term_turns=args.purchase_mortgage_term_turns, passive_income_per_owned_property=args.passive_income_per_owned_property,
+        enable_betting=args.enable_betting, bet_probability=args.bet_probability, bet_stake=args.bet_stake, bet_win_probability=args.bet_win_probability,
+        bet_payout_multiplier=args.bet_payout_multiplier, enable_auctions=args.enable_auctions, auction_bid_ratio=args.auction_bid_ratio,
+    )
     boardpack = load_boardpack(args.fixture)
     rng = random.Random(args.seed)
-    results = [play_game(boardpack, rng, args.max_rounds) for _ in range(args.games)]
-    summary = summarize_results(boardpack, results, {
-        "games": args.games,
-        "max_rounds": args.max_rounds,
-        "players": PLAYER_COUNT,
-        "cash_reserve": CASH_RESERVE,
-        "random_seed": args.seed,
-        "fixture": str(args.fixture),
-    })
+    results = [play_game(boardpack, rng, args.max_rounds, cfg) for _ in range(args.games)]
+    settings = {"games": args.games, "max_rounds": args.max_rounds, "players": PLAYER_COUNT, "random_seed": args.seed, "fixture": str(args.fixture)}
+    summary = summarize_results(boardpack, results, settings, cfg)
     path = write_summary(summary)
-    stats = summary["stats"]
-    print("Python Simulation Lab - Phase 2 (offline only)")
-    print(f"Games simulated: {stats['games_simulated']}")
+    s = summary["stats"]
+    print("Python Simulation Lab - Phase 3 (offline only, non-authoritative approximations)")
+    print(f"Games simulated: {s['games_simulated']}")
     print(f"Boardpack: {boardpack['name']} ({boardpack['id']})")
-    print(f"Average rounds: {stats['average_rounds']}")
-    print(f"Bankruptcy count/rate: {stats['bankruptcy_count']} ({stats['bankruptcy_rate']:.2%})")
-    print(f"Average ending cash: {stats['average_ending_cash']}")
-    print(f"Most-owned tiles (top 5): {stats['most_owned_tiles_top_5']}")
-    print(f"Most-landed-on tiles (top 5): {stats['most_landed_on_tiles_top_5']}")
-    print(f"Highest rent-earning tiles (top 5): {stats['highest_rent_earning_tiles_top_5']}")
+    print(f"Player policy: {s['player_policy']}")
+    print(f"Average rounds: {s['average_rounds']}")
+    print(f"Bankruptcy count/rate: {s['bankruptcy_count']} ({s['bankruptcy_rate']:.2%})")
+    print(f"Insolvency entries/by reason: {s['insolvency_entries']} {s['insolvency_by_reason']}")
+    print(f"Collateral loans/cash raised: {s['collateral_loans_taken']} / {s['collateral_cash_raised']}")
+    print(f"Purchase mortgages created/defaults: {s['purchase_mortgages_created']} / {s['purchase_mortgage_defaults']}")
+    print(f"Passive income total/events: {s['passive_income_total']} / {s['passive_income_events']}")
+    print(f"Betting stats: {s['betting']}")
+    print(f"Auction stats: {s['auctions']}")
+    print(f"Tax paid/events: {s['tax_paid']} / {s['tax_events']}")
+    print(f"Most-owned tiles (top 5): {s['most_owned_tiles_top_5']}")
+    print(f"Most-landed-on tiles (top 5): {s['most_landed_on_tiles_top_5']}")
+    print(f"Highest rent-earning tiles (top 5): {s['highest_rent_earning_tiles_top_5']}")
+    print(f"Liquidity settings used: {summary['liquidity_settings']}")
     print(f"Summary JSON: {path}")
 
 
