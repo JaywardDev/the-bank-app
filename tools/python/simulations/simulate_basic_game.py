@@ -13,6 +13,8 @@ from pathlib import Path
 from statistics import mean
 from typing import Any
 
+InlandResourceMap = dict[str, dict[str, Any]]
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PYTHON_TOOLS_ROOT = REPO_ROOT / "tools" / "python"
 EXPORTS_DIR = PYTHON_TOOLS_ROOT / "exports"
@@ -46,6 +48,14 @@ class Player:
     active_collateral_loans: list[int] = field(default_factory=list)
     purchase_mortgages: dict[int, PurchaseMortgage] = field(default_factory=dict)
     income_tax_baseline_cash: int = 0
+    inland_explores_done: int = 0
+    developed_inland_sites: list[dict[str, Any]] = field(default_factory=list)
+    deferred_inland_resources: list[str] = field(default_factory=list)
+    inland_cash_spent: int = 0
+    inland_cash_earned: int = 0
+    inland_passive_earned: int = 0
+    free_build_tokens: int = 0
+    free_upgrade_tokens: int = 0
 
 
 @dataclass
@@ -74,6 +84,10 @@ class SimulationConfig:
     collateral_ltv_rules_field_exported: float | None
     collateral_rate_per_turn: float
     collateral_term_turns: int
+    inland_mode: str
+    inland_explore_probability: float
+    max_inland_explores_per_player: int
+    inland_develop_cash_buffer_ratio: float
 
 
 @dataclass
@@ -108,6 +122,20 @@ class GameResult:
     super_tax_events: int
     fixed_tax_paid: int
     fixed_tax_events: int
+    inland_explores: int
+    inland_developments: int
+    inland_deferred_resources: int
+    inland_deferred_developed: int
+    inland_sell_income: int
+    inland_bonus_resources: int
+    inland_empty_results: int
+    inland_cash_spent: int
+    inland_cash_earned: int
+    inland_passive_income_total: int
+    inland_passive_income_events: int
+    developed_inland_sites_count: int
+    inland_resources_found_by_type: Counter[str]
+    developed_inland_sites_by_resource: Counter[str]
 
 
 # helpers omitted comments for brevity
@@ -154,6 +182,7 @@ def load_boardpack(path: Path) -> dict[str, Any]:
         "tiles": normalized_tiles,
         "loan_rules": boardpack.get("loan_rules"),
         "tax_rules": boardpack.get("tax_rules"),
+        "inland_rules": boardpack.get("inland_rules"),
     }
 
 
@@ -220,6 +249,124 @@ def _amortized_payment(principal: int, rate_per_turn: float, term_turns: int) ->
     return max(1, round(payment))
 
 
+
+
+def _resolve_inland_mode(args: argparse.Namespace) -> str:
+    if args.inland_mode:
+        return args.inland_mode
+    if args.passive_income_per_owned_property > 0:
+        return "legacy"
+    return "off"
+
+
+def _inland_resources(boardpack: dict[str, Any]) -> InlandResourceMap:
+    inland_rules = boardpack.get("inland_rules") if isinstance(boardpack.get("inland_rules"), dict) else {}
+    resources = inland_rules.get("resources") if isinstance(inland_rules.get("resources"), dict) else {}
+    return {k: v for k, v in resources.items() if isinstance(v, dict)}
+
+
+def _choose_inland_resource(resources: InlandResourceMap, rng: random.Random) -> str | None:
+    weighted = []
+    for key, rule in resources.items():
+        weight = float(rule.get("weight", 0) or 0)
+        if weight > 0:
+            weighted.append((key, weight))
+    if not weighted:
+        return None
+    total = sum(w for _, w in weighted)
+    pick = rng.random() * total
+    upto = 0.0
+    for key, weight in weighted:
+        upto += weight
+        if pick <= upto:
+            return key
+    return weighted[-1][0]
+
+
+def _inland_resource_amount(go_salary: int, multiplier: float | None) -> int:
+    if multiplier is None:
+        return 0
+    return max(0, round(go_salary * float(multiplier)))
+
+
+def _try_develop_inland_resource(player: Player, resource_key: str, boardpack: dict[str, Any], cfg: SimulationConfig, stats: Counter[str]) -> bool:
+    resources = _inland_resources(boardpack)
+    rule = resources.get(resource_key)
+    if not rule:
+        return False
+    cost = _inland_resource_amount(boardpack["go_salary"], rule.get("development_cost_multiplier"))
+    passive = _inland_resource_amount(boardpack["go_salary"], rule.get("passive_income_per_turn_multiplier"))
+    reserve = _reserve(player, cfg) + int(player.starting_cash * cfg.inland_develop_cash_buffer_ratio)
+    if cost <= 0 or player.cash - cost < reserve:
+        return False
+    _debit(player, cost, "INLAND_DEVELOP", Counter())
+    if player.pending_insolvency:
+        player.pending_insolvency = False
+        return False
+    player.inland_cash_spent += cost
+    player.developed_inland_sites.append({"resource": resource_key, "passive_per_turn": passive})
+    stats["inland_developments"] += 1
+    stats["developed_inland_sites_count"] += 1
+    stats[f"developed_inland_sites_by_resource::{resource_key}"] += 1
+    stats["inland_cash_spent"] += cost
+    return True
+
+
+def _try_explore_inland(player: Player, boardpack: dict[str, Any], rng: random.Random, cfg: SimulationConfig, stats: Counter[str], insolvency_by_reason: Counter[str]) -> None:
+    if player.bankrupt or player.pending_insolvency or player.inland_explores_done >= cfg.max_inland_explores_per_player:
+        return
+    if rng.random() >= cfg.inland_explore_probability:
+        return
+    inland_rules = boardpack.get("inland_rules") if isinstance(boardpack.get("inland_rules"), dict) else {}
+    explore_multiplier = float(inland_rules.get("exploration_cost_multiplier", 0.8))
+    cost = max(0, round(boardpack["go_salary"] * explore_multiplier))
+    if player.cash - cost < _reserve(player, cfg):
+        return
+    _debit(player, cost, "INLAND_EXPLORE", insolvency_by_reason)
+    player.inland_explores_done += 1
+    player.inland_cash_spent += cost
+    stats["inland_explores"] += 1
+    stats["inland_cash_spent"] += cost
+
+    resource_key = _choose_inland_resource(_inland_resources(boardpack), rng)
+    if not resource_key:
+        return
+    stats[f"inland_resources_found::{resource_key}"] += 1
+    rule = _inland_resources(boardpack).get(resource_key, {})
+    category = str(rule.get("category") or "NONE")
+
+    if category == "SELL":
+        gain = _inland_resource_amount(boardpack["go_salary"], rule.get("sell_multiplier"))
+        if gain > 0:
+            player.cash += gain
+            player.inland_cash_earned += gain
+            stats["inland_sell_income"] += gain
+            stats["inland_cash_earned"] += gain
+    elif category == "DEVELOP":
+        if not _try_develop_inland_resource(player, resource_key, boardpack, cfg, stats):
+            player.deferred_inland_resources.append(resource_key)
+            stats["inland_deferred_resources"] += 1
+    elif category == "BONUS":
+        stats["inland_bonus_resources"] += 1
+        if resource_key == "TIMBER":
+            player.free_build_tokens += 1
+        elif resource_key == "RARE_EARTH":
+            player.free_upgrade_tokens += 1
+    else:
+        stats["inland_empty_results"] += 1
+
+
+def _credit_inland_passive(player: Player, stats: Counter[str]) -> None:
+    payout = sum(int(site.get("passive_per_turn", 0)) for site in player.developed_inland_sites)
+    if payout <= 0:
+        return
+    player.cash += payout
+    player.inland_cash_earned += payout
+    player.inland_passive_earned += payout
+    stats["inland_cash_earned"] += payout
+    stats["inland_passive_income_total"] += payout
+    stats["inland_passive_income_events"] += 1
+
 def play_game(boardpack: dict[str, Any], rng: random.Random, max_rounds: int, cfg: SimulationConfig, income_tax_rate: float, super_tax_rate: float) -> GameResult:
     players = [Player(name=f"Player {i}", cash=boardpack["starting_cash"], starting_cash=boardpack["starting_cash"], income_tax_baseline_cash=boardpack["starting_cash"]) for i in range(1, PLAYER_COUNT + 1)]
     owners_by_tile: dict[int, Player] = {}
@@ -237,6 +384,9 @@ def play_game(boardpack: dict[str, Any], rng: random.Random, max_rounds: int, cf
         for player in active_players:
             if player.bankrupt:
                 continue
+
+            if cfg.inland_mode == "canonical-lite":
+                _credit_inland_passive(player, stats)
 
             # scheduled purchase mortgage payments
             for tile_idx in list(player.purchase_mortgages.keys()):
@@ -293,6 +443,14 @@ def play_game(boardpack: dict[str, Any], rng: random.Random, max_rounds: int, cf
                     continue
                 player.pending_insolvency = False
                 stats["recovery_successes"] += 1
+
+            if cfg.inland_mode == "canonical-lite":
+                if player.deferred_inland_resources:
+                    deferred = player.deferred_inland_resources[0]
+                    if _try_develop_inland_resource(player, deferred, boardpack, cfg, stats):
+                        player.deferred_inland_resources.pop(0)
+                        stats["inland_deferred_developed"] += 1
+                _try_explore_inland(player, boardpack, rng, cfg, stats, insolvency_by_reason)
 
             roll = roll_two_dice(rng)
             prev = player.position
@@ -379,7 +537,7 @@ def play_game(boardpack: dict[str, Any], rng: random.Random, max_rounds: int, cf
                 stats["recovery_successes"] += 1
 
             # passive income approximation
-            if not player.bankrupt and cfg.passive_income_per_owned_property > 0:
+            if cfg.inland_mode == "legacy" and not player.bankrupt and cfg.passive_income_per_owned_property > 0:
                 payout = cfg.passive_income_per_owned_property * len(player.owned_tiles)
                 if payout > 0:
                     player.cash += payout
@@ -417,6 +575,20 @@ def play_game(boardpack: dict[str, Any], rng: random.Random, max_rounds: int, cf
         super_tax_events=stats["super_tax_events"],
         fixed_tax_paid=stats["fixed_tax_paid"],
         fixed_tax_events=stats["fixed_tax_events"],
+        inland_explores=stats["inland_explores"],
+        inland_developments=stats["inland_developments"],
+        inland_deferred_resources=stats["inland_deferred_resources"],
+        inland_deferred_developed=stats["inland_deferred_developed"],
+        inland_sell_income=stats["inland_sell_income"],
+        inland_bonus_resources=stats["inland_bonus_resources"],
+        inland_empty_results=stats["inland_empty_results"],
+        inland_cash_spent=stats["inland_cash_spent"],
+        inland_cash_earned=stats["inland_cash_earned"],
+        inland_passive_income_total=stats["inland_passive_income_total"],
+        inland_passive_income_events=stats["inland_passive_income_events"],
+        developed_inland_sites_count=stats["developed_inland_sites_count"],
+        inland_resources_found_by_type=Counter({k.split("::", 1)[1]: v for k, v in stats.items() if k.startswith("inland_resources_found::")}),
+        developed_inland_sites_by_resource=Counter({k.split("::", 1)[1]: v for k, v in stats.items() if k.startswith("developed_inland_sites_by_resource::")}),
     )
 
 
@@ -440,12 +612,23 @@ def summarize_results(boardpack: dict[str, Any], results: list[GameResult], sett
             "income_tax_paid": r.income_tax_paid, "income_tax_events": r.income_tax_events,
             "super_tax_paid": r.super_tax_paid, "super_tax_events": r.super_tax_events,
             "fixed_tax_paid": r.fixed_tax_paid, "fixed_tax_events": r.fixed_tax_events,
+            "inland_explores": r.inland_explores, "inland_developments": r.inland_developments,
+            "inland_deferred_resources": r.inland_deferred_resources, "inland_deferred_developed": r.inland_deferred_developed,
+            "inland_sell_income": r.inland_sell_income, "inland_bonus_resources": r.inland_bonus_resources,
+            "inland_empty_results": r.inland_empty_results, "inland_cash_spent": r.inland_cash_spent,
+            "inland_cash_earned": r.inland_cash_earned, "inland_passive_income_total": r.inland_passive_income_total,
+            "inland_passive_income_events": r.inland_passive_income_events, "developed_inland_sites_count": r.developed_inland_sites_count,
         })
         insolvency_by_reason.update(r.insolvency_by_reason)
+        agg.update({f"inland_resources_found::{k}": v for k, v in r.inland_resources_found_by_type.items()})
+        agg.update({f"developed_inland_sites_by_resource::{k}": v for k, v in r.developed_inland_sites_by_resource.items()})
         owned_totals.update(r.owned_counter); landed_totals.update(r.landed_counter); rent_totals.update(r.rent_earned_by_tile)
     total_player_games = len(results) * PLAYER_COUNT
     total_tax_paid = agg["income_tax_paid"] + agg["super_tax_paid"] + agg["fixed_tax_paid"]
     total_tax_events = agg["income_tax_events"] + agg["super_tax_events"] + agg["fixed_tax_events"]
+    inland_resources_found = {k.split("::", 1)[1]: v for k, v in agg.items() if k.startswith("inland_resources_found::")}
+    inland_developed_by_resource = {k.split("::", 1)[1]: v for k, v in agg.items() if k.startswith("developed_inland_sites_by_resource::")}
+    estimated_payback = round(agg["inland_cash_spent"] / agg["inland_passive_income_total"], 2) if agg["inland_passive_income_total"] > 0 else None
     return {"generated_at": datetime.now(timezone.utc).isoformat(), "source": "offline_python_simulation_lab_phase_5", "boardpack": {"id": boardpack["id"], "name": boardpack["name"]}, "settings": settings, "liquidity_settings": cfg.__dict__, "stats": {
         "games_simulated": len(results), "player_policy": cfg.player_policy, "average_rounds": round(mean(r.rounds for r in results), 2),
         "bankruptcy_count": agg["bankruptcies"], "bankruptcy_rate": round(agg["bankruptcies"] / total_player_games, 4),
@@ -463,6 +646,16 @@ def summarize_results(boardpack: dict[str, Any], results: list[GameResult], sett
             "income_tax_rate_used": settings["income_tax_rate_used"], "super_tax_rate_used": settings["super_tax_rate_used"],
         },
         "most_owned_tiles_top_5": top_tiles(owned_totals, boardpack), "most_landed_on_tiles_top_5": top_tiles(landed_totals, boardpack), "highest_rent_earning_tiles_top_5": top_tiles(rent_totals, boardpack),
+        "inland": {
+            "inland_explores": agg["inland_explores"], "inland_developments": agg["inland_developments"],
+            "inland_deferred_resources": agg["inland_deferred_resources"], "inland_deferred_developed": agg["inland_deferred_developed"],
+            "inland_sell_income": agg["inland_sell_income"], "inland_bonus_resources": agg["inland_bonus_resources"],
+            "inland_empty_results": agg["inland_empty_results"], "inland_cash_spent": agg["inland_cash_spent"],
+            "inland_cash_earned": agg["inland_cash_earned"], "inland_passive_income_total": agg["inland_passive_income_total"],
+            "inland_passive_income_events": agg["inland_passive_income_events"], "developed_inland_sites_count": agg["developed_inland_sites_count"],
+            "inland_resources_found_by_type": inland_resources_found, "developed_inland_sites_by_resource": inland_developed_by_resource,
+            "estimated_avg_inland_payback_turns": estimated_payback, "inland_net_cash": agg["inland_cash_earned"] - agg["inland_cash_spent"],
+        },
     }}
 
 
@@ -491,6 +684,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--purchase-mortgage-payment-ratio", type=float, default=None)
     p.add_argument("--purchase-mortgage-term-turns", type=int, default=None)
     p.add_argument("--passive-income-per-owned-property", type=int, default=0)
+    p.add_argument("--inland-mode", choices=["off", "legacy", "canonical-lite"], default=None)
+    p.add_argument("--inland-explore-probability", type=float, default=0.35)
+    p.add_argument("--max-inland-explores-per-player", type=int, default=8)
+    p.add_argument("--inland-develop-cash-buffer-ratio", type=float, default=0.25)
     p.add_argument("--enable-betting", action="store_true")
     p.add_argument("--bet-probability", type=float, default=0.2)
     p.add_argument("--bet-stake", type=int, default=100)
@@ -569,6 +766,8 @@ def main() -> None:
         tax_sources.add("fixture")
     tax_rules_source = "mixed" if len(tax_sources) > 1 else (next(iter(tax_sources)) if tax_sources else "fallback")
 
+    inland_mode = _resolve_inland_mode(args)
+
     cfg = SimulationConfig(
         player_policy=args.player_policy, cash_reserve_ratio=args.cash_reserve_ratio, low_cash_threshold_ratio=args.low_cash_threshold_ratio,
         healthy_cash_threshold_ratio=args.healthy_cash_threshold_ratio, max_collateral_loans_per_player=args.max_collateral_loans_per_player,
@@ -580,6 +779,8 @@ def main() -> None:
         mortgage_rate_per_turn=mortgage_rate, mortgage_ltv=mortgage_ltv, purchase_mortgage_payment_model="amortized_fixed_payment",
         collateral_ltv_rules_field_exported=float(collateral_ltv_rules_field) if isinstance(collateral_ltv_rules_field, (int, float)) else None,
         collateral_rate_per_turn=collateral_rate, collateral_term_turns=collateral_term,
+        inland_mode=inland_mode, inland_explore_probability=args.inland_explore_probability,
+        max_inland_explores_per_player=args.max_inland_explores_per_player, inland_develop_cash_buffer_ratio=args.inland_develop_cash_buffer_ratio,
     )
     rng = random.Random(args.seed)
     results = [play_game(boardpack, rng, args.max_rounds, cfg, income_tax_rate, super_tax_rate) for _ in range(args.games)]
@@ -615,6 +816,7 @@ def main() -> None:
     print(f"Most-owned tiles (top 5): {s['most_owned_tiles_top_5']}")
     print(f"Most-landed-on tiles (top 5): {s['most_landed_on_tiles_top_5']}")
     print(f"Highest rent-earning tiles (top 5): {s['highest_rent_earning_tiles_top_5']}")
+    print(f"Inland stats: {s['inland']}")
     print(f"Liquidity settings used: {summary['liquidity_settings']}")
     if loan_warning:
         print(f"Loan config warning: {loan_warning}")

@@ -95,3 +95,21 @@ python tools/python/simulations/simulate_basic_game.py
 - Missing required fixture fields return clear validation errors.
 - Property rent ladders are partially approximated.
 - Collateralized properties remain rent-earning in Phase 3 approximation until deeper gameplay audit confirms otherwise.
+
+## Phase 6 inland simulation modes (opt-in)
+
+Legacy passive approximation (existing Phase 5-style flat passive income):
+
+```bash
+python tools/python/simulations/simulate_basic_game.py --fixture tools/python/exports/generated_boardpack_fixture.json --games 500 --seed 42 --max-rounds 150 --player-policy balanced --passive-income-per-owned-property 50
+```
+
+Canonical-lite inland exploration/development (opt-in):
+
+```bash
+python tools/python/simulations/simulate_basic_game.py --fixture tools/python/exports/generated_boardpack_fixture.json --games 500 --seed 42 --max-rounds 150 --player-policy balanced --inland-mode canonical-lite
+```
+
+Notes:
+- Canonical-lite inland is opt-in only and does not change default simulator behavior.
+- Canonical-lite inland does not model adjacency, bank resale, full pending UI, or rail/utility synergies.

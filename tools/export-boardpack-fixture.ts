@@ -75,6 +75,25 @@ const tiles: ExportTile[] = boardPack.tiles.map((tile) => {
 
 const rules = getRules(boardPack.rules);
 
+// Phase 6 simulation metadata mirror of canonical inland exploration config.
+// Keep this in sync with src/lib/inlandExploration.ts values.
+const inlandRules = {
+  enabled: true,
+  go_salary_anchor: "boardpack.go_salary",
+  exploration_cost_multiplier: 0.8,
+  passive_income_timing: "start_of_player_turn_approximation",
+  resources: {
+    OIL: { weight: 7.5, category: "DEVELOP", development_cost_multiplier: 2.0, passive_income_per_turn_multiplier: 0.28, sell_multiplier: null, bonus: null },
+    DEEP_WELL: { weight: 2.0, category: "DEVELOP", development_cost_multiplier: 2.75, passive_income_per_turn_multiplier: 0.40, sell_multiplier: null, bonus: null },
+    COAL: { weight: 8.5, category: "SELL", development_cost_multiplier: null, passive_income_per_turn_multiplier: null, sell_multiplier: 0.65, bonus: null },
+    TIMBER: { weight: 8.0, category: "BONUS", development_cost_multiplier: null, passive_income_per_turn_multiplier: null, sell_multiplier: null, bonus: "FREE_BUILD" },
+    RARE_EARTH: { weight: 3.0, category: "BONUS", development_cost_multiplier: null, passive_income_per_turn_multiplier: null, sell_multiplier: null, bonus: "FREE_UPGRADE" },
+    BRONZE: { weight: 8.0, category: "SELL", development_cost_multiplier: null, passive_income_per_turn_multiplier: null, sell_multiplier: 1.2, bonus: null },
+    GOLD: { weight: 3.0, category: "SELL", development_cost_multiplier: null, passive_income_per_turn_multiplier: null, sell_multiplier: 1.8, bonus: null },
+    EMPTY: { weight: 60.0, category: "NONE", development_cost_multiplier: null, passive_income_per_turn_multiplier: null, sell_multiplier: null, bonus: null },
+  },
+} as const;
+
 const fixture = {
   source: "offline_python_simulation_lab_phase_4",
   generated_at: new Date().toISOString(),
@@ -112,6 +131,7 @@ const fixture = {
     income_tax_rate: rules.incomeTaxRate,
     super_tax_rate: rules.superTaxRate,
   },
+  inland_rules: inlandRules,
   tiles,
 } satisfies Record<string, JsonValue>;
 
