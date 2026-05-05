@@ -2,6 +2,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getRules = exports.DEFAULT_RULES = void 0;
 exports.DEFAULT_RULES = {
+    incomeTaxRate: 0.2,
+    superTaxRate: 0.1,
     freeParkingJackpotEnabled: false,
     loanCollateralEnabled: true,
     mortgageRatePerTurn: 0.015,

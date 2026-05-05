@@ -81,6 +81,10 @@ const fixture = {
             payment_model: "fixed_payment_from_backend_schedule",
         },
     },
+    tax_rules: {
+        income_tax_rate: rules.incomeTaxRate,
+        super_tax_rate: rules.superTaxRate,
+    },
     tiles,
 };
 const outputPath = (0, node_path_1.resolve)("tools/python/exports/generated_boardpack_fixture.json");
