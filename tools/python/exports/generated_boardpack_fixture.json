@@ -1,0 +1,555 @@
+{
+  "source": "offline_python_simulation_lab_phase_2",
+  "generated_at": "2026-05-05T02:18:49.942Z",
+  "boardpack": {
+    "id": "philippines-hard",
+    "name": "Philippines (Hard Mode)"
+  },
+  "currency": {
+    "code": "PHP",
+    "symbol": "₱"
+  },
+  "starting_cash": 5000000,
+  "go_salary": 600000,
+  "board_size": 40,
+  "tiles": [
+    {
+      "index": 0,
+      "name": "Go",
+      "type": "start"
+    },
+    {
+      "index": 1,
+      "name": "Cavite",
+      "type": "property",
+      "price": 480000,
+      "value": 480000,
+      "base_rent": 16000,
+      "rent_ladder": [
+        16000,
+        80000,
+        240000,
+        720000,
+        928000,
+        1280000
+      ],
+      "color_group": "brown",
+      "building_cost": 400000
+    },
+    {
+      "index": 2,
+      "name": "Community Chest",
+      "type": "event"
+    },
+    {
+      "index": 3,
+      "name": "Bulacan",
+      "type": "property",
+      "price": 480000,
+      "value": 480000,
+      "base_rent": 32000,
+      "rent_ladder": [
+        32000,
+        160000,
+        480000,
+        1440000,
+        1856000,
+        2560000
+      ],
+      "color_group": "brown",
+      "building_cost": 400000
+    },
+    {
+      "index": 4,
+      "name": "Income Tax",
+      "type": "tax",
+      "tax_amount": 3200000,
+      "tax_type": "fixed"
+    },
+    {
+      "index": 5,
+      "name": "SLEX",
+      "type": "rail",
+      "price": 1600000,
+      "value": 1600000,
+      "base_rent": 200000,
+      "rail_rent_by_count": [
+        0,
+        200000,
+        400000,
+        800000,
+        1600000
+      ]
+    },
+    {
+      "index": 6,
+      "name": "Parañaque",
+      "type": "property",
+      "price": 800000,
+      "value": 800000,
+      "base_rent": 48000,
+      "rent_ladder": [
+        48000,
+        240000,
+        672000,
+        1920000,
+        2496000,
+        3360000
+      ],
+      "color_group": "light-blue",
+      "building_cost": 400000
+    },
+    {
+      "index": 7,
+      "name": "Chance",
+      "type": "event"
+    },
+    {
+      "index": 8,
+      "name": "Las Piñas",
+      "type": "property",
+      "price": 800000,
+      "value": 800000,
+      "base_rent": 48000,
+      "rent_ladder": [
+        48000,
+        240000,
+        672000,
+        1920000,
+        2496000,
+        3360000
+      ],
+      "color_group": "light-blue",
+      "building_cost": 400000
+    },
+    {
+      "index": 9,
+      "name": "Muntinlupa",
+      "type": "property",
+      "price": 960000,
+      "value": 960000,
+      "base_rent": 64000,
+      "rent_ladder": [
+        64000,
+        320000,
+        896000,
+        2560000,
+        3328000,
+        4480000
+      ],
+      "color_group": "light-blue",
+      "building_cost": 400000
+    },
+    {
+      "index": 10,
+      "name": "Jail",
+      "type": "jail"
+    },
+    {
+      "index": 11,
+      "name": "Intramuros",
+      "type": "property",
+      "price": 1120000,
+      "value": 1120000,
+      "base_rent": 80000,
+      "rent_ladder": [
+        80000,
+        400000,
+        1040000,
+        2880000,
+        3680000,
+        4960000
+      ],
+      "color_group": "pink",
+      "building_cost": 800000
+    },
+    {
+      "index": 12,
+      "name": "MERALCO",
+      "type": "utility",
+      "price": 1200000,
+      "value": 1200000,
+      "utility_multiplier": 4,
+      "utility_base_amount": 8000
+    },
+    {
+      "index": 13,
+      "name": "Ermita",
+      "type": "property",
+      "price": 1120000,
+      "value": 1120000,
+      "base_rent": 80000,
+      "rent_ladder": [
+        80000,
+        400000,
+        1040000,
+        2880000,
+        3680000,
+        4960000
+      ],
+      "color_group": "pink",
+      "building_cost": 800000
+    },
+    {
+      "index": 14,
+      "name": "Malate",
+      "type": "property",
+      "price": 1280000,
+      "value": 1280000,
+      "base_rent": 96000,
+      "rent_ladder": [
+        96000,
+        480000,
+        1248000,
+        3456000,
+        4416000,
+        5952000
+      ],
+      "color_group": "pink",
+      "building_cost": 800000
+    },
+    {
+      "index": 15,
+      "name": "LRT",
+      "type": "rail",
+      "price": 1600000,
+      "value": 1600000,
+      "base_rent": 200000,
+      "rail_rent_by_count": [
+        0,
+        200000,
+        400000,
+        800000,
+        1600000
+      ]
+    },
+    {
+      "index": 16,
+      "name": "Quezon City",
+      "type": "property",
+      "price": 1440000,
+      "value": 1440000,
+      "base_rent": 112000,
+      "rent_ladder": [
+        112000,
+        560000,
+        1344000,
+        3696000,
+        4704000,
+        6272000
+      ],
+      "color_group": "orange",
+      "building_cost": 800000
+    },
+    {
+      "index": 17,
+      "name": "Community Chest",
+      "type": "event"
+    },
+    {
+      "index": 18,
+      "name": "Pasig",
+      "type": "property",
+      "price": 1440000,
+      "value": 1440000,
+      "base_rent": 112000,
+      "rent_ladder": [
+        112000,
+        560000,
+        1344000,
+        3696000,
+        4704000,
+        6272000
+      ],
+      "color_group": "orange",
+      "building_cost": 800000
+    },
+    {
+      "index": 19,
+      "name": "Mandaluyong",
+      "type": "property",
+      "price": 1600000,
+      "value": 1600000,
+      "base_rent": 128000,
+      "rent_ladder": [
+        128000,
+        640000,
+        1536000,
+        4224000,
+        5376000,
+        7168000
+      ],
+      "color_group": "orange",
+      "building_cost": 800000
+    },
+    {
+      "index": 20,
+      "name": "Free Parking",
+      "type": "free_parking"
+    },
+    {
+      "index": 21,
+      "name": "Pasay",
+      "type": "property",
+      "price": 1760000,
+      "value": 1760000,
+      "base_rent": 144000,
+      "rent_ladder": [
+        144000,
+        720000,
+        1584000,
+        4320000,
+        5472000,
+        7200000
+      ],
+      "color_group": "red",
+      "building_cost": 1200000
+    },
+    {
+      "index": 22,
+      "name": "Chance",
+      "type": "event"
+    },
+    {
+      "index": 23,
+      "name": "Marikina",
+      "type": "property",
+      "price": 1760000,
+      "value": 1760000,
+      "base_rent": 144000,
+      "rent_ladder": [
+        144000,
+        720000,
+        1584000,
+        4320000,
+        5472000,
+        7200000
+      ],
+      "color_group": "red",
+      "building_cost": 1200000
+    },
+    {
+      "index": 24,
+      "name": "Ortigas Center",
+      "type": "property",
+      "price": 1920000,
+      "value": 1920000,
+      "base_rent": 160000,
+      "rent_ladder": [
+        160000,
+        800000,
+        1760000,
+        4800000,
+        6080000,
+        8000000
+      ],
+      "color_group": "red",
+      "building_cost": 1200000
+    },
+    {
+      "index": 25,
+      "name": "NLEX",
+      "type": "rail",
+      "price": 1600000,
+      "value": 1600000,
+      "base_rent": 200000,
+      "rail_rent_by_count": [
+        0,
+        200000,
+        400000,
+        800000,
+        1600000
+      ]
+    },
+    {
+      "index": 26,
+      "name": "Rockwell",
+      "type": "property",
+      "price": 2080000,
+      "value": 2080000,
+      "base_rent": 176000,
+      "rent_ladder": [
+        176000,
+        880000,
+        1760000,
+        4928000,
+        5984000,
+        7920000
+      ],
+      "color_group": "yellow",
+      "building_cost": 1200000
+    },
+    {
+      "index": 27,
+      "name": "Greenhills",
+      "type": "property",
+      "price": 2080000,
+      "value": 2080000,
+      "base_rent": 176000,
+      "rent_ladder": [
+        176000,
+        880000,
+        1760000,
+        4928000,
+        5984000,
+        7920000
+      ],
+      "color_group": "yellow",
+      "building_cost": 1200000
+    },
+    {
+      "index": 28,
+      "name": "Manila Water",
+      "type": "utility",
+      "price": 1200000,
+      "value": 1200000,
+      "utility_multiplier": 4,
+      "utility_base_amount": 8000
+    },
+    {
+      "index": 29,
+      "name": "Eastwood",
+      "type": "property",
+      "price": 2240000,
+      "value": 2240000,
+      "base_rent": 192000,
+      "rent_ladder": [
+        192000,
+        960000,
+        1920000,
+        5376000,
+        6528000,
+        8640000
+      ],
+      "color_group": "yellow",
+      "building_cost": 1200000
+    },
+    {
+      "index": 30,
+      "name": "Go To Jail",
+      "type": "go_to_jail"
+    },
+    {
+      "index": 31,
+      "name": "Dasmariñas Village",
+      "type": "property",
+      "price": 2400000,
+      "value": 2400000,
+      "base_rent": 208000,
+      "rent_ladder": [
+        208000,
+        1040000,
+        1872000,
+        4992000,
+        6032000,
+        7904000
+      ],
+      "color_group": "green",
+      "building_cost": 1600000
+    },
+    {
+      "index": 32,
+      "name": "Ayala Alabang",
+      "type": "property",
+      "price": 2400000,
+      "value": 2400000,
+      "base_rent": 208000,
+      "rent_ladder": [
+        208000,
+        1040000,
+        1872000,
+        4992000,
+        6032000,
+        7904000
+      ],
+      "color_group": "green",
+      "building_cost": 1600000
+    },
+    {
+      "index": 33,
+      "name": "Community Chest",
+      "type": "event"
+    },
+    {
+      "index": 34,
+      "name": "McKinley Hills",
+      "type": "property",
+      "price": 2560000,
+      "value": 2560000,
+      "base_rent": 224000,
+      "rent_ladder": [
+        224000,
+        1120000,
+        2016000,
+        5376000,
+        6496000,
+        8512000
+      ],
+      "color_group": "green",
+      "building_cost": 1600000
+    },
+    {
+      "index": 35,
+      "name": "MRT",
+      "type": "rail",
+      "price": 1600000,
+      "value": 1600000,
+      "base_rent": 200000,
+      "rail_rent_by_count": [
+        0,
+        200000,
+        400000,
+        800000,
+        1600000
+      ]
+    },
+    {
+      "index": 36,
+      "name": "Chance",
+      "type": "event"
+    },
+    {
+      "index": 37,
+      "name": "Forbes Park",
+      "type": "property",
+      "price": 2800000,
+      "value": 2800000,
+      "base_rent": 280000,
+      "rent_ladder": [
+        280000,
+        1400000,
+        2240000,
+        6160000,
+        7000000,
+        8960000
+      ],
+      "color_group": "dark-blue",
+      "building_cost": 1600000
+    },
+    {
+      "index": 38,
+      "name": "Super Tax",
+      "type": "tax",
+      "tax_amount": 1600000,
+      "tax_type": "fixed"
+    },
+    {
+      "index": 39,
+      "name": "Bonifacio High Street",
+      "type": "property",
+      "price": 3200000,
+      "value": 3200000,
+      "base_rent": 400000,
+      "rent_ladder": [
+        400000,
+        2000000,
+        3200000,
+        8800000,
+        10000000,
+        12800000
+      ],
+      "color_group": "dark-blue",
+      "building_cost": 1600000
+    }
+  ]
+}

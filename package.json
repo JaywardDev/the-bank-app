@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "export:sim-boardpack": "tsc --pretty false --module commonjs --target es2022 --outDir tools/.sim-build tools/export-boardpack-fixture.ts && node tools/.sim-build/tools/export-boardpack-fixture.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.90.1",
