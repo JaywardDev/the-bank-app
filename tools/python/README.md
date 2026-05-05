@@ -9,9 +9,9 @@ This directory contains an **offline-only Python simulation lab** for experiment
 - It does not expose a production API bridge and does not call application routes.
 - It uses local JSON fixtures under `tools/python/exports/` and writes local summary files only.
 
-## Phase 4 flow (fixture-driven loan rules + liquidity approximations)
+## Phase 5 flow (fixture-driven loan/tax rules + liquidity approximations)
 
-These Phase 4 rules are **approximations only**. They are for designer feedback and economy pressure testing, and **no live gameplay uses these Python rules**.
+These Phase 5 rules are **approximations only**. They are for designer feedback and economy pressure testing, and **no live gameplay uses these Python rules**.
 
 - Balanced player policy is default and prioritizes liquidity survival before insolvency.
 - Proactive collateral loans are modeled as simplified action-based liquidity (not emergency auto-mortgage behavior).
@@ -21,6 +21,10 @@ These Phase 4 rules are **approximations only**. They are for designer feedback 
 - Generated fixtures now include boardpack-derived `tax_rules` (`income_tax_rate`, `super_tax_rate`) from runtime `GameRules` resolution.
 - The simulator uses fixture `loan_rules` by default.
 - The simulator uses fixture `tax_rules` by default.
+- Tax tiles are now split into income tax, super tax, and fixed-tax fallback (when subtype is unknown).
+- Income tax is approximated as cash gain since a per-player baseline and then baseline resets on each income-tax landing.
+- Super tax is approximated from simplified estimated net worth (`cash + owned property value - outstanding purchase mortgage financed amount`).
+- Fixed tax continues to use `tile.tax_amount` as fallback behavior.
 - CLI values override fixture loan values only when explicitly passed.
 - Collateral principal currently uses effective runtime parity LTV `0.6` even if `rules.collateralLtv` differs.
 - `philippines-hard` currently overrides super tax to `3%` (`superTaxRate: 0.03`).

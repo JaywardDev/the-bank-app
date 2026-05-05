@@ -45,6 +45,7 @@ class Player:
     collateralized_tiles: set[int] = field(default_factory=set)
     active_collateral_loans: list[int] = field(default_factory=list)
     purchase_mortgages: dict[int, PurchaseMortgage] = field(default_factory=dict)
+    income_tax_baseline_cash: int = 0
 
 
 @dataclass
@@ -101,6 +102,12 @@ class GameResult:
     auction_cash_drained: int
     tax_paid: int
     tax_events: int
+    income_tax_paid: int
+    income_tax_events: int
+    super_tax_paid: int
+    super_tax_events: int
+    fixed_tax_paid: int
+    fixed_tax_events: int
 
 
 # helpers omitted comments for brevity
@@ -169,6 +176,31 @@ def _price(tile: dict[str, Any]) -> int:
     return int(tile.get("price") or tile.get("value") or 0)
 
 
+def _tax_subtype(tile: dict[str, Any]) -> str:
+    candidates = [tile.get("tax_kind"), tile.get("tax_type"), tile.get("kind"), tile.get("tile_id"), tile.get("id")]
+    for value in candidates:
+        if isinstance(value, str):
+            token = value.lower()
+            if "income" in token:
+                return "income"
+            if "super" in token:
+                return "super"
+    name = str(tile.get("name") or "").lower()
+    if "income" in name:
+        return "income"
+    if "super" in name:
+        return "super"
+    return "fixed"
+
+
+def _estimated_net_worth(player: Player, boardpack: dict[str, Any]) -> int:
+    owned_value = sum(_price(boardpack["tiles"][idx]) for idx in player.owned_tiles)
+    # Simplification: subtract outstanding purchase-mortgage financed amounts as rough debt proxy.
+    purchase_mortgage_debt = sum(max(0, mtg.financed_amount) for mtg in player.purchase_mortgages.values())
+    # Simplification: collateral principal is not explicitly tracked in the simulator, so not deducted.
+    return int(player.cash + owned_value - purchase_mortgage_debt)
+
+
 def _round_to_nearest_allowed_percent(ratio: float, allowed_percents: list[int]) -> float:
     if not allowed_percents:
         return ratio
@@ -188,8 +220,8 @@ def _amortized_payment(principal: int, rate_per_turn: float, term_turns: int) ->
     return max(1, round(payment))
 
 
-def play_game(boardpack: dict[str, Any], rng: random.Random, max_rounds: int, cfg: SimulationConfig) -> GameResult:
-    players = [Player(name=f"Player {i}", cash=boardpack["starting_cash"], starting_cash=boardpack["starting_cash"]) for i in range(1, PLAYER_COUNT + 1)]
+def play_game(boardpack: dict[str, Any], rng: random.Random, max_rounds: int, cfg: SimulationConfig, income_tax_rate: float, super_tax_rate: float) -> GameResult:
+    players = [Player(name=f"Player {i}", cash=boardpack["starting_cash"], starting_cash=boardpack["starting_cash"], income_tax_baseline_cash=boardpack["starting_cash"]) for i in range(1, PLAYER_COUNT + 1)]
     owners_by_tile: dict[int, Player] = {}
     landed_counter: Counter[int] = Counter()
     rent_earned_by_tile: Counter[int] = Counter()
@@ -272,11 +304,30 @@ def play_game(boardpack: dict[str, Any], rng: random.Random, max_rounds: int, cf
             ttype = tile["type"]
 
             if ttype == "tax":
-                tax = int(tile.get("tax_amount") or 0)
-                if tax > 0:
-                    _debit(player, tax, "TAX", insolvency_by_reason)
-                    stats["tax_paid"] += tax
-                    stats["tax_events"] += 1
+                subtype = _tax_subtype(tile)
+                if subtype == "income":
+                    taxable_gain = max(0, player.cash - player.income_tax_baseline_cash)
+                    tax = int(income_tax_rate * taxable_gain)
+                    if tax > 0:
+                        _debit(player, tax, "INCOME_TAX", insolvency_by_reason)
+                        stats["income_tax_paid"] += tax
+                    stats["income_tax_events"] += 1
+                    # Deterministic approximation: reset baseline after each income-tax tile visit to current
+                    # cash (post-payment if taxed; unchanged if tax=0), mirroring periodic "gain since last tax".
+                    player.income_tax_baseline_cash = player.cash
+                elif subtype == "super":
+                    net_worth_for_tax = max(0, _estimated_net_worth(player, boardpack))
+                    tax = int(super_tax_rate * net_worth_for_tax)
+                    if tax > 0:
+                        _debit(player, tax, "SUPER_TAX", insolvency_by_reason)
+                        stats["super_tax_paid"] += tax
+                    stats["super_tax_events"] += 1
+                else:
+                    tax = int(tile.get("tax_amount") or 0)
+                    if tax > 0:
+                        _debit(player, tax, "FIXED_TAX", insolvency_by_reason)
+                        stats["fixed_tax_paid"] += tax
+                    stats["fixed_tax_events"] += 1
             elif ttype in {"property", "rail", "railroad", "transport", "utility"}:
                 owner = owners_by_tile.get(player.position)
                 if owner is None and not player.pending_insolvency:
@@ -360,6 +411,12 @@ def play_game(boardpack: dict[str, Any], rng: random.Random, max_rounds: int, cf
         auction_cash_drained=stats["auction_cash_drained"],
         tax_paid=stats["tax_paid"],
         tax_events=stats["tax_events"],
+        income_tax_paid=stats["income_tax_paid"],
+        income_tax_events=stats["income_tax_events"],
+        super_tax_paid=stats["super_tax_paid"],
+        super_tax_events=stats["super_tax_events"],
+        fixed_tax_paid=stats["fixed_tax_paid"],
+        fixed_tax_events=stats["fixed_tax_events"],
     )
 
 
@@ -379,12 +436,17 @@ def summarize_results(boardpack: dict[str, Any], results: list[GameResult], sett
             "purchase_mortgage_defaults": r.purchase_mortgage_defaults, "passive_income_total": r.passive_income_total,
             "passive_income_events": r.passive_income_events, "bets_placed": r.bets_placed, "betting_staked": r.betting_staked,
             "betting_winnings": r.betting_winnings, "auctions_started": r.auctions_started, "auctions_completed": r.auctions_completed,
-            "auction_cash_drained": r.auction_cash_drained, "tax_paid": r.tax_paid, "tax_events": r.tax_events,
+            "auction_cash_drained": r.auction_cash_drained,
+            "income_tax_paid": r.income_tax_paid, "income_tax_events": r.income_tax_events,
+            "super_tax_paid": r.super_tax_paid, "super_tax_events": r.super_tax_events,
+            "fixed_tax_paid": r.fixed_tax_paid, "fixed_tax_events": r.fixed_tax_events,
         })
         insolvency_by_reason.update(r.insolvency_by_reason)
         owned_totals.update(r.owned_counter); landed_totals.update(r.landed_counter); rent_totals.update(r.rent_earned_by_tile)
     total_player_games = len(results) * PLAYER_COUNT
-    return {"generated_at": datetime.now(timezone.utc).isoformat(), "source": "offline_python_simulation_lab_phase_4", "boardpack": {"id": boardpack["id"], "name": boardpack["name"]}, "settings": settings, "liquidity_settings": cfg.__dict__, "stats": {
+    total_tax_paid = agg["income_tax_paid"] + agg["super_tax_paid"] + agg["fixed_tax_paid"]
+    total_tax_events = agg["income_tax_events"] + agg["super_tax_events"] + agg["fixed_tax_events"]
+    return {"generated_at": datetime.now(timezone.utc).isoformat(), "source": "offline_python_simulation_lab_phase_5", "boardpack": {"id": boardpack["id"], "name": boardpack["name"]}, "settings": settings, "liquidity_settings": cfg.__dict__, "stats": {
         "games_simulated": len(results), "player_policy": cfg.player_policy, "average_rounds": round(mean(r.rounds for r in results), 2),
         "bankruptcy_count": agg["bankruptcies"], "bankruptcy_rate": round(agg["bankruptcies"] / total_player_games, 4),
         "insolvency_entries": agg["insolvency_entries"], "insolvency_by_reason": dict(insolvency_by_reason), "recovery_successes": agg["recovery_successes"],
@@ -393,7 +455,13 @@ def summarize_results(boardpack: dict[str, Any], results: list[GameResult], sett
         "passive_income_total": agg["passive_income_total"], "passive_income_events": agg["passive_income_events"],
         "betting": {"enabled": cfg.enable_betting, "bets_placed": agg["bets_placed"], "betting_staked": agg["betting_staked"], "betting_winnings": agg["betting_winnings"], "betting_net": agg["betting_winnings"] - agg["betting_staked"]},
         "auctions": {"enabled": cfg.enable_auctions, "auctions_started": agg["auctions_started"], "auctions_completed": agg["auctions_completed"], "auction_cash_drained": agg["auction_cash_drained"]},
-        "tax_paid": agg["tax_paid"], "tax_events": agg["tax_events"],
+        "tax_paid": total_tax_paid, "tax_events": total_tax_events,
+        "tax_breakdown": {
+            "income_tax_paid": agg["income_tax_paid"], "income_tax_events": agg["income_tax_events"],
+            "super_tax_paid": agg["super_tax_paid"], "super_tax_events": agg["super_tax_events"],
+            "fixed_tax_paid": agg["fixed_tax_paid"], "fixed_tax_events": agg["fixed_tax_events"],
+            "income_tax_rate_used": settings["income_tax_rate_used"], "super_tax_rate_used": settings["super_tax_rate_used"],
+        },
         "most_owned_tiles_top_5": top_tiles(owned_totals, boardpack), "most_landed_on_tiles_top_5": top_tiles(landed_totals, boardpack), "highest_rent_earning_tiles_top_5": top_tiles(rent_totals, boardpack),
     }}
 
@@ -514,7 +582,7 @@ def main() -> None:
         collateral_rate_per_turn=collateral_rate, collateral_term_turns=collateral_term,
     )
     rng = random.Random(args.seed)
-    results = [play_game(boardpack, rng, args.max_rounds, cfg) for _ in range(args.games)]
+    results = [play_game(boardpack, rng, args.max_rounds, cfg, income_tax_rate, super_tax_rate) for _ in range(args.games)]
     settings = {
         "games": args.games, "max_rounds": args.max_rounds, "players": PLAYER_COUNT, "random_seed": args.seed, "fixture": str(args.fixture),
         "loan_rules_source": loan_rules_source, "mortgage_ltv_used": mortgage_ltv, "mortgage_rate_per_turn_used": mortgage_rate,
@@ -528,7 +596,7 @@ def main() -> None:
     summary = summarize_results(boardpack, results, settings, cfg)
     path = write_summary(summary)
     s = summary["stats"]
-    print("Python Simulation Lab - Phase 4 (offline only, non-authoritative approximations)")
+    print("Python Simulation Lab - Phase 5 (offline only, non-authoritative approximations)")
     print(f"Games simulated: {s['games_simulated']}")
     print(f"Boardpack: {boardpack['name']} ({boardpack['id']})")
     print(f"Player policy: {s['player_policy']}")
@@ -541,6 +609,9 @@ def main() -> None:
     print(f"Betting stats: {s['betting']}")
     print(f"Auction stats: {s['auctions']}")
     print(f"Tax paid/events: {s['tax_paid']} / {s['tax_events']}")
+    print(f"Income tax paid/events: {s['tax_breakdown']['income_tax_paid']} / {s['tax_breakdown']['income_tax_events']}")
+    print(f"Super tax paid/events: {s['tax_breakdown']['super_tax_paid']} / {s['tax_breakdown']['super_tax_events']}")
+    print(f"Fixed tax paid/events: {s['tax_breakdown']['fixed_tax_paid']} / {s['tax_breakdown']['fixed_tax_events']}")
     print(f"Most-owned tiles (top 5): {s['most_owned_tiles_top_5']}")
     print(f"Most-landed-on tiles (top 5): {s['most_landed_on_tiles_top_5']}")
     print(f"Highest rent-earning tiles (top 5): {s['highest_rent_earning_tiles_top_5']}")
