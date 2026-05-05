@@ -1,0 +1,21 @@
+{
+  "name": "Sample Basic Offline Boardpack",
+  "description": "Small local-only fixture for the Phase 1 Python simulation lab.",
+  "board_size": 12,
+  "starting_cash": 800,
+  "go_salary": 100,
+  "tiles": [
+    { "index": 0, "name": "GO", "type": "go", "price": 0, "rent": 0 },
+    { "index": 1, "name": "Harbor Lane", "type": "property", "price": 60, "rent": 8 },
+    { "index": 2, "name": "Community Plaza", "type": "blank", "price": 0, "rent": 0 },
+    { "index": 3, "name": "Market Street", "type": "property", "price": 80, "rent": 10 },
+    { "index": 4, "name": "Rail Stop", "type": "property", "price": 120, "rent": 16 },
+    { "index": 5, "name": "Free Parking", "type": "blank", "price": 0, "rent": 0 },
+    { "index": 6, "name": "Garden Court", "type": "property", "price": 100, "rent": 14 },
+    { "index": 7, "name": "Chance Corner", "type": "blank", "price": 0, "rent": 0 },
+    { "index": 8, "name": "Riverside Drive", "type": "property", "price": 140, "rent": 20 },
+    { "index": 9, "name": "Utility Works", "type": "property", "price": 150, "rent": 22 },
+    { "index": 10, "name": "Rest Stop", "type": "blank", "price": 0, "rent": 0 },
+    { "index": 11, "name": "Capital Avenue", "type": "property", "price": 180, "rent": 28 }
+  ]
+}

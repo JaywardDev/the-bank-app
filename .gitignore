@@ -40,3 +40,5 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# Generated local Python simulation summaries
+/tools/python/exports/simulation_summary_*.json
