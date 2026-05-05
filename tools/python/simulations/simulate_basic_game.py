@@ -22,6 +22,7 @@ DEFAULT_GAME_COUNT = 250
 DEFAULT_MAX_ROUNDS = 75
 PLAYER_COUNT = 4
 DEFAULT_RANDOM_SEED = 20260505
+DEFAULT_ALLOWED_DOWN_PAYMENT_PERCENTS = [30, 40, 50, 60, 70, 80]
 
 
 @dataclass
@@ -66,6 +67,12 @@ class SimulationConfig:
     bet_payout_multiplier: float
     enable_auctions: bool
     auction_bid_ratio: float
+    mortgage_rate_per_turn: float
+    mortgage_ltv: float
+    purchase_mortgage_payment_model: str
+    collateral_ltv_rules_field_exported: float | None
+    collateral_rate_per_turn: float
+    collateral_term_turns: int
 
 
 @dataclass
@@ -131,7 +138,15 @@ def load_boardpack(path: Path) -> dict[str, Any]:
         if not isinstance(name, str):
             raise ValueError(f"tile at index {index} missing name")
         normalized_tiles.append({**tile, "index": index, "type": str(tile.get("type", "unknown")).lower(), "name": name})
-    return {"name": boardpack.get("name") or "Unknown Boardpack", "id": boardpack.get("id") or "unknown", "starting_cash": starting_cash, "go_salary": go_salary, "board_size": board_size, "tiles": normalized_tiles}
+    return {
+        "name": boardpack.get("name") or "Unknown Boardpack",
+        "id": boardpack.get("id") or "unknown",
+        "starting_cash": starting_cash,
+        "go_salary": go_salary,
+        "board_size": board_size,
+        "tiles": normalized_tiles,
+        "loan_rules": boardpack.get("loan_rules"),
+    }
 
 
 def roll_two_dice(rng: random.Random) -> int:
@@ -151,6 +166,25 @@ def _debit(player: Player, amount: int, reason: str, counters: Counter[str]) -> 
 
 def _price(tile: dict[str, Any]) -> int:
     return int(tile.get("price") or tile.get("value") or 0)
+
+
+def _round_to_nearest_allowed_percent(ratio: float, allowed_percents: list[int]) -> float:
+    if not allowed_percents:
+        return ratio
+    target_percent = ratio * 100.0
+    nearest = min(allowed_percents, key=lambda p: abs(p - target_percent))
+    return nearest / 100.0
+
+
+def _amortized_payment(principal: int, rate_per_turn: float, term_turns: int) -> int:
+    if principal <= 0 or term_turns <= 0:
+        return 0
+    if rate_per_turn <= 0:
+        return max(1, round(principal / term_turns))
+    rate = rate_per_turn
+    factor = (1 + rate) ** term_turns
+    payment = principal * rate * factor / (factor - 1)
+    return max(1, round(payment))
 
 
 def play_game(boardpack: dict[str, Any], rng: random.Random, max_rounds: int, cfg: SimulationConfig) -> GameResult:
@@ -202,7 +236,7 @@ def play_game(boardpack: dict[str, Any], rng: random.Random, max_rounds: int, cf
                 candidates = [idx for idx in player.owned_tiles if idx not in player.collateralized_tiles]
                 if candidates:
                     tile_idx = max(candidates, key=lambda t: _price(boardpack["tiles"][t]))
-                    loan_cash = int(_price(boardpack["tiles"][tile_idx]) * cfg.collateral_loan_value_ratio)
+                    loan_cash = round(_price(boardpack["tiles"][tile_idx]) * cfg.collateral_loan_value_ratio)
                     if loan_cash > 0:
                         player.cash += loan_cash
                         player.collateralized_tiles.add(tile_idx)
@@ -252,11 +286,11 @@ def play_game(boardpack: dict[str, Any], rng: random.Random, max_rounds: int, cf
                         player.owned_tiles.append(player.position)
                         owners_by_tile[player.position] = player
                     elif cfg.enable_purchase_mortgage and price > 0:
-                        down = int(price * cfg.down_payment_ratio)
+                        down = round(price * cfg.down_payment_ratio)
                         if player.cash - down >= reserve and down > 0:
                             player.cash -= down
                             financed = max(0, price - down)
-                            payment = max(1, int(financed * cfg.purchase_mortgage_payment_ratio)) if financed else 0
+                            payment = _amortized_payment(financed, cfg.mortgage_rate_per_turn, cfg.purchase_mortgage_term_turns)
                             if payment > 0:
                                 player.purchase_mortgages[player.position] = PurchaseMortgage(player.position, financed, payment, cfg.purchase_mortgage_term_turns)
                             player.owned_tiles.append(player.position)
@@ -349,7 +383,7 @@ def summarize_results(boardpack: dict[str, Any], results: list[GameResult], sett
         insolvency_by_reason.update(r.insolvency_by_reason)
         owned_totals.update(r.owned_counter); landed_totals.update(r.landed_counter); rent_totals.update(r.rent_earned_by_tile)
     total_player_games = len(results) * PLAYER_COUNT
-    return {"generated_at": datetime.now(timezone.utc).isoformat(), "source": "offline_python_simulation_lab_phase_3", "boardpack": {"id": boardpack["id"], "name": boardpack["name"]}, "settings": settings, "liquidity_settings": cfg.__dict__, "stats": {
+    return {"generated_at": datetime.now(timezone.utc).isoformat(), "source": "offline_python_simulation_lab_phase_4", "boardpack": {"id": boardpack["id"], "name": boardpack["name"]}, "settings": settings, "liquidity_settings": cfg.__dict__, "stats": {
         "games_simulated": len(results), "player_policy": cfg.player_policy, "average_rounds": round(mean(r.rounds for r in results), 2),
         "bankruptcy_count": agg["bankruptcies"], "bankruptcy_rate": round(agg["bankruptcies"] / total_player_games, 4),
         "insolvency_entries": agg["insolvency_entries"], "insolvency_by_reason": dict(insolvency_by_reason), "recovery_successes": agg["recovery_successes"],
@@ -381,12 +415,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--low-cash-threshold-ratio", type=float, default=0.35)
     p.add_argument("--healthy-cash-threshold-ratio", type=float, default=0.60)
     p.add_argument("--max-collateral-loans-per-player", type=int, default=2)
-    p.add_argument("--collateral-loan-value-ratio", type=float, default=0.50)
+    p.add_argument("--collateral-loan-value-ratio", type=float, default=None)
     p.add_argument("--enable-purchase-mortgage", action="store_true", default=True)
     p.add_argument("--disable-purchase-mortgage", action="store_true")
-    p.add_argument("--down-payment-ratio", type=float, default=0.30)
-    p.add_argument("--purchase-mortgage-payment-ratio", type=float, default=0.05)
-    p.add_argument("--purchase-mortgage-term-turns", type=int, default=20)
+    p.add_argument("--down-payment-ratio", type=float, default=None)
+    p.add_argument("--purchase-mortgage-payment-ratio", type=float, default=None)
+    p.add_argument("--purchase-mortgage-term-turns", type=int, default=None)
     p.add_argument("--passive-income-per-owned-property", type=int, default=0)
     p.add_argument("--enable-betting", action="store_true")
     p.add_argument("--bet-probability", type=float, default=0.2)
@@ -400,23 +434,85 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    boardpack = load_boardpack(args.fixture)
+    loan_rules = boardpack.get("loan_rules") if isinstance(boardpack.get("loan_rules"), dict) else None
+    loan_warning: str | None = None
+    sources: set[str] = set()
+    if loan_rules is None:
+        loan_warning = "Fixture loan_rules missing; using simulator fallback defaults."
+        sources.add("fallback")
+
+    mortgage = loan_rules.get("mortgage", {}) if loan_rules else {}
+    collateral = loan_rules.get("collateral", {}) if loan_rules else {}
+    allowed_percents = mortgage.get("allowed_down_payment_percents") if isinstance(mortgage.get("allowed_down_payment_percents"), list) else DEFAULT_ALLOWED_DOWN_PAYMENT_PERCENTS
+    allowed_percents = [int(p) for p in allowed_percents if isinstance(p, (int, float))]
+
+    fallback_mortgage_ltv = 0.70
+    fallback_mortgage_rate = 0.015
+    fallback_mortgage_term = 20
+    fallback_collateral_ltv = 0.50
+    fallback_collateral_rate = 0.008
+    fallback_collateral_term = 10
+
+    mortgage_ltv = float(mortgage.get("ltv", fallback_mortgage_ltv))
+    mortgage_rate = float(mortgage.get("rate_per_turn", fallback_mortgage_rate))
+    mortgage_term = int(mortgage.get("term_turns", fallback_mortgage_term))
+    collateral_ltv_effective = float(collateral.get("ltv_effective", fallback_collateral_ltv))
+    collateral_ltv_rules_field = collateral.get("ltv_rules_field")
+    collateral_rate = float(collateral.get("rate_per_turn", fallback_collateral_rate))
+    collateral_term = int(collateral.get("term_turns", fallback_collateral_term))
+
+    if args.down_payment_ratio is not None:
+        down_payment_ratio = args.down_payment_ratio
+        sources.add("cli_override")
+    else:
+        down_payment_ratio = _round_to_nearest_allowed_percent(1.0 - mortgage_ltv, allowed_percents)
+        sources.add("fixture" if loan_rules else "fallback")
+
+    if args.purchase_mortgage_term_turns is not None:
+        mortgage_term = args.purchase_mortgage_term_turns
+        sources.add("cli_override")
+    else:
+        sources.add("fixture" if loan_rules else "fallback")
+
+    if args.collateral_loan_value_ratio is not None:
+        collateral_ltv_effective = args.collateral_loan_value_ratio
+        sources.add("cli_override")
+    else:
+        sources.add("fixture" if loan_rules else "fallback")
+
+    if args.purchase_mortgage_payment_ratio is not None:
+        loan_warning = (loan_warning + " " if loan_warning else "") + "--purchase-mortgage-payment-ratio is provided; simulator uses amortized_fixed_payment and ignores this override."
+        sources.add("cli_override")
+
+    loan_rules_source = "mixed" if len(sources) > 1 else (next(iter(sources)) if sources else "fallback")
+
     cfg = SimulationConfig(
         player_policy=args.player_policy, cash_reserve_ratio=args.cash_reserve_ratio, low_cash_threshold_ratio=args.low_cash_threshold_ratio,
         healthy_cash_threshold_ratio=args.healthy_cash_threshold_ratio, max_collateral_loans_per_player=args.max_collateral_loans_per_player,
-        collateral_loan_value_ratio=args.collateral_loan_value_ratio, enable_purchase_mortgage=args.enable_purchase_mortgage and not args.disable_purchase_mortgage,
-        down_payment_ratio=args.down_payment_ratio, purchase_mortgage_payment_ratio=args.purchase_mortgage_payment_ratio,
-        purchase_mortgage_term_turns=args.purchase_mortgage_term_turns, passive_income_per_owned_property=args.passive_income_per_owned_property,
+        collateral_loan_value_ratio=collateral_ltv_effective, enable_purchase_mortgage=args.enable_purchase_mortgage and not args.disable_purchase_mortgage,
+        down_payment_ratio=down_payment_ratio, purchase_mortgage_payment_ratio=0.0,
+        purchase_mortgage_term_turns=mortgage_term, passive_income_per_owned_property=args.passive_income_per_owned_property,
         enable_betting=args.enable_betting, bet_probability=args.bet_probability, bet_stake=args.bet_stake, bet_win_probability=args.bet_win_probability,
         bet_payout_multiplier=args.bet_payout_multiplier, enable_auctions=args.enable_auctions, auction_bid_ratio=args.auction_bid_ratio,
+        mortgage_rate_per_turn=mortgage_rate, mortgage_ltv=mortgage_ltv, purchase_mortgage_payment_model="amortized_fixed_payment",
+        collateral_ltv_rules_field_exported=float(collateral_ltv_rules_field) if isinstance(collateral_ltv_rules_field, (int, float)) else None,
+        collateral_rate_per_turn=collateral_rate, collateral_term_turns=collateral_term,
     )
-    boardpack = load_boardpack(args.fixture)
     rng = random.Random(args.seed)
     results = [play_game(boardpack, rng, args.max_rounds, cfg) for _ in range(args.games)]
-    settings = {"games": args.games, "max_rounds": args.max_rounds, "players": PLAYER_COUNT, "random_seed": args.seed, "fixture": str(args.fixture)}
+    settings = {
+        "games": args.games, "max_rounds": args.max_rounds, "players": PLAYER_COUNT, "random_seed": args.seed, "fixture": str(args.fixture),
+        "loan_rules_source": loan_rules_source, "mortgage_ltv_used": mortgage_ltv, "mortgage_rate_per_turn_used": mortgage_rate,
+        "mortgage_term_turns_used": mortgage_term, "mortgage_down_payment_ratio_used": down_payment_ratio,
+        "purchase_mortgage_payment_model": "amortized_fixed_payment", "collateral_ltv_effective_used": collateral_ltv_effective,
+        "collateral_ltv_rules_field_exported": collateral_ltv_rules_field, "collateral_rate_per_turn_used": collateral_rate,
+        "collateral_term_turns_used": collateral_term, "loan_config_warning": loan_warning,
+    }
     summary = summarize_results(boardpack, results, settings, cfg)
     path = write_summary(summary)
     s = summary["stats"]
-    print("Python Simulation Lab - Phase 3 (offline only, non-authoritative approximations)")
+    print("Python Simulation Lab - Phase 4 (offline only, non-authoritative approximations)")
     print(f"Games simulated: {s['games_simulated']}")
     print(f"Boardpack: {boardpack['name']} ({boardpack['id']})")
     print(f"Player policy: {s['player_policy']}")
@@ -433,6 +529,8 @@ def main() -> None:
     print(f"Most-landed-on tiles (top 5): {s['most_landed_on_tiles_top_5']}")
     print(f"Highest rent-earning tiles (top 5): {s['highest_rent_earning_tiles_top_5']}")
     print(f"Liquidity settings used: {summary['liquidity_settings']}")
+    if loan_warning:
+        print(f"Loan config warning: {loan_warning}")
     print(f"Summary JSON: {path}")
 
 

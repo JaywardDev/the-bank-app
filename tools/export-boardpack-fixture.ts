@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { boardPacks } from "../src/lib/boardPacks";
+import { getRules } from "../src/lib/rules";
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [k: string]: JsonValue };
 
@@ -72,8 +73,10 @@ const tiles: ExportTile[] = boardPack.tiles.map((tile) => {
   return exportTile;
 });
 
+const rules = getRules(boardPack.rules);
+
 const fixture = {
-  source: "offline_python_simulation_lab_phase_2",
+  source: "offline_python_simulation_lab_phase_4",
   generated_at: new Date().toISOString(),
   boardpack: {
     id: boardPack.id,
@@ -86,6 +89,25 @@ const fixture = {
   starting_cash: boardPack.economy.startingBalance ?? 1500,
   go_salary: boardPack.economy.passGoAmount ?? 200,
   board_size: tiles.length,
+  loan_rules: {
+    source: "game_rules_v1",
+    mortgage: {
+      enabled: true,
+      ltv: rules.mortgageLtv,
+      rate_per_turn: rules.mortgageRatePerTurn,
+      term_turns: rules.mortgageTermTurns,
+      payment_model: "amortized_fixed_payment",
+      allowed_down_payment_percents: [30, 40, 50, 60, 70, 80],
+    },
+    collateral: {
+      enabled: true,
+      ltv_effective: 0.6,
+      ltv_rules_field: rules.collateralLtv,
+      rate_per_turn: rules.collateralRatePerTurn,
+      term_turns: rules.collateralTermTurns,
+      payment_model: "fixed_payment_from_backend_schedule",
+    },
+  },
   tiles,
 } satisfies Record<string, JsonValue>;
 

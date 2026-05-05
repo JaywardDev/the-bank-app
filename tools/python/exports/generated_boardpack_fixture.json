@@ -1,6 +1,6 @@
 {
-  "source": "offline_python_simulation_lab_phase_2",
-  "generated_at": "2026-05-05T02:43:44.622Z",
+  "source": "offline_python_simulation_lab_phase_4",
+  "generated_at": "2026-05-05T06:09:52.737Z",
   "boardpack": {
     "id": "philippines-hard",
     "name": "Philippines (Hard Mode)"
@@ -12,6 +12,32 @@
   "starting_cash": 5000000,
   "go_salary": 600000,
   "board_size": 40,
+  "loan_rules": {
+    "source": "game_rules_v1",
+    "mortgage": {
+      "enabled": true,
+      "ltv": 0.7,
+      "rate_per_turn": 0.015,
+      "term_turns": 40,
+      "payment_model": "amortized_fixed_payment",
+      "allowed_down_payment_percents": [
+        30,
+        40,
+        50,
+        60,
+        70,
+        80
+      ]
+    },
+    "collateral": {
+      "enabled": true,
+      "ltv_effective": 0.6,
+      "ltv_rules_field": 0.5,
+      "rate_per_turn": 0.02,
+      "term_turns": 12,
+      "payment_model": "fixed_payment_from_backend_schedule"
+    }
+  },
   "tiles": [
     {
       "index": 0,
