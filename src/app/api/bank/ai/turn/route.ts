@@ -55,6 +55,7 @@ type GameStateRow = {
   pending_card_drawn_by_player_id: string | null;
   auction_active: boolean | null;
   auction_turn_player_id: string | null;
+  auction_turn_ends_at: string | null;
 };
 
 type AiAction =
@@ -105,7 +106,7 @@ const loadSnapshot = async (gameId: string) => {
     { method: "GET" },
   )) ?? [];
   const [gameState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
-    `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,pending_card_active,pending_card_drawn_by_player_id,auction_active,auction_turn_player_id&game_id=eq.${gameId}&limit=1`,
+    `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,pending_card_active,pending_card_drawn_by_player_id,auction_active,auction_turn_player_id,auction_turn_ends_at&game_id=eq.${gameId}&limit=1`,
     { method: "GET" },
   )) ?? [];
   return { game: game ?? null, players, gameState: gameState ?? null };
@@ -176,6 +177,40 @@ const releaseLock = async (gameId: string, lockToken: string) => {
     body: JSON.stringify({ p_game_id: gameId, p_lock_token: lockToken }),
   });
 };
+
+type AiActionContext = "auction" | "normal_turn";
+
+const getActionablePlayerId = (gameState: GameStateRow) =>
+  gameState.auction_active
+    ? gameState.auction_turn_player_id
+    : gameState.current_player_id;
+
+const getActionContext = (gameState: GameStateRow): AiActionContext =>
+  gameState.auction_active ? "auction" : "normal_turn";
+
+const findActionablePlayer = ({
+  gameState,
+  players,
+}: {
+  gameState: GameStateRow;
+  players: PlayerRow[];
+}) => {
+  const actionContext = getActionContext(gameState);
+  const actingPlayerId = getActionablePlayerId(gameState);
+  const player = actingPlayerId
+    ? (players.find((candidate) => candidate.id === actingPlayerId) ?? null)
+    : null;
+
+  return { actionContext, actingPlayerId, player };
+};
+
+const auctionTurnExpired = (gameState: GameStateRow) =>
+  Boolean(
+    gameState.auction_active &&
+      gameState.auction_turn_player_id &&
+      gameState.auction_turn_ends_at &&
+      Date.now() > Date.parse(gameState.auction_turn_ends_at),
+  );
 
 const pendingType = (state: GameStateRow) =>
   state.pending_action && typeof state.pending_action.type === "string"
@@ -286,20 +321,36 @@ export async function POST(request: Request) {
   if (initial.game?.status !== "in_progress" || !initial.gameState) {
     return NextResponse.json({ ok: true, stopped: "not_in_progress" });
   }
-  const initialAiPlayer = initial.players.find(
-    (player) => player.id === initial.gameState?.current_player_id && player.is_ai,
-  );
-  if (!initialAiPlayer || initialAiPlayer.is_eliminated) {
-    return NextResponse.json({ ok: true, stopped: "not_ai_turn" });
+  const initialActionable = findActionablePlayer({
+    gameState: initial.gameState,
+    players: initial.players,
+  });
+  if (!initialActionable.player || initialActionable.player.is_eliminated) {
+    return NextResponse.json({
+      ok: true,
+      stopped: "not_ai_actionable",
+      actionContext: initialActionable.actionContext,
+    });
   }
-  if (initialAiPlayer.ai_difficulty && initialAiPlayer.ai_difficulty !== "easy") {
-    return NextResponse.json({ ok: true, stopped: "difficulty_unavailable" });
+  if (!initialActionable.player.is_ai) {
+    return NextResponse.json({
+      ok: true,
+      stopped: initialActionable.actionContext === "auction" ? "not_ai_actionable" : "not_ai_turn",
+      actionContext: initialActionable.actionContext,
+    });
+  }
+  if (initialActionable.player.ai_difficulty && initialActionable.player.ai_difficulty !== "easy") {
+    return NextResponse.json({
+      ok: true,
+      stopped: "difficulty_unavailable",
+      actionContext: initialActionable.actionContext,
+    });
   }
 
   const lockToken = crypto.randomUUID();
   const locked = await acquireLock({
     gameId,
-    playerId: initialAiPlayer.id,
+    playerId: initialActionable.player.id,
     stateVersion: initial.gameState.version,
     lockToken,
   });
@@ -313,27 +364,41 @@ export async function POST(request: Request) {
     for (let step = 0; step < 12; step += 1) {
       const { game, gameState, players } = await loadSnapshot(gameId);
       if (game?.status !== "in_progress" || !gameState) return NextResponse.json({ ok: true, actions, stopped: "game_over" });
-      const player = players.find((candidate) => candidate.id === gameState.current_player_id);
-      if (!player?.is_ai || player.is_eliminated) return NextResponse.json({ ok: true, actions, stopped: "human_or_missing_turn" });
-      if (player.ai_difficulty && player.ai_difficulty !== "easy") return NextResponse.json({ ok: true, actions, stopped: "difficulty_unavailable" });
+      const { actionContext, player } = findActionablePlayer({ gameState, players });
+      if (!player || player.is_eliminated) {
+        return NextResponse.json({ ok: true, actions, stopped: "missing_actionable_player", actionContext });
+      }
+      if (!player.is_ai) {
+        return NextResponse.json({
+          ok: true,
+          actions,
+          stopped: actionContext === "auction" ? "not_ai_actionable" : "human_or_missing_turn",
+          actionContext,
+        });
+      }
+      if (player.ai_difficulty && player.ai_difficulty !== "easy") return NextResponse.json({ ok: true, actions, stopped: "difficulty_unavailable", actionContext });
 
-      const lockStillOwned = await validateAndRenewLock({
-        gameId,
-        playerId: player.id,
-        stateVersion: gameState.version,
-        lockToken,
-      });
-      if (!lockStillOwned) {
-        return NextResponse.json({ ok: true, actions, stopped: "lock_lost" });
+      if (actionContext === "normal_turn") {
+        const lockStillOwned = await validateAndRenewLock({
+          gameId,
+          playerId: player.id,
+          stateVersion: gameState.version,
+          lockToken,
+        });
+        if (!lockStillOwned) {
+          return NextResponse.json({ ok: true, actions, stopped: "lock_lost" });
+        }
       }
 
       const stateKey = JSON.stringify({
         version: gameState.version,
         currentPlayerId: gameState.current_player_id,
+        actionContext,
         phase: gameState.turn_phase,
         pending: pendingType(gameState),
         lastRoll: gameState.last_roll,
         auctionTurnPlayerId: gameState.auction_turn_player_id,
+        auctionTurnEndsAt: gameState.auction_turn_ends_at,
       });
       if (seenStates.has(stateKey)) return NextResponse.json({ ok: true, actions, stopped: "repeated_state" });
       seenStates.add(stateKey);
@@ -351,10 +416,20 @@ export async function POST(request: Request) {
       });
       const payload = (await actionResponse.json().catch(() => null)) as { error?: string; currentVersion?: number } | null;
       if (!actionResponse.ok) {
+        const auctionTimeoutAdvanced =
+          actionContext === "auction" &&
+          actionResponse.status === 409 &&
+          (payload?.error === "Auction turn advanced. Sync to continue." ||
+            payload?.error === "Version mismatch.");
+        if (auctionTimeoutAdvanced && auctionTurnExpired(gameState)) {
+          continue;
+        }
+
         return NextResponse.json({
           ok: true,
           actions,
           stopped: actionResponse.status === 409 && payload?.error === "Version mismatch." ? "version_conflict" : "action_rejected",
+          actionContext,
           status: actionResponse.status,
           error: payload?.error ?? null,
         });

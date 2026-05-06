@@ -1705,8 +1705,16 @@ export default function PlayV2Page() {
     gameState?.current_player_id === currentUserPlayer.id &&
     !currentUserPlayer.is_eliminated,
   );
+  const auctionTurnPlayer = useMemo(
+    () =>
+      gameState?.auction_turn_player_id
+        ? (players.find((player) => player.id === gameState.auction_turn_player_id) ?? null)
+        : null,
+    [gameState?.auction_turn_player_id, players],
+  );
+  const actionableAiPlayer = auctionActive ? auctionTurnPlayer : currentTurnPlayer;
   const isAiTurn = Boolean(
-    isInProgress && currentTurnPlayer?.is_ai && !currentTurnPlayer.is_eliminated,
+    isInProgress && actionableAiPlayer?.is_ai && !actionableAiPlayer.is_eliminated,
   );
 
   useEffect(() => {
@@ -1714,7 +1722,10 @@ export default function PlayV2Page() {
       return;
     }
 
-    const nudgeKey = `${routeGameId}:${gameState.version}:${gameState.current_player_id ?? "none"}`;
+    const aiActionablePlayerId = auctionActive
+      ? (gameState.auction_turn_player_id ?? "none")
+      : (gameState.current_player_id ?? "none");
+    const nudgeKey = `${routeGameId}:${gameState.version}:${auctionActive ? "auction" : "normal"}:${aiActionablePlayerId}`;
     if (lastAiNudgeKeyRef.current === nudgeKey || aiNudgeInFlightRef.current) {
       return;
     }
@@ -1754,7 +1765,15 @@ export default function PlayV2Page() {
     }, 350);
 
     return () => window.clearTimeout(timeout);
-  }, [gameState?.current_player_id, gameState?.version, isAiTurn, routeGameId, session?.access_token]);
+  }, [
+    auctionActive,
+    gameState?.auction_turn_player_id,
+    gameState?.current_player_id,
+    gameState?.version,
+    isAiTurn,
+    routeGameId,
+    session?.access_token,
+  ]);
 
   const pendingPurchase = useMemo<PendingPurchaseAction | null>(() => {
     const pendingAction = gameState?.pending_action;
