@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
 import {
   DEFAULT_BOARD_PACK_ECONOMY,
@@ -18,6 +19,8 @@ type LobbyActionRequest = {
   boardPackId?: string;
   gameMode?: GameModeConfig;
   roundLimit?: number;
+  aiDifficulty?: "easy" | "medium" | "hard";
+  aiPlayerId?: string;
 };
 
 type SupabaseUser = {
@@ -51,6 +54,8 @@ type PlayerRow = {
   free_upgrade_tokens: number;
   is_eliminated: boolean;
   eliminated_at: string | null;
+  is_ai: boolean;
+  ai_difficulty: "easy" | "medium" | "hard" | null;
 };
 
 type StartGameIfReadyRpcResult = {
@@ -120,7 +125,7 @@ export const handleLobbyAction = async ({
     }
 
     const [hostPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
-      "players?select=id,user_id,display_name,created_at,lobby_ready,lobby_ready_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at",
+      "players?select=id,user_id,display_name,created_at,lobby_ready,lobby_ready_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at,is_ai,ai_difficulty",
       {
         method: "POST",
         headers: {
@@ -209,7 +214,7 @@ export const handleLobbyAction = async ({
     let player: PlayerRow | undefined;
     try {
       [player] = (await fetchFromSupabaseWithService<PlayerRow[]>(
-        "players?select=id,user_id,display_name,created_at,lobby_ready,lobby_ready_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at&on_conflict=game_id,user_id",
+        "players?select=id,user_id,display_name,created_at,lobby_ready,lobby_ready_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at,is_ai,ai_difficulty&on_conflict=game_id,user_id",
         {
           method: "POST",
           headers: {
@@ -240,7 +245,7 @@ export const handleLobbyAction = async ({
     }
 
     const players = (await fetchFromSupabaseWithService<PlayerRow[]>(
-      `players?select=id,user_id,display_name,created_at,lobby_ready,lobby_ready_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at&game_id=eq.${game.id}&order=created_at.asc`,
+      `players?select=id,user_id,display_name,created_at,lobby_ready,lobby_ready_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at,is_ai,ai_difficulty&game_id=eq.${game.id}&order=created_at.asc`,
       { method: "GET" },
     )) ?? [];
     const ownershipByTile = await loadOwnershipByTile(game.id);
@@ -264,6 +269,125 @@ export const handleLobbyAction = async ({
 
   const gameId = body.gameId;
 
+
+  if (body.action === "ADD_AI_PLAYER") {
+    const [game] = (await fetchFromSupabaseWithService<GameRow[]>(
+      `games?select=id,status,created_by&id=eq.${gameId}&limit=1`,
+      { method: "GET" },
+    )) ?? [];
+
+    if (!game) {
+      return NextResponse.json({ error: "Game not found." }, { status: 404 });
+    }
+
+    if (game.created_by && game.created_by !== user.id) {
+      return NextResponse.json(
+        { error: "Only the host can add AI players." },
+        { status: 403 },
+      );
+    }
+
+    if (game.status !== "lobby") {
+      return NextResponse.json(
+        { error: "AI players can only be added in the lobby." },
+        { status: 409 },
+      );
+    }
+
+    const difficulty = body.aiDifficulty === "medium" || body.aiDifficulty === "hard"
+      ? body.aiDifficulty
+      : "easy";
+
+    if (difficulty !== "easy") {
+      return NextResponse.json(
+        { error: "Only Easy AI is available for now." },
+        { status: 400 },
+      );
+    }
+
+    const existingAiPlayers = (await fetchFromSupabaseWithService<PlayerRow[]>(
+      `players?select=id,user_id,display_name,created_at,lobby_ready,lobby_ready_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at,is_ai,ai_difficulty&game_id=eq.${gameId}&is_ai=eq.true`,
+      { method: "GET" },
+    )) ?? [];
+    const nextAiNumber = existingAiPlayers.length + 1;
+
+    const [aiPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
+      "players?select=id,user_id,display_name,created_at,lobby_ready,lobby_ready_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at,is_ai,ai_difficulty",
+      {
+        method: "POST",
+        headers: {
+          Prefer: "return=representation",
+        },
+        body: JSON.stringify({
+          game_id: gameId,
+          user_id: randomUUID(),
+          display_name: `Computer ${nextAiNumber}`,
+          lobby_ready: true,
+          lobby_ready_at: new Date().toISOString(),
+          is_ai: true,
+          ai_difficulty: difficulty,
+        }),
+      },
+    )) ?? [];
+
+    if (!aiPlayer) {
+      return NextResponse.json(
+        { error: "Unable to add AI player." },
+        { status: 500 },
+      );
+    }
+
+    return NextResponse.json({ ok: true, player: aiPlayer });
+  }
+
+  if (body.action === "REMOVE_AI_PLAYER") {
+    if (!body.aiPlayerId) {
+      return NextResponse.json({ error: "Missing aiPlayerId." }, { status: 400 });
+    }
+
+    const [game] = (await fetchFromSupabaseWithService<GameRow[]>(
+      `games?select=id,status,created_by&id=eq.${gameId}&limit=1`,
+      { method: "GET" },
+    )) ?? [];
+
+    if (!game) {
+      return NextResponse.json({ error: "Game not found." }, { status: 404 });
+    }
+
+    if (game.created_by && game.created_by !== user.id) {
+      return NextResponse.json(
+        { error: "Only the host can remove AI players." },
+        { status: 403 },
+      );
+    }
+
+    if (game.status !== "lobby") {
+      return NextResponse.json(
+        { error: "AI players can only be removed in the lobby." },
+        { status: 409 },
+      );
+    }
+
+    const [deletedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
+      `players?select=id,user_id,display_name,created_at,lobby_ready,lobby_ready_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at,is_ai,ai_difficulty&game_id=eq.${gameId}&id=eq.${body.aiPlayerId}&is_ai=eq.true`,
+      {
+        method: "DELETE",
+        headers: {
+          Prefer: "return=representation",
+        },
+      },
+    )) ?? [];
+
+    if (!deletedPlayer) {
+      return NextResponse.json(
+        { error: "AI player not found." },
+        { status: 404 },
+      );
+    }
+
+    return NextResponse.json({ ok: true, playerId: deletedPlayer.id });
+  }
+
   if (body.action === "SET_LOBBY_READY") {
     const [readyGame] = (await fetchFromSupabaseWithService<GameRow[]>(
       `games?select=id,status&id=eq.${gameId}&limit=1`,
@@ -282,7 +406,7 @@ export const handleLobbyAction = async ({
     }
 
     const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
-      `players?select=id,user_id,display_name,created_at,lobby_ready,lobby_ready_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at&game_id=eq.${gameId}&user_id=eq.${user.id}`,
+      `players?select=id,user_id,display_name,created_at,lobby_ready,lobby_ready_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at,is_ai,ai_difficulty&game_id=eq.${gameId}&user_id=eq.${user.id}`,
       {
         method: "PATCH",
         headers: {
@@ -334,7 +458,7 @@ export const handleLobbyAction = async ({
     }
 
     const [leavingPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
-      `players?select=id,user_id,display_name,created_at,lobby_ready,lobby_ready_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at&game_id=eq.${gameId}&user_id=eq.${user.id}&limit=1`,
+      `players?select=id,user_id,display_name,created_at,lobby_ready,lobby_ready_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at,is_ai,ai_difficulty&game_id=eq.${gameId}&user_id=eq.${user.id}&limit=1`,
       { method: "GET" },
     )) ?? [];
 
@@ -533,7 +657,7 @@ export const handleLobbyAction = async ({
     }
 
     await fetchFromSupabaseWithService(
-      `players?game_id=eq.${gameId}`,
+      `players?game_id=eq.${gameId}&is_ai=eq.false`,
       {
         method: "PATCH",
         body: JSON.stringify({

@@ -123,6 +123,8 @@ type Player = {
   free_upgrade_tokens: number;
   is_eliminated: boolean;
   eliminated_at: string | null;
+  is_ai: boolean;
+  ai_difficulty: "easy" | "medium" | "hard" | null;
 };
 
 type ActiveMacroEffectV1 = {
@@ -542,6 +544,8 @@ export default function PlayV2Page() {
   const latestAccessTokenRef = useRef<string | null>(session?.access_token ?? null);
   const latestLoadAllSlicesRef = useRef<typeof loadAllSlices | null>(null);
   const latestCurrentUserPlayerIdRef = useRef<string | null>(null);
+  const aiNudgeInFlightRef = useRef(false);
+  const lastAiNudgeKeyRef = useRef<string | null>(null);
   const sliceRequestEpochsRef = useRef<SliceRequestEpochs>({
     gameMeta: 0,
     players: 0,
@@ -716,7 +720,7 @@ export default function PlayV2Page() {
       const requestEpoch = startSliceRequest("players");
       logRealtimeAudit("load_players_start", { gameId, requestEpoch });
       const rows = await supabaseClient.fetchFromSupabase<Player[]>(
-        `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at&game_id=eq.${gameId}&order=created_at.asc`,
+        `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at,is_ai,ai_difficulty&game_id=eq.${gameId}&order=created_at.asc`,
         { method: "GET" },
         accessToken,
       );
@@ -1701,6 +1705,37 @@ export default function PlayV2Page() {
     gameState?.current_player_id === currentUserPlayer.id &&
     !currentUserPlayer.is_eliminated,
   );
+  const isAiTurn = Boolean(
+    isInProgress && currentTurnPlayer?.is_ai && !currentTurnPlayer.is_eliminated,
+  );
+
+  useEffect(() => {
+    if (!routeGameId || !isAiTurn || !gameState?.version) {
+      return;
+    }
+
+    const nudgeKey = `${routeGameId}:${gameState.version}:${gameState.current_player_id ?? "none"}`;
+    if (lastAiNudgeKeyRef.current === nudgeKey || aiNudgeInFlightRef.current) {
+      return;
+    }
+
+    lastAiNudgeKeyRef.current = nudgeKey;
+    aiNudgeInFlightRef.current = true;
+    const timeout = window.setTimeout(() => {
+      fetch("/api/bank/ai/turn", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gameId: routeGameId }),
+      })
+        .catch(() => undefined)
+        .finally(() => {
+          aiNudgeInFlightRef.current = false;
+        });
+    }, 350);
+
+    return () => window.clearTimeout(timeout);
+  }, [gameState?.current_player_id, gameState?.version, isAiTurn, routeGameId]);
+
   const pendingPurchase = useMemo<PendingPurchaseAction | null>(() => {
     const pendingAction = gameState?.pending_action;
     if (!pendingAction || typeof pendingAction !== "object") {
@@ -2110,9 +2145,9 @@ export default function PlayV2Page() {
   }, [defaultMortgageDownPaymentPercent, pendingPurchase]);
 
   const canAct =
-    isMyTurn && !isEliminated && !auctionActive && !hasBlockingPendingAction;
+    isMyTurn && !isAiTurn && !isEliminated && !auctionActive && !hasBlockingPendingAction;
   const canUseRecoveryActions =
-    isMyTurn && !isEliminated && !auctionActive && isInsolvencyRecoveryMode;
+    isMyTurn && !isAiTurn && !isEliminated && !auctionActive && isInsolvencyRecoveryMode;
   const isStandardTurnDoublesActive =
     gameState?.last_roll != null &&
     (gameState?.doubles_count ?? 0) > 0 &&
@@ -5644,7 +5679,7 @@ export default function PlayV2Page() {
         latestEventLabel={latestEventLabel}
         latestEventAnimationKey={latestVisibleEvent?.id ?? latestEventLabel ?? null}
         loading={loading}
-        notice={notice}
+        notice={isAiTurn ? "AI is taking a turn…" : notice}
         leftOpen={isLeftDrawerOpen}
         onLeftOpenChange={setIsLeftDrawerOpen}
         leftDrawerMode={leftDrawerMode}

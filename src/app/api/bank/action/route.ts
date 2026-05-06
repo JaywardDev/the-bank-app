@@ -119,6 +119,8 @@ type BaseActionRequest = {
   boardPackId?: string;
   gameMode?: GameModeConfig;
   roundLimit?: number;
+  aiDifficulty?: "easy" | "medium" | "hard";
+  aiPlayerId?: string;
   expectedVersion?: number;
 };
 
@@ -153,6 +155,8 @@ type BankActionRequest =
         | "LEAVE_GAME"
         | "START_GAME"
         | "SET_LOBBY_READY"
+        | "ADD_AI_PLAYER"
+        | "REMOVE_AI_PLAYER"
         | "END_GAME"
         | "ROLL_DICE"
         | "END_TURN"
@@ -266,6 +270,8 @@ type PlayerRow = {
   free_upgrade_tokens: number;
   is_eliminated: boolean;
   eliminated_at: string | null;
+  is_ai: boolean;
+  ai_difficulty: "easy" | "medium" | "hard" | null;
 };
 
 type ActiveMacroEffect = {
@@ -5169,7 +5175,13 @@ const parseBearerToken = (authorization: string | null) => {
   return token;
 };
 
-export async function POST(request: Request) {
+const executeBankActionRequest = async ({
+  body,
+  user,
+}: {
+  body: BankActionRequest;
+  user: SupabaseUser;
+}): Promise<NextResponse> => {
   try {
     if (!isConfigured()) {
       return NextResponse.json(
@@ -5178,17 +5190,6 @@ export async function POST(request: Request) {
       );
     }
 
-    const token = parseBearerToken(request.headers.get("authorization"));
-    if (!token) {
-      return NextResponse.json({ error: "Missing session." }, { status: 401 });
-    }
-
-    const user = await fetchUser(token);
-    if (!user) {
-      return NextResponse.json({ error: "Invalid session." }, { status: 401 });
-    }
-
-    const body = (await request.json()) as BankActionRequest;
     if (!body.action) {
       return NextResponse.json({ error: "Missing action." }, { status: 400 });
     }
@@ -5244,7 +5245,7 @@ export async function POST(request: Request) {
     const jailFineAmount = boardPackEconomy.jailFineAmount ?? 50;
 
     const players = (await fetchFromSupabaseWithService<PlayerRow[]>(
-      `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at&game_id=eq.${gameId}&order=created_at.asc`,
+      `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at,is_ai,ai_difficulty&game_id=eq.${gameId}&order=created_at.asc`,
       { method: "GET" },
     )) ?? [];
 
@@ -10581,6 +10582,41 @@ export async function POST(request: Request) {
       { error: "Unsupported action." },
       { status: 400 },
     );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error.";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+};
+
+export async function POST(request: Request) {
+  try {
+    if (!isConfigured()) {
+      return NextResponse.json(
+        { error: "Supabase is not configured." },
+        { status: 500 },
+      );
+    }
+
+    const internalAiToken = request.headers.get("x-bank-internal-ai-token");
+    const internalAiUserId = request.headers.get("x-bank-ai-user-id");
+    let user: SupabaseUser | null = null;
+
+    if (internalAiToken && internalAiToken === supabaseServiceRoleKey && internalAiUserId) {
+      user = { id: internalAiUserId, email: null };
+    } else {
+      const token = parseBearerToken(request.headers.get("authorization"));
+      if (!token) {
+        return NextResponse.json({ error: "Missing session." }, { status: 401 });
+      }
+
+      user = await fetchUser(token);
+      if (!user) {
+        return NextResponse.json({ error: "Invalid session." }, { status: 401 });
+      }
+    }
+
+    const body = (await request.json()) as BankActionRequest;
+    return await executeBankActionRequest({ body, user });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error.";
     return NextResponse.json({ error: message }, { status: 500 });

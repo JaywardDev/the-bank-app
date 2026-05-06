@@ -40,6 +40,8 @@ type Player = {
   position: number;
   is_eliminated: boolean;
   eliminated_at: string | null;
+  is_ai: boolean;
+  ai_difficulty: "easy" | "medium" | "hard" | null;
 };
 
 type GameState = {
@@ -58,6 +60,7 @@ export default function LobbyPage() {
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [hostGameMode, setHostGameMode] = useState<"classic" | "round_mode">("classic");
   const [hostRoundLimit, setHostRoundLimit] = useState<RoundLimitOption>(DEFAULT_ROUND_LIMIT);
+  const [aiDifficulty, setAiDifficulty] = useState<"easy" | "medium" | "hard">("easy");
   const [authLoading, setAuthLoading] = useState(true);
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
   const [sessionInvalid, setSessionInvalid] = useState(false);
@@ -100,7 +103,7 @@ export default function LobbyPage() {
       }
 
       const playerRows = await supabaseClient.fetchFromSupabase<Player[]>(
-        `players?select=id,user_id,display_name,created_at,lobby_ready,lobby_ready_at,position,is_eliminated,eliminated_at&game_id=eq.${gameId}&order=created_at.asc`,
+        `players?select=id,user_id,display_name,created_at,lobby_ready,lobby_ready_at,position,is_eliminated,eliminated_at,is_ai,ai_difficulty&game_id=eq.${gameId}&order=created_at.asc`,
         { method: "GET" },
         accessToken,
       );
@@ -574,6 +577,54 @@ export default function LobbyPage() {
     }
   };
 
+
+  const handleAddAiPlayer = async () => {
+    if (!session || !activeGame) {
+      setNotice("Join a lobby before adding AI players.");
+      return;
+    }
+
+    setLoadingAction("add-ai");
+    setNotice(null);
+
+    try {
+      const result = await performBankActionWithRecovery({
+        action: "ADD_AI_PLAYER",
+        gameId: activeGame.id,
+        aiDifficulty,
+      });
+      if (!result) return;
+      await loadLobby(activeGame.id, result.accessToken);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to add AI player.");
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
+  const handleRemoveAiPlayer = async (aiPlayerId: string) => {
+    if (!session || !activeGame) {
+      return;
+    }
+
+    setLoadingAction(`remove-ai:${aiPlayerId}`);
+    setNotice(null);
+
+    try {
+      const result = await performBankActionWithRecovery({
+        action: "REMOVE_AI_PLAYER",
+        gameId: activeGame.id,
+        aiPlayerId,
+      });
+      if (!result) return;
+      await loadLobby(activeGame.id, result.accessToken);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Unable to remove AI player.");
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
   const isHost = Boolean(
     session && activeGame?.created_by && session.user.id === activeGame.created_by,
   );
@@ -684,13 +735,25 @@ export default function LobbyPage() {
                         </span>
                       ) : null}
                     </div>
-                    <span
-                      className="text-lg leading-none"
-                      role="img"
-                      aria-label={player.lobby_ready ? "ready" : "not ready"}
-                    >
-                      {player.lobby_ready ? "✅" : "❌"}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      {isHost && player.is_ai && activeGame.status === "lobby" ? (
+                        <button
+                          className="rounded-md border border-neutral-300 bg-white px-2 py-1 text-[11px] font-semibold text-neutral-700 disabled:opacity-50"
+                          type="button"
+                          onClick={() => handleRemoveAiPlayer(player.id)}
+                          disabled={loadingAction === `remove-ai:${player.id}`}
+                        >
+                          {loadingAction === `remove-ai:${player.id}` ? "Removing…" : "Remove"}
+                        </button>
+                      ) : null}
+                      <span
+                        className="text-lg leading-none"
+                        role="img"
+                        aria-label={player.lobby_ready ? "ready" : "not ready"}
+                      >
+                        {player.lobby_ready ? "✅" : "❌"}
+                      </span>
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -734,6 +797,26 @@ export default function LobbyPage() {
                     >
                       Host settings
                     </button>
+                    <div className="flex items-center gap-2 rounded-lg border border-neutral-300 bg-white/85 px-2 py-1.5">
+                      <select
+                        className="h-8 rounded-md border border-neutral-300 bg-white px-2 text-xs font-semibold text-neutral-800"
+                        value={aiDifficulty}
+                        onChange={(event) => setAiDifficulty(event.target.value as "easy" | "medium" | "hard")}
+                        aria-label="AI difficulty"
+                      >
+                        <option value="easy">Easy</option>
+                        <option value="medium" disabled>Medium — Future</option>
+                        <option value="hard" disabled>Hard — Future</option>
+                      </select>
+                      <button
+                        className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-400"
+                        type="button"
+                        onClick={handleAddAiPlayer}
+                        disabled={loadingAction === "add-ai" || aiDifficulty !== "easy"}
+                      >
+                        {loadingAction === "add-ai" ? "Adding…" : "Add AI"}
+                      </button>
+                    </div>
                     <button
                       className="rounded-lg border border-rose-200/80 bg-rose-50/85 px-4 py-2 text-sm font-semibold text-rose-800"
                       type="button"
