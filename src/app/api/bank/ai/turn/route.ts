@@ -1,8 +1,14 @@
 import { NextResponse } from "next/server";
-import { SUPABASE_ANON_KEY, SUPABASE_URL } from "@/lib/env";
+import { SUPABASE_URL } from "@/lib/env";
+import {
+  executeBankActionRequest,
+  fetchUser,
+  isConfigured,
+  parseBearerToken,
+  type BankActionRequest,
+} from "@/lib/server/actions/executeBankActionRequest";
 
 const supabaseUrl = (process.env.SUPABASE_URL ?? SUPABASE_URL ?? "").trim();
-const supabaseAnonKey = (process.env.SUPABASE_ANON_KEY ?? SUPABASE_ANON_KEY ?? "").trim();
 const supabaseServiceRoleKey = (process.env.SUPABASE_SERVICE_ROLE_KEY ?? "").trim();
 
 const bankHeaders = {
@@ -11,7 +17,8 @@ const bankHeaders = {
   "Content-Type": "application/json",
 };
 
-const isConfigured = () => Boolean(supabaseUrl && supabaseAnonKey && supabaseServiceRoleKey);
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const AI_LOCK_TTL_SECONDS = 90;
 
 type AiDifficulty = "easy" | "medium" | "hard";
 
@@ -104,6 +111,17 @@ const loadSnapshot = async (gameId: string) => {
   return { game: game ?? null, players, gameState: gameState ?? null };
 };
 
+const userIsGameMember = async (gameId: string, userId: string) => {
+  const [player] = (await fetchFromSupabaseWithService<Array<{ id: string }>>(
+    `players?select=id&game_id=eq.${gameId}&user_id=eq.${userId}&limit=1`,
+    { method: "GET" },
+  )) ?? [];
+  return Boolean(player);
+};
+
+const rpcBoolean = (rows: boolean | boolean[] | null) =>
+  Array.isArray(rows) ? rows[0] === true : rows === true;
+
 const acquireLock = async ({
   gameId,
   playerId,
@@ -122,10 +140,34 @@ const acquireLock = async ({
       p_player_id: playerId,
       p_state_version: stateVersion,
       p_lock_token: lockToken,
-      p_lock_ttl_seconds: 90,
+      p_lock_ttl_seconds: AI_LOCK_TTL_SECONDS,
     }),
   });
-  return Array.isArray(rows) ? rows[0] === true : rows === true;
+  return rpcBoolean(rows);
+};
+
+const validateAndRenewLock = async ({
+  gameId,
+  playerId,
+  stateVersion,
+  lockToken,
+}: {
+  gameId: string;
+  playerId: string;
+  stateVersion: number;
+  lockToken: string;
+}) => {
+  const rows = await fetchFromSupabaseWithService<boolean | boolean[]>("rpc/validate_and_renew_ai_turn_lock", {
+    method: "POST",
+    body: JSON.stringify({
+      p_game_id: gameId,
+      p_player_id: playerId,
+      p_state_version: stateVersion,
+      p_lock_token: lockToken,
+      p_lock_ttl_seconds: AI_LOCK_TTL_SECONDS,
+    }),
+  });
+  return rpcBoolean(rows);
 };
 
 const releaseLock = async (gameId: string, lockToken: string) => {
@@ -211,10 +253,33 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Supabase is not configured." }, { status: 500 });
   }
 
+  const token = parseBearerToken(request.headers.get("authorization"));
+  if (!token) {
+    return NextResponse.json({ error: "Missing session." }, { status: 401 });
+  }
+
+  const user = await fetchUser(token);
+  if (!user) {
+    return NextResponse.json({ error: "Invalid session." }, { status: 401 });
+  }
+
   const body = (await request.json().catch(() => null)) as { gameId?: unknown } | null;
-  const gameId = typeof body?.gameId === "string" ? body.gameId : null;
-  if (!gameId) {
-    return NextResponse.json({ error: "Missing gameId." }, { status: 400 });
+  if (!body || Array.isArray(body) || typeof body !== "object") {
+    return NextResponse.json({ error: "Invalid request." }, { status: 400 });
+  }
+
+  const bodyKeys = Object.keys(body);
+  if (bodyKeys.length !== 1 || bodyKeys[0] !== "gameId") {
+    return NextResponse.json({ error: "AI turn nudges may only include gameId." }, { status: 400 });
+  }
+
+  const gameId = typeof body.gameId === "string" ? body.gameId : null;
+  if (!gameId || !UUID_PATTERN.test(gameId)) {
+    return NextResponse.json({ error: "Invalid gameId." }, { status: 400 });
+  }
+
+  if (!(await userIsGameMember(gameId, user.id))) {
+    return NextResponse.json({ error: "Forbidden." }, { status: 403 });
   }
 
   const initial = await loadSnapshot(gameId);
@@ -252,6 +317,16 @@ export async function POST(request: Request) {
       if (!player?.is_ai || player.is_eliminated) return NextResponse.json({ ok: true, actions, stopped: "human_or_missing_turn" });
       if (player.ai_difficulty && player.ai_difficulty !== "easy") return NextResponse.json({ ok: true, actions, stopped: "difficulty_unavailable" });
 
+      const lockStillOwned = await validateAndRenewLock({
+        gameId,
+        playerId: player.id,
+        stateVersion: gameState.version,
+        lockToken,
+      });
+      if (!lockStillOwned) {
+        return NextResponse.json({ ok: true, actions, stopped: "lock_lost" });
+      }
+
       const stateKey = JSON.stringify({
         version: gameState.version,
         currentPlayerId: gameState.current_player_id,
@@ -266,18 +341,13 @@ export async function POST(request: Request) {
       const aiAction = chooseEasyAction({ state: gameState, player });
       if (!aiAction) return NextResponse.json({ ok: true, actions, stopped: "unsupported_state" });
 
-      const actionResponse = await fetch(new URL("/api/bank/action", request.url), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-bank-internal-ai-token": supabaseServiceRoleKey,
-          "x-bank-ai-user-id": player.user_id,
-        },
-        body: JSON.stringify({
+      const actionResponse = await executeBankActionRequest({
+        user: { id: player.user_id, email: null },
+        body: {
           ...aiAction,
           gameId,
           expectedVersion: gameState.version,
-        }),
+        } as BankActionRequest,
       });
       const payload = (await actionResponse.json().catch(() => null)) as { error?: string; currentVersion?: number } | null;
       if (!actionResponse.ok) {

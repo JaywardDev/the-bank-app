@@ -1710,7 +1710,7 @@ export default function PlayV2Page() {
   );
 
   useEffect(() => {
-    if (!routeGameId || !isAiTurn || !gameState?.version) {
+    if (!routeGameId || !isAiTurn || !gameState?.version || !session?.access_token) {
       return;
     }
 
@@ -1722,11 +1722,31 @@ export default function PlayV2Page() {
     lastAiNudgeKeyRef.current = nudgeKey;
     aiNudgeInFlightRef.current = true;
     const timeout = window.setTimeout(() => {
-      fetch("/api/bank/ai/turn", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ gameId: routeGameId }),
-      })
+      const postAiNudge = (accessToken: string) =>
+        fetch("/api/bank/ai/turn", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({ gameId: routeGameId }),
+        });
+
+      postAiNudge(session.access_token)
+        .then(async (response) => {
+          if (response.status === 401) {
+            const refreshedSession = await supabaseClient.refreshSession();
+            setSession(refreshedSession);
+            if (refreshedSession?.access_token) {
+              return postAiNudge(refreshedSession.access_token);
+            }
+          }
+
+          if (!response.ok && response.status !== 401 && response.status !== 403) {
+            console.warn("AI turn nudge failed", response.status);
+          }
+          return response;
+        })
         .catch(() => undefined)
         .finally(() => {
           aiNudgeInFlightRef.current = false;
@@ -1734,7 +1754,7 @@ export default function PlayV2Page() {
     }, 350);
 
     return () => window.clearTimeout(timeout);
-  }, [gameState?.current_player_id, gameState?.version, isAiTurn, routeGameId]);
+  }, [gameState?.current_player_id, gameState?.version, isAiTurn, routeGameId, session?.access_token]);
 
   const pendingPurchase = useMemo<PendingPurchaseAction | null>(() => {
     const pendingAction = gameState?.pending_action;

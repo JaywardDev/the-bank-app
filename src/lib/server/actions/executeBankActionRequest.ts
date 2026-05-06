@@ -1,0 +1,10590 @@
+import "server-only";
+import { NextResponse } from "next/server";
+import {
+  chanceCards,
+  communityCards,
+  DEFAULT_BOARD_PACK_ECONOMY,
+  getBoardPackById,
+} from "@/lib/boardPacks";
+import type { BoardPackEconomy, BoardTile, BoardTileType, UtilityKind } from "@/lib/boardPacks";
+import { SUPABASE_ANON_KEY, SUPABASE_URL } from "@/lib/env";
+import {
+  MACRO_EVENT_INTERVAL_ROUNDS,
+  type MacroEventEffect,
+} from "@/lib/macroDecks";
+import {
+  getMacroHouseSellMultiplierV1,
+  normalizeMacroEffects,
+} from "@/lib/macroEffects";
+import {
+  MACRO_DECK_V1,
+  drawMacroCardV1,
+  type MacroEffectsV1,
+  type MacroRarity,
+} from "@/lib/macroDeckV1";
+import { DEFAULT_RULES, getRules } from "@/lib/rules";
+import { MACRO_DECK_PH_HARD_V1, drawMacroCardPhHardV1 } from "@/lib/macroDeckPhHardV1";
+import { computeEffectiveGoSalary } from "@/lib/salary";
+import {
+  computeIncomeTaxAmount,
+  computeIncomeTaxBreakdown,
+  computeSuperTaxBreakdown,
+  isCustomTaxBoardPack,
+} from "@/lib/tax";
+import {
+  COLLATERAL_LOAN_LTV,
+  computeAuthoritativeNetWorthBreakdown,
+  computeOwnedPropertyCollateralPrincipal,
+} from "@/lib/netWorth";
+import {
+  calculateAmortizedPaymentPerTurn,
+  calculateDownPaymentAmount,
+  calculateMortgagePrincipalFromDownPayment,
+  defaultPurchaseDownPaymentPercentFromMortgageLtv,
+  isValidPurchaseDownPaymentPercent,
+  type PurchaseDownPaymentPercent,
+} from "@/lib/loanMath";
+import {
+  settleBettingMarketForRoll,
+  type BettingMarketBetKind,
+} from "@/lib/bettingMarket";
+import {
+  clearInlandOwnershipForPlayer,
+  computeCoalUtilitySynergyPayouts,
+  computeOilRailSynergyPayouts,
+  computeWaterUtilitySynergyPayouts,
+  computeInlandPassiveIncomeForPlayer,
+  normalizeInlandCellRecords,
+  serializeInlandCellRecords,
+} from "@/lib/inlandExploration";
+import { resolveBoardTilesForRules } from "@/lib/resolvedBoardTiles";
+import { getMaxDevelopmentLevel, getNextBuildCost } from "@/lib/developmentCosts";
+import {
+  getRuntimeUnlocksFromRules,
+  mergeCommunicationUnlockIntoRules,
+  shouldUnlockCommunicationUtility,
+} from "@/lib/runtimeUnlocks";
+import { getUtilityRentMultiplierForOwnedCount, ownsFullyBuiltColorSet } from "@/lib/rent";
+import { handleLobbyAction } from "@/lib/server/actions/lobbyActions";
+import { handleBettingAction } from "@/lib/server/actions/bettingActions";
+import { handleInlandAction } from "@/lib/server/actions/inlandActions";
+import { handleAuctionAction } from "@/lib/server/actions/auctionActions";
+import { handleTradeAction } from "@/lib/server/actions/tradeActions";
+import { isRoundLimitOption, shouldEndRoundModeGame } from "@/lib/gameConfig";
+import { isPropertySaleLocked } from "@/lib/propertySaleLock";
+import { getPropertyMarketValue } from "@/lib/propertyMarketValue";
+
+const supabaseUrl = (process.env.SUPABASE_URL ?? SUPABASE_URL ?? "").trim();
+const supabaseAnonKey = (
+  process.env.SUPABASE_ANON_KEY ?? SUPABASE_ANON_KEY ?? ""
+).trim();
+const supabaseServiceRoleKey = (process.env.SUPABASE_SERVICE_ROLE_KEY ?? "").trim();
+
+const playerHeaders = {
+  apikey: supabaseAnonKey,
+  "Content-Type": "application/json",
+};
+
+const bankHeaders = {
+  apikey: supabaseServiceRoleKey,
+  Authorization: `Bearer ${supabaseServiceRoleKey}`,
+  "Content-Type": "application/json",
+};
+
+const DEFAULT_MACRO_DECK = {
+  id: "macro-v1",
+  name: "Macro V1",
+  cards: MACRO_DECK_V1,
+  draw: (lastCardId?: string) => drawMacroCardV1(lastCardId),
+};
+
+const resolveMacroDeck = (
+  boardPack: ReturnType<typeof getBoardPackById> | null | undefined,
+) => {
+  if (boardPack?.id === "philippines-hard") {
+    return {
+      id: "macro-ph-hard-v1",
+      name: "Macro PH Hard V1",
+      cards: MACRO_DECK_PH_HARD_V1,
+      draw: (lastCardId?: string) => drawMacroCardPhHardV1(lastCardId),
+    };
+  }
+  return boardPack?.macroDeck ?? DEFAULT_MACRO_DECK;
+};
+
+type BaseActionRequest = {
+  gameId?: string;
+  playerName?: string;
+  joinCode?: string;
+  displayName?: string;
+  boardPackId?: string;
+  gameMode?: GameModeConfig;
+  roundLimit?: number;
+  aiDifficulty?: "easy" | "medium" | "hard";
+  aiPlayerId?: string;
+  expectedVersion?: number;
+};
+
+type GameModeConfig = "classic" | "round_mode";
+
+export type BankActionRequest =
+  | (BaseActionRequest & {
+      action: "UPDATE_GAME_SETTINGS";
+      gameMode?: GameModeConfig;
+      roundLimit?: number;
+    })
+  | (BaseActionRequest & {
+      action: "PROPOSE_TRADE";
+      counterpartyPlayerId: string;
+      offerCash?: number;
+      offerFreeBuildTokens?: number;
+      offerFreeUpgradeTokens?: number;
+      offerTiles?: number[];
+      requestCash?: number;
+      requestFreeBuildTokens?: number;
+      requestFreeUpgradeTokens?: number;
+      requestTiles?: number[];
+    })
+  | (BaseActionRequest & {
+      action: "ACCEPT_TRADE" | "REJECT_TRADE" | "CANCEL_TRADE";
+      tradeId: string;
+    })
+  | (BaseActionRequest & {
+      action?: Exclude<
+        | "CREATE_GAME"
+        | "JOIN_GAME"
+        | "LEAVE_GAME"
+        | "START_GAME"
+        | "SET_LOBBY_READY"
+        | "ADD_AI_PLAYER"
+        | "REMOVE_AI_PLAYER"
+        | "END_GAME"
+        | "ROLL_DICE"
+        | "END_TURN"
+        | "DECLINE_PROPERTY"
+        | "BUY_PROPERTY"
+        | "JAIL_PAY_FINE"
+        | "JAIL_ROLL_FOR_DOUBLES"
+        | "USE_GET_OUT_OF_JAIL_FREE"
+        | "CONFIRM_GO_TO_JAIL"
+        | "CONFIRM_PENDING_CARD"
+        | "CONFIRM_MACRO_EVENT"
+        | "CONFIRM_INSOLVENCY_PAYMENT"
+        | "DECLARE_BANKRUPTCY"
+        | "SURRENDER_GAME"
+        | "PAYOFF_COLLATERAL_LOAN"
+        | "PAYOFF_PURCHASE_MORTGAGE"
+        | "CONFIRM_INCOME_TAX"
+        | "CONFIRM_SUPER_TAX"
+        | "USE_TAX_EXEMPTION_PASS"
+        | "BUILD_HOUSE"
+        | "SELL_HOUSE"
+        | "SELL_HOTEL"
+        | "SELL_TO_MARKET"
+        | "EXPLORE_INTERIOR"
+        | "SELL_INTERIOR_RESOURCE"
+        | "DEVELOP_INTERIOR_SITE"
+        | "DEFER_INTERIOR_RESOURCE_DECISION"
+        | "BUY_BANK_OWNED_INTERIOR_SITE"
+        | "DEFAULT_PROPERTY",
+        "DECLINE_PROPERTY" | "BUY_PROPERTY"
+      >;
+      tileIndex?: number;
+      loanId?: string;
+      mortgageId?: string;
+      interiorCell?: { row?: unknown; col?: unknown };
+      useConstructionVoucher?: unknown;
+    })
+  | (BaseActionRequest & {
+      action: "DECLINE_PROPERTY" | "BUY_PROPERTY";
+      tileIndex: number;
+      financing?: "MORTGAGE";
+      downPaymentPercent?: PurchaseDownPaymentPercent;
+    })
+  | (BaseActionRequest & {
+      action: "AUCTION_BID";
+      amount: number;
+    })
+  | (BaseActionRequest & {
+      action: "AUCTION_PASS";
+    })
+  | (BaseActionRequest & {
+      action: "TAKE_COLLATERAL_LOAN";
+      tileIndex: number;
+    })
+  | (BaseActionRequest & {
+      action: "PLACE_BETTING_MARKET_BET";
+      kind: BettingMarketBetKind;
+      stake: number;
+      selection: Record<string, unknown>;
+    })
+  | (BaseActionRequest & {
+      action: "CANCEL_BETTING_MARKET_BET";
+      betId: string;
+    })
+  | (BaseActionRequest & {
+      action: "PAYOFF_COLLATERAL_LOAN";
+      loanId: string;
+    })
+  | (BaseActionRequest & {
+      action: "PAYOFF_PURCHASE_MORTGAGE";
+      mortgageId: string;
+    })
+  | (BaseActionRequest & {
+      action:
+        | "CONFIRM_INSOLVENCY_PAYMENT"
+        | "DECLARE_BANKRUPTCY"
+        | "SURRENDER_GAME"
+        | "CONFIRM_SUPER_TAX"
+        | "CONFIRM_INCOME_TAX"
+        | "USE_TAX_EXEMPTION_PASS";
+    });
+
+export type SupabaseUser = {
+  id: string;
+  email: string | null;
+};
+
+type GameRow = {
+  id: string;
+  join_code: string | null;
+  status: string | null;
+  starting_cash: number | null;
+  created_at: string | null;
+  created_by: string | null;
+  board_pack_id: string | null;
+  game_mode: GameModeConfig | null;
+  round_limit: number | null;
+};
+
+type PlayerRow = {
+  id: string;
+  user_id: string;
+  display_name: string | null;
+  created_at: string | null;
+  position: number;
+  is_in_jail: boolean;
+  jail_turns_remaining: number;
+  get_out_of_jail_free_count: number;
+  tax_exemption_pass_count: number;
+  free_build_tokens: number;
+  free_upgrade_tokens: number;
+  is_eliminated: boolean;
+  eliminated_at: string | null;
+  is_ai: boolean;
+  ai_difficulty: "easy" | "medium" | "hard" | null;
+};
+
+type ActiveMacroEffect = {
+  id: string;
+  name: string;
+  effects: MacroEventEffect[];
+  remaining_rounds: number;
+  started_round: number;
+};
+
+type ActiveMacroEffectV1 = {
+  id: string;
+  name: string;
+  rarity: MacroRarity | null;
+  effects: MacroEffectsV1;
+  roundsRemaining: number;
+  roundsApplied: number;
+  tooltip?: string;
+};
+
+type InsolvencyReason =
+  | "PAY_RENT"
+  | "PAY_TAX"
+  | "JAIL_PAY_FINE"
+  | "CARD_PAY"
+  | "COLLATERAL_LOAN_PAYMENT"
+  | "MACRO_INTEREST_SURCHARGE";
+
+type InsolvencyPendingAction = {
+  type: "INSOLVENCY_RECOVERY";
+  player_id: string;
+  reason: InsolvencyReason | null;
+  amount_due: number;
+  cash_available: number;
+  shortfall: number;
+  owed_to_player_id: string | null;
+  tile_index: number | null;
+  tile_id: string | null;
+  label: string | null;
+  tax_kind?: "INCOME_TAX";
+};
+
+type SuperTaxPendingAction = {
+  type: "SUPER_TAX_CONFIRM";
+  player_id: string;
+  tile_id: string;
+  tile_index: number;
+  tile_name: string;
+  boardpack_id: string | null;
+  current_cash: number;
+  asset_value: number;
+  total_liabilities: number;
+  net_worth_for_tax: number;
+  tax_rate: number;
+  tax_amount: number;
+  uses_custom_formula: boolean;
+  currency_code: string;
+  currency_symbol: string;
+  return_turn_phase: string;
+  tax_exemption_pass_count: number;
+};
+
+type IncomeTaxPendingAction = {
+  type: "INCOME_TAX_CONFIRM";
+  player_id: string;
+  tile_id: string;
+  tile_index: number;
+  tile_name: string;
+  boardpack_id: string | null;
+  current_cash: number;
+  baseline_cash: number;
+  taxable_gain: number;
+  tax_rate: number;
+  tax_amount: number;
+  currency_code: string;
+  currency_symbol: string;
+  return_turn_phase: string;
+  tax_exemption_pass_count: number;
+};
+
+type GoToJailPendingAction = {
+  type: "GO_TO_JAIL_CONFIRM";
+  player_id: string;
+  source: "tile" | "card" | "three_doubles" | "other";
+  from_tile_index: number;
+  to_jail_tile_index: number;
+};
+
+
+type FinalStanding = {
+  playerId: string;
+  playerName: string;
+  rank: number;
+  cash: number;
+  netWorth: number;
+  isWinner: boolean;
+  isEliminated: boolean;
+  ownedCount: number;
+  liabilityCount: number;
+};
+
+type BankruptcyCandidate = {
+  reason: InsolvencyReason;
+  cashBefore: number;
+  cashAfter: number;
+  amountDue: number;
+  owedToPlayerId?: string | null;
+  tileIndex?: number | null;
+  tileId?: string | null;
+  label?: string | null;
+  taxKind?: "INCOME_TAX";
+};
+
+type GameStateRow = {
+  game_id: string;
+  version: number;
+  // References players.id (not auth user_id).
+  current_player_id: string | null;
+  balances: Record<string, number> | null;
+  last_roll: number | null;
+  doubles_count: number | null;
+  rounds_elapsed: number | null;
+  last_macro_event_id: string | null;
+  active_macro_effects: ActiveMacroEffect[] | null;
+  active_macro_effects_v1: ActiveMacroEffectV1[] | null;
+  turn_phase: string | null;
+  pending_action: Record<string, unknown> | null;
+  chance_index: number | null;
+  community_index: number | null;
+  chance_order: number[] | null;
+  community_order: number[] | null;
+  chance_draw_ptr: number | null;
+  community_draw_ptr: number | null;
+  chance_seed: string | null;
+  community_seed: string | null;
+  chance_reshuffle_count: number | null;
+  community_reshuffle_count: number | null;
+  free_parking_pot: number | null;
+  rules: Partial<ReturnType<typeof getRules>> | null;
+  auction_active: boolean | null;
+  auction_tile_index: number | null;
+  auction_initiator_player_id: string | null;
+  auction_current_bid: number | null;
+  auction_current_winner_player_id: string | null;
+  auction_turn_player_id: string | null;
+  auction_turn_ends_at: string | null;
+  auction_eligible_player_ids: string[] | null;
+  auction_passed_player_ids: string[] | null;
+  auction_min_increment: number | null;
+  pending_card_active: boolean | null;
+  pending_card_deck: "CHANCE" | "COMMUNITY" | null;
+  pending_card_id: string | null;
+  pending_card_title: string | null;
+  pending_card_kind: string | null;
+  pending_card_payload: Record<string, unknown> | null;
+  pending_card_drawn_by_player_id: string | null;
+  pending_card_drawn_at: string | null;
+  pending_card_source_tile_index: number | null;
+  skip_next_roll_by_player: Record<string, boolean> | null;
+  income_tax_baseline_cash_by_player: Record<string, number> | null;
+  betting_market_state: Record<string, unknown> | null;
+  inland_explored_cells: unknown[] | null;
+};
+
+type OwnershipRow = {
+  tile_index: number;
+  owner_player_id: string | null;
+  acquired_round: number | null;
+  collateral_loan_id: string | null;
+  purchase_mortgage_id: string | null;
+  houses: number | null;
+};
+
+type OwnershipByTile = Record<
+  number,
+  {
+    owner_player_id: string;
+    acquired_round: number | null;
+    collateral_loan_id: string | null;
+    purchase_mortgage_id: string | null;
+    houses: number;
+  }
+>;
+
+type PlayerLoanRow = {
+  id: string;
+  game_id: string;
+  player_id: string;
+  collateral_tile_index: number;
+  principal: number;
+  remaining_principal: number;
+  rate_per_turn: number;
+  term_turns: number;
+  turns_remaining: number;
+  payment_per_turn: number;
+  status: string;
+};
+
+type PurchaseMortgageRow = {
+  id: string;
+  game_id: string;
+  player_id: string;
+  tile_index: number;
+  principal_original: number;
+  principal_remaining: number;
+  rate_per_turn: number;
+  term_turns: number;
+  turns_remaining: number;
+  payment_per_turn: number;
+  turns_elapsed: number;
+  accrued_interest_unpaid: number;
+  status: string;
+};
+
+type TileInfo = {
+  tile_id: string;
+  type: BoardTileType;
+  index: number;
+  name: string;
+  price?: number;
+  baseRent?: number;
+  taxAmount?: number;
+  colorGroup?: string;
+  houseCost?: number;
+  rentByHouses?: number[];
+  utilityKind?: UtilityKind;
+};
+
+type DiceEventPayload = {
+  player_id: string;
+  player_name: string | null;
+  roll: number;
+  dice: number[];
+  doubles_count?: number;
+  rolls_this_turn?: number;
+};
+
+const OWNABLE_TILE_TYPES = new Set(["PROPERTY", "RAIL", "UTILITY"]);
+
+const maybeUnlockCommunicationUtility = ({
+  gameState,
+  boardPack,
+  ownershipByTile,
+  events,
+}: {
+  gameState: GameStateRow;
+  boardPack: ReturnType<typeof getBoardPackById>;
+  ownershipByTile: OwnershipByTile;
+  events: Array<{ event_type: string; payload: Record<string, unknown> }>;
+}) => {
+  const unlocks = getRuntimeUnlocksFromRules(gameState.rules);
+  const boardTiles = resolveBoardTilesForRules({ boardPack, rules: gameState.rules });
+  const shouldUnlock = shouldUnlockCommunicationUtility({
+    alreadyUnlocked: unlocks.communicationUtilityUnlocked,
+    boardTiles,
+    ownershipByTile,
+    inlandExploredCells: gameState.inland_explored_cells,
+  });
+  if (!shouldUnlock) {
+    return gameState.rules;
+  }
+
+  events.push({
+    event_type: "COMMUNICATION_UTILITY_UNLOCKED",
+    payload: {
+      tile_index: 20,
+      tile_id: "communication-network",
+      tile_name: "Communications Network",
+    },
+  });
+  return mergeCommunicationUnlockIntoRules(gameState.rules);
+};
+
+export const isConfigured = () =>
+  Boolean(supabaseUrl && supabaseAnonKey && supabaseServiceRoleKey);
+
+const createJoinCode = () => {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const segments = Array.from({ length: 6 }, () =>
+    alphabet[Math.floor(Math.random() * alphabet.length)],
+  );
+  return segments.join("");
+};
+
+const hashStringToUint32 = (value: string) => {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+};
+
+const normalizeActiveMacroEffects = (raw: unknown): ActiveMacroEffect[] => {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+      const data = entry as Record<string, unknown>;
+      const effects = Array.isArray(data.effects)
+        ? normalizeMacroEffects(data.effects as MacroEventEffect[])
+        : [];
+      const remainingRounds =
+        typeof data.remaining_rounds === "number" ? data.remaining_rounds : 0;
+      return {
+        id: typeof data.id === "string" ? data.id : "unknown",
+        name: typeof data.name === "string" ? data.name : "Macroeconomic event",
+        effects,
+        remaining_rounds: remainingRounds,
+        started_round:
+          typeof data.started_round === "number" ? data.started_round : 0,
+      };
+    })
+    .filter((entry): entry is ActiveMacroEffect => Boolean(entry));
+};
+
+const normalizeActiveMacroEffectsV1 = (raw: unknown): ActiveMacroEffectV1[] => {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+      const data = entry as Record<string, unknown>;
+      const effects =
+        data.effects && typeof data.effects === "object"
+          ? (data.effects as MacroEffectsV1)
+          : {};
+      return {
+        id: typeof data.id === "string" ? data.id : "unknown",
+        name: typeof data.name === "string" ? data.name : "Macroeconomic event",
+        rarity: typeof data.rarity === "string" ? (data.rarity as MacroRarity) : null,
+        effects,
+        roundsRemaining: Number.isFinite(data.roundsRemaining)
+          ? (data.roundsRemaining as number)
+          : 0,
+        roundsApplied:
+          typeof data.roundsApplied === "number" ? data.roundsApplied : 0,
+        ...(typeof data.tooltip === "string" ? { tooltip: data.tooltip } : {}),
+      };
+    })
+    .filter((entry): entry is ActiveMacroEffectV1 => Boolean(entry));
+};
+
+const getActiveMacroEffectsForRules = (
+  raw: unknown,
+  macroEnabled: boolean,
+): ActiveMacroEffect[] =>
+  macroEnabled ? normalizeActiveMacroEffects(raw) : [];
+
+const getActiveMacroEffectsV1ForRules = (
+  raw: unknown,
+  macroEnabled: boolean,
+): ActiveMacroEffectV1[] =>
+  macroEnabled ? normalizeActiveMacroEffectsV1(raw) : [];
+
+const normalizeMacroEffectsV1 = (effects: MacroEffectsV1): MacroEventEffect[] => {
+  const normalized: MacroEventEffect[] = [];
+  if (typeof effects.rent_multiplier === "number") {
+    normalized.push({
+      type: "rent_multiplier",
+      value: effects.rent_multiplier,
+      description: "",
+    });
+  }
+  if (typeof effects.build_cost_multiplier === "number") {
+    normalized.push({
+      type: "development_cost_multiplier",
+      value: effects.build_cost_multiplier,
+      description: "",
+    });
+  }
+  if (typeof effects.cash_delta === "number" && effects.cash_delta !== 0) {
+    normalized.push({
+      type: effects.cash_delta >= 0 ? "cash_bonus" : "cash_shock",
+      value: effects.cash_delta,
+      description: "",
+    });
+  }
+  return normalized;
+};
+
+const tickMacroEffects = (activeEffects: ActiveMacroEffect[]) => {
+  const expired: ActiveMacroEffect[] = [];
+  const updated = activeEffects
+    .map((effect) => {
+      const remaining = effect.remaining_rounds - 1;
+      if (remaining <= 0) {
+        expired.push(effect);
+        return null;
+      }
+      return {
+        ...effect,
+        remaining_rounds: remaining,
+      };
+    })
+    .filter((entry): entry is ActiveMacroEffect => Boolean(entry));
+  return { updated, expired };
+};
+
+const tickMacroEffectsV1 = (activeEffects: ActiveMacroEffectV1[]) => {
+  const expired: ActiveMacroEffectV1[] = [];
+  const updated = activeEffects
+    .map((effect) => {
+      const remaining = effect.roundsRemaining - 1;
+      if (remaining <= 0) {
+        expired.push(effect);
+        return null;
+      }
+      return {
+        ...effect,
+        roundsRemaining: remaining,
+        roundsApplied: effect.roundsApplied + 1,
+      };
+    })
+    .filter((entry): entry is ActiveMacroEffectV1 => Boolean(entry));
+  return { updated, expired };
+};
+
+const getMacroInterestDeltaPerTurn = (activeEffects: ActiveMacroEffect[]) =>
+  activeEffects.reduce((total, effect) => {
+    const delta = effect.effects.reduce((sum, detail) => {
+      if (detail.type === "loan_rate_modifier") {
+        return sum + detail.value;
+      }
+      return sum;
+    }, 0);
+    return total + delta;
+  }, 0);
+
+const getMacroRentMultiplierV1 = (activeEffects: ActiveMacroEffectV1[]) =>
+  activeEffects.reduce((product, effect) => {
+    const multiplier = effect.effects.rent_multiplier;
+    if (typeof multiplier === "number") {
+      return product * multiplier;
+    }
+    return product;
+  }, 1);
+
+const getMacroRailRentMultiplierV1 = (activeEffects: ActiveMacroEffectV1[]) =>
+  activeEffects.reduce((product, effect) => {
+    const multiplier = effect.effects.rail_rent_multiplier;
+    if (typeof multiplier === "number") {
+      return product * multiplier;
+    }
+    return product;
+  }, 1);
+
+const getMacroUtilityRentBonusPctPerHouseV1 = (
+  activeEffects: ActiveMacroEffectV1[],
+) =>
+  activeEffects.reduce((total, effect) => {
+    const bonus = effect.effects.utility_rent_bonus_per_house_pct;
+    if (typeof bonus === "number") {
+      return total + bonus;
+    }
+    return total;
+  }, 0);
+
+const getMacroBuildCostMultiplierV1 = (activeEffects: ActiveMacroEffectV1[]) =>
+  activeEffects.reduce((product, effect) => {
+    const multiplier = effect.effects.build_cost_multiplier;
+    if (typeof multiplier === "number") {
+      return product * multiplier;
+    }
+    return product;
+  }, 1);
+
+const getMacroHouseBuildBlockedV1 = (activeEffects: ActiveMacroEffectV1[]) =>
+  activeEffects.some((effect) => effect.effects.house_build_blocked === true);
+
+const getMacroRentMultiplierForColorGroupV1 = (
+  activeEffects: ActiveMacroEffectV1[],
+  colorGroup?: string | null,
+) => {
+  if (!colorGroup) {
+    return 1;
+  }
+  const normalizedColorGroup = colorGroup.toLowerCase();
+  return activeEffects.reduce((product, effect) => {
+    const byGroup = effect.effects.rent_multiplier_by_color_group;
+    if (!byGroup) {
+      return product;
+    }
+    const entry = byGroup[normalizedColorGroup];
+    return typeof entry === "number" ? product * entry : product;
+  }, 1);
+};
+
+const getMacroMortgageFlatDeltaV1 = (activeEffects: ActiveMacroEffectV1[]) =>
+  activeEffects.reduce((total, effect) => {
+    const delta = effect.effects.mortgage_interest_flat_delta;
+    if (typeof delta === "number") {
+      return total + delta;
+    }
+    return total;
+  }, 0);
+
+const getMacroInterestTrendAccumulatorV1 = (
+  activeEffects: ActiveMacroEffectV1[],
+) =>
+  activeEffects.reduce((total, effect) => {
+    const trend = effect.effects.interest_trend_per_round;
+    if (typeof trend === "number") {
+      return total + trend * effect.roundsApplied;
+    }
+    return total;
+  }, 0);
+
+const isActiveLoanMortgageBlockingEffectV1 = (effect: ActiveMacroEffectV1) =>
+  // Defensive check: expired or malformed macro entries
+  // (roundsRemaining <= 0) must not block loans or mortgages.
+  // Some legacy states may persist loan_mortgage_new_blocked
+  // without a valid duration.
+  effect.effects?.loan_mortgage_new_blocked === true &&
+  typeof effect.roundsRemaining === "number" &&
+  effect.roundsRemaining > 0;
+
+const getBlockingMacroLoanMortgageEffectV1 = (
+  activeEffects: ActiveMacroEffectV1[],
+) => activeEffects.find((effect) => isActiveLoanMortgageBlockingEffectV1(effect));
+
+const getMacroPropertyPurchaseDiscountPctV1 = (
+  activeEffects: ActiveMacroEffectV1[],
+) =>
+  activeEffects.reduce((maxDiscount, effect) => {
+    const discountPct = effect.effects.property_purchase_discount_pct;
+    if (typeof discountPct !== "number" || !Number.isFinite(discountPct)) {
+      return maxDiscount;
+    }
+    return Math.max(maxDiscount, discountPct);
+  }, 0);
+
+const calculateDirectBankPropertyPurchasePrice = (
+  basePrice: number,
+  activeEffects: ActiveMacroEffectV1[],
+) => {
+  // Intentionally non-stacking: when overlapping macros apply purchase discounts,
+  // only the single highest discount is used (e.g. 20% + 70% => 70% total).
+  const discountPctRaw = getMacroPropertyPurchaseDiscountPctV1(activeEffects);
+  const discountPct = Math.min(Math.max(discountPctRaw, 0), 1);
+  const discountedPrice = Math.round(basePrice * (1 - discountPct));
+  return {
+    basePrice,
+    discountPct,
+    finalPrice: Math.max(0, discountedPrice),
+  };
+};
+
+const hasMacroOneOffEffects = (effects: MacroEffectsV1 | null) => {
+  if (!effects) {
+    return false;
+  }
+  return (
+    typeof effects.cash_delta === "number" ||
+    typeof effects.tax_cash_percent === "number" ||
+    Boolean(effects.regional_disaster) ||
+    Boolean(effects.bank_stress_test) ||
+    Boolean(effects.pandemic) ||
+    Boolean(effects.sovereign_default)
+  );
+};
+
+const getActivePlayers = (players: PlayerRow[]) =>
+  players.filter((player) => !player.is_eliminated);
+
+const getPropertyColorGroups = (boardTiles: TileInfo[]) => {
+  const groups = new Set<string>();
+  for (const tile of boardTiles) {
+    if (tile.type === "PROPERTY" && tile.colorGroup) {
+      groups.add(tile.colorGroup);
+    }
+  }
+  return Array.from(groups);
+};
+
+const selectRandomColorGroups = (
+  colorGroups: string[],
+  count: number,
+  seedKey: string,
+) => {
+  if (colorGroups.length === 0 || count <= 0) {
+    return [];
+  }
+  const rng = mulberry32(hashStringToUint32(seedKey));
+  const selection = [...colorGroups];
+  for (let index = selection.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(rng() * (index + 1));
+    [selection[index], selection[swapIndex]] = [
+      selection[swapIndex],
+      selection[index],
+    ];
+  }
+  return selection.slice(0, Math.min(count, selection.length));
+};
+
+const liquidateHousesForPlayer = async ({
+  gameId,
+  player,
+  boardTiles,
+  ownershipByTile,
+  balances,
+  startingCash,
+  targetCash,
+  allowedColorGroups,
+  macroHouseSellMultiplier,
+  events,
+  macroMeta,
+  effectType,
+}: {
+  gameId: string;
+  player: PlayerRow;
+  boardTiles: TileInfo[];
+  ownershipByTile: OwnershipByTile;
+  balances: Record<string, number>;
+  startingCash: number;
+  targetCash: number;
+  allowedColorGroups?: string[] | null;
+  macroHouseSellMultiplier: number;
+  events: Array<{ event_type: string; payload: Record<string, unknown> }>;
+  macroMeta: {
+    macro_id: string | null;
+    macro_name: string;
+    macro_effect_type?: string;
+  };
+  effectType: string;
+}) => {
+  let updatedBalances = balances;
+  let housesSold = 0;
+  let cashRecovered = 0;
+
+  const candidateTiles = boardTiles
+    .filter((tile) => {
+      if (tile.type !== "PROPERTY" || !tile.colorGroup) {
+        return false;
+      }
+      if (allowedColorGroups && !allowedColorGroups.includes(tile.colorGroup)) {
+        return false;
+      }
+      return true;
+    })
+    .map((tile) => {
+      const ownership = ownershipByTile[tile.index];
+      if (ownership?.owner_player_id !== player.id) {
+        return null;
+      }
+      const houses = ownership.houses ?? 0;
+      if (houses <= 0) {
+        return null;
+      }
+      return { tile, houses };
+    })
+    .filter(
+      (entry): entry is { tile: TileInfo; houses: number } => entry !== null,
+    );
+
+  const currentBalance = updatedBalances[player.id] ?? startingCash;
+  let nextBalance = currentBalance;
+
+  const pickNextTile = () => {
+    let bestIndex = -1;
+    let bestHouses = -1;
+    for (let index = 0; index < candidateTiles.length; index += 1) {
+      const entry = candidateTiles[index];
+      if (entry.houses > bestHouses) {
+        bestHouses = entry.houses;
+        bestIndex = index;
+      } else if (entry.houses === bestHouses && bestIndex >= 0) {
+        const bestTile = candidateTiles[bestIndex].tile;
+        if (entry.tile.index < bestTile.index) {
+          bestIndex = index;
+        }
+      }
+    }
+    return bestIndex;
+  };
+
+  while (nextBalance < targetCash && candidateTiles.length > 0) {
+    const nextIndex = pickNextTile();
+    if (nextIndex < 0) {
+      break;
+    }
+    const entry = candidateTiles[nextIndex];
+    const tile = entry.tile;
+    const houseCost = tile.houseCost ?? 0;
+    const housesBefore = entry.houses;
+    const housesAfter = 0;
+    const sellValue = Math.round(
+      houseCost * 0.5 * macroHouseSellMultiplier * housesBefore,
+    );
+    await fetchFromSupabaseWithService(
+      `property_ownership?game_id=eq.${gameId}&tile_index=eq.${tile.index}&owner_player_id=eq.${player.id}`,
+      {
+        method: "PATCH",
+        headers: {
+          Prefer: "return=representation",
+        },
+        body: JSON.stringify({
+          houses: housesAfter,
+        }),
+      },
+    );
+
+    ownershipByTile[tile.index] = {
+      owner_player_id: player.id,
+      acquired_round: ownershipByTile[tile.index]?.acquired_round ?? null,
+      collateral_loan_id: ownershipByTile[tile.index]?.collateral_loan_id ?? null,
+      purchase_mortgage_id:
+        ownershipByTile[tile.index]?.purchase_mortgage_id ?? null,
+      houses: housesAfter,
+    };
+
+    entry.houses = housesAfter;
+    candidateTiles.splice(nextIndex, 1);
+
+    nextBalance += sellValue;
+    housesSold += housesBefore;
+    cashRecovered += sellValue;
+    updatedBalances = {
+      ...updatedBalances,
+      [player.id]: nextBalance,
+    };
+
+    events.push(
+      {
+        event_type: "HOUSE_SOLD",
+        payload: {
+          player_id: player.id,
+          tile_index: tile.index,
+          tile_id: tile.tile_id,
+          house_cost: houseCost,
+          houses_before: housesBefore,
+          houses_after: housesAfter,
+          reason: "FORCED_HOUSE_LIQUIDATION",
+          effect_type: effectType,
+          ...macroMeta,
+        },
+      },
+      {
+        event_type: "CASH_CREDIT",
+        payload: {
+          player_id: player.id,
+          amount: sellValue,
+          reason: "FORCED_HOUSE_LIQUIDATION",
+          effect_type: effectType,
+          ...macroMeta,
+        },
+      },
+    );
+  }
+
+  return { balances: updatedBalances, housesSold, cashRecovered };
+};
+
+const getMaintenancePerHouse = (effects: MacroEventEffect[]) =>
+  effects.reduce((sum, detail) => {
+    if (detail.type === "maintenance_per_house") {
+      return sum + detail.value;
+    }
+    return sum;
+  }, 0);
+
+const getMacroDevelopmentCostMultiplier = (activeEffects: ActiveMacroEffect[]) =>
+  activeEffects.reduce((multiplier, effect) => {
+    const effectMultiplier = effect.effects.reduce((product, detail) => {
+      if (detail.type === "development_cost_multiplier") {
+        return product * detail.value;
+      }
+      return product;
+    }, 1);
+    return multiplier * effectMultiplier;
+  }, 1);
+
+const getMacroCashDelta = (effects: MacroEventEffect[]) =>
+  effects.reduce((sum, detail) => {
+    if (detail.type === "cash_bonus" || detail.type === "cash_shock") {
+      return sum + detail.value;
+    }
+    return sum;
+  }, 0);
+
+const getMacroRentMultipliers = (
+  activeEffects: ActiveMacroEffect[],
+  tile: TileInfo,
+) => {
+  let globalMultiplier = 1;
+  let groupMultiplier = 1;
+  const appliedGroups: string[] = [];
+
+  for (const effect of activeEffects) {
+    for (const detail of effect.effects) {
+      if (detail.type === "rent_multiplier") {
+        globalMultiplier *= detail.value;
+        continue;
+      }
+      if (
+        detail.type === "rent_multiplier_group" ||
+        detail.type === "rent_multiplier_sector" ||
+        detail.type === "rent_multiplier_color_group"
+      ) {
+        const detailRecord = detail as MacroEventEffect & {
+          group?: string;
+          sector?: string;
+        };
+        const group =
+          typeof detailRecord.group === "string"
+            ? detailRecord.group
+            : typeof detailRecord.sector === "string"
+              ? detailRecord.sector
+              : null;
+        if (!group) {
+          continue;
+        }
+        const matchesGroup =
+          tile.colorGroup === group || tile.type === group;
+        if (matchesGroup) {
+          groupMultiplier *= detail.value;
+          appliedGroups.push(group);
+        }
+      }
+    }
+  }
+
+  return {
+    globalMultiplier,
+    groupMultiplier,
+    appliedGroups,
+  };
+};
+
+const mulberry32 = (seed: number) => {
+  let state = seed;
+  return () => {
+    state = (state + 0x6d2b79f5) | 0;
+    let t = Math.imul(state ^ (state >>> 15), state | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+};
+
+const createDeckSeed = (gameId: string, deckLabel: string) =>
+  `${gameId}-${deckLabel}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+const buildShuffledOrder = (
+  deckLength: number,
+  seed: string,
+  reshuffleCount: number,
+) => {
+  if (deckLength <= 0) {
+    throw new Error("Event deck is empty.");
+  }
+  const order = Array.from({ length: deckLength }, (_, index) => index);
+  const rng = mulberry32(hashStringToUint32(`${seed}-${reshuffleCount}`));
+  for (let index = order.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(rng() * (index + 1));
+    [order[index], order[swapIndex]] = [order[swapIndex], order[index]];
+  }
+  return order;
+};
+
+type DeckShuffleState = {
+  order: number[] | null;
+  drawPtr: number | null;
+  seed: string | null;
+  reshuffleCount: number | null;
+};
+
+const ensureDeckOrder = ({
+  deckLength,
+  deckLabel,
+  gameId,
+  state,
+}: {
+  deckLength: number;
+  deckLabel: "chance" | "community";
+  gameId: string;
+  state: DeckShuffleState;
+}) => {
+  if (deckLength <= 0) {
+    throw new Error(`${deckLabel} deck is empty.`);
+  }
+
+  const baseSeed = state.seed ?? createDeckSeed(gameId, deckLabel);
+  let reshuffleCount = Number.isInteger(state.reshuffleCount)
+    ? (state.reshuffleCount as number)
+    : 0;
+  let order = Array.isArray(state.order) ? state.order : null;
+  let drawPtr = Number.isInteger(state.drawPtr) ? (state.drawPtr as number) : 0;
+
+  const resetOrder = () => {
+    order = buildShuffledOrder(deckLength, baseSeed, reshuffleCount);
+    drawPtr = 0;
+  };
+
+  if (!order || order.length !== deckLength) {
+    reshuffleCount = 0;
+    resetOrder();
+  }
+
+  if (drawPtr >= deckLength) {
+    reshuffleCount += 1;
+    resetOrder();
+  }
+
+  return {
+    order: order ?? buildShuffledOrder(deckLength, baseSeed, reshuffleCount),
+    drawPtr,
+    seed: baseSeed,
+    reshuffleCount,
+  };
+};
+
+const prepareDeckDraw = ({
+  deckLength,
+  deckLabel,
+  gameId,
+  state,
+}: {
+  deckLength: number;
+  deckLabel: "chance" | "community";
+  gameId: string;
+  state: DeckShuffleState;
+}) => {
+  const deckOrderState = ensureDeckOrder({
+    deckLength,
+    deckLabel,
+    gameId,
+    state,
+  });
+  let { order, drawPtr, reshuffleCount } = deckOrderState;
+  const { seed } = deckOrderState;
+
+  const resetOrder = () => {
+    order = buildShuffledOrder(deckLength, seed, reshuffleCount);
+    drawPtr = 0;
+  };
+
+  let cardIndex = order[drawPtr];
+  if (
+    typeof cardIndex !== "number" ||
+    cardIndex < 0 ||
+    cardIndex >= deckLength
+  ) {
+    reshuffleCount += 1;
+    resetOrder();
+    cardIndex = order[drawPtr];
+  }
+
+  return {
+    order,
+    drawPtr: drawPtr + 1,
+    seed,
+    reshuffleCount,
+    cardIndex,
+    drawIndex: drawPtr,
+  };
+};
+
+export const fetchUser = async (accessToken: string) => {
+  const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
+    headers: {
+      ...playerHeaders,
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  return (await response.json()) as SupabaseUser;
+};
+
+const parseSupabaseResponse = async <T>(
+  response: Response,
+  options?: { onErrorMessage?: string },
+): Promise<T | null> => {
+  if (response.status === 204) {
+    return null;
+  }
+
+  const bodyText = await response.text();
+  if (!response.ok) {
+    const defaultMessage = options?.onErrorMessage ?? "Supabase request failed.";
+    if (!bodyText) {
+      throw new Error(defaultMessage);
+    }
+    try {
+      const parsed = JSON.parse(bodyText) as { message?: string; error?: string };
+      if (parsed?.message) {
+        throw new Error(parsed.message);
+      }
+      if (parsed?.error) {
+        throw new Error(parsed.error);
+      }
+    } catch {
+      // fallback to raw text
+    }
+    throw new Error(bodyText || defaultMessage);
+  }
+
+  if (!bodyText) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(bodyText) as T;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Invalid JSON.";
+    throw new Error(`Supabase returned invalid JSON: ${message}`);
+  }
+};
+
+const fetchFromSupabase = async <T>(
+  path: string,
+  options: RequestInit,
+): Promise<T | null> => {
+  const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
+    ...options,
+    headers: {
+      ...playerHeaders,
+      ...(options.headers ?? {}),
+    },
+  });
+
+  return parseSupabaseResponse<T>(response);
+};
+
+const fetchFromSupabaseWithService = async <T>(
+  path: string,
+  options: RequestInit,
+): Promise<T | null> => {
+  const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
+    ...options,
+    headers: {
+      ...bankHeaders,
+      ...(options.headers ?? {}),
+    },
+  });
+
+  return parseSupabaseResponse<T>(response);
+};
+
+const parseRpcErrorMessage = (errorText: string) => {
+  try {
+    const parsed = JSON.parse(errorText) as { message?: string };
+    return parsed?.message ?? errorText;
+  } catch {
+    return errorText;
+  }
+};
+
+const loadOwnershipByTile = async (
+  gameId: string,
+): Promise<OwnershipByTile> => {
+  const ownershipRows = (await fetchFromSupabaseWithService<OwnershipRow[]>(
+    `property_ownership?select=tile_index,owner_player_id,acquired_round,collateral_loan_id,purchase_mortgage_id,houses&game_id=eq.${gameId}`,
+    { method: "GET" },
+  )) ?? [];
+
+  return ownershipRows.reduce<OwnershipByTile>((acc, row) => {
+    if (row.owner_player_id) {
+      acc[row.tile_index] = {
+        owner_player_id: row.owner_player_id,
+        acquired_round: row.acquired_round ?? null,
+        collateral_loan_id: row.collateral_loan_id ?? null,
+        purchase_mortgage_id: row.purchase_mortgage_id ?? null,
+        houses: row.houses ?? 0,
+      };
+    }
+    return acc;
+  }, {});
+};
+
+const assignPropertyOwnership = async ({
+  gameId,
+  tileIndex,
+  ownerPlayerId,
+  purchaseMortgageId,
+  acquiredRound,
+}: {
+  gameId: string;
+  tileIndex: number;
+  ownerPlayerId: string;
+  purchaseMortgageId?: string | null;
+  acquiredRound: number;
+}): Promise<{
+  ok: boolean;
+  alreadyOwned?: boolean;
+  errorText?: string;
+}> => {
+  const patchRows =
+    (await fetchFromSupabaseWithService<
+      Array<{ tile_index: number; owner_player_id: string | null }>
+    >(
+      `property_ownership?select=tile_index,owner_player_id&game_id=eq.${gameId}&tile_index=eq.${tileIndex}&owner_player_id=is.null`,
+      {
+        method: "PATCH",
+        headers: {
+          Prefer: "return=representation",
+        },
+        body: JSON.stringify({
+          owner_player_id: ownerPlayerId,
+          acquired_round: acquiredRound,
+          collateral_loan_id: null,
+          purchase_mortgage_id: purchaseMortgageId ?? null,
+          houses: 0,
+        }),
+      },
+    )) ?? [];
+
+  if (patchRows.length > 0) {
+    return { ok: true };
+  }
+
+  const insertResponse = await fetch(`${supabaseUrl}/rest/v1/property_ownership`, {
+    method: "POST",
+    headers: {
+      ...bankHeaders,
+      Prefer: "return=representation",
+    },
+    body: JSON.stringify({
+      game_id: gameId,
+      tile_index: tileIndex,
+      owner_player_id: ownerPlayerId,
+      acquired_round: acquiredRound,
+      collateral_loan_id: null,
+      purchase_mortgage_id: purchaseMortgageId ?? null,
+      houses: 0,
+    }),
+  });
+
+  if (insertResponse.ok) {
+    return { ok: true };
+  }
+
+  const errorText = await insertResponse.text();
+  if (
+    insertResponse.status === 409 ||
+    errorText.includes("duplicate key value") ||
+    errorText.includes("23505")
+  ) {
+    return { ok: false, alreadyOwned: true };
+  }
+
+  return {
+    ok: false,
+    errorText,
+  };
+};
+
+const emitGameEvent = async (
+  gameId: string,
+  version: number,
+  eventType: string,
+  payload: Record<string, unknown>,
+  userId: string,
+) => {
+  await fetchFromSupabaseWithService(
+    "game_events",
+    {
+      method: "POST",
+      headers: {
+        Prefer: "return=representation",
+      },
+      body: JSON.stringify({
+        game_id: gameId,
+        version,
+        event_type: eventType,
+        payload,
+        created_by: userId,
+      }),
+    },
+  );
+};
+
+const emitGameEvents = async (
+  gameId: string,
+  startVersion: number,
+  events: Array<{ event_type: string; payload: Record<string, unknown> }>,
+  userId: string,
+) => {
+  let version = startVersion;
+  for (const event of events) {
+    await emitGameEvent(gameId, version, event.event_type, event.payload, userId);
+    version += 1;
+  }
+};
+
+const resolveTile = (tile: TileInfo, player: PlayerRow) => {
+  const basePayload = {
+    player_id: player.id,
+    tile_id: tile.tile_id,
+    tile_type: tile.type,
+    tile_index: tile.index,
+  };
+
+  switch (tile.type) {
+    case "PROPERTY":
+    case "RAIL":
+    case "UTILITY":
+      return { event_type: "LAND_PROPERTY", payload: basePayload };
+    case "TAX":
+      return { event_type: "LAND_TAX", payload: basePayload };
+    case "EVENT":
+      return { event_type: "LAND_EVENT", payload: basePayload };
+    case "JAIL":
+      return { event_type: "LAND_JAIL", payload: basePayload };
+    case "GO_TO_JAIL":
+      return { event_type: "LAND_GO_TO_JAIL", payload: basePayload };
+    case "START":
+      return { event_type: "LAND_START", payload: basePayload };
+    case "FREE_PARKING":
+      return { event_type: "LAND_FREE_PARKING", payload: basePayload };
+    default:
+      console.info("[Bank] Unhandled tile type", tile);
+      return null;
+  }
+};
+
+const getEventDeckForTile = (
+  tile: TileInfo,
+  boardPack: ReturnType<typeof getBoardPackById> | null,
+) => {
+  const chanceDeck =
+    boardPack?.eventDecks?.chance?.length
+      ? boardPack.eventDecks.chance
+      : chanceCards;
+  const communityDeck =
+    boardPack?.eventDecks?.community?.length
+      ? boardPack.eventDecks.community
+      : communityCards;
+  const tileId = tile.tile_id.toLowerCase();
+  const tileName = tile.name.toLowerCase();
+  if (tileId.includes("chance") || tileName.includes("chance")) {
+    return {
+      deck: "CHANCE",
+      cards: chanceDeck,
+      indexKey: "chance_index" as const,
+    };
+  }
+  if (tileId.includes("community") || tileName.includes("community")) {
+    return {
+      deck: "COMMUNITY",
+      cards: communityDeck,
+      indexKey: "community_index" as const,
+    };
+  }
+  return null;
+};
+
+type EventDeckState = {
+  nextChanceIndex: number;
+  nextCommunityIndex: number;
+  nextChanceOrder: number[] | null;
+  nextCommunityOrder: number[] | null;
+  nextChanceDrawPtr: number;
+  nextCommunityDrawPtr: number;
+  nextChanceSeed: string | null;
+  nextCommunitySeed: string | null;
+  nextChanceReshuffleCount: number;
+  nextCommunityReshuffleCount: number;
+  chanceStateChanged: boolean;
+  communityStateChanged: boolean;
+};
+
+const drawEventCardForLanding = ({
+  landingTile,
+  boardPack,
+  gameId,
+  state,
+}: {
+  landingTile: TileInfo;
+  boardPack: ReturnType<typeof getBoardPackById> | null;
+  gameId: string;
+  state: EventDeckState;
+}) => {
+  const eventDeck =
+    landingTile.type === "EVENT"
+      ? getEventDeckForTile(landingTile, boardPack)
+      : null;
+  if (!eventDeck) {
+    return null;
+  }
+
+  const currentIndex =
+    eventDeck.indexKey === "chance_index"
+      ? state.nextChanceIndex
+      : state.nextCommunityIndex;
+  const drawResult =
+    eventDeck.indexKey === "chance_index"
+      ? prepareDeckDraw({
+          deckLength: eventDeck.cards.length,
+          deckLabel: "chance",
+          gameId,
+          state: {
+            order: state.nextChanceOrder,
+            drawPtr: state.nextChanceDrawPtr,
+            seed: state.nextChanceSeed,
+            reshuffleCount: state.nextChanceReshuffleCount,
+          },
+        })
+      : prepareDeckDraw({
+          deckLength: eventDeck.cards.length,
+          deckLabel: "community",
+          gameId,
+          state: {
+            order: state.nextCommunityOrder,
+            drawPtr: state.nextCommunityDrawPtr,
+            seed: state.nextCommunitySeed,
+            reshuffleCount: state.nextCommunityReshuffleCount,
+          },
+        });
+  const card = eventDeck.cards[drawResult.cardIndex];
+  if (!card) {
+    throw new Error("Drawn card index out of range.");
+  }
+
+  if (eventDeck.indexKey === "chance_index") {
+    state.nextChanceIndex = currentIndex + 1;
+    state.nextChanceOrder = drawResult.order;
+    state.nextChanceDrawPtr = drawResult.drawPtr;
+    state.nextChanceSeed = drawResult.seed;
+    state.nextChanceReshuffleCount = drawResult.reshuffleCount;
+    state.chanceStateChanged = true;
+  } else {
+    state.nextCommunityIndex = currentIndex + 1;
+    state.nextCommunityOrder = drawResult.order;
+    state.nextCommunityDrawPtr = drawResult.drawPtr;
+    state.nextCommunitySeed = drawResult.seed;
+    state.nextCommunityReshuffleCount = drawResult.reshuffleCount;
+    state.communityStateChanged = true;
+  }
+
+  return { eventDeck, drawResult, card };
+};
+
+const getNumberPayload = (
+  payload: Record<string, unknown>,
+  key: string,
+): number | null => {
+  const value = payload[key];
+  if (typeof value === "number") {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
+};
+
+const getBooleanPayload = (
+  payload: Record<string, unknown>,
+  key: string,
+): boolean => {
+  const value = payload[key];
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+  if (typeof value === "string") {
+    return value.toLowerCase() === "true";
+  }
+  return false;
+};
+
+const rollDice = () => {
+  const dieOne = Math.floor(Math.random() * 6) + 1;
+  const dieTwo = Math.floor(Math.random() * 6) + 1;
+  return { dice: [dieOne, dieTwo] as [number, number], total: dieOne + dieTwo };
+};
+
+const getStringPayload = (
+  payload: Record<string, unknown>,
+  key: string,
+): string | null => {
+  const value = payload[key];
+  return typeof value === "string" ? value : null;
+};
+
+const findNearestTileIndex = (
+  boardTiles: TileInfo[],
+  fromIndex: number,
+  kind: "RAILROAD" | "UTILITY",
+): number | null => {
+  const tileType = kind === "RAILROAD" ? "RAIL" : "UTILITY";
+  const boardSize = boardTiles.length;
+  for (let offset = 1; offset <= boardSize; offset += 1) {
+    const candidateIndex = (fromIndex + offset) % boardSize;
+    const candidate = boardTiles[candidateIndex];
+    if (candidate && candidate.type === tileType) {
+      return candidate.index;
+    }
+  }
+  return null;
+};
+
+const resolveMoveToTargetIndex = (
+  payload: Record<string, unknown>,
+  boardTiles: TileInfo[],
+  fromIndex: number,
+): number | null => {
+  const targetTileId = getStringPayload(payload, "target_tile_id");
+  if (targetTileId) {
+    const targetTile = boardTiles.find((tile) => tile.tile_id === targetTileId);
+    if (!targetTile) {
+      throw new Error(
+        `Card target tile_id not found in board pack: ${targetTileId}`,
+      );
+    }
+    return targetTile.index;
+  }
+
+  const nearestKind = getStringPayload(payload, "nearest_kind");
+  if (nearestKind === "RAILROAD" || nearestKind === "UTILITY") {
+    const nearestIndex = findNearestTileIndex(boardTiles, fromIndex, nearestKind);
+    if (nearestIndex === null) {
+      throw new Error(
+        `Card nearest ${nearestKind.toLowerCase()} tile not found in board pack.`,
+      );
+    }
+    return nearestIndex;
+  }
+
+  return getNumberPayload(payload, "tile_index");
+};
+
+const getNextActivePlayer = (
+  players: PlayerRow[],
+  currentPlayerId: string | null,
+): PlayerRow | null => {
+  if (players.length === 0) {
+    return null;
+  }
+  const startIndex = players.findIndex(
+    (player) => player.id === currentPlayerId,
+  );
+  if (startIndex === -1) {
+    return players.find((player) => !player.is_eliminated) ?? null;
+  }
+  for (let offset = 1; offset <= players.length; offset += 1) {
+    const candidate = players[(startIndex + offset) % players.length];
+    if (!candidate.is_eliminated) {
+      return candidate;
+    }
+  }
+  return null;
+};
+
+const getFirstActivePlayer = (players: PlayerRow[]): PlayerRow | null =>
+  players.find((player) => !player.is_eliminated) ?? null;
+
+const getActivePlayersAfterElimination = (
+  players: PlayerRow[],
+  eliminatedPlayerId: string,
+) => players.filter(
+  (player) => !player.is_eliminated && player.id !== eliminatedPlayerId,
+);
+
+const normalizePlayerIdArray = (value: unknown): string[] =>
+  Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string")
+    : [];
+
+const getNextEligibleAuctionPlayerId = (
+  players: PlayerRow[],
+  startingPlayerId: string | null,
+  eligibleIds: string[],
+  passedIds: Set<string>,
+): string | null => {
+  if (eligibleIds.length === 0) {
+    return null;
+  }
+  const eligibleSet = new Set(eligibleIds);
+  const startIndex = players.findIndex(
+    (player) => player.id === startingPlayerId,
+  );
+  if (startIndex === -1) {
+    return (
+      players.find(
+        (player) =>
+          eligibleSet.has(player.id) &&
+          !passedIds.has(player.id) &&
+          !player.is_eliminated,
+      )?.id ?? null
+    );
+  }
+  for (let offset = 1; offset <= players.length; offset += 1) {
+    const candidate = players[(startIndex + offset) % players.length];
+    if (
+      eligibleSet.has(candidate.id) &&
+      !passedIds.has(candidate.id) &&
+      !candidate.is_eliminated
+    ) {
+      return candidate.id;
+    }
+  }
+  return null;
+};
+
+type AuctionTimeoutProgressResult = {
+  eligiblePlayerIds: string[];
+  passedPlayerIds: Set<string>;
+  currentBid: number;
+  currentWinnerId: string | null;
+  turnPlayerId: string | null;
+  turnEndsAt: Date | null;
+  minIncrement: number;
+  timeoutEvents: Array<{
+    event_type: string;
+    payload: Record<string, unknown>;
+  }>;
+};
+
+const advanceAuctionForExpiredTurns = ({
+  gameState,
+  players,
+  rules,
+  boardPackEconomy,
+  now,
+}: {
+  gameState: GameStateRow;
+  players: PlayerRow[];
+  rules: ReturnType<typeof getRules>;
+  boardPackEconomy: BoardPackEconomy;
+  now: Date;
+}): AuctionTimeoutProgressResult => {
+  const activePlayerIds = players
+    .filter((player) => !player.is_eliminated)
+    .map((player) => player.id);
+  const eligiblePlayerIds = normalizePlayerIdArray(
+    gameState.auction_eligible_player_ids,
+  ).filter((id) => activePlayerIds.includes(id));
+
+  const passedPlayerIds = new Set(
+    normalizePlayerIdArray(gameState.auction_passed_player_ids).filter((id) =>
+      eligiblePlayerIds.includes(id),
+    ),
+  );
+  const currentBid =
+    typeof gameState.auction_current_bid === "number"
+      ? gameState.auction_current_bid
+      : 0;
+  const currentWinnerId =
+    typeof gameState.auction_current_winner_player_id === "string"
+      ? gameState.auction_current_winner_player_id
+      : null;
+  let turnPlayerId =
+    typeof gameState.auction_turn_player_id === "string"
+      ? gameState.auction_turn_player_id
+      : null;
+  let turnEndsAt = gameState.auction_turn_ends_at
+    ? new Date(gameState.auction_turn_ends_at)
+    : null;
+  const minIncrement =
+    typeof gameState.auction_min_increment === "number"
+      ? gameState.auction_min_increment
+      : (boardPackEconomy.auctionMinIncrement ?? 10);
+  const timeoutEvents: AuctionTimeoutProgressResult["timeoutEvents"] = [];
+
+  const advanceTurn = (fromPlayerId: string | null) =>
+    getNextEligibleAuctionPlayerId(
+      players,
+      fromPlayerId,
+      eligiblePlayerIds,
+      passedPlayerIds,
+    );
+
+  const isValidTurnPlayer = (playerId: string | null) =>
+    Boolean(
+      playerId &&
+        eligiblePlayerIds.includes(playerId) &&
+        !passedPlayerIds.has(playerId) &&
+        !players.find((player) => player.id === playerId)?.is_eliminated,
+    );
+
+  if (!isValidTurnPlayer(turnPlayerId)) {
+    const nextTurnId = advanceTurn(turnPlayerId);
+    turnPlayerId = nextTurnId;
+    turnEndsAt = nextTurnId
+      ? new Date(now.getTime() + rules.auctionTurnSeconds * 1000)
+      : null;
+  }
+
+  while (turnPlayerId && turnEndsAt && now > turnEndsAt) {
+    if (!passedPlayerIds.has(turnPlayerId)) {
+      passedPlayerIds.add(turnPlayerId);
+      timeoutEvents.push({
+        event_type: "AUCTION_PASS",
+        payload: {
+          tile_index: gameState.auction_tile_index,
+          player_id: turnPlayerId,
+          auto: true,
+        },
+      });
+    }
+    const nextTurnId = advanceTurn(turnPlayerId);
+    turnPlayerId = nextTurnId;
+    turnEndsAt = nextTurnId
+      ? new Date(now.getTime() + rules.auctionTurnSeconds * 1000)
+      : null;
+  }
+
+  return {
+    eligiblePlayerIds,
+    passedPlayerIds,
+    currentBid,
+    currentWinnerId,
+    turnPlayerId,
+    turnEndsAt,
+    minIncrement,
+    timeoutEvents,
+  };
+};
+
+const parsePendingInsolvencyAction = (
+  pendingAction: Record<string, unknown> | null | undefined,
+): InsolvencyPendingAction | null => {
+  if (!pendingAction || pendingAction.type !== "INSOLVENCY_RECOVERY") {
+    return null;
+  }
+
+  const amountDue = pendingAction.amount_due;
+  const cashAvailable = pendingAction.cash_available;
+  const shortfall = pendingAction.shortfall;
+  if (
+    typeof pendingAction.player_id !== "string" ||
+    typeof amountDue !== "number" ||
+    typeof cashAvailable !== "number" ||
+    typeof shortfall !== "number"
+  ) {
+    return null;
+  }
+
+  const reason =
+    typeof pendingAction.reason === "string" && pendingAction.reason.length > 0
+      ? (pendingAction.reason as InsolvencyReason)
+      : null;
+
+  return {
+    type: "INSOLVENCY_RECOVERY",
+    player_id: pendingAction.player_id,
+    reason,
+    amount_due: amountDue,
+    cash_available: cashAvailable,
+    shortfall,
+    owed_to_player_id:
+      typeof pendingAction.owed_to_player_id === "string"
+        ? pendingAction.owed_to_player_id
+        : null,
+    tile_index: typeof pendingAction.tile_index === "number" ? pendingAction.tile_index : null,
+    tile_id: typeof pendingAction.tile_id === "string" ? pendingAction.tile_id : null,
+    label: typeof pendingAction.label === "string" ? pendingAction.label : null,
+    ...(pendingAction.tax_kind === "INCOME_TAX" ? { tax_kind: "INCOME_TAX" as const } : {}),
+  };
+};
+
+const parsePendingSuperTaxAction = (
+  pendingAction: Record<string, unknown> | null | undefined,
+): SuperTaxPendingAction | null => {
+  if (!pendingAction || pendingAction.type !== "SUPER_TAX_CONFIRM") {
+    return null;
+  }
+
+  if (
+    typeof pendingAction.player_id !== "string" ||
+    typeof pendingAction.tile_id !== "string" ||
+    typeof pendingAction.tile_index !== "number" ||
+    typeof pendingAction.tile_name !== "string" ||
+    typeof pendingAction.current_cash !== "number" ||
+    typeof pendingAction.asset_value !== "number" ||
+    typeof pendingAction.total_liabilities !== "number" ||
+    typeof pendingAction.net_worth_for_tax !== "number" ||
+    typeof pendingAction.tax_rate !== "number" ||
+    typeof pendingAction.tax_amount !== "number" ||
+    typeof pendingAction.uses_custom_formula !== "boolean" ||
+    typeof pendingAction.currency_code !== "string" ||
+    typeof pendingAction.currency_symbol !== "string" ||
+    typeof pendingAction.return_turn_phase !== "string" ||
+    typeof pendingAction.tax_exemption_pass_count !== "number"
+  ) {
+    return null;
+  }
+
+  return {
+    type: "SUPER_TAX_CONFIRM",
+    player_id: pendingAction.player_id,
+    tile_id: pendingAction.tile_id,
+    tile_index: pendingAction.tile_index,
+    tile_name: pendingAction.tile_name,
+    boardpack_id:
+      typeof pendingAction.boardpack_id === "string" ? pendingAction.boardpack_id : null,
+    current_cash: pendingAction.current_cash,
+    asset_value: pendingAction.asset_value,
+    total_liabilities: pendingAction.total_liabilities,
+    net_worth_for_tax: pendingAction.net_worth_for_tax,
+    tax_rate: pendingAction.tax_rate,
+    tax_amount: pendingAction.tax_amount,
+    uses_custom_formula: pendingAction.uses_custom_formula,
+    currency_code: pendingAction.currency_code,
+    currency_symbol: pendingAction.currency_symbol,
+    return_turn_phase: pendingAction.return_turn_phase,
+    tax_exemption_pass_count: pendingAction.tax_exemption_pass_count,
+  };
+};
+
+const parsePendingIncomeTaxAction = (
+  pendingAction: Record<string, unknown> | null | undefined,
+): IncomeTaxPendingAction | null => {
+  if (!pendingAction || pendingAction.type !== "INCOME_TAX_CONFIRM") {
+    return null;
+  }
+
+  if (
+    typeof pendingAction.player_id !== "string" ||
+    typeof pendingAction.tile_id !== "string" ||
+    typeof pendingAction.tile_index !== "number" ||
+    typeof pendingAction.tile_name !== "string" ||
+    typeof pendingAction.current_cash !== "number" ||
+    typeof pendingAction.baseline_cash !== "number" ||
+    typeof pendingAction.taxable_gain !== "number" ||
+    typeof pendingAction.tax_rate !== "number" ||
+    typeof pendingAction.tax_amount !== "number" ||
+    typeof pendingAction.currency_code !== "string" ||
+    typeof pendingAction.currency_symbol !== "string" ||
+    typeof pendingAction.return_turn_phase !== "string" ||
+    typeof pendingAction.tax_exemption_pass_count !== "number"
+  ) {
+    return null;
+  }
+
+  return {
+    type: "INCOME_TAX_CONFIRM",
+    player_id: pendingAction.player_id,
+    tile_id: pendingAction.tile_id,
+    tile_index: pendingAction.tile_index,
+    tile_name: pendingAction.tile_name,
+    boardpack_id:
+      typeof pendingAction.boardpack_id === "string" ? pendingAction.boardpack_id : null,
+    current_cash: pendingAction.current_cash,
+    baseline_cash: pendingAction.baseline_cash,
+    taxable_gain: pendingAction.taxable_gain,
+    tax_rate: pendingAction.tax_rate,
+    tax_amount: pendingAction.tax_amount,
+    currency_code: pendingAction.currency_code,
+    currency_symbol: pendingAction.currency_symbol,
+    return_turn_phase: pendingAction.return_turn_phase,
+    tax_exemption_pass_count: pendingAction.tax_exemption_pass_count,
+  };
+};
+
+const createSuperTaxPendingAction = ({
+  player,
+  tile,
+  boardPack,
+  boardPackEconomy,
+  breakdown,
+  usesCustomFormula,
+  returnTurnPhase,
+}: {
+  player: PlayerRow;
+  tile: TileInfo;
+  boardPack: ReturnType<typeof getBoardPackById> | null;
+  boardPackEconomy: BoardPackEconomy;
+  breakdown: {
+    currentCash: number;
+    assetValue: number;
+    totalLiabilities: number;
+    netWorthForTax: number;
+    taxRate: number;
+    taxAmount: number;
+  };
+  usesCustomFormula: boolean;
+  returnTurnPhase: string;
+}): SuperTaxPendingAction => ({
+  type: "SUPER_TAX_CONFIRM",
+  player_id: player.id,
+  tile_id: tile.tile_id,
+  tile_index: tile.index,
+  tile_name: tile.name,
+  boardpack_id: boardPack?.id ?? null,
+  current_cash: breakdown.currentCash,
+  asset_value: breakdown.assetValue,
+  total_liabilities: breakdown.totalLiabilities,
+  net_worth_for_tax: breakdown.netWorthForTax,
+  tax_rate: breakdown.taxRate,
+  tax_amount: breakdown.taxAmount,
+  uses_custom_formula: usesCustomFormula,
+  currency_code: boardPackEconomy.currency.code,
+  currency_symbol: boardPackEconomy.currency.symbol,
+  return_turn_phase: returnTurnPhase,
+  tax_exemption_pass_count: player.tax_exemption_pass_count ?? 0,
+});
+
+const createIncomeTaxPendingAction = ({
+  player,
+  tile,
+  boardPack,
+  boardPackEconomy,
+  breakdown,
+  returnTurnPhase,
+}: {
+  player: PlayerRow;
+  tile: TileInfo;
+  boardPack: ReturnType<typeof getBoardPackById> | null;
+  boardPackEconomy: BoardPackEconomy;
+  breakdown: {
+    currentCash: number;
+    baselineCash: number;
+    taxableGain: number;
+    taxRate: number;
+    taxAmount: number;
+  };
+  returnTurnPhase: string;
+}): IncomeTaxPendingAction => ({
+  type: "INCOME_TAX_CONFIRM",
+  player_id: player.id,
+  tile_id: tile.tile_id,
+  tile_index: tile.index,
+  tile_name: tile.name,
+  boardpack_id: boardPack?.id ?? null,
+  current_cash: breakdown.currentCash,
+  baseline_cash: breakdown.baselineCash,
+  taxable_gain: breakdown.taxableGain,
+  tax_rate: breakdown.taxRate,
+  tax_amount: breakdown.taxAmount,
+  currency_code: boardPackEconomy.currency.code,
+  currency_symbol: boardPackEconomy.currency.symbol,
+  return_turn_phase: returnTurnPhase,
+  tax_exemption_pass_count: player.tax_exemption_pass_count ?? 0,
+});
+
+const createInsolvencyPendingAction = ({
+  playerId,
+  reason,
+  amountDue,
+  cashAvailable,
+  owedToPlayerId = null,
+  tileIndex = null,
+  tileId = null,
+  label = null,
+  taxKind,
+}: {
+  playerId: string;
+  reason: InsolvencyReason;
+  amountDue: number;
+  cashAvailable: number;
+  owedToPlayerId?: string | null;
+  tileIndex?: number | null;
+  tileId?: string | null;
+  label?: string | null;
+  taxKind?: "INCOME_TAX";
+}): InsolvencyPendingAction => ({
+  type: "INSOLVENCY_RECOVERY",
+  player_id: playerId,
+  reason,
+  amount_due: amountDue,
+  cash_available: cashAvailable,
+  shortfall: Math.max(amountDue - cashAvailable, 0),
+  owed_to_player_id: owedToPlayerId,
+  tile_index: tileIndex,
+  tile_id: tileId,
+  label,
+  ...(taxKind ? { tax_kind: taxKind } : {}),
+});
+
+const enterInsolvencyRecovery = async ({
+  gameId,
+  gameState,
+  player,
+  candidate,
+  events,
+  currentVersion,
+  userId,
+}: {
+  gameId: string;
+  gameState: GameStateRow;
+  player: PlayerRow;
+  candidate: BankruptcyCandidate;
+  events: Array<{ event_type: string; payload: Record<string, unknown> }>;
+  currentVersion: number;
+  userId: string;
+}): Promise<{
+  handled: boolean;
+  updatedState?: GameStateRow;
+  error?: string;
+}> => {
+  if (candidate.cashAfter >= 0) {
+    return { handled: false };
+  }
+
+  const pendingAction = createInsolvencyPendingAction({
+    playerId: player.id,
+    reason: candidate.reason,
+    amountDue: candidate.amountDue,
+    cashAvailable: candidate.cashBefore,
+    owedToPlayerId: candidate.owedToPlayerId ?? null,
+    tileIndex: candidate.tileIndex ?? null,
+    tileId: candidate.tileId ?? null,
+    label: candidate.label ?? null,
+    taxKind: candidate.taxKind,
+  });
+
+  const insolvencyEvents = [
+    ...events,
+    {
+      event_type: "INSOLVENCY_RECOVERY_STARTED",
+      payload: {
+        player_id: player.id,
+        player_name: player.display_name,
+        reason: pendingAction.reason,
+        amount_due: pendingAction.amount_due,
+        cash_available: pendingAction.cash_available,
+        shortfall: pendingAction.shortfall,
+        owed_to_player_id: pendingAction.owed_to_player_id,
+        tile_index: pendingAction.tile_index,
+        tile_id: pendingAction.tile_id,
+        label: pendingAction.label,
+        ...(pendingAction.tax_kind ? { tax_kind: pendingAction.tax_kind } : {}),
+      },
+    },
+  ];
+
+  const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+    `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+    {
+      method: "PATCH",
+      headers: {
+        Prefer: "return=representation",
+      },
+      body: JSON.stringify({
+        version: currentVersion + insolvencyEvents.length,
+        pending_action: pendingAction,
+        updated_at: new Date().toISOString(),
+      }),
+    },
+  )) ?? [];
+
+  if (!updatedState) {
+    return { handled: true, error: "Version mismatch." };
+  }
+
+  await emitGameEvents(gameId, currentVersion + 1, insolvencyEvents, userId);
+
+  return { handled: true, updatedState };
+};
+
+const commitResolvedMoveState = async ({
+  gameId,
+  gameState,
+  currentVersion,
+  nextVersion,
+  currentPlayer,
+  finalPosition,
+  shouldSendToJail,
+  jailTile,
+  nextGetOutOfJailFreeCount,
+  getOutOfJailFreeCountChanged,
+  nextTaxExemptionPassCount,
+  taxExemptionPassCountChanged,
+  rollTotal,
+  nextDoublesCount,
+  updatedBalances,
+  balancesChanged,
+  nextChanceIndex,
+  nextCommunityIndex,
+  chanceStateChanged,
+  nextChanceOrder,
+  nextChanceDrawPtr,
+  nextChanceSeed,
+  nextChanceReshuffleCount,
+  communityStateChanged,
+  nextCommunityOrder,
+  nextCommunityDrawPtr,
+  nextCommunitySeed,
+  nextCommunityReshuffleCount,
+  turnPhase,
+  extraGameStatePatch,
+}: {
+  gameId: string;
+  gameState: GameStateRow;
+  currentVersion: number;
+  nextVersion: number;
+  currentPlayer: PlayerRow;
+  finalPosition: number;
+  shouldSendToJail: boolean;
+  jailTile: TileInfo | null;
+  nextGetOutOfJailFreeCount: number;
+  getOutOfJailFreeCountChanged: boolean;
+  nextTaxExemptionPassCount: number;
+  taxExemptionPassCountChanged: boolean;
+  rollTotal: number | null;
+  nextDoublesCount: number;
+  updatedBalances: Record<string, number>;
+  balancesChanged: boolean;
+  nextChanceIndex: number;
+  nextCommunityIndex: number;
+  chanceStateChanged: boolean;
+  nextChanceOrder: number[] | null;
+  nextChanceDrawPtr: number;
+  nextChanceSeed: string | null;
+  nextChanceReshuffleCount: number;
+  communityStateChanged: boolean;
+  nextCommunityOrder: number[] | null;
+  nextCommunityDrawPtr: number;
+  nextCommunitySeed: string | null;
+  nextCommunityReshuffleCount: number;
+  turnPhase: string;
+  extraGameStatePatch?: Record<string, unknown>;
+}): Promise<GameStateRow | null> => {
+  const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+    `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+    {
+      method: "PATCH",
+      headers: {
+        Prefer: "return=representation",
+      },
+      body: JSON.stringify({
+        version: nextVersion,
+        last_roll: rollTotal ?? null,
+        doubles_count: nextDoublesCount,
+        ...(balancesChanged ? { balances: updatedBalances } : {}),
+        ...(nextChanceIndex !== (gameState?.chance_index ?? 0)
+          ? { chance_index: nextChanceIndex }
+          : {}),
+        ...(nextCommunityIndex !== (gameState?.community_index ?? 0)
+          ? { community_index: nextCommunityIndex }
+          : {}),
+        ...(chanceStateChanged
+          ? {
+              chance_order: nextChanceOrder,
+              chance_draw_ptr: nextChanceDrawPtr,
+              chance_seed: nextChanceSeed,
+              chance_reshuffle_count: nextChanceReshuffleCount,
+            }
+          : {}),
+        ...(communityStateChanged
+          ? {
+              community_order: nextCommunityOrder,
+              community_draw_ptr: nextCommunityDrawPtr,
+              community_seed: nextCommunitySeed,
+              community_reshuffle_count: nextCommunityReshuffleCount,
+            }
+          : {}),
+        turn_phase: turnPhase,
+        pending_action: null,
+        ...(extraGameStatePatch ?? {}),
+        updated_at: new Date().toISOString(),
+      }),
+    },
+  )) ?? [];
+
+  if (!updatedState) {
+    return null;
+  }
+
+  const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
+    `players?id=eq.${currentPlayer.id}`,
+    {
+      method: "PATCH",
+      headers: {
+        Prefer: "return=representation",
+      },
+      body: JSON.stringify({
+        position: finalPosition,
+        is_in_jail: Boolean(shouldSendToJail && jailTile),
+        jail_turns_remaining: shouldSendToJail && jailTile ? 3 : 0,
+        ...(getOutOfJailFreeCountChanged
+          ? { get_out_of_jail_free_count: nextGetOutOfJailFreeCount }
+          : {}),
+        ...(taxExemptionPassCountChanged
+          ? { tax_exemption_pass_count: nextTaxExemptionPassCount }
+          : {}),
+      }),
+    },
+  )) ?? [];
+
+  if (!updatedPlayer) {
+    throw new Error("Unable to update player position.");
+  }
+
+  return updatedState;
+};
+
+const createGoToJailPendingAction = ({
+  currentPlayer,
+  jailTile,
+  source,
+  fromTileIndex,
+}: {
+  currentPlayer: PlayerRow;
+  jailTile: TileInfo;
+  source: GoToJailPendingAction["source"];
+  fromTileIndex: number;
+}): GoToJailPendingAction => ({
+  type: "GO_TO_JAIL_CONFIRM",
+  player_id: currentPlayer.id,
+  source,
+  from_tile_index: fromTileIndex,
+  to_jail_tile_index: jailTile.index,
+});
+
+const computeAuthoritativeFinalStandings = async ({
+  gameId,
+  gameState,
+  players,
+  boardPack,
+}: {
+  gameId: string;
+  gameState: GameStateRow;
+  players: PlayerRow[];
+  boardPack: ReturnType<typeof getBoardPackById> | null;
+}): Promise<FinalStanding[]> => {
+  const boardTiles = resolveBoardTilesForRules({ boardPack, rules: gameState.rules });
+  const ownershipByTile = await loadOwnershipByTile(gameId);
+  const activeLoans = (await fetchFromSupabaseWithService<PlayerLoanRow[]>(
+    `player_loans?select=id,game_id,player_id,collateral_tile_index,principal,remaining_principal,rate_per_turn,term_turns,turns_remaining,payment_per_turn,status&game_id=eq.${gameId}&status=eq.active`,
+    { method: "GET" },
+  )) ?? [];
+  const activeMortgages = (await fetchFromSupabaseWithService<PurchaseMortgageRow[]>(
+    `purchase_mortgages?select=id,game_id,player_id,tile_index,principal_original,principal_remaining,rate_per_turn,term_turns,turns_remaining,payment_per_turn,turns_elapsed,accrued_interest_unpaid,status&game_id=eq.${gameId}&status=eq.active`,
+    { method: "GET" },
+  )) ?? [];
+
+  return players
+    .map((player) => {
+      const ownedTiles = boardTiles.filter(
+        (tile) =>
+          OWNABLE_TILE_TYPES.has(tile.type) &&
+          ownershipByTile[tile.index]?.owner_player_id === player.id,
+      );
+      const activePlayerLoans = activeLoans.filter((loan) => loan.player_id === player.id);
+      const activePlayerMortgages = activeMortgages.filter((mortgage) => mortgage.player_id === player.id);
+      const cash = gameState.balances?.[player.id] ?? 0;
+      const netWorthBreakdown = computeAuthoritativeNetWorthBreakdown({
+        currentCash: cash,
+        currentRound: gameState.rounds_elapsed ?? 0,
+        playerId: player.id,
+        boardTiles,
+        ownershipByTile,
+        activeCollateralLoans: activePlayerLoans,
+        activePurchaseMortgages: activePlayerMortgages,
+        inlandExploredCells: gameState.inland_explored_cells,
+        boardPackEconomy: boardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY,
+      });
+
+      return {
+        playerId: player.id,
+        playerName: player.display_name ?? "Unknown player",
+        cash,
+        netWorth: netWorthBreakdown.netWorth,
+        isEliminated: player.is_eliminated,
+        ownedCount: ownedTiles.length,
+        liabilityCount: activePlayerLoans.length + activePlayerMortgages.length,
+        eliminatedAtMs: player.eliminated_at ? Date.parse(player.eliminated_at) : Number.POSITIVE_INFINITY,
+      };
+    })
+    .sort((a, b) => {
+      if (b.netWorth !== a.netWorth) {
+        return b.netWorth - a.netWorth;
+      }
+      if (a.isEliminated !== b.isEliminated) {
+        return a.isEliminated ? 1 : -1;
+      }
+      if (a.eliminatedAtMs !== b.eliminatedAtMs) {
+        return a.eliminatedAtMs - b.eliminatedAtMs;
+      }
+      return a.playerName.localeCompare(b.playerName);
+    })
+    .map((entry, index) => ({
+      playerId: entry.playerId,
+      playerName: entry.playerName,
+      rank: index + 1,
+      cash: entry.cash,
+      netWorth: entry.netWorth,
+      isWinner: index === 0,
+      isEliminated: entry.isEliminated,
+      ownedCount: entry.ownedCount,
+      liabilityCount: entry.liabilityCount,
+    }));
+};
+
+const buildGameOverPayload = ({
+  winner,
+  reason,
+  standings,
+  extraPayload = {},
+}: {
+  winner: { id: string; display_name: string | null } | null;
+  reason: string;
+  standings: FinalStanding[];
+  extraPayload?: Record<string, unknown>;
+}) => ({
+  winner_player_id: winner?.id ?? null,
+  winner_player_name: winner?.display_name ?? null,
+  reason,
+  standings,
+  ...extraPayload,
+});
+
+const resolveTurnHandoffCheckpoint = async ({
+  gameId,
+  game,
+  gameState,
+  players,
+  nextPlayer,
+  boardPack,
+}: {
+  gameId: string;
+  game: GameRow;
+  gameState: GameStateRow;
+  players: PlayerRow[];
+  nextPlayer: PlayerRow;
+  boardPack: ReturnType<typeof getBoardPackById> | null;
+}) => {
+  const firstActivePlayer = getFirstActivePlayer(players);
+  const tableRoundAdvanced = Boolean(
+    firstActivePlayer && nextPlayer.id === firstActivePlayer.id,
+  );
+  const nextRound =
+    (gameState.rounds_elapsed ?? 0) + (tableRoundAdvanced ? 1 : 0);
+  const gameMode = game.game_mode ?? "classic";
+  const roundLimit = game.round_limit;
+  const isRoundLimitReached = shouldEndRoundModeGame({
+    gameMode,
+    roundLimit,
+    tableRoundAdvanced,
+    nextRound,
+  });
+
+  if (!isRoundLimitReached) {
+    return {
+      tableRoundAdvanced,
+      nextRound,
+      shouldEndForRoundLimit: false as const,
+    };
+  }
+
+  const standings = await computeAuthoritativeFinalStandings({
+    gameId,
+    gameState: { ...gameState, rounds_elapsed: nextRound },
+    players,
+    boardPack,
+  });
+
+  return {
+    tableRoundAdvanced,
+    nextRound,
+    shouldEndForRoundLimit: true as const,
+    standings,
+  };
+};
+
+const resolveBankruptcyIfNeeded = async ({
+  gameId,
+  gameState,
+  players,
+  player,
+  updatedBalances,
+  cashBefore,
+  cashAfter,
+  reason,
+  events,
+  currentVersion,
+  userId,
+  playerPosition,
+  boardPack,
+}: {
+  gameId: string;
+  gameState: GameStateRow;
+  players: PlayerRow[];
+  player: PlayerRow;
+  updatedBalances: Record<string, number>;
+  cashBefore: number;
+  cashAfter: number;
+  reason: string;
+  events: Array<{ event_type: string; payload: Record<string, unknown> }>;
+  currentVersion: number;
+  userId: string;
+  playerPosition: number | null;
+  boardPack: ReturnType<typeof getBoardPackById> | null;
+}): Promise<{
+  handled: boolean;
+  updatedState?: GameStateRow;
+  error?: string;
+}> => {
+  if (cashAfter >= 0) {
+    return { handled: false };
+  }
+
+  return resolvePlayerElimination({
+    gameId,
+    gameState,
+    players,
+    eliminatedPlayer: player,
+    updatedBalances: {
+      ...updatedBalances,
+      [player.id]: 0,
+    },
+    triggerEventType: "BANKRUPTCY",
+    triggerPayload: {
+      player_id: player.id,
+      cash_before: cashBefore,
+      cash_after: cashAfter,
+      reason,
+    },
+    gameOverReason: "BANKRUPTCY",
+    events,
+    currentVersion,
+    userId,
+    playerPosition,
+    boardPack,
+  });
+};
+
+const resolvePlayerElimination = async ({
+  gameId,
+  gameState,
+  players,
+  eliminatedPlayer,
+  updatedBalances,
+  triggerEventType,
+  triggerPayload,
+  gameOverReason,
+  events,
+  currentVersion,
+  userId,
+  playerPosition,
+  boardPack,
+}: {
+  gameId: string;
+  gameState: GameStateRow;
+  players: PlayerRow[];
+  eliminatedPlayer: PlayerRow;
+  updatedBalances: Record<string, number>;
+  triggerEventType: string;
+  triggerPayload: Record<string, unknown>;
+  gameOverReason: string;
+  events: Array<{ event_type: string; payload: Record<string, unknown> }>;
+  currentVersion: number;
+  userId: string;
+  playerPosition?: number | null;
+  boardPack: ReturnType<typeof getBoardPackById> | null;
+}): Promise<{
+  handled: boolean;
+  updatedState?: GameStateRow;
+  error?: string;
+}> => {
+
+  const now = new Date().toISOString();
+  const activePlayersAfter = getActivePlayersAfterElimination(
+    players,
+    eliminatedPlayer.id,
+  );
+  const nextPlayer = getNextActivePlayer(players, eliminatedPlayer.id);
+  const remainingPlayers = activePlayersAfter.length;
+  const winner = remainingPlayers === 1 ? activePlayersAfter[0] : null;
+  const gameIsOver = remainingPlayers <= 1;
+  const updatedBalancesNormalized = { ...updatedBalances };
+
+  const ownedRows = (await fetchFromSupabaseWithService<
+    Array<{ id: string; tile_index: number }>
+  >(
+    `property_ownership?select=id,tile_index&game_id=eq.${gameId}&owner_player_id=eq.${eliminatedPlayer.id}`,
+    { method: "GET" },
+  )) ?? [];
+  const returnedPropertyIds = ownedRows.map((row) => row.tile_index);
+
+  if (ownedRows.length > 0) {
+    await fetchFromSupabaseWithService(
+      `property_ownership?game_id=eq.${gameId}&owner_player_id=eq.${eliminatedPlayer.id}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          owner_player_id: null,
+          acquired_round: null,
+          collateral_loan_id: null,
+          purchase_mortgage_id: null,
+          houses: 0,
+        }),
+      },
+    );
+  }
+
+  await fetchFromSupabaseWithService(
+    `player_loans?game_id=eq.${gameId}&player_id=eq.${eliminatedPlayer.id}&status=eq.active`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        status: "defaulted",
+        updated_at: now,
+      }),
+    },
+  );
+
+  await fetchFromSupabaseWithService(
+    `purchase_mortgages?game_id=eq.${gameId}&player_id=eq.${eliminatedPlayer.id}&status=eq.active`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        status: "defaulted",
+        updated_at: now,
+      }),
+    },
+  );
+
+  await fetchFromSupabaseWithService(`players?id=eq.${eliminatedPlayer.id}`, {
+    method: "PATCH",
+    headers: {
+      Prefer: "return=representation",
+    },
+    body: JSON.stringify({
+      ...(Number.isFinite(playerPosition) ? { position: playerPosition } : {}),
+      is_in_jail: false,
+      jail_turns_remaining: 0,
+      is_eliminated: true,
+      eliminated_at: now,
+    }),
+  });
+
+  const eliminationEvents: Array<{
+    event_type: string;
+    payload: Record<string, unknown>;
+  }> = [
+    {
+      event_type: triggerEventType,
+      payload: {
+        ...triggerPayload,
+        returned_property_ids: returnedPropertyIds,
+      },
+    },
+  ];
+
+  const eliminatedCurrentPlayer = gameState.current_player_id === eliminatedPlayer.id;
+  if (!gameIsOver && eliminatedCurrentPlayer && nextPlayer) {
+    eliminationEvents.push({
+      event_type: "END_TURN",
+      payload: {
+        from_player_id: eliminatedPlayer.id,
+        from_player_name: eliminatedPlayer.display_name,
+        to_player_id: nextPlayer.id,
+        to_player_name: nextPlayer.display_name,
+      },
+    });
+  }
+
+  if (gameIsOver) {
+    const standings = await computeAuthoritativeFinalStandings({
+      gameId,
+      gameState: {
+        ...gameState,
+        balances: updatedBalancesNormalized,
+      },
+      players: players.map((candidate) =>
+        candidate.id === eliminatedPlayer.id
+          ? {
+              ...candidate,
+              is_eliminated: true,
+              eliminated_at: now,
+            }
+          : candidate,
+      ),
+      boardPack,
+    });
+
+    eliminationEvents.push({
+      event_type: "GAME_OVER",
+      payload: buildGameOverPayload({
+        winner,
+        reason: gameOverReason,
+        standings,
+      }),
+    });
+  }
+
+  const finalVersion = currentVersion + events.length + eliminationEvents.length;
+  const nextTurnPhase = nextPlayer?.is_in_jail
+    ? "AWAITING_JAIL_DECISION"
+    : "AWAITING_ROLL";
+  const auctionEligibleIds = normalizePlayerIdArray(
+    gameState.auction_eligible_player_ids,
+  ).filter((playerId) => playerId !== eliminatedPlayer.id);
+  const auctionPassedIds = normalizePlayerIdArray(
+    gameState.auction_passed_player_ids,
+  ).filter((playerId) => playerId !== eliminatedPlayer.id);
+  const shouldClearAuction = Boolean(gameState.auction_active);
+  const inlandCells = normalizeInlandCellRecords(gameState.inland_explored_cells);
+  const inlandOwnershipCleared = clearInlandOwnershipForPlayer({
+    recordsByKey: inlandCells,
+    playerId: eliminatedPlayer.id,
+  });
+  const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+    `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+    {
+      method: "PATCH",
+      headers: {
+        Prefer: "return=representation",
+      },
+      body: JSON.stringify({
+        version: finalVersion,
+        balances: updatedBalancesNormalized,
+        current_player_id: gameIsOver
+          ? winner?.id ?? null
+          : eliminatedCurrentPlayer
+            ? nextPlayer?.id ?? null
+            : gameState.current_player_id,
+        ...(eliminatedCurrentPlayer
+          ? {
+              last_roll: null,
+              doubles_count: 0,
+              turn_phase: gameIsOver ? "AWAITING_ROLL" : nextTurnPhase,
+              pending_action: null,
+            }
+          : {}),
+        ...(shouldClearAuction
+          ? {
+              auction_active: false,
+              auction_tile_index: null,
+              auction_end_at: null,
+              auction_highest_bid: null,
+              auction_highest_bidder_player_id: null,
+              auction_eligible_player_ids: auctionEligibleIds,
+              auction_current_bid: null,
+              auction_current_winner_player_id: null,
+              auction_turn_player_id: null,
+              auction_turn_ends_at: null,
+              auction_passed_player_ids: auctionPassedIds,
+              auction_min_increment: null,
+            }
+          : {}),
+        ...(inlandOwnershipCleared
+          ? {
+              inland_explored_cells: serializeInlandCellRecords(inlandCells),
+            }
+          : {}),
+        updated_at: now,
+      }),
+    },
+  )) ?? [];
+
+  if (!updatedState) {
+    return { handled: true, error: "Version mismatch." };
+  }
+
+  await emitGameEvents(
+    gameId,
+    currentVersion + 1,
+    [...events, ...eliminationEvents],
+    userId,
+  );
+
+  if (gameIsOver) {
+    await fetchFromSupabaseWithService(`games?id=eq.${gameId}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        status: "ended",
+      }),
+    });
+  }
+
+  return { handled: true, updatedState };
+};
+
+const countOwnedTilesByType = (
+  boardTiles: TileInfo[],
+  ownershipByTile: OwnershipByTile,
+  ownerId: string,
+  tileType: string,
+) =>
+  boardTiles.filter(
+    (tile) =>
+      tile.type === tileType &&
+      ownershipByTile[tile.index]?.owner_player_id === ownerId,
+  ).length;
+
+const ownsFullColorSet = (
+  tile: TileInfo,
+  boardTiles: TileInfo[],
+  ownershipByTile: OwnershipByTile,
+  ownerId: string,
+) => {
+  if (tile.type !== "PROPERTY" || !tile.colorGroup) {
+    return false;
+  }
+  const groupTiles = boardTiles.filter(
+    (entry) =>
+      entry.type === "PROPERTY" && entry.colorGroup === tile.colorGroup,
+  );
+  if (groupTiles.length === 0) {
+    return false;
+  }
+  return groupTiles.every(
+    (entry) => ownershipByTile[entry.index]?.owner_player_id === ownerId,
+  );
+};
+
+const normalizeRentByHousesTiers = (rentByHouses?: number[] | null) => {
+  if (!rentByHouses || rentByHouses.length === 0) {
+    return rentByHouses ?? null;
+  }
+  if (rentByHouses.length !== 5) {
+    return [...rentByHouses];
+  }
+
+  const tier4 = rentByHouses[3] ?? rentByHouses[4] ?? 0;
+  const tier5 = rentByHouses[4] ?? tier4;
+  if (tier5 <= tier4) {
+    return [...rentByHouses.slice(0, 4), tier4, rentByHouses[4]];
+  }
+  const insertedTier = Math.min(
+    tier5 - 1,
+    Math.max(tier4 + 1, Math.round((tier4 + tier5) / 2)),
+  );
+  return [...rentByHouses.slice(0, 4), insertedTier, rentByHouses[4]];
+};
+
+const getPropertyRentWithDev = (
+  tile: TileInfo,
+  dev: number,
+) => {
+  const rentByHouses = normalizeRentByHousesTiers(tile.rentByHouses);
+  if (!rentByHouses || rentByHouses.length === 0) {
+    return tile.baseRent ?? 0;
+  }
+  const normalizedDev = Number.isFinite(dev) ? Math.max(0, Math.floor(dev)) : 0;
+  if (normalizedDev <= rentByHouses.length - 1) {
+    return rentByHouses[normalizedDev] ?? tile.baseRent ?? 0;
+  }
+  return rentByHouses[rentByHouses.length - 1] ?? tile.baseRent ?? 0;
+};
+
+const calculateRent = ({
+  tile,
+  ownerId,
+  currentPlayerId,
+  boardTiles,
+  ownershipByTile,
+  diceTotal,
+  activeMacroEffects,
+  boardPackEconomy,
+}: {
+  tile: TileInfo;
+  ownerId: string | null;
+  currentPlayerId: string;
+  boardTiles: TileInfo[];
+  ownershipByTile: OwnershipByTile;
+  diceTotal?: number | null;
+  activeMacroEffects: ActiveMacroEffectV1[];
+  boardPackEconomy: BoardPackEconomy;
+}) => {
+  if (!ownerId || ownerId === currentPlayerId) {
+    return { amount: 0, meta: null };
+  }
+
+  const rentMultiplier = getMacroRentMultiplierV1(activeMacroEffects);
+  const railMultiplier = getMacroRailRentMultiplierV1(activeMacroEffects);
+  const utilityBonusPctPerHouse = getMacroUtilityRentBonusPctPerHouseV1(
+    activeMacroEffects,
+  );
+  const macroMeta =
+    rentMultiplier !== 1 || railMultiplier !== 1 || utilityBonusPctPerHouse !== 0
+      ? {
+          rent_multiplier: rentMultiplier,
+          rail_rent_multiplier: railMultiplier,
+          utility_rent_bonus_per_house_pct: utilityBonusPctPerHouse,
+        }
+      : null;
+
+  if (tile.type === "RAIL") {
+    const railCount = countOwnedTilesByType(
+      boardTiles,
+      ownershipByTile,
+      ownerId,
+      "RAIL",
+    );
+    const baseAmount = boardPackEconomy.railRentByCount[railCount] ?? 0;
+    const amount = Math.round(baseAmount * rentMultiplier * railMultiplier);
+    return {
+      amount,
+      meta: {
+        rent_type: "RAIL",
+        railroads_owned: railCount,
+        base_rent: baseAmount,
+        ...(macroMeta ?? {}),
+      },
+    };
+  }
+
+  if (tile.type === "UTILITY") {
+    const utilityCount = countOwnedTilesByType(
+      boardTiles,
+      ownershipByTile,
+      ownerId,
+      "UTILITY",
+    );
+    const multiplier = getUtilityRentMultiplierForOwnedCount(
+      utilityCount,
+      boardPackEconomy.utilityRentMultipliers,
+    );
+    const total = diceTotal ?? 0;
+    const utilityBaseAmount = boardPackEconomy.utilityBaseAmount ?? 1;
+    const baseAmount = multiplier * total * utilityBaseAmount;
+    const totalHousesOwned = Object.values(ownershipByTile).reduce(
+      (sum, ownership) =>
+        ownership.owner_player_id === ownerId ? sum + ownership.houses : sum,
+      0,
+    );
+    const utilityBonusMultiplier =
+      1 + utilityBonusPctPerHouse * totalHousesOwned;
+    const amount = Math.round(
+      baseAmount * rentMultiplier * utilityBonusMultiplier,
+    );
+    return {
+      amount,
+      meta: {
+        rent_type: "UTILITY",
+        utilities_owned: utilityCount,
+        dice_total: total,
+        multiplier,
+        base_rent: baseAmount,
+        utility_bonus_multiplier: utilityBonusMultiplier,
+        utility_houses_owned: totalHousesOwned,
+        ...(macroMeta ?? {}),
+      },
+    };
+  }
+
+  if (tile.type === "PROPERTY") {
+    const dev = ownershipByTile[tile.index]?.houses ?? 0;
+    const amount = getPropertyRentWithDev(tile, dev);
+    // Monopoly (complete color set) doubles only the no-house base rent.
+    // Do not apply this to developed properties; houses/hotels already define rent.
+    const hasMonopolyNoDev =
+      dev === 0 && ownsFullColorSet(tile, boardTiles, ownershipByTile, ownerId);
+    const baseNoHouseRent = tile.rentByHouses?.[0] ?? tile.baseRent ?? 0;
+    const monopolyAdjustedAmount = hasMonopolyNoDev
+      ? baseNoHouseRent * 2
+      : amount;
+    const colorGroupMultiplier = getMacroRentMultiplierForColorGroupV1(
+      activeMacroEffects,
+      tile.colorGroup,
+    );
+    const finalAmount = Math.round(
+      monopolyAdjustedAmount * rentMultiplier * colorGroupMultiplier,
+    );
+    return {
+      amount: finalAmount,
+      meta: {
+        rent_type: "PROPERTY",
+        houses: dev,
+        base_rent: monopolyAdjustedAmount,
+        monopoly_applied: hasMonopolyNoDev,
+        color_group_multiplier: colorGroupMultiplier,
+        ...(macroMeta ?? {}),
+      },
+    };
+  }
+
+  const amount = tile.baseRent ?? 0;
+  return {
+    amount: Math.round(amount * rentMultiplier),
+    meta: {
+      rent_type: "PROPERTY",
+      base_rent: amount,
+      ...(macroMeta ?? {}),
+    },
+  };
+};
+
+const applyGoSalary = ({
+  player,
+  balances,
+  startingCash,
+  events,
+  reason,
+  packEconomy,
+  boardTiles,
+  ownershipByTile,
+}: {
+  player: PlayerRow;
+  balances: Record<string, number>;
+  startingCash: number;
+  events: Array<{ event_type: string; payload: Record<string, unknown> }>;
+  reason: "PASS_START" | "LAND_GO";
+  packEconomy: BoardPackEconomy;
+  boardTiles: BoardTile[];
+  ownershipByTile: Record<
+    number,
+    {
+      owner_player_id: string | null;
+      collateral_loan_id: string | null;
+      houses?: number | null;
+    }
+  >;
+}) => {
+  const currentBalance = balances[player.id] ?? startingCash;
+  const totalSalary = computeEffectiveGoSalary({
+    packEconomy,
+    boardTiles,
+    ownershipByTile,
+    playerId: player.id,
+  });
+  const updatedBalances = {
+    ...balances,
+    [player.id]: currentBalance + totalSalary,
+  };
+  events.push({
+    event_type: "COLLECT_GO",
+    payload: {
+      player_id: player.id,
+      player_name: player.display_name,
+      amount: totalSalary,
+      reason,
+    },
+  });
+  if (totalSalary !== 0) {
+    events.push({
+      event_type: "CASH_CREDIT",
+      payload: {
+        player_id: player.id,
+        amount: totalSalary,
+        reason: "COLLECT_GO",
+        source_event_type: "COLLECT_GO",
+      },
+    });
+  }
+  return { balances: updatedBalances, balancesChanged: totalSalary !== 0 };
+};
+
+const applyCardEffect = ({
+  card,
+  currentPlayer,
+  boardTiles,
+  boardSize,
+  activeLandingTile,
+  activeResolvedTile,
+  jailTile,
+  shouldSendToJail,
+  finalPosition,
+  events,
+  updatedBalances,
+  balancesChanged,
+  bankruptcyCandidate,
+  nextGetOutOfJailFreeCount,
+  getOutOfJailFreeCountChanged,
+  nextTaxExemptionPassCount,
+  taxExemptionPassCountChanged,
+  cardUtilityRollOverride,
+  cardTriggeredGoToJail,
+  startingCash,
+  ownershipByTile,
+  boardPackEconomy,
+}: {
+  card: { id: string; title: string; kind: string; payload?: unknown };
+  currentPlayer: PlayerRow;
+  boardTiles: TileInfo[];
+  boardSize: number;
+  activeLandingTile: TileInfo;
+  activeResolvedTile: TileInfo;
+  jailTile: TileInfo | null;
+  shouldSendToJail: boolean;
+  finalPosition: number;
+  events: Array<{ event_type: string; payload: Record<string, unknown> }>;
+  updatedBalances: Record<string, number>;
+  balancesChanged: boolean;
+  bankruptcyCandidate:
+    | BankruptcyCandidate
+    | null;
+  nextGetOutOfJailFreeCount: number;
+  getOutOfJailFreeCountChanged: boolean;
+  nextTaxExemptionPassCount: number;
+  taxExemptionPassCountChanged: boolean;
+  cardUtilityRollOverride:
+    | { total: number; dice: [number, number] }
+    | null;
+  cardTriggeredGoToJail: boolean;
+  startingCash: number;
+  ownershipByTile: Record<
+    number,
+    {
+      owner_player_id: string | null;
+      collateral_loan_id: string | null;
+      houses?: number | null;
+    }
+  >;
+  boardPackEconomy: BoardPackEconomy;
+}) => {
+  if (card.kind === "PAY" || card.kind === "RECEIVE") {
+    const amount =
+      getNumberPayload(card.payload as Record<string, unknown>, "amount") ?? 0;
+    const currentBalance = updatedBalances[currentPlayer.id] ?? startingCash;
+    const nextBalance =
+      card.kind === "PAY" ? currentBalance - amount : currentBalance + amount;
+    if (card.kind === "PAY" && nextBalance < 0 && !bankruptcyCandidate) {
+      bankruptcyCandidate = {
+        reason: "CARD_PAY",
+        cashBefore: currentBalance,
+        cashAfter: nextBalance,
+        amountDue: amount,
+        label: card.title,
+      };
+    }
+    if (card.kind === "RECEIVE" || nextBalance >= 0) {
+      updatedBalances = {
+        ...updatedBalances,
+        [currentPlayer.id]: nextBalance,
+      };
+      if (amount !== 0) {
+        balancesChanged = true;
+      }
+      events.push({
+        event_type: card.kind === "PAY" ? "CARD_PAY" : "CARD_RECEIVE",
+        payload: {
+          player_id: currentPlayer.id,
+          player_name: currentPlayer.display_name,
+          card_id: card.id,
+          card_title: card.title,
+          card_kind: card.kind,
+          amount,
+        },
+      });
+      if (amount !== 0) {
+        events.push({
+          event_type: card.kind === "PAY" ? "CASH_DEBIT" : "CASH_CREDIT",
+          payload: {
+            target_player_id: currentPlayer.id,
+            amount,
+            reason: card.kind === "PAY" ? "CARD_PAY" : "CARD_RECEIVE",
+            source_event_type: card.kind === "PAY" ? "CARD_PAY" : "CARD_RECEIVE",
+          },
+        });
+      }
+    }
+  }
+
+  if (card.kind === "GET_OUT_OF_JAIL_FREE") {
+    nextGetOutOfJailFreeCount += 1;
+    getOutOfJailFreeCountChanged = true;
+    events.push({
+      event_type: "CARD_GET_OUT_OF_JAIL_FREE_RECEIVED",
+      payload: {
+        player_id: currentPlayer.id,
+        player_name: currentPlayer.display_name,
+        card_id: card.id,
+        card_title: card.title,
+        card_kind: card.kind,
+        total_cards: nextGetOutOfJailFreeCount,
+      },
+    });
+  }
+
+  if (card.kind === "TAX_EXEMPTION_PASS") {
+    nextTaxExemptionPassCount += 1;
+    taxExemptionPassCountChanged = true;
+    events.push({
+      event_type: "CARD_TAX_EXEMPTION_PASS_RECEIVED",
+      payload: {
+        player_id: currentPlayer.id,
+        player_name: currentPlayer.display_name,
+        card_id: card.id,
+        card_title: card.title,
+        card_kind: card.kind,
+        total_cards: nextTaxExemptionPassCount,
+      },
+    });
+  }
+
+  if (card.kind === "MOVE_TO" || card.kind === "MOVE_REL") {
+    const payload = card.payload as Record<string, unknown>;
+    const shouldOverrideUtilityRoll =
+      card.kind === "MOVE_TO" &&
+      getBooleanPayload(payload, "utility_roll_override");
+    const targetIndex =
+      card.kind === "MOVE_TO"
+        ? resolveMoveToTargetIndex(payload, boardTiles, activeResolvedTile.index)
+        : null;
+    const spaces =
+      card.kind === "MOVE_REL"
+        ? getNumberPayload(payload, "relative_spaces") ??
+          getNumberPayload(payload, "spaces")
+        : null;
+    const cardFromIndex = activeResolvedTile.index;
+    const rawIndex =
+      card.kind === "MOVE_TO" && targetIndex !== null
+        ? targetIndex
+        : card.kind === "MOVE_REL" && spaces !== null
+          ? cardFromIndex + spaces
+          : null;
+    if (rawIndex !== null) {
+      const normalizedIndex = ((rawIndex % boardSize) + boardSize) % boardSize;
+      const cardLandingTile = boardTiles[normalizedIndex] ?? {
+        index: normalizedIndex,
+        tile_id: `tile-${normalizedIndex}`,
+        type: "PROPERTY",
+        name: `Tile ${normalizedIndex}`,
+      };
+      const cardPassedStart =
+        card.kind === "MOVE_TO"
+          ? normalizedIndex < cardFromIndex
+          : spaces !== null
+            ? spaces > 0 && cardFromIndex + spaces >= boardSize
+            : false;
+      const cardJailTile =
+        cardLandingTile.type === "GO_TO_JAIL"
+          ? boardTiles.find((tile) => tile.type === "JAIL") ?? {
+              index: 10,
+              tile_id: "jail",
+              type: "JAIL",
+              name: "Jail",
+            }
+          : null;
+      const cardResolvedTile =
+        cardLandingTile.type === "GO_TO_JAIL" ? cardLandingTile : cardJailTile ?? cardLandingTile;
+      jailTile = cardJailTile ?? jailTile;
+      shouldSendToJail =
+        cardLandingTile.type === "GO_TO_JAIL" && Boolean(cardJailTile);
+      activeLandingTile = cardLandingTile;
+      activeResolvedTile = cardResolvedTile;
+      finalPosition = cardResolvedTile.index;
+      if (shouldOverrideUtilityRoll && cardLandingTile.type === "UTILITY") {
+        const overrideRoll = rollDice();
+        cardUtilityRollOverride = overrideRoll;
+        events.push({
+          event_type: "CARD_UTILITY_ROLL",
+          payload: {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.display_name,
+            roll: overrideRoll.total,
+            dice: overrideRoll.dice,
+            tile_id: cardLandingTile.tile_id,
+            tile_index: cardLandingTile.index,
+            card_id: card.id,
+            card_title: card.title,
+          },
+        });
+      }
+      events.push({
+        event_type: card.kind === "MOVE_TO" ? "CARD_MOVE_TO" : "CARD_MOVE_REL",
+        payload: {
+          player_id: currentPlayer.id,
+          player_name: currentPlayer.display_name,
+          card_id: card.id,
+          card_title: card.title,
+          card_kind: card.kind,
+          from_tile_index: cardFromIndex,
+          to_tile_index: cardLandingTile.index,
+          passed_start: cardPassedStart,
+        },
+      });
+
+      events.push({
+        event_type: "MOVE_PLAYER",
+        payload: {
+          player_id: currentPlayer.id,
+          from: cardFromIndex,
+          to: cardLandingTile.index,
+          passedStart: cardPassedStart,
+          tile_id: cardLandingTile.tile_id,
+          tile_name: cardLandingTile.name,
+          reason: "CARD",
+          card_id: card.id,
+        },
+      });
+
+      if (cardPassedStart || cardLandingTile.type === "START") {
+        const reason = cardPassedStart ? "PASS_START" : "LAND_GO";
+        const goResult = applyGoSalary({
+          player: currentPlayer,
+          balances: updatedBalances,
+          startingCash,
+          events,
+          reason,
+          packEconomy: boardPackEconomy,
+          boardTiles,
+          ownershipByTile,
+        });
+        updatedBalances = goResult.balances;
+        balancesChanged = balancesChanged || goResult.balancesChanged;
+      }
+
+      events.push({
+        event_type: "LAND_ON_TILE",
+        payload: {
+          player_id: currentPlayer.id,
+          tile_id: cardLandingTile.tile_id,
+          tile_type: cardLandingTile.type,
+          tile_index: cardLandingTile.index,
+        },
+      });
+
+      const cardResolutionEvent = resolveTile(cardLandingTile, currentPlayer);
+      if (cardResolutionEvent) {
+        events.push({
+          event_type: cardResolutionEvent.event_type,
+          payload: cardResolutionEvent.payload,
+        });
+      }
+
+      if (cardLandingTile.type === "GO_TO_JAIL" && cardJailTile) {
+        cardTriggeredGoToJail = true;
+      }
+    }
+  }
+
+  if (card.kind === "GO_TO_JAIL") {
+    const cardFromIndex = activeResolvedTile.index;
+    const cardJailTile =
+      boardTiles.find((tile) => tile.type === "JAIL") ?? {
+        index: 10,
+        tile_id: "jail",
+        type: "JAIL",
+        name: "Jail",
+      };
+    activeLandingTile = cardJailTile;
+    activeResolvedTile = cardJailTile;
+    finalPosition = cardFromIndex;
+    shouldSendToJail = true;
+    jailTile = cardJailTile;
+    cardTriggeredGoToJail = true;
+
+    events.push({
+      event_type: "CARD_GO_TO_JAIL",
+      payload: {
+        player_id: currentPlayer.id,
+        player_name: currentPlayer.display_name,
+        card_id: card.id,
+        card_title: card.title,
+        card_kind: card.kind,
+        from_tile_index: cardFromIndex,
+        to_jail_tile_index: cardJailTile.index,
+      },
+    });
+
+  }
+
+  return {
+    activeLandingTile,
+    activeResolvedTile,
+    jailTile,
+    shouldSendToJail,
+    finalPosition,
+    updatedBalances,
+    balancesChanged,
+    bankruptcyCandidate,
+    nextGetOutOfJailFreeCount,
+    getOutOfJailFreeCountChanged,
+    nextTaxExemptionPassCount,
+    taxExemptionPassCountChanged,
+    cardUtilityRollOverride,
+    cardTriggeredGoToJail,
+  };
+};
+
+const finalizeMoveResolution = async ({
+  gameId,
+  game,
+  gameState,
+  players,
+  currentPlayer,
+  updatedBalances,
+  balancesChanged,
+  bankruptcyCandidate,
+  activeLandingTile,
+  activeResolvedTile,
+  finalPosition,
+  shouldSendToJail,
+  jailTile,
+  cardTriggeredGoToJail,
+  cardUtilityRollOverride,
+  rollTotal,
+  isDouble,
+  allowExtraRoll,
+  nextDoublesCount,
+  events,
+  currentVersion,
+  userId,
+  ownershipByTile,
+  boardTiles,
+  boardPack,
+  boardPackEconomy,
+  rules,
+  startingCash,
+  activeMacroEffects,
+  nextChanceIndex,
+  nextCommunityIndex,
+  nextChanceOrder,
+  nextCommunityOrder,
+  nextChanceDrawPtr,
+  nextCommunityDrawPtr,
+  nextChanceSeed,
+  nextCommunitySeed,
+  nextChanceReshuffleCount,
+  nextCommunityReshuffleCount,
+  chanceStateChanged,
+  communityStateChanged,
+  nextGetOutOfJailFreeCount,
+  getOutOfJailFreeCountChanged,
+  nextTaxExemptionPassCount,
+  taxExemptionPassCountChanged,
+  extraGameStatePatch,
+}: {
+  gameId: string;
+  game: GameRow;
+  gameState: GameStateRow;
+  players: PlayerRow[];
+  currentPlayer: PlayerRow;
+  updatedBalances: Record<string, number>;
+  balancesChanged: boolean;
+  bankruptcyCandidate:
+    | BankruptcyCandidate
+    | null;
+  activeLandingTile: TileInfo;
+  activeResolvedTile: TileInfo;
+  finalPosition: number;
+  shouldSendToJail: boolean;
+  jailTile: TileInfo | null;
+  cardTriggeredGoToJail: boolean;
+  cardUtilityRollOverride:
+    | { total: number; dice: [number, number] }
+    | null;
+  rollTotal: number | null;
+  isDouble: boolean;
+  allowExtraRoll: boolean;
+  nextDoublesCount: number;
+  events: Array<{ event_type: string; payload: Record<string, unknown> }>;
+  currentVersion: number;
+  userId: string;
+  ownershipByTile: OwnershipByTile;
+  boardTiles: TileInfo[];
+  boardPack: ReturnType<typeof getBoardPackById> | null;
+  boardPackEconomy: BoardPackEconomy;
+  rules: ReturnType<typeof getRules>;
+  startingCash: number;
+  activeMacroEffects: ActiveMacroEffectV1[];
+  nextChanceIndex: number;
+  nextCommunityIndex: number;
+  nextChanceOrder: number[] | null;
+  nextCommunityOrder: number[] | null;
+  nextChanceDrawPtr: number;
+  nextCommunityDrawPtr: number;
+  nextChanceSeed: string | null;
+  nextCommunitySeed: string | null;
+  nextChanceReshuffleCount: number;
+  nextCommunityReshuffleCount: number;
+  chanceStateChanged: boolean;
+  communityStateChanged: boolean;
+  nextGetOutOfJailFreeCount: number;
+  getOutOfJailFreeCountChanged: boolean;
+  nextTaxExemptionPassCount: number;
+  taxExemptionPassCountChanged: boolean;
+  extraGameStatePatch?: Record<string, unknown>;
+}) => {
+  const ownership = ownershipByTile[activeLandingTile.index];
+  const isOwnableTile = OWNABLE_TILE_TYPES.has(activeLandingTile.type);
+  const rentOwnerId =
+    isOwnableTile && ownership ? ownership.owner_player_id : null;
+  const isCollateralized = Boolean(ownership?.collateral_loan_id);
+  const rentCalculation = isCollateralized
+    ? { amount: 0, meta: null }
+    : (() => {
+        const rentDiceTotal =
+          activeLandingTile.type === "UTILITY" && cardUtilityRollOverride
+            ? cardUtilityRollOverride.total
+            : rollTotal ?? 0;
+        return calculateRent({
+          tile: activeLandingTile,
+          ownerId: rentOwnerId,
+          currentPlayerId: currentPlayer.id,
+          boardTiles,
+          ownershipByTile,
+          diceTotal: rentDiceTotal,
+          activeMacroEffects,
+          boardPackEconomy,
+        });
+      })();
+  if (activeLandingTile.type === "UTILITY" && cardUtilityRollOverride) {
+    cardUtilityRollOverride = null;
+  }
+  const rentAmount = rentCalculation.amount;
+  let shouldPayRent = rentAmount > 0 && Boolean(rentOwnerId);
+  const isUnownedOwnableTile = isOwnableTile && !ownership;
+  const isTaxTile = activeLandingTile.type === "TAX";
+  const usesCustomTaxRules = isCustomTaxBoardPack(boardPack?.id);
+  const normalizedTaxTileId = isTaxTile
+    ? activeLandingTile.tile_id.toLowerCase()
+    : "";
+  const isIncomeTax = isTaxTile && normalizedTaxTileId === "income-tax";
+  const isSuperTax = isTaxTile && normalizedTaxTileId === "super-tax";
+  const baseTaxAmount = isTaxTile ? activeLandingTile.taxAmount ?? 0 : 0;
+  const currentCashForTax = updatedBalances[currentPlayer.id] ?? startingCash;
+  let taxAmount = baseTaxAmount;
+  let incomeTaxBreakdown: {
+    currentCash: number;
+    baselineCash: number;
+    taxableGain: number;
+    taxRate: number;
+    taxAmount: number;
+  } | null = null;
+  let superTaxBreakdown: {
+    currentCash: number;
+    assetValue: number;
+    totalLiabilities: number;
+    netWorthForTax: number;
+    taxRate: number;
+    taxAmount: number;
+  } | null = null;
+
+  if (usesCustomTaxRules && isIncomeTax) {
+    const baselineByPlayer = gameState.income_tax_baseline_cash_by_player ?? {};
+    const baselineCash = baselineByPlayer[currentPlayer.id] ?? startingCash;
+    incomeTaxBreakdown = computeIncomeTaxBreakdown({
+      currentCash: currentCashForTax,
+      baselineCash,
+      taxRate: rules.incomeTaxRate,
+    });
+    taxAmount = computeIncomeTaxAmount(
+      currentCashForTax,
+      baselineCash,
+      rules.incomeTaxRate,
+    );
+  }
+
+  if (isSuperTax) {
+    if (usesCustomTaxRules) {
+      const [activeLoans, activeMortgages] = await Promise.all([
+        fetchFromSupabaseWithService(
+          `player_loans?select=principal,remaining_principal&game_id=eq.${gameId}&player_id=eq.${currentPlayer.id}&status=eq.active`,
+          { method: "GET" },
+        ),
+        fetchFromSupabaseWithService(
+          `purchase_mortgages?select=principal_remaining,accrued_interest_unpaid&game_id=eq.${gameId}&player_id=eq.${currentPlayer.id}&status=eq.active`,
+          { method: "GET" },
+        ),
+      ]);
+
+      superTaxBreakdown = computeSuperTaxBreakdown({
+        currentCash: currentCashForTax,
+        currentRound: gameState.rounds_elapsed ?? 0,
+        playerId: currentPlayer.id,
+        boardTiles,
+        ownershipByTile,
+        activeCollateralLoans: Array.isArray(activeLoans)
+          ? (activeLoans as Array<{ principal: number; remaining_principal: number | null }>)
+          : [],
+        activePurchaseMortgages: Array.isArray(activeMortgages)
+          ? (activeMortgages as Array<{
+              principal_remaining: number;
+              accrued_interest_unpaid: number;
+            }>)
+          : [],
+        inlandExploredCells: gameState.inland_explored_cells,
+        boardPackEconomy,
+        taxRate: rules.superTaxRate,
+      });
+
+      taxAmount = superTaxBreakdown.taxAmount;
+    } else {
+      superTaxBreakdown = {
+        currentCash: currentCashForTax,
+        assetValue: 0,
+        totalLiabilities: 0,
+        netWorthForTax: currentCashForTax,
+        taxRate: 0,
+        taxAmount: baseTaxAmount,
+      };
+      taxAmount = baseTaxAmount;
+    }
+  }
+  const shouldPayTax = isTaxTile && taxAmount > 0;
+  const incomeTaxPendingAction =
+    !bankruptcyCandidate &&
+    isIncomeTax &&
+    usesCustomTaxRules &&
+    incomeTaxBreakdown &&
+    !(shouldSendToJail && jailTile)
+      ? createIncomeTaxPendingAction({
+          player: currentPlayer,
+          tile: activeLandingTile,
+          boardPack,
+          boardPackEconomy,
+          breakdown: incomeTaxBreakdown,
+          returnTurnPhase: "AWAITING_ROLL",
+        })
+      : null;
+  const superTaxPendingAction =
+    !bankruptcyCandidate &&
+    isSuperTax &&
+    taxAmount > 0 &&
+    superTaxBreakdown &&
+    !(shouldSendToJail && jailTile)
+      ? createSuperTaxPendingAction({
+          player: currentPlayer,
+          tile: activeLandingTile,
+          boardPack,
+          boardPackEconomy,
+          breakdown: superTaxBreakdown,
+          usesCustomFormula: usesCustomTaxRules,
+          returnTurnPhase: "AWAITING_ROLL",
+        })
+      : null;
+  const isFreeParking = activeLandingTile.type === "FREE_PARKING";
+
+  if (isCollateralized && rentOwnerId && rentOwnerId !== currentPlayer.id) {
+    shouldPayRent = false;
+    events.push({
+      event_type: "RENT_SKIPPED_COLLATERAL",
+      payload: {
+        tile_index: activeLandingTile.index,
+        tile_id: activeLandingTile.tile_id,
+        owner_player_id: rentOwnerId,
+        reason: "collateralized",
+      },
+    });
+  }
+
+  if (shouldPayRent && rentOwnerId && rentOwnerId !== currentPlayer.id) {
+    const payerBalance = updatedBalances[currentPlayer.id] ?? startingCash;
+    const ownerBalance = updatedBalances[rentOwnerId] ?? startingCash;
+    const nextBalance = payerBalance - rentAmount;
+    if (nextBalance < 0 && !bankruptcyCandidate) {
+      bankruptcyCandidate = {
+        reason: "PAY_RENT",
+        cashBefore: payerBalance,
+        cashAfter: nextBalance,
+        amountDue: rentAmount,
+        owedToPlayerId: rentOwnerId,
+        tileIndex: activeLandingTile.index,
+        tileId: activeLandingTile.tile_id,
+        label: activeLandingTile.name,
+      };
+    }
+    if (nextBalance >= 0) {
+      updatedBalances = {
+        ...updatedBalances,
+        [currentPlayer.id]: nextBalance,
+        [rentOwnerId]: ownerBalance + rentAmount,
+      };
+      balancesChanged = true;
+    }
+    const rentPayload: Record<string, unknown> = {
+      tile_index: activeLandingTile.index,
+      tile_id: activeLandingTile.tile_id,
+      tile_type: activeLandingTile.type,
+      from_player_id: currentPlayer.id,
+      to_player_id: rentOwnerId,
+      amount: rentAmount,
+    };
+    if (rentCalculation.meta) {
+      Object.assign(rentPayload, rentCalculation.meta);
+    }
+    if (nextBalance >= 0) {
+      events.push({
+        event_type: "PAY_RENT",
+        payload: rentPayload,
+      });
+      events.push(
+        {
+          event_type: "CASH_DEBIT",
+          payload: {
+            player_id: currentPlayer.id,
+            amount: rentAmount,
+            reason: "PAY_RENT",
+            tile_index: activeLandingTile.index,
+            counterparty_player_id: rentOwnerId,
+            source_event_type: "PAY_RENT",
+          },
+        },
+        {
+          event_type: "CASH_CREDIT",
+          payload: {
+            player_id: rentOwnerId,
+            amount: rentAmount,
+            reason: "PAY_RENT",
+            tile_index: activeLandingTile.index,
+            counterparty_player_id: currentPlayer.id,
+            source_event_type: "PAY_RENT",
+          },
+        },
+      );
+
+      if (activeLandingTile.type === "RAIL") {
+        const inlandCells = normalizeInlandCellRecords(
+          gameState.inland_explored_cells,
+        );
+        const {
+          oilRefineryCountsByPlayer,
+          refineryPayoutsByPlayer,
+          verticalIntegrationBonus,
+        } = computeOilRailSynergyPayouts({
+          recordsByKey: inlandCells,
+          rentPaid: rentAmount,
+          railroadOwnerPlayerId: rentOwnerId,
+        });
+
+        for (const playerId of Object.keys(refineryPayoutsByPlayer).sort()) {
+          const payout = refineryPayoutsByPlayer[playerId] ?? 0;
+          if (payout <= 0) {
+            continue;
+          }
+          const currentBalance = updatedBalances[playerId] ?? startingCash;
+          updatedBalances = {
+            ...updatedBalances,
+            [playerId]: currentBalance + payout,
+          };
+          balancesChanged = true;
+          events.push({
+            event_type: "OIL_RAIL_SYNERGY_PAYOUT",
+            payload: {
+              trigger_tile_index: activeLandingTile.index,
+              trigger_tile_id: activeLandingTile.tile_id,
+              trigger_tile_type: activeLandingTile.type,
+              railroad_owner_player_id: rentOwnerId,
+              rent_paid: rentAmount,
+              player_id: playerId,
+              payout,
+              oil_refinery_count: oilRefineryCountsByPlayer[playerId] ?? 0,
+            },
+          });
+          events.push({
+            event_type: "CASH_CREDIT",
+            payload: {
+              player_id: playerId,
+              amount: payout,
+              reason: "OIL_RAIL_SYNERGY_PAYOUT",
+              tile_index: activeLandingTile.index,
+              source_event_type: "OIL_RAIL_SYNERGY_PAYOUT",
+            },
+          });
+        }
+
+        if (verticalIntegrationBonus > 0) {
+          const railroadOwnerBalance = updatedBalances[rentOwnerId] ?? startingCash;
+          updatedBalances = {
+            ...updatedBalances,
+            [rentOwnerId]: railroadOwnerBalance + verticalIntegrationBonus,
+          };
+          balancesChanged = true;
+          events.push({
+            event_type: "VERTICAL_INTEGRATION_BONUS",
+            payload: {
+              trigger_tile_index: activeLandingTile.index,
+              trigger_tile_id: activeLandingTile.tile_id,
+              trigger_tile_type: activeLandingTile.type,
+              railroad_owner_player_id: rentOwnerId,
+              rent_paid: rentAmount,
+              payout: verticalIntegrationBonus,
+            },
+          });
+          events.push({
+            event_type: "CASH_CREDIT",
+            payload: {
+              player_id: rentOwnerId,
+              amount: verticalIntegrationBonus,
+              reason: "VERTICAL_INTEGRATION_BONUS",
+              tile_index: activeLandingTile.index,
+              source_event_type: "VERTICAL_INTEGRATION_BONUS",
+            },
+          });
+        }
+      }
+
+      if (
+        activeLandingTile.type === "UTILITY" &&
+        activeLandingTile.utilityKind === "ELECTRIC"
+      ) {
+        const inlandCells = normalizeInlandCellRecords(
+          gameState.inland_explored_cells,
+        );
+        const {
+          coalSiteCountsByPlayer,
+          coalSitePayoutsByPlayer,
+          verticalIntegrationBonus,
+        } = computeCoalUtilitySynergyPayouts({
+          recordsByKey: inlandCells,
+          rentPaid: rentAmount,
+          electricUtilityOwnerPlayerId: rentOwnerId,
+        });
+
+        for (const playerId of Object.keys(coalSitePayoutsByPlayer).sort()) {
+          const payout = coalSitePayoutsByPlayer[playerId] ?? 0;
+          if (payout <= 0) {
+            continue;
+          }
+          const currentBalance = updatedBalances[playerId] ?? startingCash;
+          updatedBalances = {
+            ...updatedBalances,
+            [playerId]: currentBalance + payout,
+          };
+          balancesChanged = true;
+          events.push({
+            event_type: "COAL_UTILITY_SYNERGY_PAYOUT",
+            payload: {
+              trigger_tile_index: activeLandingTile.index,
+              trigger_tile_id: activeLandingTile.tile_id,
+              trigger_tile_type: activeLandingTile.type,
+              utility_kind: activeLandingTile.utilityKind,
+              electric_utility_owner_player_id: rentOwnerId,
+              rent_paid: rentAmount,
+              player_id: playerId,
+              payout,
+              coal_site_count: coalSiteCountsByPlayer[playerId] ?? 0,
+            },
+          });
+          events.push({
+            event_type: "CASH_CREDIT",
+            payload: {
+              player_id: playerId,
+              amount: payout,
+              reason: "COAL_UTILITY_SYNERGY_PAYOUT",
+              tile_index: activeLandingTile.index,
+              source_event_type: "COAL_UTILITY_SYNERGY_PAYOUT",
+            },
+          });
+        }
+
+        if (verticalIntegrationBonus > 0) {
+          const utilityOwnerBalance = updatedBalances[rentOwnerId] ?? startingCash;
+          updatedBalances = {
+            ...updatedBalances,
+            [rentOwnerId]: utilityOwnerBalance + verticalIntegrationBonus,
+          };
+          balancesChanged = true;
+          events.push({
+            event_type: "COAL_VERTICAL_INTEGRATION_BONUS",
+            payload: {
+              trigger_tile_index: activeLandingTile.index,
+              trigger_tile_id: activeLandingTile.tile_id,
+              trigger_tile_type: activeLandingTile.type,
+              utility_kind: activeLandingTile.utilityKind,
+              electric_utility_owner_player_id: rentOwnerId,
+              rent_paid: rentAmount,
+              payout: verticalIntegrationBonus,
+              coal_site_count: coalSiteCountsByPlayer[rentOwnerId] ?? 0,
+            },
+          });
+          events.push({
+            event_type: "CASH_CREDIT",
+            payload: {
+              player_id: rentOwnerId,
+              amount: verticalIntegrationBonus,
+              reason: "COAL_VERTICAL_INTEGRATION_BONUS",
+              tile_index: activeLandingTile.index,
+              source_event_type: "COAL_VERTICAL_INTEGRATION_BONUS",
+            },
+          });
+        }
+      }
+
+      if (
+        activeLandingTile.type === "UTILITY" &&
+        activeLandingTile.utilityKind === "WATER"
+      ) {
+        const inlandCells = normalizeInlandCellRecords(
+          gameState.inland_explored_cells,
+        );
+        const {
+          waterSiteCountsByPlayer,
+          waterSitePayoutsByPlayer,
+          verticalIntegrationBonus,
+        } = computeWaterUtilitySynergyPayouts({
+          recordsByKey: inlandCells,
+          rentPaid: rentAmount,
+          waterUtilityOwnerPlayerId: rentOwnerId,
+        });
+
+        for (const playerId of Object.keys(waterSitePayoutsByPlayer).sort()) {
+          const payout = waterSitePayoutsByPlayer[playerId] ?? 0;
+          if (payout <= 0) {
+            continue;
+          }
+          const currentBalance = updatedBalances[playerId] ?? startingCash;
+          updatedBalances = {
+            ...updatedBalances,
+            [playerId]: currentBalance + payout,
+          };
+          balancesChanged = true;
+          events.push({
+            event_type: "WATER_UTILITY_SYNERGY_PAYOUT",
+            payload: {
+              trigger_tile_index: activeLandingTile.index,
+              trigger_tile_id: activeLandingTile.tile_id,
+              trigger_tile_type: activeLandingTile.type,
+              utility_kind: activeLandingTile.utilityKind,
+              water_utility_owner_player_id: rentOwnerId,
+              rent_paid: rentAmount,
+              player_id: playerId,
+              payout,
+              water_site_count: waterSiteCountsByPlayer[playerId] ?? 0,
+            },
+          });
+          events.push({
+            event_type: "CASH_CREDIT",
+            payload: {
+              player_id: playerId,
+              amount: payout,
+              reason: "WATER_UTILITY_SYNERGY_PAYOUT",
+              tile_index: activeLandingTile.index,
+              source_event_type: "WATER_UTILITY_SYNERGY_PAYOUT",
+            },
+          });
+        }
+
+        if (verticalIntegrationBonus > 0) {
+          const utilityOwnerBalance = updatedBalances[rentOwnerId] ?? startingCash;
+          updatedBalances = {
+            ...updatedBalances,
+            [rentOwnerId]: utilityOwnerBalance + verticalIntegrationBonus,
+          };
+          balancesChanged = true;
+          events.push({
+            event_type: "WATER_VERTICAL_INTEGRATION_BONUS",
+            payload: {
+              trigger_tile_index: activeLandingTile.index,
+              trigger_tile_id: activeLandingTile.tile_id,
+              trigger_tile_type: activeLandingTile.type,
+              utility_kind: activeLandingTile.utilityKind,
+              water_utility_owner_player_id: rentOwnerId,
+              rent_paid: rentAmount,
+              payout: verticalIntegrationBonus,
+              water_site_count: waterSiteCountsByPlayer[rentOwnerId] ?? 0,
+            },
+          });
+          events.push({
+            event_type: "CASH_CREDIT",
+            payload: {
+              player_id: rentOwnerId,
+              amount: verticalIntegrationBonus,
+              tile_index: activeLandingTile.index,
+              reason: "WATER_VERTICAL_INTEGRATION_BONUS",
+              source_event_type: "WATER_VERTICAL_INTEGRATION_BONUS",
+            },
+          });
+        }
+      }
+    }
+  }
+
+  if (shouldPayTax && !superTaxPendingAction && !incomeTaxPendingAction) {
+    const payerBalance = updatedBalances[currentPlayer.id] ?? startingCash;
+    const nextBalance = payerBalance - taxAmount;
+    if (nextBalance < 0 && !bankruptcyCandidate) {
+      bankruptcyCandidate = {
+        reason: "PAY_TAX",
+        cashBefore: payerBalance,
+        cashAfter: nextBalance,
+        amountDue: taxAmount,
+        tileIndex: activeLandingTile.index,
+        tileId: activeLandingTile.tile_id,
+        label: activeLandingTile.name,
+      };
+    }
+    if (nextBalance >= 0) {
+      updatedBalances = {
+        ...updatedBalances,
+        [currentPlayer.id]: nextBalance,
+      };
+      balancesChanged = true;
+    }
+    const taxPayload: Record<string, unknown> = {
+      tile_index: activeLandingTile.index,
+      tile_name: activeLandingTile.name,
+      amount: taxAmount,
+      payer_player_id: currentPlayer.id,
+      payer_display_name: currentPlayer.display_name,
+    };
+    if (usesCustomTaxRules && isIncomeTax) {
+      Object.assign(taxPayload, {
+        tax_kind: "INCOME_TAX",
+        computed_from: "cash_minus_starting_cash",
+      });
+    }
+    if (usesCustomTaxRules && isSuperTax) {
+      Object.assign(taxPayload, {
+        tax_kind: "SUPER_TAX",
+        computed_from: "net_worth_for_tax",
+      });
+    }
+    if (nextBalance >= 0) {
+      events.push(
+        {
+          event_type: "PAY_TAX",
+          payload: taxPayload,
+        },
+        {
+          event_type: "CASH_DEBIT",
+          payload: {
+            player_id: currentPlayer.id,
+            amount: taxAmount,
+            reason: "PAY_TAX",
+            tile_index: activeLandingTile.index,
+          },
+        },
+      );
+    }
+    // TODO: If rules.freeParkingJackpotEnabled, route taxAmount into free_parking_pot.
+  }
+
+  if (isFreeParking && rules.freeParkingJackpotEnabled) {
+    // TODO: Pay out free_parking_pot and reset to 0 when jackpot is enabled.
+  }
+
+  const isBankruptcyPending = Boolean(bankruptcyCandidate);
+  const pendingPurchaseAction =
+    !isBankruptcyPending &&
+    !superTaxPendingAction &&
+    !incomeTaxPendingAction &&
+    isUnownedOwnableTile &&
+    !(shouldSendToJail && jailTile)
+      ? {
+          type: "BUY_PROPERTY",
+          player_id: currentPlayer.id,
+          tile_index: activeLandingTile.index,
+          ...(() => {
+            const basePrice = activeLandingTile.price ?? 0;
+            const activeMacroEffectsV1 = getActiveMacroEffectsV1ForRules(
+              gameState.active_macro_effects_v1,
+              rules.macroEnabled,
+            );
+            const discountedPurchase = calculateDirectBankPropertyPurchasePrice(
+              basePrice,
+              activeMacroEffectsV1,
+            );
+            const discountMacro =
+              discountedPurchase.discountPct > 0
+                ? activeMacroEffectsV1.find(
+                    (effect) =>
+                      effect.effects.property_purchase_discount_pct ===
+                      discountedPurchase.discountPct,
+                  ) ?? null
+                : null;
+            return {
+              price: discountedPurchase.finalPrice,
+              base_price: discountedPurchase.basePrice,
+              property_purchase_discount_pct: discountedPurchase.discountPct,
+              ...(discountMacro
+                ? { property_purchase_discount_macro_name: discountMacro.name }
+                : {}),
+            };
+          })(),
+        }
+      : null;
+
+  if (pendingPurchaseAction) {
+    events.push({
+      event_type: "OFFER_PURCHASE",
+      payload: {
+        player_id: currentPlayer.id,
+        tile_id: activeLandingTile.tile_id,
+        tile_name: activeLandingTile.name,
+        tile_index: activeLandingTile.index,
+        price: pendingPurchaseAction.price,
+        ...(typeof pendingPurchaseAction.base_price === "number"
+          ? { base_price: pendingPurchaseAction.base_price }
+          : {}),
+        ...(typeof pendingPurchaseAction.property_purchase_discount_pct ===
+        "number"
+          ? {
+              property_purchase_discount_pct:
+                pendingPurchaseAction.property_purchase_discount_pct,
+            }
+          : {}),
+        ...(typeof pendingPurchaseAction.property_purchase_discount_macro_name ===
+        "string"
+          ? {
+              property_purchase_discount_macro_name:
+                pendingPurchaseAction.property_purchase_discount_macro_name,
+            }
+          : {}),
+      },
+    });
+  }
+
+  events.push({
+    event_type: "MOVE_RESOLVED",
+    payload: {
+      player_id: currentPlayer.id,
+      tile_id: activeResolvedTile.tile_id,
+      tile_type: activeResolvedTile.type,
+      tile_index: activeResolvedTile.index,
+    },
+  });
+
+  if (
+    allowExtraRoll &&
+    isDouble &&
+    !pendingPurchaseAction &&
+    !incomeTaxPendingAction &&
+    !superTaxPendingAction &&
+    !isBankruptcyPending &&
+    !(shouldSendToJail && jailTile)
+  ) {
+    events.push({
+      event_type: "ALLOW_EXTRA_ROLL",
+      payload: {
+        player_id: currentPlayer.id,
+        player_name: currentPlayer.display_name,
+        doubles_count: nextDoublesCount,
+      },
+    });
+  }
+
+  if (bankruptcyCandidate) {
+    const resolvedMoveVersion = currentVersion + events.length;
+    const turnPhaseAfterMove =
+      pendingPurchaseAction || superTaxPendingAction || incomeTaxPendingAction
+        ? "AWAITING_DECISION"
+        : "AWAITING_ROLL";
+
+    let resolvedMoveState: GameStateRow;
+    try {
+      const committedState = await commitResolvedMoveState({
+        gameId,
+        gameState,
+        currentVersion,
+        nextVersion: resolvedMoveVersion,
+        currentPlayer,
+        finalPosition,
+        shouldSendToJail,
+        jailTile,
+        nextGetOutOfJailFreeCount,
+        getOutOfJailFreeCountChanged,
+        nextTaxExemptionPassCount,
+        taxExemptionPassCountChanged,
+        rollTotal,
+        nextDoublesCount,
+        updatedBalances,
+        balancesChanged,
+        nextChanceIndex,
+        nextCommunityIndex,
+        chanceStateChanged,
+        nextChanceOrder,
+        nextChanceDrawPtr,
+        nextChanceSeed,
+        nextChanceReshuffleCount,
+        communityStateChanged,
+        nextCommunityOrder,
+        nextCommunityDrawPtr,
+        nextCommunitySeed,
+        nextCommunityReshuffleCount,
+        turnPhase: turnPhaseAfterMove,
+        extraGameStatePatch,
+      });
+
+      if (!committedState) {
+        return NextResponse.json(
+          { error: "Version mismatch." },
+          { status: 409 },
+        );
+      }
+
+      resolvedMoveState = committedState;
+    } catch (error) {
+      console.error("[Bank][Insolvency] Failed to commit resolved move state", error);
+      return NextResponse.json(
+        { error: "Unable to update player position." },
+        { status: 500 },
+      );
+    }
+
+    await emitGameEvents(gameId, currentVersion + 1, events, userId);
+
+    const bankruptcyResult = await enterInsolvencyRecovery({
+      gameId,
+      gameState: resolvedMoveState,
+      player: currentPlayer,
+      candidate: bankruptcyCandidate,
+      events: [],
+      currentVersion: resolvedMoveVersion,
+      userId,
+    });
+
+    if (bankruptcyResult.handled) {
+      if (bankruptcyResult.error) {
+        return NextResponse.json(
+          { error: bankruptcyResult.error },
+          { status: 409 },
+        );
+      }
+      return NextResponse.json({ gameState: bankruptcyResult.updatedState });
+    }
+  }
+
+  if (shouldSendToJail && jailTile) {
+    const finalVersion = currentVersion + events.length;
+    const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+      `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+      {
+        method: "PATCH",
+        headers: {
+          Prefer: "return=representation",
+        },
+        body: JSON.stringify({
+          version: finalVersion,
+          last_roll: rollTotal ?? null,
+          doubles_count: nextDoublesCount,
+          ...(balancesChanged ? { balances: updatedBalances } : {}),
+          ...(nextChanceIndex !== (gameState?.chance_index ?? 0)
+            ? { chance_index: nextChanceIndex }
+            : {}),
+          ...(nextCommunityIndex !== (gameState?.community_index ?? 0)
+            ? { community_index: nextCommunityIndex }
+            : {}),
+          ...(chanceStateChanged
+            ? {
+                chance_order: nextChanceOrder,
+                chance_draw_ptr: nextChanceDrawPtr,
+                chance_seed: nextChanceSeed,
+                chance_reshuffle_count: nextChanceReshuffleCount,
+              }
+            : {}),
+          ...(communityStateChanged
+            ? {
+                community_order: nextCommunityOrder,
+                community_draw_ptr: nextCommunityDrawPtr,
+                community_seed: nextCommunitySeed,
+                community_reshuffle_count: nextCommunityReshuffleCount,
+              }
+            : {}),
+          pending_action: createGoToJailPendingAction({
+            currentPlayer,
+            jailTile,
+            source: cardTriggeredGoToJail
+              ? "card"
+              : activeLandingTile.type === "GO_TO_JAIL"
+                ? "tile"
+                : "other",
+            fromTileIndex: activeLandingTile.index,
+          }),
+          turn_phase: "AWAITING_GO_TO_JAIL_CONFIRM",
+          ...(extraGameStatePatch ?? {}),
+          updated_at: new Date().toISOString(),
+        }),
+      },
+    )) ?? [];
+
+    if (!updatedState) {
+      return NextResponse.json(
+        { error: "Version mismatch." },
+        { status: 409 },
+      );
+    }
+
+    const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
+      `players?id=eq.${currentPlayer.id}`,
+      {
+        method: "PATCH",
+        headers: {
+          Prefer: "return=representation",
+        },
+        body: JSON.stringify({
+          position: finalPosition,
+          is_in_jail: false,
+          jail_turns_remaining: 0,
+          ...(getOutOfJailFreeCountChanged
+            ? { get_out_of_jail_free_count: nextGetOutOfJailFreeCount }
+            : {}),
+          ...(taxExemptionPassCountChanged
+            ? { tax_exemption_pass_count: nextTaxExemptionPassCount }
+            : {}),
+        }),
+      },
+    )) ?? [];
+
+    if (!updatedPlayer) {
+      return NextResponse.json(
+        { error: "Unable to update player position." },
+        { status: 500 },
+      );
+    }
+
+    await emitGameEvents(gameId, currentVersion + 1, events, userId);
+
+    return NextResponse.json({ gameState: updatedState });
+  }
+
+  const finalVersion = currentVersion + events.length;
+  const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+    `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+    {
+      method: "PATCH",
+      headers: {
+        Prefer: "return=representation",
+      },
+      body: JSON.stringify({
+        version: finalVersion,
+        last_roll: rollTotal ?? null,
+        doubles_count: nextDoublesCount,
+        ...(balancesChanged ? { balances: updatedBalances } : {}),
+        ...(nextChanceIndex !== (gameState?.chance_index ?? 0)
+          ? { chance_index: nextChanceIndex }
+          : {}),
+        ...(nextCommunityIndex !== (gameState?.community_index ?? 0)
+          ? { community_index: nextCommunityIndex }
+          : {}),
+        ...(chanceStateChanged
+          ? {
+              chance_order: nextChanceOrder,
+              chance_draw_ptr: nextChanceDrawPtr,
+              chance_seed: nextChanceSeed,
+              chance_reshuffle_count: nextChanceReshuffleCount,
+            }
+          : {}),
+        ...(communityStateChanged
+          ? {
+              community_order: nextCommunityOrder,
+              community_draw_ptr: nextCommunityDrawPtr,
+              community_seed: nextCommunitySeed,
+              community_reshuffle_count: nextCommunityReshuffleCount,
+            }
+          : {}),
+        turn_phase: pendingPurchaseAction || superTaxPendingAction || incomeTaxPendingAction
+          ? "AWAITING_DECISION"
+          : "AWAITING_ROLL",
+        pending_action: incomeTaxPendingAction ?? superTaxPendingAction ?? pendingPurchaseAction,
+        ...(extraGameStatePatch ?? {}),
+        updated_at: new Date().toISOString(),
+      }),
+    },
+  )) ?? [];
+
+  if (!updatedState) {
+    return NextResponse.json({ error: "Version mismatch." }, { status: 409 });
+  }
+
+  const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
+    `players?id=eq.${currentPlayer.id}`,
+    {
+      method: "PATCH",
+      headers: {
+        Prefer: "return=representation",
+      },
+      body: JSON.stringify({
+        position: finalPosition,
+        is_in_jail: Boolean(shouldSendToJail && jailTile),
+        jail_turns_remaining: shouldSendToJail && jailTile ? 3 : 0,
+        ...(getOutOfJailFreeCountChanged
+          ? { get_out_of_jail_free_count: nextGetOutOfJailFreeCount }
+          : {}),
+        ...(taxExemptionPassCountChanged
+          ? { tax_exemption_pass_count: nextTaxExemptionPassCount }
+          : {}),
+      }),
+    },
+  )) ?? [];
+
+  if (!updatedPlayer) {
+    return NextResponse.json(
+      { error: "Unable to update player position." },
+      { status: 500 },
+    );
+  }
+
+  await emitGameEvents(gameId, currentVersion + 1, events, userId);
+
+  return NextResponse.json({ gameState: updatedState });
+};
+
+const applyLoanPaymentsForPlayer = async ({
+  gameId,
+  player,
+  balances,
+  startingCash,
+  macroInterestTrendAccumulator,
+  macroMortgageFlatDelta,
+}: {
+  gameId: string;
+  player: PlayerRow;
+  balances: Record<string, number>;
+  startingCash: number;
+  macroInterestTrendAccumulator: number;
+  macroMortgageFlatDelta: number;
+}) => {
+  const activeLoans = (await fetchFromSupabaseWithService<PlayerLoanRow[]>(
+    `player_loans?select=id,collateral_tile_index,principal,remaining_principal,rate_per_turn,term_turns,turns_remaining,payment_per_turn,status&game_id=eq.${gameId}&player_id=eq.${player.id}&status=eq.active`,
+    { method: "GET" },
+  )) ?? [];
+
+  const activeMortgages = (await fetchFromSupabaseWithService<
+    PurchaseMortgageRow[]
+  >(
+    `purchase_mortgages?select=id,tile_index,principal_original,principal_remaining,rate_per_turn,term_turns,turns_remaining,payment_per_turn,turns_elapsed,accrued_interest_unpaid,status&game_id=eq.${gameId}&player_id=eq.${player.id}&status=eq.active`,
+    { method: "GET" },
+  )) ?? [];
+
+  if (activeLoans.length === 0 && activeMortgages.length === 0) {
+    return {
+      balances,
+      balancesChanged: false,
+      events: [] as Array<{ event_type: string; payload: Record<string, unknown> }>,
+      bankruptcyCandidate: null as BankruptcyCandidate | null,
+    };
+  }
+
+  let updatedBalances = balances;
+  let balancesChanged = false;
+  let bankruptcyCandidate: BankruptcyCandidate | null = null;
+  const events: Array<{ event_type: string; payload: Record<string, unknown> }> = [];
+
+  for (const loan of activeLoans) {
+    const paymentAmount = loan.payment_per_turn;
+    const currentBalance = updatedBalances[player.id] ?? startingCash;
+    const nextBalance = currentBalance - paymentAmount;
+    if (nextBalance < 0 && !bankruptcyCandidate) {
+      bankruptcyCandidate = {
+        reason: "COLLATERAL_LOAN_PAYMENT",
+        cashBefore: currentBalance,
+        cashAfter: nextBalance,
+        amountDue: paymentAmount,
+        tileIndex: loan.collateral_tile_index,
+        label: "Collateral loan payment",
+      };
+      break;
+    }
+    const remainingPrincipal =
+      typeof loan.remaining_principal === "number"
+        ? loan.remaining_principal
+        : loan.principal;
+    const remainingPrincipalAfter = Math.max(
+      0,
+      remainingPrincipal - paymentAmount,
+    );
+    updatedBalances = {
+      ...updatedBalances,
+      [player.id]: nextBalance,
+    };
+    if (paymentAmount !== 0) {
+      balancesChanged = true;
+    }
+
+    const turnsRemainingAfter = Math.max(0, loan.turns_remaining - 1);
+    const status =
+      turnsRemainingAfter === 0 || remainingPrincipalAfter === 0
+        ? "paid"
+        : "active";
+
+    await fetchFromSupabaseWithService(`player_loans?id=eq.${loan.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        turns_remaining: turnsRemainingAfter,
+        status,
+        remaining_principal: remainingPrincipalAfter,
+        updated_at: new Date().toISOString(),
+      }),
+    });
+
+    events.push({
+      event_type: "COLLATERAL_LOAN_PAYMENT",
+      payload: {
+        player_id: player.id,
+        tile_index: loan.collateral_tile_index,
+        amount: paymentAmount,
+        turns_remaining_after: turnsRemainingAfter,
+      },
+    });
+    events.push({
+      event_type: "CASH_DEBIT",
+      payload: {
+        player_id: player.id,
+        amount: paymentAmount,
+        reason: "COLLATERAL_LOAN_PAYMENT",
+        tile_index: loan.collateral_tile_index,
+        loan_id: loan.id,
+        source_event_type: "COLLATERAL_LOAN_PAYMENT",
+      },
+    });
+
+    const macroInterestSurcharge = Math.round(
+      remainingPrincipal * macroInterestTrendAccumulator,
+    );
+    if (macroInterestSurcharge !== 0) {
+      const surchargeBalance = updatedBalances[player.id] ?? startingCash;
+      const surchargeAfter = surchargeBalance - macroInterestSurcharge;
+      if (surchargeAfter < 0 && !bankruptcyCandidate) {
+        bankruptcyCandidate = {
+          reason: "MACRO_INTEREST_SURCHARGE",
+          cashBefore: surchargeBalance,
+          cashAfter: surchargeAfter,
+          amountDue: macroInterestSurcharge,
+          tileIndex: loan.collateral_tile_index,
+          label: "Macro interest surcharge",
+        };
+        break;
+      }
+      updatedBalances = {
+        ...updatedBalances,
+        [player.id]: surchargeAfter,
+      };
+      balancesChanged = true;
+      events.push(
+        {
+          event_type: macroInterestSurcharge > 0 ? "CASH_DEBIT" : "CASH_CREDIT",
+          payload: {
+            player_id: player.id,
+            amount: Math.abs(macroInterestSurcharge),
+            reason: "MACRO_INTEREST_SURCHARGE",
+            loan_id: loan.id,
+            tile_index: loan.collateral_tile_index,
+            principal_remaining: remainingPrincipal,
+            macro_interest_delta_per_turn: macroInterestTrendAccumulator,
+          },
+        },
+        {
+          event_type: "MACRO_INTEREST_SURCHARGE",
+          payload: {
+            player_id: player.id,
+            loan_id: loan.id,
+            tile_index: loan.collateral_tile_index,
+            amount: macroInterestSurcharge,
+            principal_remaining: remainingPrincipal,
+            macro_interest_delta_per_turn: macroInterestTrendAccumulator,
+          },
+        },
+      );
+    }
+
+    if (status === "paid") {
+      await fetchFromSupabaseWithService(
+        `property_ownership?game_id=eq.${gameId}&tile_index=eq.${loan.collateral_tile_index}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            collateral_loan_id: null,
+          }),
+        },
+      );
+      events.push({
+        event_type: "COLLATERAL_LOAN_PAID",
+        payload: {
+          player_id: player.id,
+          tile_index: loan.collateral_tile_index,
+          principal: loan.principal,
+        },
+      });
+    }
+  }
+
+  for (const mortgage of activeMortgages) {
+    const termEnded =
+      (mortgage.turns_remaining ?? 0) <= 0 ||
+      (mortgage.turns_elapsed ?? 0) >= (mortgage.term_turns ?? 0);
+    const principalCleared = (mortgage.principal_remaining ?? 0) <= 0;
+    if (termEnded || principalCleared) {
+      await fetchFromSupabaseWithService(`purchase_mortgages?id=eq.${mortgage.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          principal_remaining: 0,
+          accrued_interest_unpaid: 0,
+          turns_remaining: 0,
+          status: "paid",
+          updated_at: new Date().toISOString(),
+        }),
+      });
+      await fetchFromSupabaseWithService(
+        `property_ownership?game_id=eq.${gameId}&tile_index=eq.${mortgage.tile_index}&purchase_mortgage_id=eq.${mortgage.id}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            purchase_mortgage_id: null,
+          }),
+        },
+      );
+      events.push({
+        event_type: "PURCHASE_MORTGAGE_PAID",
+        payload: {
+          player_id: player.id,
+          mortgage_id: mortgage.id,
+          tile_index: mortgage.tile_index,
+          completion_reason: termEnded ? "TERM_COMPLETE" : "PAID_OFF",
+          principal_remaining_after: 0,
+          accrued_interest_unpaid_after: 0,
+          turns_remaining_after: 0,
+          turns_elapsed_after: mortgage.turns_elapsed ?? 0,
+        },
+      });
+      continue;
+    }
+
+    const effectiveRatePerTurn =
+      mortgage.rate_per_turn +
+      macroInterestTrendAccumulator +
+      macroMortgageFlatDelta;
+    const interestAmount = Math.round(
+      mortgage.principal_remaining * effectiveRatePerTurn,
+    );
+    const fallbackTurns = Math.max(
+      1,
+      (mortgage.term_turns ?? 0) - (mortgage.turns_elapsed ?? 0),
+    );
+    const fallbackPaymentAmount = calculateAmortizedPaymentPerTurn(
+      mortgage.principal_remaining,
+      effectiveRatePerTurn,
+      fallbackTurns,
+    );
+    const paymentAmount =
+      typeof mortgage.payment_per_turn === "number" &&
+      mortgage.payment_per_turn > 0
+        ? mortgage.payment_per_turn
+        : fallbackPaymentAmount;
+    const principalComponent = Math.max(0, paymentAmount - interestAmount);
+    const turnsElapsedAfter = (mortgage.turns_elapsed ?? 0) + 1;
+    const turnsRemainingAfter = Math.max(0, (mortgage.turns_remaining ?? 0) - 1);
+    const currentBalance = updatedBalances[player.id] ?? startingCash;
+    const canPayPayment = currentBalance >= paymentAmount;
+
+    if (!canPayPayment) {
+      await fetchFromSupabaseWithService(`purchase_mortgages?id=eq.${mortgage.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          status: "defaulted",
+          updated_at: new Date().toISOString(),
+        }),
+      });
+      await fetchFromSupabaseWithService(
+        `property_ownership?game_id=eq.${gameId}&tile_index=eq.${mortgage.tile_index}&owner_player_id=eq.${player.id}&purchase_mortgage_id=eq.${mortgage.id}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            owner_player_id: null,
+            acquired_round: null,
+            purchase_mortgage_id: null,
+            collateral_loan_id: null,
+            houses: 0,
+          }),
+        },
+      );
+      events.push({
+        event_type: "PROPERTY_DEFAULTED",
+        payload: {
+          tile_index: mortgage.tile_index,
+          player_id: player.id,
+          purchase_mortgage_id: mortgage.id,
+          reason: "PURCHASE_MORTGAGE_MISSED_PAYMENT",
+          required_payment: paymentAmount,
+          balance_before: currentBalance,
+        },
+      });
+      continue;
+    }
+
+    const principalRemainingAfter = Math.max(
+      0,
+      mortgage.principal_remaining - principalComponent,
+    );
+    const isPaid =
+      principalRemainingAfter <= 0 ||
+      turnsRemainingAfter <= 0 ||
+      turnsElapsedAfter >= (mortgage.term_turns ?? 0);
+
+    await fetchFromSupabaseWithService(`purchase_mortgages?id=eq.${mortgage.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        principal_remaining: isPaid ? 0 : principalRemainingAfter,
+        accrued_interest_unpaid: isPaid ? 0 : mortgage.accrued_interest_unpaid ?? 0,
+        turns_elapsed: turnsElapsedAfter,
+        turns_remaining: isPaid ? 0 : turnsRemainingAfter,
+        status: isPaid ? "paid" : "active",
+        updated_at: new Date().toISOString(),
+      }),
+    });
+
+    {
+      updatedBalances = {
+        ...updatedBalances,
+        [player.id]: currentBalance - paymentAmount,
+      };
+      if (paymentAmount !== 0) {
+        balancesChanged = true;
+      }
+      events.push(
+        {
+          event_type: "CASH_DEBIT",
+          payload: {
+            player_id: player.id,
+            amount: paymentAmount,
+            reason: "PURCHASE_MORTGAGE_PAYMENT",
+            tile_index: mortgage.tile_index,
+            mortgage_id: mortgage.id,
+            base_rate_per_turn: mortgage.rate_per_turn,
+            macro_interest_delta_per_turn: macroInterestTrendAccumulator,
+            macro_mortgage_flat_delta: macroMortgageFlatDelta,
+            effective_rate_per_turn: effectiveRatePerTurn,
+          },
+        },
+        {
+          event_type: "PURCHASE_MORTGAGE_PAYMENT",
+          payload: {
+            player_id: player.id,
+            mortgage_id: mortgage.id,
+            tile_index: mortgage.tile_index,
+            payment_amount: paymentAmount,
+            interest_amount: interestAmount,
+            principal_amount: principalComponent,
+            principal_remaining_after: principalRemainingAfter,
+            turns_remaining_after: turnsRemainingAfter,
+            turns_elapsed_after: turnsElapsedAfter,
+            base_rate_per_turn: mortgage.rate_per_turn,
+            macro_interest_delta_per_turn: macroInterestTrendAccumulator,
+            macro_mortgage_flat_delta: macroMortgageFlatDelta,
+            effective_rate_per_turn: effectiveRatePerTurn,
+          },
+        },
+      );
+    }
+
+    if (isPaid) {
+      await fetchFromSupabaseWithService(
+        `property_ownership?game_id=eq.${gameId}&tile_index=eq.${mortgage.tile_index}&purchase_mortgage_id=eq.${mortgage.id}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            purchase_mortgage_id: null,
+          }),
+        },
+      );
+      events.push({
+        event_type: "PURCHASE_MORTGAGE_PAID",
+        payload: {
+          player_id: player.id,
+          mortgage_id: mortgage.id,
+          tile_index: mortgage.tile_index,
+          payment_amount: paymentAmount,
+          turns_elapsed_after: turnsElapsedAfter,
+          completion_reason:
+            turnsRemainingAfter <= 0 || turnsElapsedAfter >= (mortgage.term_turns ?? 0)
+              ? "TERM_COMPLETE"
+              : "PAID_OFF",
+          principal_remaining_after: 0,
+          accrued_interest_unpaid_after: 0,
+          turns_remaining_after: 0,
+        },
+      });
+    }
+  }
+
+  return { balances: updatedBalances, balancesChanged, events, bankruptcyCandidate };
+};
+
+const advanceTurn = async ({
+  gameId,
+  game,
+  gameState,
+  players,
+  currentPlayer,
+  currentVersion,
+  userId,
+  rules,
+  startingCash,
+  boardPack,
+  extraEvents = [],
+  extraGameStatePatch = {},
+}: {
+  gameId: string;
+  game: GameRow;
+  gameState: GameStateRow;
+  players: PlayerRow[];
+  currentPlayer: PlayerRow;
+  currentVersion: number;
+  userId: string;
+  rules: ReturnType<typeof getRules>;
+  startingCash: number;
+  boardPack: ReturnType<typeof getBoardPackById> | null;
+  extraEvents?: Array<{ event_type: string; payload: Record<string, unknown> }>;
+  extraGameStatePatch?: Record<string, unknown>;
+}) => {
+  const nextPlayer = getNextActivePlayer(players, gameState.current_player_id);
+
+  if (!nextPlayer) {
+    return NextResponse.json(
+      { error: "No active players remaining." },
+      { status: 409 },
+    );
+  }
+
+  const balances = gameState.balances ?? {};
+  let updatedBalances = balances;
+  let balancesChanged = false;
+  let bankruptcyCandidate: BankruptcyCandidate | null = null;
+  const events: Array<{ event_type: string; payload: Record<string, unknown> }> = [
+    ...extraEvents,
+    {
+      event_type: "END_TURN",
+      payload: {
+        from_player_id: currentPlayer.id,
+        from_player_name: currentPlayer.display_name,
+        to_player_id: nextPlayer.id,
+        to_player_name: nextPlayer.display_name,
+      },
+    },
+  ];
+
+  const inlandCells = normalizeInlandCellRecords(gameState.inland_explored_cells);
+  const inlandIncome = computeInlandPassiveIncomeForPlayer({
+    recordsByKey: inlandCells,
+    playerId: nextPlayer.id,
+    goSalary: boardPack?.economy?.passGoAmount ?? DEFAULT_BOARD_PACK_ECONOMY.passGoAmount ?? 0,
+  });
+  if (inlandIncome.total > 0) {
+    const nextPlayerCash = updatedBalances[nextPlayer.id] ?? 0;
+    updatedBalances = {
+      ...updatedBalances,
+      [nextPlayer.id]: nextPlayerCash + inlandIncome.total,
+    };
+    balancesChanged = true;
+    events.push({
+      event_type: "INLAND_PASSIVE_INCOME",
+      payload: {
+        player_id: nextPlayer.id,
+        player_name: nextPlayer.display_name,
+        amount: inlandIncome.total,
+        breakdown: inlandIncome.breakdown.map((entry) => ({
+          resource_type: entry.resourceType,
+          count: entry.count,
+          per_site_income: entry.perSiteIncome,
+          subtotal: entry.subtotal,
+        })),
+      },
+    });
+    events.push({
+      event_type: "CASH_CREDIT",
+      payload: {
+        player_id: nextPlayer.id,
+        amount: inlandIncome.total,
+        reason: "INDUSTRY_PASSIVE_INCOME",
+        source_event_type: "INLAND_PASSIVE_INCOME",
+      },
+    });
+  }
+
+  const handoffCheckpoint = await resolveTurnHandoffCheckpoint({
+    gameId,
+    game,
+    gameState,
+    players,
+    nextPlayer,
+    boardPack,
+  });
+  const tableRoundAdvanced = handoffCheckpoint.tableRoundAdvanced;
+  const nextRound = handoffCheckpoint.nextRound;
+
+  if (handoffCheckpoint.shouldEndForRoundLimit) {
+    const roundLimitEvents: Array<{ event_type: string; payload: Record<string, unknown> }> = [
+      ...events,
+      {
+        event_type: "GAME_OVER",
+        payload: buildGameOverPayload({
+          winner:
+            handoffCheckpoint.standings[0] != null
+              ? {
+                  id: handoffCheckpoint.standings[0].playerId,
+                  display_name: handoffCheckpoint.standings[0].playerName,
+                }
+              : null,
+          reason: "ROUND_LIMIT_REACHED",
+          standings: handoffCheckpoint.standings,
+          extraPayload: {
+            round_limit: game.round_limit,
+            rounds_elapsed: nextRound,
+          },
+        }),
+      },
+    ];
+    const finalVersion = currentVersion + roundLimitEvents.length;
+    const [endedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+      `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+      {
+        method: "PATCH",
+        headers: {
+          Prefer: "return=representation",
+        },
+        body: JSON.stringify({
+          version: finalVersion,
+          current_player_id: handoffCheckpoint.standings[0]?.playerId ?? null,
+          last_roll: null,
+          doubles_count: 0,
+          rounds_elapsed: nextRound,
+          turn_phase: "AWAITING_ROLL",
+          pending_action: null,
+          updated_at: new Date().toISOString(),
+        }),
+      },
+    )) ?? [];
+
+    if (!endedState) {
+      return NextResponse.json({ error: "Version mismatch." }, { status: 409 });
+    }
+
+    await fetchFromSupabaseWithService(`games?id=eq.${gameId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "ended" }),
+    });
+
+    await emitGameEvents(gameId, currentVersion + 1, roundLimitEvents, userId);
+
+    return NextResponse.json({ gameState: endedState, status: "ended" });
+  }
+  const macroEnabled = rules.macroEnabled;
+  let nextLastMacroEventId = gameState.last_macro_event_id ?? null;
+  const activeMacroEffectsV1 = normalizeActiveMacroEffectsV1(
+    gameState.active_macro_effects_v1,
+  );
+  let nextActiveMacroEffectsV1 = activeMacroEffectsV1;
+  let triggeredMacroEvent: {
+    id: string;
+    name: string;
+    durationRounds: number;
+    headline: string;
+    flavor: string;
+    rulesText: string;
+    tooltip?: string;
+    effects: MacroEffectsV1;
+    rarity?: "common" | "uncommon" | "black_swan";
+  } | null = null;
+
+  if (macroEnabled && tableRoundAdvanced) {
+    const { updated: tickedMacroEffects, expired: expiredMacroEffects } =
+      tickMacroEffectsV1(activeMacroEffectsV1);
+    nextActiveMacroEffectsV1 = tickedMacroEffects;
+
+    for (const expiredEffect of expiredMacroEffects) {
+      events.push({
+        event_type: "MACRO_EXPIRED",
+        payload: {
+          macro_id: expiredEffect.id,
+          macro_name: expiredEffect.name,
+          round_index: nextRound,
+        },
+      });
+    }
+
+    const macroDeck = resolveMacroDeck(boardPack);
+    if (
+      nextRound % MACRO_EVENT_INTERVAL_ROUNDS === 0 &&
+      macroDeck.cards.length > 0
+    ) {
+      const macroEvent = macroDeck.draw(nextLastMacroEventId ?? undefined);
+      nextLastMacroEventId = macroEvent.id;
+      triggeredMacroEvent = macroEvent;
+      events.push({
+        event_type: "MACRO_EVENT_TRIGGERED",
+        payload: {
+          deck_id: macroDeck.id,
+          deck_name: macroDeck.name,
+          event_id: macroEvent.id,
+          event_name: macroEvent.name,
+          duration_rounds: macroEvent.durationRounds,
+          effects: macroEvent.effects,
+          rarity: macroEvent.rarity ?? null,
+          mode: "weighted",
+          round_index: nextRound,
+        },
+      });
+    }
+  }
+
+  const nextTurnPhase = nextPlayer.is_in_jail
+    ? "AWAITING_JAIL_DECISION"
+    : "AWAITING_ROLL";
+  const nextPendingAction = triggeredMacroEvent
+    ? {
+        type: "MACRO_EVENT",
+        macro_id: triggeredMacroEvent.id,
+        macroCardId: triggeredMacroEvent.id,
+        name: triggeredMacroEvent.name,
+        rarity: triggeredMacroEvent.rarity ?? null,
+        durationRounds: triggeredMacroEvent.durationRounds,
+        headline: triggeredMacroEvent.headline,
+        flavor: triggeredMacroEvent.flavor,
+        rulesText: triggeredMacroEvent.rulesText,
+        effects: triggeredMacroEvent.effects,
+        return_turn_phase: nextTurnPhase,
+      }
+    : null;
+  const preServicingEvents = [...events];
+  const turnContextVersion = currentVersion + preServicingEvents.length;
+  const [committedTurnState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+    `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+    {
+      method: "PATCH",
+      headers: {
+        Prefer: "return=representation",
+      },
+      body: JSON.stringify({
+        version: turnContextVersion,
+        current_player_id: nextPlayer.id,
+        last_roll: null,
+        doubles_count: 0,
+        rounds_elapsed: nextRound,
+        last_macro_event_id: nextLastMacroEventId,
+        active_macro_effects_v1: nextActiveMacroEffectsV1,
+        ...(balancesChanged ? { balances: updatedBalances } : {}),
+        pending_action: nextPendingAction,
+        turn_phase: triggeredMacroEvent
+          ? "AWAITING_CONFIRMATION"
+          : nextTurnPhase,
+        ...extraGameStatePatch,
+        updated_at: new Date().toISOString(),
+      }),
+    },
+  )) ?? [];
+
+  if (!committedTurnState) {
+    return NextResponse.json(
+      { error: "Supabase returned no data for END_TURN game_state update." },
+      { status: 500 },
+    );
+  }
+
+  await emitGameEvents(gameId, currentVersion + 1, preServicingEvents, userId);
+
+  const committedGameState = committedTurnState;
+  const loanResult = await applyLoanPaymentsForPlayer({
+    gameId,
+    player: nextPlayer,
+    balances: updatedBalances,
+    startingCash,
+    macroInterestTrendAccumulator: getMacroInterestTrendAccumulatorV1(
+      macroEnabled ? nextActiveMacroEffectsV1 : [],
+    ),
+    macroMortgageFlatDelta: getMacroMortgageFlatDeltaV1(
+      macroEnabled ? nextActiveMacroEffectsV1 : [],
+    ),
+  });
+  updatedBalances = loanResult.balances;
+  balancesChanged = balancesChanged || loanResult.balancesChanged;
+  const postCommitEvents = loanResult.events;
+  if (!bankruptcyCandidate && loanResult.bankruptcyCandidate) {
+    bankruptcyCandidate = loanResult.bankruptcyCandidate;
+  }
+
+  if (bankruptcyCandidate) {
+    const bankruptcyResult = await enterInsolvencyRecovery({
+      gameId,
+      gameState: committedGameState,
+      player: nextPlayer,
+      candidate: bankruptcyCandidate,
+      events: postCommitEvents,
+      currentVersion: turnContextVersion,
+      userId,
+    });
+
+    if (bankruptcyResult.handled) {
+      if (bankruptcyResult.error) {
+        return NextResponse.json(
+          { error: bankruptcyResult.error },
+          { status: 409 },
+        );
+      }
+      return NextResponse.json({ gameState: bankruptcyResult.updatedState });
+    }
+  }
+
+  const finalVersion = turnContextVersion + postCommitEvents.length;
+  const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+    `game_state?game_id=eq.${gameId}&version=eq.${turnContextVersion}`,
+    {
+      method: "PATCH",
+      headers: {
+        Prefer: "return=representation",
+      },
+      body: JSON.stringify({
+        version: finalVersion,
+        ...(balancesChanged ? { balances: updatedBalances } : {}),
+        updated_at: new Date().toISOString(),
+      }),
+    },
+  )) ?? [];
+
+  if (!updatedState) {
+    return NextResponse.json(
+      { error: "Supabase returned no data for END_TURN game_state update." },
+      { status: 500 },
+    );
+  }
+
+  if (postCommitEvents.length > 0) {
+    await emitGameEvents(gameId, turnContextVersion + 1, postCommitEvents, userId);
+  }
+
+  return NextResponse.json({ gameState: updatedState });
+};
+
+export const parseBearerToken = (authorization: string | null) => {
+  if (!authorization) {
+    return null;
+  }
+
+  const [scheme, token] = authorization.split(" ");
+  if (scheme !== "Bearer" || !token) {
+    return null;
+  }
+
+  return token;
+};
+
+export const executeBankActionRequest = async ({
+  body,
+  user,
+}: {
+  body: BankActionRequest;
+  user: SupabaseUser;
+}): Promise<NextResponse> => {
+  try {
+    if (!isConfigured()) {
+      return NextResponse.json(
+        { error: "Supabase is not configured." },
+        { status: 500 },
+      );
+    }
+
+    if (!body.action) {
+      return NextResponse.json({ error: "Missing action." }, { status: 400 });
+    }
+
+    const lobbyResponse = await handleLobbyAction({
+      body,
+      user,
+      fetchFromSupabaseWithService,
+      loadOwnershipByTile,
+      createJoinCode,
+    });
+
+    if (lobbyResponse) {
+      return lobbyResponse;
+    }
+
+    if (!body.gameId) {
+      return NextResponse.json({ error: "Missing gameId." }, { status: 400 });
+    }
+
+    const gameId = body.gameId;
+
+    if (typeof body.expectedVersion !== "number") {
+      return NextResponse.json(
+        { error: "Missing expectedVersion." },
+        { status: 400 },
+      );
+    }
+
+    if (!Number.isInteger(body.expectedVersion) || body.expectedVersion < 0) {
+      return NextResponse.json(
+        { error: "Invalid expectedVersion." },
+        { status: 400 },
+      );
+    }
+
+    const [game] = (await fetchFromSupabaseWithService<GameRow[]>(
+      `games?select=id,join_code,starting_cash,created_by,status,board_pack_id,game_mode,round_limit&id=eq.${gameId}&limit=1`,
+      { method: "GET" },
+    )) ?? [];
+
+    if (!game) {
+      return NextResponse.json({ error: "Game not found." }, { status: 404 });
+    }
+
+    const boardPack = getBoardPackById(game.board_pack_id);
+    const boardPackEconomy = boardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY;
+    const startingCash =
+      game.starting_cash ??
+      boardPackEconomy.startingBalance ??
+      DEFAULT_BOARD_PACK_ECONOMY.startingBalance ??
+      0;
+    const jailFineAmount = boardPackEconomy.jailFineAmount ?? 50;
+
+    const players = (await fetchFromSupabaseWithService<PlayerRow[]>(
+      `players?select=id,user_id,display_name,created_at,position,is_in_jail,jail_turns_remaining,get_out_of_jail_free_count,tax_exemption_pass_count,free_build_tokens,free_upgrade_tokens,is_eliminated,eliminated_at,is_ai,ai_difficulty&game_id=eq.${gameId}&order=created_at.asc`,
+      { method: "GET" },
+    )) ?? [];
+
+    const [gameState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+      `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,betting_market_state,inland_explored_cells,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
+      { method: "GET" },
+    )) ?? [];
+
+    if (!players.some((player) => player.user_id === user.id)) {
+      return NextResponse.json(
+        { error: "You are not a member of this game." },
+        { status: 403 },
+      );
+    }
+
+    let currentVersion = gameState?.version ?? 0;
+
+    if (body.expectedVersion !== currentVersion) {
+      return NextResponse.json(
+        { error: "Version mismatch.", currentVersion },
+        { status: 409 },
+      );
+    }
+
+    const nextVersion = currentVersion + 1;
+    const rules = getRules({
+      ...(boardPack?.rules ?? {}),
+      ...(gameState?.rules ?? {}),
+    });
+
+    if (body.action === "START_GAME") {
+      try {
+        const rpcRows = await fetchFromSupabaseWithService<
+          Array<{ started: boolean; rejection_reason: string | null }>
+        >("rpc/start_game_if_all_ready_atomic", {
+          method: "POST",
+          body: JSON.stringify({
+            p_game_id: gameId,
+            p_actor_user_id: user.id,
+          }),
+        });
+
+        const result = rpcRows?.[0];
+        if (!result?.started) {
+          const reason = result?.rejection_reason ?? "NOT_ALL_READY";
+          if (reason === "NOT_MEMBER") {
+            return NextResponse.json(
+              { error: "You are not a member of this game." },
+              { status: 403 },
+            );
+          }
+
+          if (reason === "NOT_LOBBY") {
+            return NextResponse.json(
+              { error: "Game is not in the lobby." },
+              { status: 409 },
+            );
+          }
+
+          return NextResponse.json(
+            { error: "All players must be ready before the game can start." },
+            { status: 409 },
+          );
+        }
+      } catch (error) {
+        if (error instanceof Error && error.message.includes("NOT_MEMBER")) {
+          return NextResponse.json(
+            { error: "You are not a member of this game." },
+            { status: 403 },
+          );
+        }
+        throw error;
+      }
+
+      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,betting_market_state,inland_explored_cells,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
+        { method: "GET" },
+      )) ?? [];
+
+      return NextResponse.json({ gameState: updatedState ?? null });
+    }
+
+    if (body.action === "END_GAME") {
+      if (game.created_by && game.created_by !== user.id) {
+        return NextResponse.json(
+          { error: "Only the host can end the session." },
+          { status: 403 },
+        );
+      }
+
+      if (game.status === "ended") {
+        return NextResponse.json(
+          { error: "Game already ended." },
+          { status: 409 },
+        );
+      }
+
+      const [endedGame] = (await fetchFromSupabaseWithService<GameRow[]>(
+        `games?select=id,status&id=eq.${gameId}&status=in.(lobby,in_progress)`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            status: "ended",
+          }),
+        },
+      )) ?? [];
+
+      if (!endedGame) {
+        const [latestGame] = (await fetchFromSupabaseWithService<GameRow[]>(
+          `games?select=id,status&id=eq.${gameId}&limit=1`,
+          { method: "GET" },
+        )) ?? [];
+
+        if (latestGame?.status === "ended") {
+          return NextResponse.json(
+            { error: "Game already ended." },
+            { status: 409 },
+          );
+        }
+
+        return NextResponse.json(
+          { error: "Game is not active." },
+          { status: 409 },
+        );
+      }
+
+      const terminalEvents: Array<{
+        event_type: string;
+        payload: Record<string, unknown>;
+      }> = [
+        {
+          event_type: "END_GAME",
+          payload: {
+            previous_status: game.status,
+          },
+        },
+      ];
+
+      if (gameState) {
+        const standings = await computeAuthoritativeFinalStandings({
+          gameId,
+          gameState,
+          players,
+          boardPack,
+        });
+        const winner = standings[0]
+          ? {
+              id: standings[0].playerId,
+              display_name: standings[0].playerName,
+            }
+          : null;
+        terminalEvents.push({
+          event_type: "GAME_OVER",
+          payload: buildGameOverPayload({
+            winner,
+            reason: "MANUAL_END_GAME",
+            standings,
+            extraPayload: {
+              previous_status: game.status,
+            },
+          }),
+        });
+      }
+
+      await emitGameEvents(gameId, nextVersion, terminalEvents, user.id);
+
+      return NextResponse.json({ status: "ended" });
+    }
+
+    if (!gameState) {
+      return NextResponse.json(
+        { error: "Game has not started yet." },
+        { status: 400 },
+      );
+    }
+
+    if (game.status !== "in_progress") {
+      return NextResponse.json(
+        { error: "Game is not in progress." },
+        { status: 409 },
+      );
+    }
+
+    const currentUserPlayer = players.find(
+      (player) => player.user_id === user.id,
+    );
+
+    if (!currentUserPlayer) {
+      return NextResponse.json(
+        { error: "Player not found for this game." },
+        { status: 403 },
+      );
+    }
+
+    const tradeActionResponse = await handleTradeAction({
+      body,
+      gameId,
+      gameState,
+      players,
+      currentUserPlayer,
+      currentVersion,
+      user,
+      boardPack,
+      fetchFromSupabaseWithService,
+      emitGameEvents,
+      loadOwnershipByTile,
+      maybeUnlockCommunicationUtility,
+    });
+    if (tradeActionResponse) {
+      return tradeActionResponse;
+    }
+
+    const currentPlayer = players.find(
+      (player) => player.id === gameState.current_player_id,
+    );
+    const isAuctionAction =
+      body.action === "AUCTION_BID" || body.action === "AUCTION_PASS";
+    const isSelfSurrenderAction = body.action === "SURRENDER_GAME";
+
+    if (!currentPlayer) {
+      return NextResponse.json(
+        { error: "Current player is missing." },
+        { status: 400 },
+      );
+    }
+
+    if (
+      !isAuctionAction &&
+      !isSelfSurrenderAction &&
+      currentUserPlayer.id !== gameState.current_player_id
+    ) {
+      return NextResponse.json(
+        { error: "It is not your turn." },
+        { status: 403 },
+      );
+    }
+
+    if (currentUserPlayer.is_eliminated) {
+      return NextResponse.json(
+        { error: "Eliminated players cannot take actions." },
+        { status: 403 },
+      );
+    }
+
+    if (body.action === "SURRENDER_GAME") {
+      const updatedBalances = {
+        ...(gameState.balances ?? {}),
+        [currentUserPlayer.id]: 0,
+      };
+      const surrenderResult = await resolvePlayerElimination({
+        gameId,
+        gameState,
+        players,
+        eliminatedPlayer: currentUserPlayer,
+        updatedBalances,
+        triggerEventType: "SURRENDER",
+        triggerPayload: {
+          player_id: currentUserPlayer.id,
+          by_user_id: user.id,
+          reason: "VOLUNTARY_FORFEIT",
+        },
+        gameOverReason: "SURRENDER",
+        events: [],
+        currentVersion,
+        userId: user.id,
+        boardPack,
+      });
+      if (surrenderResult.error) {
+        return NextResponse.json({ error: surrenderResult.error }, { status: 409 });
+      }
+      return NextResponse.json({ gameState: surrenderResult.updatedState });
+    }
+
+    if (gameState.auction_active && !isAuctionAction) {
+      const timeoutProgress = advanceAuctionForExpiredTurns({
+        gameState,
+        players,
+        rules,
+        boardPackEconomy,
+        now: new Date(),
+      });
+      const nextPassedIds = Array.from(timeoutProgress.passedPlayerIds);
+      const existingPassedIds = normalizePlayerIdArray(
+        gameState.auction_passed_player_ids,
+      );
+      const shouldUpdateAuctionState =
+        timeoutProgress.timeoutEvents.length > 0 ||
+        timeoutProgress.turnPlayerId !== gameState.auction_turn_player_id ||
+        (timeoutProgress.turnEndsAt?.toISOString() ?? null) !==
+          (gameState.auction_turn_ends_at ?? null) ||
+        nextPassedIds.length !== existingPassedIds.length;
+
+      if (shouldUpdateAuctionState) {
+        const stateOnlyMutationCount =
+          timeoutProgress.timeoutEvents.length === 0 ? 1 : 0;
+        const nextVersion =
+          currentVersion +
+          timeoutProgress.timeoutEvents.length +
+          stateOnlyMutationCount;
+        const [updatedAuctionState] = (await fetchFromSupabaseWithService<
+          GameStateRow[]
+        >(`game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`, {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            version: nextVersion,
+            auction_turn_player_id: timeoutProgress.turnPlayerId,
+            auction_turn_ends_at: timeoutProgress.turnEndsAt
+              ? timeoutProgress.turnEndsAt.toISOString()
+              : null,
+            auction_passed_player_ids: nextPassedIds,
+            auction_eligible_player_ids: timeoutProgress.eligiblePlayerIds,
+            auction_current_bid: timeoutProgress.currentBid,
+            auction_current_winner_player_id: timeoutProgress.currentWinnerId,
+            auction_min_increment: timeoutProgress.minIncrement,
+            updated_at: new Date().toISOString(),
+          }),
+        })) ?? [];
+
+        if (!updatedAuctionState) {
+          return NextResponse.json(
+            { error: "Version mismatch." },
+            { status: 409 },
+          );
+        }
+
+        if (timeoutProgress.timeoutEvents.length > 0) {
+          await emitGameEvents(
+            gameId,
+            currentVersion + 1,
+            timeoutProgress.timeoutEvents,
+            user.id,
+          );
+        }
+      }
+
+      return NextResponse.json(
+        { error: "Auction in progress." },
+        { status: 409 },
+      );
+    }
+
+    if (gameState.pending_card_active && body.action !== "CONFIRM_PENDING_CARD") {
+      return NextResponse.json(
+        { error: "Confirm the pending card before continuing." },
+        { status: 409 },
+      );
+    }
+
+    const pendingMacroAction = gameState.pending_action as
+      | { type?: unknown }
+      | null;
+    if (
+      pendingMacroAction?.type === "MACRO_EVENT" &&
+      body.action !== "CONFIRM_MACRO_EVENT"
+    ) {
+      return NextResponse.json(
+        { error: "Confirm the macro event before continuing." },
+        { status: 409 },
+      );
+    }
+
+    const pendingSuperTaxAction = gameState.pending_action as { type?: unknown; player_id?: unknown } | null;
+    if (pendingSuperTaxAction?.type === "SUPER_TAX_CONFIRM") {
+      const isSuperTaxActor =
+        typeof pendingSuperTaxAction.player_id === "string" &&
+        pendingSuperTaxAction.player_id === currentUserPlayer.id;
+      if (!isSuperTaxActor || (body.action !== "CONFIRM_SUPER_TAX" && body.action !== "USE_TAX_EXEMPTION_PASS")) {
+        return NextResponse.json(
+          { error: "Resolve Super Tax before continuing." },
+          { status: 409 },
+        );
+      }
+    }
+
+    const pendingIncomeTaxAction = gameState.pending_action as { type?: unknown; player_id?: unknown } | null;
+    if (pendingIncomeTaxAction?.type === "INCOME_TAX_CONFIRM") {
+      const isIncomeTaxActor =
+        typeof pendingIncomeTaxAction.player_id === "string" &&
+        pendingIncomeTaxAction.player_id === currentUserPlayer.id;
+      if (!isIncomeTaxActor || (body.action !== "CONFIRM_INCOME_TAX" && body.action !== "USE_TAX_EXEMPTION_PASS")) {
+        return NextResponse.json(
+          { error: "Resolve Income Tax before continuing." },
+          { status: 409 },
+        );
+      }
+    }
+
+    const pendingInsolvencyAction = gameState.pending_action as { type?: unknown; player_id?: unknown } | null;
+    const isInsolvencyRecoveryAction =
+      body.action === "SELL_TO_MARKET" ||
+      body.action === "TAKE_COLLATERAL_LOAN" ||
+      body.action === "CONFIRM_INSOLVENCY_PAYMENT" ||
+      body.action === "DECLARE_BANKRUPTCY";
+    if (pendingInsolvencyAction?.type === "INSOLVENCY_RECOVERY") {
+      const isRecoveryActor =
+        typeof pendingInsolvencyAction.player_id === "string" &&
+        pendingInsolvencyAction.player_id === currentUserPlayer.id;
+      if (!isRecoveryActor || !isInsolvencyRecoveryAction) {
+        return NextResponse.json(
+          { error: "Resolve insolvency with recovery actions before continuing." },
+          { status: 409 },
+        );
+      }
+    }
+
+    const inlandActionResponse = await handleInlandAction({
+      body,
+      boardPackEconomy,
+      gameState,
+      gameId,
+      currentVersion,
+      currentUserPlayer,
+      user,
+      fetchFromSupabaseWithService,
+      emitGameEvents,
+      loadOwnershipByTile,
+      maybeUnlockCommunicationUtility: ({ gameState: inlandGameState, ownershipByTile, events }) =>
+        maybeUnlockCommunicationUtility({
+          gameState: inlandGameState as GameStateRow,
+          boardPack,
+          ownershipByTile: ownershipByTile as OwnershipByTile,
+          events,
+        }),
+    });
+    if (inlandActionResponse) {
+      return inlandActionResponse;
+    }
+
+    const bettingActionResponse = await handleBettingAction({
+      body,
+      boardPackEconomy,
+      gameState,
+      gameId,
+      currentVersion,
+      currentUserPlayer,
+      user,
+      fetchFromSupabaseWithService,
+      emitGameEvents,
+    });
+    if (bettingActionResponse) {
+      return bettingActionResponse;
+    }
+
+    const auctionActionResponse = await handleAuctionAction({
+      auctionAction: null,
+      body,
+      gameState,
+      players,
+      currentUserPlayer,
+      currentPlayer,
+      gameId,
+      currentVersion,
+      rules,
+      boardPack,
+      boardPackEconomy,
+      startingCash,
+      user,
+      fetchFromSupabaseWithService,
+      emitGameEvents,
+      loadOwnershipByTile,
+      assignPropertyOwnership,
+      maybeUnlockCommunicationUtility: maybeUnlockCommunicationUtility as (params: {
+        gameState: unknown;
+        boardPack: unknown;
+        ownershipByTile: Record<number, { owner_player_id: string | null }>;
+        events: Array<{ event_type: string; payload: Record<string, unknown> }>;
+      }) => Record<string, unknown> | null,
+      normalizePlayerIdArray,
+      getNextEligibleAuctionPlayerId: getNextEligibleAuctionPlayerId as (
+        players: Array<{ id: string; is_eliminated: boolean }>,
+        startingPlayerId: string | null,
+        eligibleIds: string[],
+        passedIds: Set<string>,
+      ) => string | null,
+      advanceAuctionForExpiredTurns: advanceAuctionForExpiredTurns as (params: {
+        gameState: unknown;
+        players: Array<{ id: string; is_eliminated: boolean }>;
+        rules: unknown;
+        boardPackEconomy: BoardPackEconomy;
+        now: Date;
+      }) => {
+        eligiblePlayerIds: string[];
+        passedPlayerIds: Set<string>;
+        currentBid: number;
+        currentWinnerId: string | null;
+        turnPlayerId: string | null;
+        turnEndsAt: Date | null;
+        minIncrement: number;
+        timeoutEvents: Array<{
+          event_type: string;
+          payload: Record<string, unknown>;
+        }>;
+      },
+      startAuctionEvents: null,
+      startAuctionTileIndex: null,
+      advanceTurnAfterAuctionSkipped: null,
+      isAuctionAction,
+    });
+    if (auctionActionResponse) {
+      return auctionActionResponse;
+    }
+
+    if (body.action === "CONFIRM_PENDING_CARD") {
+      if (!gameState.pending_card_active) {
+        return NextResponse.json(
+          { error: "No pending card to confirm." },
+          { status: 409 },
+        );
+      }
+
+      if (gameState.turn_phase !== "AWAITING_CARD_CONFIRM") {
+        return NextResponse.json(
+          { error: "Not ready to confirm the card yet." },
+          { status: 409 },
+        );
+      }
+
+      if (gameState.pending_card_drawn_by_player_id !== currentUserPlayer.id) {
+        return NextResponse.json(
+          { error: "Only the acting player can confirm this card." },
+          { status: 403 },
+        );
+      }
+
+      const cardId = gameState.pending_card_id;
+      const cardKind = gameState.pending_card_kind;
+      if (!cardId || !cardKind) {
+        return NextResponse.json(
+          { error: "Pending card data is missing." },
+          { status: 409 },
+        );
+      }
+
+      const cardTitle = gameState.pending_card_title ?? "Card";
+      const cardPayload =
+        gameState.pending_card_payload &&
+        typeof gameState.pending_card_payload === "object"
+          ? gameState.pending_card_payload
+          : {};
+      const card = {
+        id: cardId,
+        title: cardTitle,
+        kind: cardKind,
+        payload: cardPayload,
+      };
+      const boardTiles = resolveBoardTilesForRules({ boardPack, rules: gameState.rules });
+      const boardSize = boardTiles.length > 0 ? boardTiles.length : 40;
+      const sourceIndex =
+        typeof gameState.pending_card_source_tile_index === "number"
+          ? gameState.pending_card_source_tile_index
+          : Number.isFinite(currentPlayer.position)
+            ? currentPlayer.position
+            : 0;
+      const sourceTile = boardTiles[sourceIndex] ?? {
+        index: sourceIndex,
+        tile_id: `tile-${sourceIndex}`,
+        type: "PROPERTY",
+        name: `Tile ${sourceIndex}`,
+      };
+      let jailTile =
+        sourceTile.type === "GO_TO_JAIL"
+          ? boardTiles.find((tile) => tile.type === "JAIL") ?? {
+              index: 10,
+              tile_id: "jail",
+              type: "JAIL",
+              name: "Jail",
+            }
+          : null;
+      const resolvedTile = sourceTile;
+      let finalPosition = resolvedTile.index;
+      let shouldSendToJail =
+        sourceTile.type === "GO_TO_JAIL" && Boolean(jailTile);
+      let activeLandingTile = sourceTile;
+      let activeResolvedTile = resolvedTile;
+      const balances = gameState?.balances ?? {};
+      let updatedBalances = balances;
+      let balancesChanged = false;
+      let bankruptcyCandidate: BankruptcyCandidate | null = null;
+      const rollTotal =
+        typeof gameState.last_roll === "number" ? gameState.last_roll : null;
+      const ownershipByTile = await loadOwnershipByTile(gameId);
+      const eventDeckState: EventDeckState = {
+        nextChanceIndex: gameState?.chance_index ?? 0,
+        nextCommunityIndex: gameState?.community_index ?? 0,
+        nextChanceOrder: gameState?.chance_order ?? null,
+        nextCommunityOrder: gameState?.community_order ?? null,
+        nextChanceDrawPtr: gameState?.chance_draw_ptr ?? 0,
+        nextCommunityDrawPtr: gameState?.community_draw_ptr ?? 0,
+        nextChanceSeed: gameState?.chance_seed ?? null,
+        nextCommunitySeed: gameState?.community_seed ?? null,
+        nextChanceReshuffleCount: gameState?.chance_reshuffle_count ?? 0,
+        nextCommunityReshuffleCount: gameState?.community_reshuffle_count ?? 0,
+        chanceStateChanged: false,
+        communityStateChanged: false,
+      };
+      let cardTriggeredGoToJail = false;
+      let cardUtilityRollOverride:
+        | { total: number; dice: [number, number] }
+        | null = null;
+      let nextGetOutOfJailFreeCount =
+        currentPlayer.get_out_of_jail_free_count ?? 0;
+      let getOutOfJailFreeCountChanged = false;
+      let nextTaxExemptionPassCount =
+        currentPlayer.tax_exemption_pass_count ?? 0;
+      let taxExemptionPassCountChanged = false;
+      const events: Array<{
+        event_type: string;
+        payload: Record<string, unknown>;
+      }> = [];
+
+      const cardResult = applyCardEffect({
+        card,
+        currentPlayer,
+        boardTiles,
+        boardSize,
+        activeLandingTile,
+        activeResolvedTile,
+        jailTile,
+        shouldSendToJail,
+        finalPosition,
+        events,
+        updatedBalances,
+        balancesChanged,
+        bankruptcyCandidate,
+        nextGetOutOfJailFreeCount,
+        getOutOfJailFreeCountChanged,
+        nextTaxExemptionPassCount,
+        taxExemptionPassCountChanged,
+        cardUtilityRollOverride,
+        cardTriggeredGoToJail,
+        startingCash: startingCash,
+        ownershipByTile,
+        boardPackEconomy,
+      });
+
+      ({
+        activeLandingTile,
+        activeResolvedTile,
+        jailTile,
+        shouldSendToJail,
+        finalPosition,
+        updatedBalances,
+        balancesChanged,
+        bankruptcyCandidate,
+        nextGetOutOfJailFreeCount,
+        getOutOfJailFreeCountChanged,
+        nextTaxExemptionPassCount,
+        taxExemptionPassCountChanged,
+        cardUtilityRollOverride,
+        cardTriggeredGoToJail,
+      } = cardResult);
+
+      const movedToDifferentTile = activeResolvedTile.index !== sourceTile.index;
+      const shouldDrawChainedEventCard =
+        movedToDifferentTile && activeLandingTile.type === "EVENT";
+
+      if (shouldDrawChainedEventCard) {
+        const drawOutcome = drawEventCardForLanding({
+          landingTile: activeLandingTile,
+          boardPack,
+          gameId,
+          state: eventDeckState,
+        });
+        if (!drawOutcome) {
+          return NextResponse.json(
+            { error: "Unable to resolve event deck for tile." },
+            { status: 500 },
+          );
+        }
+
+        events.push({
+          event_type: "DRAW_CARD",
+          payload: {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.display_name,
+            deck: drawOutcome.eventDeck.deck,
+            card_id: drawOutcome.card.id,
+            card_title: drawOutcome.card.title,
+            card_kind: drawOutcome.card.kind,
+            draw_index: drawOutcome.drawResult.drawIndex,
+          },
+        });
+        events.push({
+          event_type: "CARD_REVEALED",
+          payload: {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.display_name,
+            deck: drawOutcome.eventDeck.deck,
+            card_id: drawOutcome.card.id,
+            card_title: drawOutcome.card.title,
+            card_kind: drawOutcome.card.kind,
+          },
+        });
+
+        const finalVersion = currentVersion + events.length;
+        const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+          `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+          {
+            method: "PATCH",
+            headers: {
+              Prefer: "return=representation",
+            },
+            body: JSON.stringify({
+              version: finalVersion,
+              ...(balancesChanged ? { balances: updatedBalances } : {}),
+              ...(eventDeckState.nextChanceIndex !== (gameState?.chance_index ?? 0)
+                ? { chance_index: eventDeckState.nextChanceIndex }
+                : {}),
+              ...(eventDeckState.nextCommunityIndex !== (gameState?.community_index ?? 0)
+                ? { community_index: eventDeckState.nextCommunityIndex }
+                : {}),
+              ...(eventDeckState.chanceStateChanged
+                ? {
+                    chance_order: eventDeckState.nextChanceOrder,
+                    chance_draw_ptr: eventDeckState.nextChanceDrawPtr,
+                    chance_seed: eventDeckState.nextChanceSeed,
+                    chance_reshuffle_count: eventDeckState.nextChanceReshuffleCount,
+                  }
+                : {}),
+              ...(eventDeckState.communityStateChanged
+                ? {
+                    community_order: eventDeckState.nextCommunityOrder,
+                    community_draw_ptr: eventDeckState.nextCommunityDrawPtr,
+                    community_seed: eventDeckState.nextCommunitySeed,
+                    community_reshuffle_count:
+                      eventDeckState.nextCommunityReshuffleCount,
+                  }
+                : {}),
+              pending_card_active: true,
+              pending_card_deck: drawOutcome.eventDeck.deck,
+              pending_card_id: drawOutcome.card.id,
+              pending_card_title: drawOutcome.card.title,
+              pending_card_kind: drawOutcome.card.kind,
+              pending_card_payload:
+                typeof drawOutcome.card.payload === "object" &&
+                drawOutcome.card.payload
+                  ? drawOutcome.card.payload
+                  : null,
+              pending_card_drawn_by_player_id: currentPlayer.id,
+              pending_card_drawn_at: new Date().toISOString(),
+              pending_card_source_tile_index: activeResolvedTile.index,
+              turn_phase: "AWAITING_CARD_CONFIRM",
+              pending_action: null,
+              updated_at: new Date().toISOString(),
+            }),
+          },
+        )) ?? [];
+
+        if (!updatedState) {
+          return NextResponse.json(
+            { error: "Version mismatch." },
+            { status: 409 },
+          );
+        }
+
+        const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
+          `players?id=eq.${currentPlayer.id}`,
+          {
+            method: "PATCH",
+            headers: {
+              Prefer: "return=representation",
+            },
+            body: JSON.stringify({
+              position: finalPosition,
+              is_in_jail: Boolean(shouldSendToJail && jailTile),
+              jail_turns_remaining: shouldSendToJail && jailTile ? 3 : 0,
+              ...(getOutOfJailFreeCountChanged
+                ? { get_out_of_jail_free_count: nextGetOutOfJailFreeCount }
+                : {}),
+              ...(taxExemptionPassCountChanged
+                ? { tax_exemption_pass_count: nextTaxExemptionPassCount }
+                : {}),
+            }),
+          },
+        )) ?? [];
+
+        if (!updatedPlayer) {
+          return NextResponse.json(
+            { error: "Unable to update player position." },
+            { status: 500 },
+          );
+        }
+
+        await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+
+        return NextResponse.json({ gameState: updatedState });
+      }
+
+      return await finalizeMoveResolution({
+        gameId,
+        game,
+        gameState,
+        players,
+        currentPlayer,
+        updatedBalances,
+        balancesChanged,
+        bankruptcyCandidate,
+        activeLandingTile,
+        activeResolvedTile,
+        finalPosition,
+        shouldSendToJail,
+        jailTile,
+        cardTriggeredGoToJail,
+        cardUtilityRollOverride,
+        rollTotal,
+        isDouble: (gameState.doubles_count ?? 0) > 0,
+        allowExtraRoll: true,
+        nextDoublesCount: gameState.doubles_count ?? 0,
+        events,
+        currentVersion,
+        userId: user.id,
+        ownershipByTile,
+        boardTiles,
+        boardPack,
+        boardPackEconomy,
+        rules,
+        startingCash: startingCash,
+        activeMacroEffects: getActiveMacroEffectsV1ForRules(
+          gameState?.active_macro_effects_v1,
+          rules.macroEnabled,
+        ),
+        nextChanceIndex: eventDeckState.nextChanceIndex,
+        nextCommunityIndex: eventDeckState.nextCommunityIndex,
+        nextChanceOrder: eventDeckState.nextChanceOrder,
+        nextCommunityOrder: eventDeckState.nextCommunityOrder,
+        nextChanceDrawPtr: eventDeckState.nextChanceDrawPtr,
+        nextCommunityDrawPtr: eventDeckState.nextCommunityDrawPtr,
+        nextChanceSeed: eventDeckState.nextChanceSeed,
+        nextCommunitySeed: eventDeckState.nextCommunitySeed,
+        nextChanceReshuffleCount: eventDeckState.nextChanceReshuffleCount,
+        nextCommunityReshuffleCount: eventDeckState.nextCommunityReshuffleCount,
+        chanceStateChanged: eventDeckState.chanceStateChanged,
+        communityStateChanged: eventDeckState.communityStateChanged,
+        nextGetOutOfJailFreeCount,
+        getOutOfJailFreeCountChanged,
+        nextTaxExemptionPassCount,
+        taxExemptionPassCountChanged,
+        extraGameStatePatch: {
+          pending_card_active: false,
+          pending_card_deck: null,
+          pending_card_id: null,
+          pending_card_title: null,
+          pending_card_kind: null,
+          pending_card_payload: null,
+          pending_card_drawn_by_player_id: null,
+          pending_card_drawn_at: null,
+          pending_card_source_tile_index: null,
+        },
+      });
+    }
+
+    if (body.action === "CONFIRM_GO_TO_JAIL") {
+      if (gameState.turn_phase !== "AWAITING_GO_TO_JAIL_CONFIRM") {
+        return NextResponse.json(
+          { error: "Not waiting for GO_TO_JAIL confirmation." },
+          { status: 409 },
+        );
+      }
+
+      const pendingAction =
+        gameState.pending_action && typeof gameState.pending_action === "object"
+          ? (gameState.pending_action as Partial<GoToJailPendingAction>)
+          : null;
+      if (
+        !pendingAction ||
+        pendingAction.type !== "GO_TO_JAIL_CONFIRM" ||
+        pendingAction.player_id !== currentPlayer.id ||
+        typeof pendingAction.to_jail_tile_index !== "number"
+      ) {
+        return NextResponse.json(
+          { error: "GO_TO_JAIL confirmation is not available." },
+          { status: 409 },
+        );
+      }
+
+      const boardTiles = resolveBoardTilesForRules({ boardPack, rules: gameState.rules });
+      const jailTile =
+        boardTiles.find((tile) => tile.index === pendingAction.to_jail_tile_index) ??
+        boardTiles.find((tile) => tile.type === "JAIL") ?? {
+          index: pendingAction.to_jail_tile_index,
+          tile_id: "jail",
+          type: "JAIL",
+          name: "Jail",
+        };
+      const fromTileIndex = Number.isFinite(currentPlayer.position)
+        ? currentPlayer.position
+        : pendingAction.from_tile_index ?? jailTile.index;
+
+      const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
+        `players?id=eq.${currentPlayer.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            position: jailTile.index,
+            is_in_jail: true,
+            jail_turns_remaining: 3,
+          }),
+        },
+      )) ?? [];
+
+      if (!updatedPlayer) {
+        return NextResponse.json(
+          { error: "Unable to update player position." },
+          { status: 500 },
+        );
+      }
+
+      return await advanceTurn({
+        gameId,
+        game,
+        gameState: {
+          ...gameState,
+          pending_action: null,
+          turn_phase: "AWAITING_ROLL",
+        },
+        players,
+        currentPlayer,
+        currentVersion,
+        userId: user.id,
+        rules,
+        startingCash: startingCash,
+        boardPack,
+        extraEvents: [
+          {
+            event_type: "MOVE_PLAYER",
+            payload: {
+              player_id: currentPlayer.id,
+              from: fromTileIndex,
+              to: jailTile.index,
+              tile_id: jailTile.tile_id,
+              tile_name: jailTile.name,
+              reason: "GO_TO_JAIL_CONFIRM",
+            },
+          },
+          {
+            event_type: "LAND_ON_TILE",
+            payload: {
+              player_id: currentPlayer.id,
+              tile_id: jailTile.tile_id,
+              tile_type: jailTile.type,
+              tile_index: jailTile.index,
+            },
+          },
+          {
+            event_type: "LAND_JAIL",
+            payload: {
+              player_id: currentPlayer.id,
+              player_name: currentPlayer.display_name,
+              tile_id: jailTile.tile_id,
+              tile_name: jailTile.name,
+              tile_index: jailTile.index,
+            },
+          },
+          {
+            event_type: "GO_TO_JAIL",
+            payload: {
+              from_tile_index: fromTileIndex,
+              to_jail_tile_index: jailTile.index,
+              player_id: currentPlayer.id,
+              display_name: currentPlayer.display_name,
+              source: pendingAction.source ?? "other",
+            },
+          },
+        ],
+        extraGameStatePatch: {
+          pending_action: null,
+        },
+      });
+    }
+
+    if (body.action === "ROLL_DICE") {
+      if (gameState.pending_action) {
+        return NextResponse.json(
+          { error: "Pending decision must be resolved." },
+          { status: 409 },
+        );
+      }
+
+      if (gameState.turn_phase === "AWAITING_JAIL_DECISION") {
+        return NextResponse.json(
+          { error: "Resolve jail before rolling." },
+          { status: 409 },
+        );
+      }
+
+      const doublesCount = gameState?.doubles_count ?? 0;
+
+      if (gameState.last_roll != null && doublesCount === 0) {
+        return NextResponse.json(
+          { error: "You have already rolled this turn." },
+          { status: 409 },
+        );
+      }
+
+      const skipNextRoll =
+        gameState.skip_next_roll_by_player?.[currentPlayer.id] === true;
+      if (skipNextRoll) {
+        const nextSkipNextRollByPlayer = {
+          ...(gameState.skip_next_roll_by_player ?? {}),
+          [currentPlayer.id]: false,
+        };
+        return await advanceTurn({
+          gameId,
+          game,
+          gameState,
+          players,
+          currentPlayer,
+          currentVersion,
+          userId: user.id,
+          rules,
+          startingCash: startingCash,
+          boardPack,
+          extraEvents: [
+            {
+              event_type: "TURN_SKIPPED_PANDEMIC",
+              payload: {
+                player_id: currentPlayer.id,
+                player_name: currentPlayer.display_name,
+              },
+            },
+          ],
+          extraGameStatePatch: {
+            skip_next_roll_by_player: nextSkipNextRollByPlayer,
+          },
+        });
+      }
+
+      const { dice, total: rollTotal } = rollDice();
+      const [dieOne, dieTwo] = dice;
+      const isDouble = dieOne === dieTwo;
+      const nextDoublesCount = isDouble ? doublesCount + 1 : 0;
+      const boardTiles = resolveBoardTilesForRules({ boardPack, rules: gameState.rules });
+      const boardSize = boardTiles.length > 0 ? boardTiles.length : 40;
+      const currentPosition = Number.isFinite(currentPlayer.position)
+        ? currentPlayer.position
+        : 0;
+      const newPosition = (currentPosition + rollTotal) % boardSize;
+      const passedStart = currentPosition + rollTotal >= boardSize;
+      const landingTile = boardTiles[newPosition] ?? {
+        index: newPosition,
+        tile_id: `tile-${newPosition}`,
+        type: "PROPERTY",
+        name: `Tile ${newPosition}`,
+      };
+      const ownershipByTile = await loadOwnershipByTile(gameId);
+      const jailTile =
+        landingTile.type === "GO_TO_JAIL"
+          ? boardTiles.find((tile) => tile.type === "JAIL") ?? {
+              index: 10,
+              tile_id: "jail",
+              type: "JAIL",
+              name: "Jail",
+            }
+          : null;
+      const resolvedTile = landingTile;
+      const finalPosition = resolvedTile.index;
+      const shouldSendToJail = landingTile.type === "GO_TO_JAIL" && Boolean(jailTile);
+      const activeLandingTile = landingTile;
+      const activeResolvedTile = resolvedTile;
+      const balances = gameState?.balances ?? {};
+      let updatedBalances = balances;
+      let balancesChanged = false;
+      const playersById = players.reduce<Record<string, { display_name: string | null }>>(
+        (acc, player) => {
+          acc[player.id] = { display_name: player.display_name };
+          return acc;
+        },
+        {},
+      );
+      const bettingSettlement = settleBettingMarketForRoll({
+        bettingMarketState: gameState.betting_market_state,
+        balances: updatedBalances,
+        playersById,
+        dice: [dieOne, dieTwo],
+      });
+      updatedBalances = bettingSettlement.balances;
+      balancesChanged = balancesChanged || bettingSettlement.balancesChanged;
+      const bettingWinEvents = bettingSettlement.events;
+      const resolvedBettingState = bettingSettlement.bettingMarketState;
+      const bankruptcyCandidate: BankruptcyCandidate | null = null;
+      let nextChanceIndex = gameState?.chance_index ?? 0;
+      let nextCommunityIndex = gameState?.community_index ?? 0;
+      let nextChanceOrder = gameState?.chance_order ?? null;
+      let nextCommunityOrder = gameState?.community_order ?? null;
+      let nextChanceDrawPtr = gameState?.chance_draw_ptr ?? 0;
+      let nextCommunityDrawPtr = gameState?.community_draw_ptr ?? 0;
+      let nextChanceSeed = gameState?.chance_seed ?? null;
+      let nextCommunitySeed = gameState?.community_seed ?? null;
+      let nextChanceReshuffleCount = gameState?.chance_reshuffle_count ?? 0;
+      let nextCommunityReshuffleCount = gameState?.community_reshuffle_count ?? 0;
+      let chanceStateChanged = false;
+      let communityStateChanged = false;
+      const nextGetOutOfJailFreeCount =
+        currentPlayer.get_out_of_jail_free_count ?? 0;
+      const getOutOfJailFreeCountChanged = false;
+      const nextTaxExemptionPassCount =
+        currentPlayer.tax_exemption_pass_count ?? 0;
+      const taxExemptionPassCountChanged = false;
+
+      if (isDouble && nextDoublesCount >= 3) {
+        const jailTile =
+          boardTiles.find((tile) => tile.type === "JAIL") ?? {
+            index: 10,
+            tile_id: "jail",
+            type: "JAIL",
+            name: "Jail",
+          };
+        const events: Array<{
+          event_type: string;
+          payload: Record<string, unknown>;
+        }> = [
+          {
+            event_type: "ROLL_DICE",
+            payload: {
+              player_id: currentPlayer.id,
+              player_name: currentPlayer.display_name,
+              roll: rollTotal,
+              dice,
+            } satisfies DiceEventPayload,
+          },
+          ...bettingWinEvents,
+          {
+            event_type: "ROLLED_DOUBLE",
+            payload: {
+              player_id: currentPlayer.id,
+              player_name: currentPlayer.display_name,
+              roll: rollTotal,
+              dice,
+              doubles_count: nextDoublesCount,
+            } satisfies DiceEventPayload,
+          },
+        ];
+
+        const finalVersion = currentVersion + events.length;
+
+        const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+          `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+          {
+            method: "PATCH",
+            headers: {
+              Prefer: "return=representation",
+            },
+            body: JSON.stringify({
+              version: finalVersion,
+              last_roll: rollTotal,
+              doubles_count: 0,
+              ...(balancesChanged ? { balances: updatedBalances } : {}),
+              betting_market_state: resolvedBettingState,
+              pending_action: createGoToJailPendingAction({
+                currentPlayer,
+                jailTile,
+                source: "three_doubles",
+                fromTileIndex: currentPosition,
+              }),
+              turn_phase: "AWAITING_GO_TO_JAIL_CONFIRM",
+              updated_at: new Date().toISOString(),
+            }),
+          },
+        )) ?? [];
+
+        if (!updatedState) {
+          return NextResponse.json(
+            { error: "Version mismatch." },
+            { status: 409 },
+          );
+        }
+
+        const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
+          `players?id=eq.${currentPlayer.id}`,
+          {
+            method: "PATCH",
+            headers: {
+              Prefer: "return=representation",
+            },
+            body: JSON.stringify({
+              position: currentPosition,
+              is_in_jail: false,
+              jail_turns_remaining: 0,
+            }),
+          },
+        )) ?? [];
+
+        if (!updatedPlayer) {
+          return NextResponse.json(
+            { error: "Unable to move player to jail." },
+            { status: 500 },
+          );
+        }
+
+        await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+
+        return NextResponse.json({ gameState: updatedState });
+      }
+
+      const events: Array<{
+        event_type: string;
+        payload: Record<string, unknown>;
+      }> = [
+        {
+          event_type: "ROLL_DICE",
+          payload: {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.display_name,
+            roll: rollTotal,
+            dice,
+          } satisfies DiceEventPayload,
+        },
+        ...bettingWinEvents,
+      ];
+
+      if (isDouble) {
+        events.push({
+          event_type: "ROLLED_DOUBLE",
+          payload: {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.display_name,
+            roll: rollTotal,
+            dice,
+            doubles_count: nextDoublesCount,
+          } satisfies DiceEventPayload,
+        });
+      }
+
+      events.push({
+        event_type: "MOVE_PLAYER",
+        payload: {
+          player_id: currentPlayer.id,
+          from: currentPosition,
+          to: newPosition,
+          roll_total: rollTotal,
+          dice,
+          passedStart,
+          tile_id: landingTile.tile_id,
+          tile_name: landingTile.name,
+        },
+      });
+
+      if (passedStart || landingTile.type === "START") {
+        const reason = passedStart ? "PASS_START" : "LAND_GO";
+        const goResult = applyGoSalary({
+          player: currentPlayer,
+          balances: updatedBalances,
+          startingCash: startingCash,
+          events,
+          reason,
+          packEconomy: boardPackEconomy,
+          boardTiles,
+          ownershipByTile,
+        });
+        updatedBalances = goResult.balances;
+        balancesChanged = balancesChanged || goResult.balancesChanged;
+      }
+
+      events.push({
+        event_type: "LAND_ON_TILE",
+        payload: {
+          player_id: currentPlayer.id,
+          tile_id: landingTile.tile_id,
+          tile_type: landingTile.type,
+          tile_index: landingTile.index,
+        },
+      });
+
+      const resolutionEvent = resolveTile(landingTile, currentPlayer);
+      if (resolutionEvent) {
+        events.push({
+          event_type: resolutionEvent.event_type,
+          payload: resolutionEvent.payload,
+        });
+      }
+      const cardTriggeredGoToJail = false;
+      const cardUtilityRollOverride:
+        | { total: number; dice: [number, number] }
+        | null = null;
+      const eventDeckState: EventDeckState = {
+        nextChanceIndex,
+        nextCommunityIndex,
+        nextChanceOrder,
+        nextCommunityOrder,
+        nextChanceDrawPtr,
+        nextCommunityDrawPtr,
+        nextChanceSeed,
+        nextCommunitySeed,
+        nextChanceReshuffleCount,
+        nextCommunityReshuffleCount,
+        chanceStateChanged,
+        communityStateChanged,
+      };
+      const drawOutcome = drawEventCardForLanding({
+        landingTile,
+        boardPack,
+        gameId,
+        state: eventDeckState,
+      });
+      if (drawOutcome) {
+        nextChanceIndex = eventDeckState.nextChanceIndex;
+        nextCommunityIndex = eventDeckState.nextCommunityIndex;
+        nextChanceOrder = eventDeckState.nextChanceOrder;
+        nextCommunityOrder = eventDeckState.nextCommunityOrder;
+        nextChanceDrawPtr = eventDeckState.nextChanceDrawPtr;
+        nextCommunityDrawPtr = eventDeckState.nextCommunityDrawPtr;
+        nextChanceSeed = eventDeckState.nextChanceSeed;
+        nextCommunitySeed = eventDeckState.nextCommunitySeed;
+        nextChanceReshuffleCount = eventDeckState.nextChanceReshuffleCount;
+        nextCommunityReshuffleCount = eventDeckState.nextCommunityReshuffleCount;
+        chanceStateChanged = eventDeckState.chanceStateChanged;
+        communityStateChanged = eventDeckState.communityStateChanged;
+
+        events.push({
+          event_type: "DRAW_CARD",
+          payload: {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.display_name,
+            deck: drawOutcome.eventDeck.deck,
+            card_id: drawOutcome.card.id,
+            card_title: drawOutcome.card.title,
+            card_kind: drawOutcome.card.kind,
+            draw_index: drawOutcome.drawResult.drawIndex,
+          },
+        });
+        events.push({
+          event_type: "CARD_REVEALED",
+          payload: {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.display_name,
+            deck: drawOutcome.eventDeck.deck,
+            card_id: drawOutcome.card.id,
+            card_title: drawOutcome.card.title,
+            card_kind: drawOutcome.card.kind,
+          },
+        });
+
+        const finalVersion = currentVersion + events.length;
+        const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+          `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+          {
+            method: "PATCH",
+            headers: {
+              Prefer: "return=representation",
+            },
+            body: JSON.stringify({
+              version: finalVersion,
+              last_roll: rollTotal,
+              doubles_count: nextDoublesCount,
+              ...(balancesChanged ? { balances: updatedBalances } : {}),
+              betting_market_state: resolvedBettingState,
+              ...(nextChanceIndex !== (gameState?.chance_index ?? 0)
+                ? { chance_index: nextChanceIndex }
+                : {}),
+              ...(nextCommunityIndex !== (gameState?.community_index ?? 0)
+                ? { community_index: nextCommunityIndex }
+                : {}),
+              ...(chanceStateChanged
+                ? {
+                    chance_order: nextChanceOrder,
+                    chance_draw_ptr: nextChanceDrawPtr,
+                    chance_seed: nextChanceSeed,
+                    chance_reshuffle_count: nextChanceReshuffleCount,
+                  }
+                : {}),
+              ...(communityStateChanged
+                ? {
+                    community_order: nextCommunityOrder,
+                    community_draw_ptr: nextCommunityDrawPtr,
+                    community_seed: nextCommunitySeed,
+                    community_reshuffle_count: nextCommunityReshuffleCount,
+                  }
+                : {}),
+              pending_card_active: true,
+              pending_card_deck: drawOutcome.eventDeck.deck,
+              pending_card_id: drawOutcome.card.id,
+              pending_card_title: drawOutcome.card.title,
+              pending_card_kind: drawOutcome.card.kind,
+              pending_card_payload:
+                typeof drawOutcome.card.payload === "object" && drawOutcome.card.payload
+                  ? drawOutcome.card.payload
+                  : null,
+              pending_card_drawn_by_player_id: currentPlayer.id,
+              pending_card_drawn_at: new Date().toISOString(),
+              pending_card_source_tile_index: activeResolvedTile.index,
+              turn_phase: "AWAITING_CARD_CONFIRM",
+              pending_action: null,
+              updated_at: new Date().toISOString(),
+            }),
+          },
+        )) ?? [];
+
+        if (!updatedState) {
+          return NextResponse.json(
+            { error: "Version mismatch." },
+            { status: 409 },
+          );
+        }
+
+        const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
+          `players?id=eq.${currentPlayer.id}`,
+          {
+            method: "PATCH",
+            headers: {
+              Prefer: "return=representation",
+            },
+            body: JSON.stringify({
+              position: finalPosition,
+              is_in_jail: Boolean(shouldSendToJail && jailTile),
+              jail_turns_remaining: shouldSendToJail && jailTile ? 3 : 0,
+              ...(getOutOfJailFreeCountChanged
+                ? { get_out_of_jail_free_count: nextGetOutOfJailFreeCount }
+                : {}),
+              ...(taxExemptionPassCountChanged
+                ? { tax_exemption_pass_count: nextTaxExemptionPassCount }
+                : {}),
+            }),
+          },
+        )) ?? [];
+
+        if (!updatedPlayer) {
+          return NextResponse.json(
+            { error: "Unable to update player position." },
+            { status: 500 },
+          );
+        }
+
+        await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+
+        return NextResponse.json({ gameState: updatedState });
+      }
+
+      return await finalizeMoveResolution({
+        gameId,
+        game,
+        gameState,
+        players,
+        currentPlayer,
+        updatedBalances,
+        balancesChanged,
+        bankruptcyCandidate,
+        activeLandingTile,
+        activeResolvedTile,
+        finalPosition,
+        shouldSendToJail,
+        jailTile,
+        cardTriggeredGoToJail,
+        cardUtilityRollOverride,
+        rollTotal,
+        isDouble,
+        allowExtraRoll: true,
+        nextDoublesCount,
+        events,
+        currentVersion,
+        userId: user.id,
+        ownershipByTile,
+        boardTiles,
+        boardPack,
+        boardPackEconomy,
+        rules,
+        startingCash: startingCash,
+        activeMacroEffects: getActiveMacroEffectsV1ForRules(
+          gameState?.active_macro_effects_v1,
+          rules.macroEnabled,
+        ),
+        nextChanceIndex,
+        nextCommunityIndex,
+        nextChanceOrder,
+        nextCommunityOrder,
+        nextChanceDrawPtr,
+        nextCommunityDrawPtr,
+        nextChanceSeed,
+        nextCommunitySeed,
+        nextChanceReshuffleCount,
+        nextCommunityReshuffleCount,
+        chanceStateChanged,
+        communityStateChanged,
+        nextGetOutOfJailFreeCount,
+        getOutOfJailFreeCountChanged,
+        nextTaxExemptionPassCount,
+        taxExemptionPassCountChanged,
+        extraGameStatePatch: {
+          betting_market_state: resolvedBettingState,
+        },
+      });
+    }
+
+    if (body.action === "DECLINE_PROPERTY") {
+      const pendingAction = gameState.pending_action as
+        | {
+            type?: unknown;
+            tile_index?: unknown;
+            player_id?: unknown;
+          }
+        | null;
+
+      if (!pendingAction || pendingAction.type !== "BUY_PROPERTY") {
+        return NextResponse.json(
+          { error: "No pending property decision." },
+          { status: 409 },
+        );
+      }
+
+      if (
+        typeof pendingAction.player_id === "string" &&
+        pendingAction.player_id !== currentPlayer.id
+      ) {
+        return NextResponse.json(
+          { error: "Pending decision belongs to another player." },
+          { status: 409 },
+        );
+      }
+
+      if (!Number.isInteger(body.tileIndex)) {
+        return NextResponse.json(
+          { error: "Invalid tileIndex." },
+          { status: 400 },
+        );
+      }
+
+      if (pendingAction.tile_index !== body.tileIndex) {
+        return NextResponse.json(
+          { error: "Pending decision does not match that tile." },
+          { status: 409 },
+        );
+      }
+
+      const boardPack = getBoardPackById(game.board_pack_id);
+      const boardTiles = resolveBoardTilesForRules({ boardPack, rules: gameState.rules });
+      const landingTile = boardTiles.find(
+        (tile) => tile.index === body.tileIndex,
+      );
+
+      if (!landingTile) {
+        return NextResponse.json(
+          { error: "Tile not found on this board." },
+          { status: 404 },
+        );
+      }
+
+      if (!OWNABLE_TILE_TYPES.has(landingTile.type)) {
+        return NextResponse.json(
+          { error: "Tile is not ownable." },
+          { status: 409 },
+        );
+      }
+
+      const ownershipByTile = await loadOwnershipByTile(gameId);
+      if (ownershipByTile[body.tileIndex]) {
+        return NextResponse.json(
+          { error: "Property already owned." },
+          { status: 409 },
+        );
+      }
+
+      const events: Array<{
+        event_type: string;
+        payload: Record<string, unknown>;
+      }> = [
+        {
+          event_type: "DECLINE_PROPERTY",
+          payload: {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.display_name,
+            tile_index: body.tileIndex,
+          },
+        },
+      ];
+
+      if (rules.auctionEnabled) {
+        const startAuctionResponse = await handleAuctionAction({
+          auctionAction: "START_AUCTION",
+          body,
+          gameState,
+          players,
+          currentUserPlayer,
+          currentPlayer,
+          gameId,
+          currentVersion,
+          rules,
+          boardPack,
+          boardPackEconomy,
+          startingCash,
+          user,
+          fetchFromSupabaseWithService,
+          emitGameEvents,
+          loadOwnershipByTile,
+          assignPropertyOwnership,
+          maybeUnlockCommunicationUtility: maybeUnlockCommunicationUtility as (params: {
+            gameState: unknown;
+            boardPack: unknown;
+            ownershipByTile: Record<number, { owner_player_id: string | null }>;
+            events: Array<{ event_type: string; payload: Record<string, unknown> }>;
+          }) => Record<string, unknown> | null,
+          normalizePlayerIdArray,
+          getNextEligibleAuctionPlayerId: getNextEligibleAuctionPlayerId as (
+            players: Array<{ id: string; is_eliminated: boolean }>,
+            startingPlayerId: string | null,
+            eligibleIds: string[],
+            passedIds: Set<string>,
+          ) => string | null,
+          advanceAuctionForExpiredTurns: advanceAuctionForExpiredTurns as (params: {
+            gameState: unknown;
+            players: Array<{ id: string; is_eliminated: boolean }>;
+            rules: unknown;
+            boardPackEconomy: BoardPackEconomy;
+            now: Date;
+          }) => {
+            eligiblePlayerIds: string[];
+            passedPlayerIds: Set<string>;
+            currentBid: number;
+            currentWinnerId: string | null;
+            turnPlayerId: string | null;
+            turnEndsAt: Date | null;
+            minIncrement: number;
+            timeoutEvents: Array<{
+              event_type: string;
+              payload: Record<string, unknown>;
+            }>;
+          },
+          startAuctionEvents: events,
+          startAuctionTileIndex: body.tileIndex,
+          advanceTurnAfterAuctionSkipped: async ({ extraEvents }) =>
+            advanceTurn({
+              gameId,
+              game,
+              gameState,
+              players,
+              currentPlayer,
+              currentVersion,
+              userId: user.id,
+              rules,
+              startingCash: startingCash,
+              boardPack,
+              extraEvents,
+            }),
+          isAuctionAction,
+        });
+        if (startAuctionResponse) {
+          return startAuctionResponse;
+        }
+      }
+
+      return await advanceTurn({
+        gameId,
+        game,
+        gameState,
+        players,
+        currentPlayer,
+        currentVersion,
+        userId: user.id,
+        rules,
+        startingCash: startingCash,
+        boardPack,
+        extraEvents: events,
+      });
+    }
+
+    if (body.action === "DECLARE_BANKRUPTCY") {
+      const pendingRecovery = parsePendingInsolvencyAction(gameState.pending_action);
+      const creditorPlayerId =
+        pendingRecovery?.type === "INSOLVENCY_RECOVERY"
+          ? pendingRecovery.owed_to_player_id
+          : null;
+      const originalAmount =
+        pendingRecovery?.type === "INSOLVENCY_RECOVERY"
+          ? pendingRecovery.amount_due
+          : 0;
+      const compensationAmount = Math.floor(originalAmount * 0.5);
+      const shouldPayRentBankruptcyCompensation =
+        pendingRecovery?.type === "INSOLVENCY_RECOVERY" &&
+        pendingRecovery.reason === "PAY_RENT" &&
+        typeof creditorPlayerId === "string" &&
+        creditorPlayerId.length > 0 &&
+        compensationAmount > 0 &&
+        originalAmount > 0 &&
+        creditorPlayerId !== currentPlayer.id &&
+        !players.some((player) => player.id === creditorPlayerId && player.is_eliminated);
+
+      if (shouldPayRentBankruptcyCompensation && creditorPlayerId) {
+        const currentCreditorBalance = gameState.balances?.[creditorPlayerId] ?? startingCash;
+        const compensationBalances = {
+          ...(gameState.balances ?? {}),
+          [creditorPlayerId]: currentCreditorBalance + compensationAmount,
+        };
+        const compensationEvents = [
+          {
+            event_type: "BANKRUPTCY_COMPENSATION",
+            payload: {
+              creditor_player_id: creditorPlayerId,
+              debtor_player_id: currentPlayer.id,
+              original_amount: originalAmount,
+              compensation_amount: compensationAmount,
+              tile_label: pendingRecovery.label,
+              reason: "BANKRUPTCY_RENT_COMPENSATION",
+            },
+          },
+          {
+            event_type: "CASH_CREDIT",
+            payload: {
+              player_id: creditorPlayerId,
+              amount: compensationAmount,
+              balance_after: currentCreditorBalance + compensationAmount,
+              source_event_type: "BANKRUPTCY_COMPENSATION",
+            },
+          },
+        ] as Array<{ event_type: string; payload: Record<string, unknown> }>;
+
+        const compensationResponse = await fetchFromSupabaseWithService<{
+          game_state: GameStateRow;
+          events: Array<{ event_type: string; payload: Record<string, unknown> }>;
+        }[]>(
+          "rpc/update_game_state_and_emit_events",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              p_game_id: gameId,
+              p_expected_version: currentVersion,
+              p_patch: {
+                balances: compensationBalances,
+              },
+              p_events: compensationEvents,
+              p_user_id: user.id,
+            }),
+          },
+        );
+
+        if (!compensationResponse) {
+          throw new Error("Compensation response missing");
+        }
+
+        currentVersion += 1;
+      }
+
+      const rpcResponse = await fetch(
+        `${supabaseUrl}/rest/v1/rpc/declare_bankruptcy`,
+        {
+          method: "POST",
+          headers: bankHeaders,
+          body: JSON.stringify({
+            game_id: gameId,
+            player_id: currentPlayer.id,
+            expected_version: currentVersion,
+            actor_user_id: user.id,
+            starting_cash_input: startingCash,
+          }),
+        },
+      );
+
+      if (!rpcResponse.ok) {
+        const errorText = await rpcResponse.text();
+        const errorMessage = parseRpcErrorMessage(errorText);
+
+        if (errorMessage === "VERSION_MISMATCH") {
+          return NextResponse.json({ error: "Version mismatch." }, { status: 409 });
+        }
+        if (errorMessage === "NO_PENDING_INSOLVENCY") {
+          return NextResponse.json(
+            { error: "No insolvency recovery is pending." },
+            { status: 409 },
+          );
+        }
+        if (errorMessage === "WRONG_PLAYER") {
+          return NextResponse.json(
+            { error: "Only the insolvent player can declare bankruptcy." },
+            { status: 403 },
+          );
+        }
+        if (errorMessage === "INVALID_PENDING_INSOLVENCY") {
+          return NextResponse.json(
+            { error: "Pending insolvency payload is invalid for bankruptcy resolution." },
+            { status: 422 },
+          );
+        }
+
+        console.error("[Bank][Insolvency] Bankruptcy RPC failed", {
+          status: rpcResponse.status,
+          error: errorText,
+        });
+        return NextResponse.json(
+          { error: "Bankruptcy declaration could not be completed." },
+          { status: 500 },
+        );
+      }
+
+      const [rpcResult] = (await rpcResponse.json()) as Array<{
+        game_state: GameStateRow;
+      }>;
+
+      if (!rpcResult?.game_state) {
+        return NextResponse.json(
+          { error: "Bankruptcy declaration could not be completed." },
+          { status: 500 },
+        );
+      }
+
+      return NextResponse.json({ gameState: rpcResult.game_state });
+    }
+
+    if (body.action === "CONFIRM_INCOME_TAX") {
+      const pendingAction = parsePendingIncomeTaxAction(gameState.pending_action);
+
+      if (!pendingAction) {
+        return NextResponse.json(
+          { error: "No pending Income Tax to confirm." },
+          { status: 409 },
+        );
+      }
+
+      if (gameState.turn_phase !== "AWAITING_DECISION") {
+        return NextResponse.json(
+          { error: "Not ready to confirm Income Tax yet." },
+          { status: 409 },
+        );
+      }
+
+      if (pendingAction.player_id !== currentPlayer.id) {
+        return NextResponse.json(
+          { error: "Only the acting player can confirm Income Tax." },
+          { status: 403 },
+        );
+      }
+
+      const currentCashBeforeTax = gameState.balances?.[currentPlayer.id] ?? startingCash;
+      const nextBalance = currentCashBeforeTax - pendingAction.tax_amount;
+      const shouldUpdateBaseline = pendingAction.taxable_gain > 0;
+      const nextIncomeTaxBaselineCashByPlayer = {
+        ...(gameState.income_tax_baseline_cash_by_player ?? {}),
+        ...(shouldUpdateBaseline ? { [currentPlayer.id]: nextBalance } : {}),
+      };
+
+      if (pendingAction.tax_amount > 0 && nextBalance < 0) {
+        const bankruptcyResult = await enterInsolvencyRecovery({
+          gameId,
+          gameState,
+          player: currentPlayer,
+          candidate: {
+            reason: "PAY_TAX",
+            cashBefore: currentCashBeforeTax,
+            cashAfter: nextBalance,
+            amountDue: pendingAction.tax_amount,
+            tileIndex: pendingAction.tile_index,
+            tileId: pendingAction.tile_id,
+            label: pendingAction.tile_name,
+            taxKind: shouldUpdateBaseline ? "INCOME_TAX" : undefined,
+          },
+          events: [],
+          currentVersion,
+          userId: user.id,
+        });
+
+        if (bankruptcyResult.handled) {
+          if (bankruptcyResult.error) {
+            return NextResponse.json(
+              { error: bankruptcyResult.error },
+              { status: 409 },
+            );
+          }
+          return NextResponse.json({ gameState: bankruptcyResult.updatedState });
+        }
+      }
+
+      const updatedBalances =
+        pendingAction.tax_amount > 0
+          ? {
+              ...(gameState.balances ?? {}),
+              [currentPlayer.id]: nextBalance,
+            }
+          : gameState.balances ?? {};
+
+      const events =
+        pendingAction.tax_amount > 0
+          ? ([
+              {
+                event_type: "PAY_TAX",
+                payload: {
+                  tile_index: pendingAction.tile_index,
+                  tile_name: pendingAction.tile_name,
+                  amount: pendingAction.tax_amount,
+                  payer_player_id: currentPlayer.id,
+                  payer_display_name: currentPlayer.display_name,
+                  tax_kind: "INCOME_TAX",
+                  computed_from: "cash_gain_since_last_income_tax_checkpoint",
+                  current_cash: currentCashBeforeTax,
+                  baseline_cash: pendingAction.baseline_cash,
+                  taxable_gain: pendingAction.taxable_gain,
+                  tax_rate: pendingAction.tax_rate,
+                },
+              },
+              {
+                event_type: "CASH_DEBIT",
+                payload: {
+                  player_id: currentPlayer.id,
+                  amount: pendingAction.tax_amount,
+                  reason: "PAY_TAX",
+                  tile_index: pendingAction.tile_index,
+                },
+              },
+            ] satisfies Array<{ event_type: string; payload: Record<string, unknown> }>)
+          : [];
+
+      const finalVersion = currentVersion + events.length;
+      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            version: finalVersion,
+            ...(pendingAction.tax_amount > 0 ? { balances: updatedBalances } : {}),
+            income_tax_baseline_cash_by_player: nextIncomeTaxBaselineCashByPlayer,
+            pending_action: null,
+            turn_phase: pendingAction.return_turn_phase,
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      )) ?? [];
+
+      if (!updatedState) {
+        return NextResponse.json({ error: "Version mismatch." }, { status: 409 });
+      }
+
+      if (events.length > 0) {
+        await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+      }
+      return NextResponse.json({ gameState: updatedState });
+    }
+
+    if (body.action === "USE_TAX_EXEMPTION_PASS") {
+      const pendingIncomeTax = parsePendingIncomeTaxAction(gameState.pending_action);
+      const pendingSuperTax = parsePendingSuperTaxAction(gameState.pending_action);
+      const pendingAction = pendingIncomeTax ?? pendingSuperTax;
+
+      if (!pendingAction) {
+        return NextResponse.json(
+          { error: "No pending tax action to exempt." },
+          { status: 409 },
+        );
+      }
+
+      if (gameState.turn_phase !== "AWAITING_DECISION") {
+        return NextResponse.json(
+          { error: "Not ready to use Tax Exemption Pass yet." },
+          { status: 409 },
+        );
+      }
+
+      if (pendingAction.player_id !== currentPlayer.id) {
+        return NextResponse.json(
+          { error: "Only the acting player can use Tax Exemption Pass." },
+          { status: 403 },
+        );
+      }
+
+      const currentCount = currentPlayer.tax_exemption_pass_count ?? 0;
+      if (currentCount <= 0) {
+        return NextResponse.json(
+          { error: "No Tax Exemption Pass available." },
+          { status: 409 },
+        );
+      }
+
+      const nextCount = currentCount - 1;
+      const taxKind =
+        pendingAction.type === "INCOME_TAX_CONFIRM" ? "INCOME_TAX" : "SUPER_TAX";
+      const nextIncomeTaxBaselineCashByPlayer =
+        pendingAction.type === "INCOME_TAX_CONFIRM" && pendingAction.taxable_gain > 0
+          ? {
+              ...(gameState.income_tax_baseline_cash_by_player ?? {}),
+              [currentPlayer.id]: pendingAction.current_cash,
+            }
+          : gameState.income_tax_baseline_cash_by_player ?? {};
+
+      const events = [
+        {
+          event_type: "CARD_TAX_EXEMPTION_PASS_USED",
+          payload: {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.display_name,
+            tax_kind: taxKind,
+            tile_index: pendingAction.tile_index,
+            tile_id: pendingAction.tile_id,
+            tile_name: pendingAction.tile_name,
+            prevented_amount: pendingAction.tax_amount,
+            remaining_cards: nextCount,
+          },
+        },
+      ] as Array<{ event_type: string; payload: Record<string, unknown> }>;
+
+      const finalVersion = currentVersion + events.length;
+      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            version: finalVersion,
+            pending_action: null,
+            ...(pendingAction.type === "INCOME_TAX_CONFIRM"
+              ? { income_tax_baseline_cash_by_player: nextIncomeTaxBaselineCashByPlayer }
+              : {}),
+            turn_phase: pendingAction.return_turn_phase,
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      )) ?? [];
+
+      if (!updatedState) {
+        return NextResponse.json({ error: "Version mismatch." }, { status: 409 });
+      }
+
+      const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
+        `players?id=eq.${currentPlayer.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            tax_exemption_pass_count: nextCount,
+          }),
+        },
+      )) ?? [];
+
+      if (!updatedPlayer) {
+        return NextResponse.json(
+          { error: "Unable to consume Tax Exemption Pass." },
+          { status: 500 },
+        );
+      }
+
+      await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+      return NextResponse.json({ gameState: updatedState });
+    }
+
+    if (body.action === "CONFIRM_SUPER_TAX") {
+      const pendingAction = parsePendingSuperTaxAction(gameState.pending_action);
+
+      if (!pendingAction) {
+        return NextResponse.json(
+          { error: "No pending Super Tax to confirm." },
+          { status: 409 },
+        );
+      }
+
+      if (gameState.turn_phase !== "AWAITING_DECISION") {
+        return NextResponse.json(
+          { error: "Not ready to confirm Super Tax yet." },
+          { status: 409 },
+        );
+      }
+
+      if (pendingAction.player_id !== currentPlayer.id) {
+        return NextResponse.json(
+          { error: "Only the acting player can confirm Super Tax." },
+          { status: 403 },
+        );
+      }
+
+      const payerBalance = gameState.balances?.[currentPlayer.id] ?? startingCash;
+      const nextBalance = payerBalance - pendingAction.tax_amount;
+
+      if (nextBalance < 0) {
+        const bankruptcyResult = await enterInsolvencyRecovery({
+          gameId,
+          gameState,
+          player: currentPlayer,
+          candidate: {
+            reason: "PAY_TAX",
+            cashBefore: payerBalance,
+            cashAfter: nextBalance,
+            amountDue: pendingAction.tax_amount,
+            tileIndex: pendingAction.tile_index,
+            tileId: pendingAction.tile_id,
+            label: pendingAction.tile_name,
+          },
+          events: [],
+          currentVersion,
+          userId: user.id,
+        });
+
+        if (bankruptcyResult.handled) {
+          if (bankruptcyResult.error) {
+            return NextResponse.json(
+              { error: bankruptcyResult.error },
+              { status: 409 },
+            );
+          }
+          return NextResponse.json({ gameState: bankruptcyResult.updatedState });
+        }
+      }
+
+      const updatedBalances = {
+        ...(gameState.balances ?? {}),
+        [currentPlayer.id]: nextBalance,
+      };
+      const events = [
+        {
+          event_type: "PAY_TAX",
+          payload: {
+            tile_index: pendingAction.tile_index,
+            tile_name: pendingAction.tile_name,
+            amount: pendingAction.tax_amount,
+            payer_player_id: currentPlayer.id,
+            payer_display_name: currentPlayer.display_name,
+            tax_kind: "SUPER_TAX",
+            computed_from: pendingAction.uses_custom_formula
+              ? "net_worth_for_tax"
+              : "fixed_amount",
+          },
+        },
+        {
+          event_type: "CASH_DEBIT",
+          payload: {
+            player_id: currentPlayer.id,
+            amount: pendingAction.tax_amount,
+            reason: "PAY_TAX",
+            tile_index: pendingAction.tile_index,
+          },
+        },
+      ] as Array<{ event_type: string; payload: Record<string, unknown> }>;
+
+      const finalVersion = currentVersion + events.length;
+      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            version: finalVersion,
+            balances: updatedBalances,
+            pending_action: null,
+            turn_phase: pendingAction.return_turn_phase,
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      )) ?? [];
+
+      if (!updatedState) {
+        return NextResponse.json({ error: "Version mismatch." }, { status: 409 });
+      }
+
+      await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+      return NextResponse.json({ gameState: updatedState });
+    }
+
+    if (body.action === "CONFIRM_INSOLVENCY_PAYMENT") {
+      const activeMacroEffects = getActiveMacroEffectsV1ForRules(
+        gameState.active_macro_effects_v1,
+        rules.macroEnabled,
+      );
+      const macroInterestTrendAccumulator =
+        getMacroInterestTrendAccumulatorV1(activeMacroEffects);
+
+      const rpcResponse = await fetch(
+        `${supabaseUrl}/rest/v1/rpc/confirm_insolvency_payment`,
+        {
+          method: "POST",
+          headers: bankHeaders,
+          body: JSON.stringify({
+            game_id: gameId,
+            player_id: currentPlayer.id,
+            expected_version: currentVersion,
+            actor_user_id: user.id,
+            starting_cash_input: startingCash,
+            macro_interest_delta_input: macroInterestTrendAccumulator,
+          }),
+        },
+      );
+
+      if (!rpcResponse.ok) {
+        const errorText = await rpcResponse.text();
+        const errorMessage = parseRpcErrorMessage(errorText);
+
+        if (errorMessage === "VERSION_MISMATCH") {
+          return NextResponse.json({ error: "Version mismatch." }, { status: 409 });
+        }
+        if (errorMessage === "NO_PENDING_INSOLVENCY") {
+          return NextResponse.json(
+            { error: "No pending insolvency payment to confirm." },
+            { status: 409 },
+          );
+        }
+        if (errorMessage === "WRONG_PLAYER") {
+          return NextResponse.json(
+            { error: "Only the insolvent player can confirm this payment." },
+            { status: 403 },
+          );
+        }
+        if (errorMessage === "INSUFFICIENT_FUNDS") {
+          return NextResponse.json(
+            { error: "You still need more cash before confirming this payment." },
+            { status: 409 },
+          );
+        }
+        if (errorMessage === "MISSING_PAYEE") {
+          return NextResponse.json(
+            { error: "Held rent payment is missing its payee." },
+            { status: 409 },
+          );
+        }
+        if (errorMessage === "LOAN_NOT_FOUND") {
+          return NextResponse.json(
+            { error: "Active collateral loan not found for held payment." },
+            { status: 409 },
+          );
+        }
+        if (errorMessage === "UNSUPPORTED_REASON") {
+          return NextResponse.json(
+            { error: "Unsupported insolvency payment type." },
+            { status: 409 },
+          );
+        }
+
+        console.error("[Bank][Insolvency] Confirm RPC failed", {
+          status: rpcResponse.status,
+          error: errorText,
+        });
+        return NextResponse.json(
+          { error: "Unable to confirm insolvency payment." },
+          { status: 500 },
+        );
+      }
+
+      const [rpcResult] = (await rpcResponse.json()) as Array<{
+        game_state: GameStateRow;
+      }>;
+
+      if (!rpcResult?.game_state) {
+        return NextResponse.json(
+          { error: "Unable to confirm insolvency payment." },
+          { status: 500 },
+        );
+      }
+
+      return NextResponse.json({ gameState: rpcResult.game_state });
+    }
+
+    if (body.action === "CONFIRM_MACRO_EVENT") {
+      const pendingAction = gameState.pending_action as
+        | {
+            type?: unknown;
+            macro_id?: unknown;
+            macroCardId?: unknown;
+            name?: unknown;
+            rarity?: unknown;
+            durationRounds?: unknown;
+            headline?: unknown;
+            flavor?: unknown;
+            rulesText?: unknown;
+            tooltip?: unknown;
+            effects?: unknown;
+            return_turn_phase?: unknown;
+          }
+        | null;
+
+      if (!pendingAction || pendingAction.type !== "MACRO_EVENT") {
+        return NextResponse.json(
+          { error: "No pending macro event to confirm." },
+          { status: 409 },
+        );
+      }
+
+      if (gameState.turn_phase !== "AWAITING_CONFIRMATION") {
+        return NextResponse.json(
+          { error: "Not ready to confirm the macro event yet." },
+          { status: 409 },
+        );
+      }
+
+      const returnTurnPhase =
+        typeof pendingAction.return_turn_phase === "string"
+          ? pendingAction.return_turn_phase
+          : "AWAITING_ROLL";
+      const macroCardId =
+        typeof pendingAction.macroCardId === "string"
+          ? pendingAction.macroCardId
+          : typeof pendingAction.macro_id === "string"
+            ? pendingAction.macro_id
+            : null;
+      const macroName =
+        typeof pendingAction.name === "string"
+          ? pendingAction.name
+          : "Macroeconomic shift";
+      const macroRarity =
+        typeof pendingAction.rarity === "string" ? pendingAction.rarity : null;
+      const macroDurationRounds =
+        typeof pendingAction.durationRounds === "number"
+          ? pendingAction.durationRounds
+          : null;
+      const macroHeadline =
+        typeof pendingAction.headline === "string" ? pendingAction.headline : null;
+      const macroFlavor =
+        typeof pendingAction.flavor === "string" ? pendingAction.flavor : null;
+      const macroRulesText =
+        typeof pendingAction.rulesText === "string" ? pendingAction.rulesText : null;
+      const macroTooltip =
+        typeof pendingAction.tooltip === "string" ? pendingAction.tooltip : null;
+      const macroEffects =
+        pendingAction.effects && typeof pendingAction.effects === "object"
+          ? (pendingAction.effects as MacroEffectsV1)
+          : null;
+      const macroEnabled = rules.macroEnabled;
+      const activeMacroEffectsV1 = normalizeActiveMacroEffectsV1(
+        gameState.active_macro_effects_v1,
+      );
+      let nextActiveMacroEffectsV1 = activeMacroEffectsV1;
+      const balances = gameState.balances ?? {};
+      let updatedBalances = balances;
+      let balancesChanged = false;
+      const skipNextRollByPlayer =
+        gameState.skip_next_roll_by_player &&
+        typeof gameState.skip_next_roll_by_player === "object"
+          ? (gameState.skip_next_roll_by_player as Record<string, boolean>)
+          : {};
+      const nextSkipNextRollByPlayer = { ...skipNextRollByPlayer };
+      const macroMetaBase = {
+        macro_id: macroCardId,
+        macro_name: macroName,
+      };
+
+      const events: Array<{ event_type: string; payload: Record<string, unknown> }> =
+        [
+          {
+            event_type: "MACRO_EVENT",
+            payload: {
+              macroCardId,
+              name: macroName,
+              rarity: macroRarity,
+              durationRounds: macroDurationRounds,
+              headline: macroHeadline,
+              flavor: macroFlavor,
+              rulesText: macroRulesText,
+              tooltip: macroTooltip,
+              effects: macroEffects,
+              event_id: macroCardId,
+              event_name: macroName,
+              duration_rounds: macroDurationRounds,
+            },
+          },
+        ];
+      if (
+        macroEnabled &&
+        macroEffects &&
+        (hasMacroOneOffEffects(macroEffects) || macroDurationRounds === 0)
+      ) {
+        const activePlayers = getActivePlayers(players);
+        const boardPack = getBoardPackById(game.board_pack_id);
+        const boardTiles = resolveBoardTilesForRules({ boardPack, rules: gameState.rules });
+        const boardPackEconomy = boardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY;
+        const activeMacroEffectsForRules = getActiveMacroEffectsV1ForRules(
+          gameState.active_macro_effects_v1,
+          rules.macroEnabled,
+        );
+        const macroHouseSellMultiplier = getMacroHouseSellMultiplierV1(
+          activeMacroEffectsForRules,
+        );
+        const macroInterestTrendAccumulator = getMacroInterestTrendAccumulatorV1(
+          activeMacroEffectsForRules,
+        );
+        const macroMortgageFlatDelta = getMacroMortgageFlatDeltaV1(
+          activeMacroEffectsForRules,
+        );
+        const needsOwnership =
+          Boolean(macroEffects.regional_disaster) ||
+          Boolean(
+            macroEffects.sovereign_default?.forceHouseLiquidationIfInsufficient,
+          );
+        let ownershipByTileLoaded = needsOwnership;
+        let ownershipByTile = needsOwnership
+          ? ((await loadOwnershipByTile(gameId)) ?? {})
+          : {};
+
+        if (typeof macroEffects.cash_delta === "number") {
+          const cashDelta = Math.round(macroEffects.cash_delta);
+          const perPlayerAmounts: Array<{
+            player_id: string;
+            amount: number;
+          }> = [];
+          for (const player of activePlayers) {
+            const currentBalance = updatedBalances[player.id] ?? startingCash;
+            const nextBalance = currentBalance + cashDelta;
+            updatedBalances = {
+              ...updatedBalances,
+              [player.id]: nextBalance,
+            };
+            if (cashDelta !== 0) {
+              balancesChanged = true;
+            }
+            perPlayerAmounts.push({ player_id: player.id, amount: cashDelta });
+            events.push({
+              event_type: cashDelta >= 0 ? "CASH_CREDIT" : "CASH_DEBIT",
+              payload: {
+                player_id: player.id,
+                amount: Math.abs(cashDelta),
+                reason: "MACRO_CASH_DELTA",
+                effect_type: "cash_delta",
+                ...macroMetaBase,
+              },
+            });
+          }
+          events.push({
+            event_type: "MACRO_CASH_DELTA_APPLIED",
+            payload: {
+              effect_type: "cash_delta",
+              per_player: perPlayerAmounts,
+              ...macroMetaBase,
+            },
+          });
+        }
+
+        if (typeof macroEffects.tax_cash_percent === "number") {
+          const taxRate = macroEffects.tax_cash_percent;
+          const perPlayerAmounts: Array<{
+            player_id: string;
+            amount: number;
+          }> = [];
+          for (const player of activePlayers) {
+            const currentBalance = updatedBalances[player.id] ?? startingCash;
+            const taxAmount = Math.round(currentBalance * taxRate);
+            const nextBalance = currentBalance - taxAmount;
+            updatedBalances = {
+              ...updatedBalances,
+              [player.id]: nextBalance,
+            };
+            if (taxAmount !== 0) {
+              balancesChanged = true;
+            }
+            perPlayerAmounts.push({ player_id: player.id, amount: taxAmount });
+            events.push({
+              event_type: "CASH_DEBIT",
+              payload: {
+                player_id: player.id,
+                amount: taxAmount,
+                reason: "MACRO_TAX_PERCENT",
+                effect_type: "tax_cash_percent",
+                tax_rate: taxRate,
+                ...macroMetaBase,
+              },
+            });
+          }
+          events.push({
+            event_type: "MACRO_TAX_PERCENT_APPLIED",
+            payload: {
+              effect_type: "tax_cash_percent",
+              tax_rate: taxRate,
+              per_player: perPlayerAmounts,
+              ...macroMetaBase,
+            },
+          });
+        }
+
+        if (macroEffects.regional_disaster) {
+          const colorSets = Math.max(
+            0,
+            macroEffects.regional_disaster.colorSets ?? 0,
+          );
+          const costPerHouse = Math.round(
+            macroEffects.regional_disaster.costPerHouse ?? 0,
+          );
+          const availableGroups = getPropertyColorGroups(boardTiles);
+          const selectedColorSets = selectRandomColorGroups(
+            availableGroups,
+            colorSets,
+            `${gameId}-${macroCardId ?? "macro"}-regional-disaster`,
+          );
+          const perPlayerSummary: Array<{
+            player_id: string;
+            houses_affected: number;
+            cost: number;
+            houses_sold: number;
+            cash_recovered: number;
+            remaining_deficit: number;
+          }> = [];
+          for (const player of activePlayers) {
+            const housesAffected = boardTiles.reduce((sum, tile) => {
+              if (
+                tile.type !== "PROPERTY" ||
+                !tile.colorGroup ||
+                !selectedColorSets.includes(tile.colorGroup)
+              ) {
+                return sum;
+              }
+              const ownership = ownershipByTile[tile.index];
+              if (ownership?.owner_player_id !== player.id) {
+                return sum;
+              }
+              return sum + (ownership.houses ?? 0);
+            }, 0);
+            const cost = housesAffected * costPerHouse;
+            let housesSold = 0;
+            let cashRecovered = 0;
+            if (cost > 0) {
+              const currentBalance =
+                updatedBalances[player.id] ?? startingCash;
+              if (currentBalance < cost) {
+                const liquidation = await liquidateHousesForPlayer({
+                  gameId,
+                  player,
+                  boardTiles,
+                  ownershipByTile,
+                  balances: updatedBalances,
+                  startingCash: startingCash,
+                  targetCash: cost,
+                  allowedColorGroups: selectedColorSets,
+                  macroHouseSellMultiplier,
+                  events,
+                  macroMeta: {
+                    ...macroMetaBase,
+                    macro_effect_type: "regional_disaster",
+                  },
+                  effectType: "regional_disaster",
+                });
+                updatedBalances = liquidation.balances;
+                housesSold = liquidation.housesSold;
+                cashRecovered = liquidation.cashRecovered;
+                if (cashRecovered !== 0) {
+                  balancesChanged = true;
+                }
+              }
+              const postBalance =
+                updatedBalances[player.id] ?? startingCash;
+              const nextBalance = postBalance - cost;
+              updatedBalances = {
+                ...updatedBalances,
+                [player.id]: nextBalance,
+              };
+              if (cost !== 0) {
+                balancesChanged = true;
+              }
+              events.push({
+                event_type: "CASH_DEBIT",
+                payload: {
+                  player_id: player.id,
+                  amount: cost,
+                  reason: "MACRO_REGIONAL_DISASTER",
+                  effect_type: "regional_disaster",
+                  ...macroMetaBase,
+                },
+              });
+            }
+            const remainingDeficit = Math.min(
+              0,
+              (updatedBalances[player.id] ?? startingCash),
+            );
+            if (remainingDeficit < 0) {
+              events.push({
+                event_type: "WARNING",
+                payload: {
+                  player_id: player.id,
+                  reason: "MACRO_REGIONAL_DISASTER_INSUFFICIENT_FUNDS",
+                  remaining_deficit: remainingDeficit,
+                  effect_type: "regional_disaster",
+                  ...macroMetaBase,
+                },
+              });
+            }
+            perPlayerSummary.push({
+              player_id: player.id,
+              houses_affected: housesAffected,
+              cost,
+              houses_sold: housesSold,
+              cash_recovered: cashRecovered,
+              remaining_deficit: remainingDeficit,
+            });
+          }
+          events.push({
+            event_type: "MACRO_REGIONAL_DISASTER_APPLIED",
+            payload: {
+              selected_color_sets: selectedColorSets,
+              cost_per_house: costPerHouse,
+              per_player: perPlayerSummary,
+              effect_type: "regional_disaster",
+              ...macroMetaBase,
+            },
+          });
+        }
+
+        if (macroEffects.bank_stress_test?.payLargestLoanInterestImmediately) {
+          const minLoans = Math.max(
+            0,
+            macroEffects.bank_stress_test.minLoans ?? 0,
+          );
+          const perPlayerLoans: Array<{
+            player_id: string;
+            affected: Array<Record<string, unknown>>;
+          }> = [];
+          for (const player of activePlayers) {
+            const activeLoans =
+              (await fetchFromSupabaseWithService<PlayerLoanRow[]>(
+                `player_loans?select=id,collateral_tile_index,principal,remaining_principal,rate_per_turn,status&game_id=eq.${gameId}&player_id=eq.${player.id}&status=eq.active`,
+                { method: "GET" },
+              )) ?? [];
+            const activeMortgages =
+              (await fetchFromSupabaseWithService<PurchaseMortgageRow[]>(
+                `purchase_mortgages?select=id,tile_index,principal_remaining,rate_per_turn,status&game_id=eq.${gameId}&player_id=eq.${player.id}&status=eq.active`,
+                { method: "GET" },
+              )) ?? [];
+            const liabilityCount = activeLoans.length + activeMortgages.length;
+            if (liabilityCount < minLoans) {
+              continue;
+            }
+            const liabilities: Array<{
+              type: "collateral_loan" | "purchase_mortgage";
+              id: string;
+              principal_remaining: number;
+              interest_amount: number;
+              meta: Record<string, unknown>;
+            }> = [];
+            for (const loan of activeLoans) {
+              const principalRemaining =
+                typeof loan.remaining_principal === "number"
+                  ? loan.remaining_principal
+                  : loan.principal;
+              const interestAmount = Math.round(
+                principalRemaining * loan.rate_per_turn,
+              );
+              liabilities.push({
+                type: "collateral_loan",
+                id: loan.id,
+                principal_remaining: principalRemaining,
+                interest_amount: interestAmount,
+                meta: {
+                  loan_id: loan.id,
+                  tile_index: loan.collateral_tile_index,
+                  rate_per_turn: loan.rate_per_turn,
+                },
+              });
+            }
+            for (const mortgage of activeMortgages) {
+              const effectiveRatePerTurn =
+                mortgage.rate_per_turn +
+                macroInterestTrendAccumulator +
+                macroMortgageFlatDelta;
+              const interestAmount = Math.round(
+                mortgage.principal_remaining * effectiveRatePerTurn,
+              );
+              liabilities.push({
+                type: "purchase_mortgage",
+                id: mortgage.id,
+                principal_remaining: mortgage.principal_remaining,
+                interest_amount: interestAmount,
+                meta: {
+                  mortgage_id: mortgage.id,
+                  tile_index: mortgage.tile_index,
+                  base_rate_per_turn: mortgage.rate_per_turn,
+                  macro_interest_delta_per_turn: macroInterestTrendAccumulator,
+                  macro_mortgage_flat_delta: macroMortgageFlatDelta,
+                  effective_rate_per_turn: effectiveRatePerTurn,
+                },
+              });
+            }
+            if (liabilities.length === 0) {
+              continue;
+            }
+            const maxPrincipal = Math.max(
+              ...liabilities.map((entry) => entry.principal_remaining),
+            );
+            const affected = liabilities.filter(
+              (entry) => entry.principal_remaining === maxPrincipal,
+            );
+            const affectedSummaries: Array<Record<string, unknown>> = [];
+            for (const liability of affected) {
+              const currentBalance =
+                updatedBalances[player.id] ?? startingCash;
+              const nextBalance = currentBalance - liability.interest_amount;
+              updatedBalances = {
+                ...updatedBalances,
+                [player.id]: nextBalance,
+              };
+              if (liability.interest_amount !== 0) {
+                balancesChanged = true;
+              }
+              events.push({
+                event_type: "CASH_DEBIT",
+                payload: {
+                  player_id: player.id,
+                  amount: liability.interest_amount,
+                  reason: "MACRO_STRESS_TEST",
+                  effect_type: "bank_stress_test",
+                  loan_type: liability.type,
+                  principal_remaining: liability.principal_remaining,
+                  interest_amount: liability.interest_amount,
+                  ...liability.meta,
+                  ...macroMetaBase,
+                },
+              });
+              affectedSummaries.push({
+                loan_type: liability.type,
+                loan_id: liability.id,
+                principal_remaining: liability.principal_remaining,
+                interest_amount: liability.interest_amount,
+                ...liability.meta,
+              });
+            }
+            if (affectedSummaries.length > 0) {
+              perPlayerLoans.push({
+                player_id: player.id,
+                affected: affectedSummaries,
+              });
+            }
+          }
+          if (perPlayerLoans.length > 0) {
+            events.push({
+              event_type: "MACRO_STRESS_TEST_APPLIED",
+              payload: {
+                per_player: perPlayerLoans,
+                effect_type: "bank_stress_test",
+                ...macroMetaBase,
+              },
+            });
+          }
+        }
+
+        if (macroEffects.pandemic) {
+          const stimulusCash = Math.round(
+            macroEffects.pandemic.stimulusCash ?? 0,
+          );
+          if (stimulusCash !== 0) {
+            for (const player of activePlayers) {
+              const currentBalance =
+                updatedBalances[player.id] ?? startingCash;
+              const nextBalance = currentBalance + stimulusCash;
+              updatedBalances = {
+                ...updatedBalances,
+                [player.id]: nextBalance,
+              };
+              balancesChanged = true;
+              events.push({
+                event_type: "CASH_CREDIT",
+                payload: {
+                  player_id: player.id,
+                  amount: stimulusCash,
+                  reason: "MACRO_PANDEMIC_STIMULUS",
+                  effect_type: "pandemic",
+                  ...macroMetaBase,
+                },
+              });
+            }
+          }
+          if (macroEffects.pandemic.skipNextRoll) {
+            for (const player of activePlayers) {
+              nextSkipNextRollByPlayer[player.id] = true;
+            }
+          }
+
+          if (!ownershipByTileLoaded) {
+            ownershipByTile = (await loadOwnershipByTile(gameId)) ?? {};
+            ownershipByTileLoaded = true;
+          }
+          const pandemicMacroEffects = getActiveMacroEffectsV1ForRules(
+            gameState.active_macro_effects_v1,
+            rules.macroEnabled,
+          );
+          for (const player of activePlayers) {
+            const playerPosition = Number.isFinite(player.position)
+              ? player.position
+              : null;
+            if (playerPosition == null) {
+              continue;
+            }
+            const currentTile = boardTiles.find((tile) => tile.index === playerPosition);
+            if (!currentTile) {
+              continue;
+            }
+            const ownership = ownershipByTile[currentTile.index];
+            const ownerId = ownership?.owner_player_id ?? null;
+            if (!ownerId || ownerId === player.id) {
+              continue;
+            }
+            const rentResult = calculateRent({
+              tile: currentTile,
+              ownerId,
+              currentPlayerId: player.id,
+              boardTiles,
+              ownershipByTile,
+              diceTotal: gameState.last_roll,
+              activeMacroEffects: pandemicMacroEffects,
+              boardPackEconomy,
+            });
+            if (rentResult.amount <= 0) {
+              continue;
+            }
+            const payerBalance = updatedBalances[player.id] ?? startingCash;
+            const ownerBalance = updatedBalances[ownerId] ?? startingCash;
+            updatedBalances = {
+              ...updatedBalances,
+              [player.id]: payerBalance - rentResult.amount,
+              [ownerId]: ownerBalance + rentResult.amount,
+            };
+            balancesChanged = true;
+            events.push({
+              event_type: "CASH_DEBIT",
+              payload: {
+                player_id: player.id,
+                amount: rentResult.amount,
+                reason: "MACRO_PANDEMIC_RENT_RECHARGE",
+                tile_index: currentTile.index,
+                tile_id: currentTile.tile_id,
+                effect_type: "pandemic",
+                ...macroMetaBase,
+              },
+            });
+            events.push({
+              event_type: "CASH_CREDIT",
+              payload: {
+                player_id: ownerId,
+                amount: rentResult.amount,
+                reason: "MACRO_PANDEMIC_RENT_RECHARGE",
+                tile_index: currentTile.index,
+                tile_id: currentTile.tile_id,
+                from_player_id: player.id,
+                effect_type: "pandemic",
+                ...macroMetaBase,
+              },
+            });
+            events.push({
+              event_type: "RENT_PAID",
+              payload: {
+                from_player_id: player.id,
+                to_player_id: ownerId,
+                amount: rentResult.amount,
+                tile_index: currentTile.index,
+                tile_id: currentTile.tile_id,
+                reason: "MACRO_PANDEMIC_RENT_RECHARGE",
+                rent_meta: rentResult.meta,
+                effect_type: "pandemic",
+                ...macroMetaBase,
+              },
+            });
+          }
+        }
+
+        if (macroEffects.sovereign_default) {
+          const cashDelta = Math.round(macroEffects.sovereign_default.cashDelta ?? 0);
+          const forceLiquidation =
+            macroEffects.sovereign_default.forceHouseLiquidationIfInsufficient;
+          const perPlayerSummary: Array<{
+            player_id: string;
+            houses_sold: number;
+            cash_recovered: number;
+            remaining_deficit: number;
+          }> = [];
+          for (const player of activePlayers) {
+            const currentBalance =
+              updatedBalances[player.id] ?? startingCash;
+            const nextBalance = currentBalance + cashDelta;
+            updatedBalances = {
+              ...updatedBalances,
+              [player.id]: nextBalance,
+            };
+            if (cashDelta !== 0) {
+              balancesChanged = true;
+            }
+            if (cashDelta !== 0) {
+              events.push({
+                event_type: cashDelta >= 0 ? "CASH_CREDIT" : "CASH_DEBIT",
+                payload: {
+                  player_id: player.id,
+                  amount: Math.abs(cashDelta),
+                  reason: "MACRO_SOVEREIGN_DEFAULT",
+                  effect_type: "sovereign_default",
+                  ...macroMetaBase,
+                },
+              });
+            }
+            let housesSold = 0;
+            let cashRecovered = 0;
+            if (forceLiquidation && nextBalance < 0) {
+              if (!ownershipByTileLoaded) {
+                ownershipByTile =
+                  (await loadOwnershipByTile(gameId)) ?? {};
+                ownershipByTileLoaded = true;
+              }
+              const liquidation = await liquidateHousesForPlayer({
+                gameId,
+                player,
+                boardTiles,
+                ownershipByTile,
+                balances: updatedBalances,
+                startingCash: startingCash,
+                targetCash: 0,
+                allowedColorGroups: null,
+                macroHouseSellMultiplier,
+                events,
+                macroMeta: {
+                  ...macroMetaBase,
+                },
+                effectType: "sovereign_default",
+              });
+              updatedBalances = liquidation.balances;
+              housesSold = liquidation.housesSold;
+              cashRecovered = liquidation.cashRecovered;
+              if (cashRecovered !== 0) {
+                balancesChanged = true;
+              }
+            }
+            const remainingDeficit = Math.min(
+              0,
+              updatedBalances[player.id] ?? startingCash,
+            );
+            if (remainingDeficit < 0) {
+              events.push({
+                event_type: "WARNING",
+                payload: {
+                  player_id: player.id,
+                  reason: "MACRO_SOVEREIGN_DEFAULT_INSUFFICIENT_FUNDS",
+                  remaining_deficit: remainingDeficit,
+                  effect_type: "sovereign_default",
+                  ...macroMetaBase,
+                },
+              });
+            }
+            perPlayerSummary.push({
+              player_id: player.id,
+              houses_sold: housesSold,
+              cash_recovered: cashRecovered,
+              remaining_deficit: remainingDeficit,
+            });
+          }
+          events.push({
+            event_type: "MACRO_SOVEREIGN_DEFAULT_APPLIED",
+            payload: {
+              cash_delta: cashDelta,
+              per_player: perPlayerSummary,
+              effect_type: "sovereign_default",
+              ...macroMetaBase,
+            },
+          });
+        }
+      }
+      if (
+        macroEnabled &&
+        macroEffects &&
+        typeof macroDurationRounds === "number" &&
+        macroDurationRounds > 0
+      ) {
+        const activeMacroEffect: ActiveMacroEffectV1 = {
+          id: macroCardId ?? "unknown",
+          name: macroName,
+          rarity:
+            typeof macroRarity === "string" ? (macroRarity as MacroRarity) : null,
+          effects: macroEffects as MacroEffectsV1,
+          roundsRemaining: macroDurationRounds,
+          roundsApplied: 0,
+          tooltip: macroTooltip ?? undefined,
+        };
+        nextActiveMacroEffectsV1 = [
+          ...nextActiveMacroEffectsV1,
+          activeMacroEffect,
+        ];
+        events.push({
+          event_type: "MACRO_APPLIED",
+          payload: {
+            macro_id: activeMacroEffect.id,
+            macro_name: activeMacroEffect.name,
+            rarity: activeMacroEffect.rarity,
+            rounds_remaining: activeMacroEffect.roundsRemaining,
+            effects: activeMacroEffect.effects,
+          },
+        });
+      }
+
+      const finalVersion = currentVersion + events.length;
+      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            version: finalVersion,
+            pending_action: null,
+            turn_phase: returnTurnPhase,
+            active_macro_effects_v1: nextActiveMacroEffectsV1,
+            ...(balancesChanged ? { balances: updatedBalances } : {}),
+            skip_next_roll_by_player: nextSkipNextRollByPlayer,
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      )) ?? [];
+
+      if (!updatedState) {
+        return NextResponse.json(
+          { error: "Version mismatch." },
+          { status: 409 },
+        );
+      }
+
+      await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+
+      return NextResponse.json({ gameState: updatedState });
+    }
+
+    if (body.action === "BUY_PROPERTY") {
+      const pendingAction = gameState.pending_action as
+        | {
+            type?: unknown;
+            tile_index?: unknown;
+            player_id?: unknown;
+          }
+        | null;
+
+      if (!pendingAction || pendingAction.type !== "BUY_PROPERTY") {
+        return NextResponse.json(
+          { error: "No pending property purchase." },
+          { status: 409 },
+        );
+      }
+
+      if (
+        typeof pendingAction.player_id === "string" &&
+        pendingAction.player_id !== currentPlayer.id
+      ) {
+        return NextResponse.json(
+          { error: "Pending decision belongs to another player." },
+          { status: 409 },
+        );
+      }
+
+      const tileIndex = body.tileIndex;
+      if (typeof tileIndex !== "number" || !Number.isInteger(tileIndex)) {
+        return NextResponse.json(
+          { error: "Invalid tileIndex." },
+          { status: 400 },
+        );
+      }
+
+      if (pendingAction.tile_index !== tileIndex) {
+        return NextResponse.json(
+          { error: "Pending decision does not match that tile." },
+          { status: 409 },
+        );
+      }
+
+      const boardPack = getBoardPackById(game.board_pack_id);
+      const boardTiles = resolveBoardTilesForRules({ boardPack, rules: gameState.rules });
+      const landingTile = boardTiles.find((tile) => tile.index === tileIndex);
+
+      if (!landingTile) {
+        return NextResponse.json(
+          { error: "Tile not found on this board." },
+          { status: 404 },
+        );
+      }
+
+      if (!OWNABLE_TILE_TYPES.has(landingTile.type)) {
+        return NextResponse.json(
+          { error: "Tile is not ownable." },
+          { status: 409 },
+        );
+      }
+
+      const ownershipByTile = await loadOwnershipByTile(gameId);
+      if (ownershipByTile[tileIndex]) {
+        return NextResponse.json(
+          { error: "Property already owned." },
+          { status: 409 },
+        );
+      }
+
+      const basePrice = landingTile.price ?? 0;
+      const activeMacroEffects = getActiveMacroEffectsV1ForRules(
+        gameState.active_macro_effects_v1,
+        rules.macroEnabled,
+      );
+      const discountedPurchase = calculateDirectBankPropertyPurchasePrice(
+        basePrice,
+        activeMacroEffects,
+      );
+      const price = discountedPurchase.finalPrice;
+      const balances = gameState.balances ?? {};
+      const currentBalance =
+        balances[currentPlayer.id] ?? startingCash;
+      const usingMortgage = body.financing === "MORTGAGE";
+      if (!usingMortgage && body.downPaymentPercent !== undefined) {
+        return NextResponse.json(
+          { error: "downPaymentPercent is only allowed with mortgage financing." },
+          { status: 400 },
+        );
+      }
+      if (usingMortgage) {
+        const blockingMacroEffect = getBlockingMacroLoanMortgageEffectV1(activeMacroEffects);
+        if (blockingMacroEffect) {
+          console.debug("Loan blocked by macro", {
+            effectId: blockingMacroEffect.id,
+            roundsRemaining: blockingMacroEffect.roundsRemaining,
+          });
+          return NextResponse.json(
+            { error: "New loans and mortgages are currently blocked." },
+            { status: 409 },
+          );
+        }
+      }
+      let mortgageDownPaymentPercent: PurchaseDownPaymentPercent =
+        defaultPurchaseDownPaymentPercentFromMortgageLtv(rules.mortgageLtv);
+      if (usingMortgage) {
+        if (
+          body.downPaymentPercent !== undefined &&
+          !isValidPurchaseDownPaymentPercent(body.downPaymentPercent)
+        ) {
+          return NextResponse.json(
+            {
+              error:
+                "Invalid downPaymentPercent. Must be one of 30, 40, 50, 60, 70, 80.",
+            },
+            { status: 400 },
+          );
+        }
+        mortgageDownPaymentPercent =
+          body.downPaymentPercent ?? mortgageDownPaymentPercent;
+      }
+      const downPayment = usingMortgage
+        ? calculateDownPaymentAmount(price, mortgageDownPaymentPercent)
+        : price;
+      const principal = usingMortgage
+        ? calculateMortgagePrincipalFromDownPayment(price, mortgageDownPaymentPercent)
+        : 0;
+
+      if (currentBalance < downPayment) {
+        return NextResponse.json(
+          {
+            error: usingMortgage
+              ? "Insufficient cash for the down payment."
+              : "Insufficient cash to buy this property.",
+          },
+          { status: 409 },
+        );
+      }
+
+      const updatedBalances = {
+        ...balances,
+        [currentPlayer.id]: currentBalance - downPayment,
+      };
+
+      const mortgageRatePerTurn = rules.mortgageRatePerTurn;
+      const mortgageTermTurns = rules.mortgageTermTurns;
+      const mortgagePaymentPerTurn = calculateAmortizedPaymentPerTurn(
+        principal,
+        mortgageRatePerTurn,
+        mortgageTermTurns,
+      );
+
+      let mortgageId: string | null = null;
+      if (usingMortgage) {
+        const mortgageResponse = await fetch(
+          `${supabaseUrl}/rest/v1/purchase_mortgages`,
+          {
+            method: "POST",
+            headers: {
+              ...bankHeaders,
+              Prefer: "return=representation",
+            },
+            body: JSON.stringify({
+              game_id: gameId,
+              player_id: currentPlayer.id,
+              tile_index: tileIndex,
+              principal_original: principal,
+              principal_remaining: principal,
+              rate_per_turn: mortgageRatePerTurn,
+              term_turns: mortgageTermTurns,
+              turns_remaining: mortgageTermTurns,
+              payment_per_turn: mortgagePaymentPerTurn,
+              turns_elapsed: 0,
+              accrued_interest_unpaid: 0,
+              status: "active",
+            }),
+          },
+        );
+
+        if (!mortgageResponse.ok) {
+          const errorText = await mortgageResponse.text();
+          return NextResponse.json(
+            { error: errorText || "Unable to create mortgage." },
+            { status: 500 },
+          );
+        }
+
+        const [mortgageRow] = (await mortgageResponse.json()) as
+          | PurchaseMortgageRow[]
+          | [];
+        mortgageId = mortgageRow?.id ?? null;
+        if (!mortgageId) {
+          return NextResponse.json(
+            { error: "Unable to create mortgage." },
+            { status: 500 },
+          );
+        }
+      }
+
+      const ownershipResult = await assignPropertyOwnership({
+        gameId,
+        tileIndex,
+        ownerPlayerId: currentPlayer.id,
+        purchaseMortgageId: mortgageId,
+        acquiredRound: gameState.rounds_elapsed ?? 0,
+      });
+
+      if (!ownershipResult.ok) {
+        if (ownershipResult.alreadyOwned) {
+          return NextResponse.json(
+            { error: "Property already owned." },
+            { status: 409 },
+          );
+        }
+
+        return NextResponse.json(
+          { error: ownershipResult.errorText || "Unable to record ownership." },
+          { status: 500 },
+        );
+      }
+
+      const events: Array<{
+        event_type: string;
+        payload: Record<string, unknown>;
+      }> = [
+        {
+          event_type: "BUY_PROPERTY",
+          payload: {
+            tile_index: tileIndex,
+            price,
+            base_price: basePrice,
+            property_purchase_discount_pct: discountedPurchase.discountPct,
+            owner_player_id: currentPlayer.id,
+            ...(usingMortgage
+              ? {
+                  financing: "mortgage",
+                  down_payment_percent: mortgageDownPaymentPercent,
+                }
+              : {}),
+          },
+        },
+        {
+          event_type: "CASH_DEBIT",
+          payload: {
+            player_id: currentPlayer.id,
+            amount: downPayment,
+            reason: usingMortgage ? "BUY_PROPERTY_DOWNPAYMENT" : "BUY_PROPERTY",
+            tile_index: tileIndex,
+          },
+        },
+      ];
+      if (usingMortgage && mortgageId) {
+        events.push({
+          event_type: "PURCHASE_MORTGAGE_CREATED",
+          payload: {
+            mortgage_id: mortgageId,
+            player_id: currentPlayer.id,
+            tile_index: tileIndex,
+            principal,
+            down_payment: downPayment,
+            down_payment_percent: mortgageDownPaymentPercent,
+            rate_per_turn: mortgageRatePerTurn,
+            term_turns: mortgageTermTurns,
+            payment_per_turn: mortgagePaymentPerTurn,
+          },
+        });
+      }
+      const refreshedOwnershipByTile = await loadOwnershipByTile(gameId);
+      const nextRules = maybeUnlockCommunicationUtility({
+        gameState,
+        boardPack,
+        ownershipByTile: refreshedOwnershipByTile,
+        events,
+      });
+      const finalVersion = currentVersion + events.length;
+
+      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            version: finalVersion,
+            balances: updatedBalances,
+            turn_phase: "AWAITING_ROLL",
+            pending_action: null,
+            rules: nextRules,
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      )) ?? [];
+
+      if (!updatedState) {
+        return NextResponse.json(
+          { error: "Version mismatch." },
+          { status: 409 },
+        );
+      }
+
+      await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+
+      return NextResponse.json({ gameState: updatedState });
+    }
+
+    const handleHouseAction = async (
+      action: "BUILD_HOUSE" | "SELL_HOUSE" | "SELL_HOTEL",
+      tileIndex: number,
+    ) => {
+      const activeMacroEffects = getActiveMacroEffectsV1ForRules(
+        gameState.active_macro_effects_v1,
+        rules.macroEnabled,
+      );
+      const macroDevelopmentMultiplier =
+        getMacroBuildCostMultiplierV1(activeMacroEffects);
+      const macroHouseSellMultiplier =
+        getMacroHouseSellMultiplierV1(activeMacroEffects);
+      const boardPack = getBoardPackById(game.board_pack_id);
+      const boardTiles = resolveBoardTilesForRules({ boardPack, rules: gameState.rules });
+      const tile = boardTiles.find((entry) => entry.index === tileIndex);
+
+      if (!tile) {
+        return NextResponse.json(
+          { error: "Property not found." },
+          { status: 404 },
+        );
+      }
+
+      if (tile.type !== "PROPERTY") {
+        return NextResponse.json(
+          { error: "Houses can only be built on properties." },
+          { status: 409 },
+        );
+      }
+
+      const ownershipByTile = await loadOwnershipByTile(gameId);
+      const ownership = ownershipByTile[tileIndex];
+
+      if (!ownership || ownership.owner_player_id !== currentPlayer.id) {
+        return NextResponse.json(
+          { error: "You do not own this property." },
+          { status: 409 },
+        );
+      }
+
+      if (ownership.collateral_loan_id) {
+        return NextResponse.json(
+          { error: "Collateralized properties cannot be upgraded." },
+          { status: 409 },
+        );
+      }
+
+      if (!ownsFullColorSet(tile, boardTiles, ownershipByTile, currentPlayer.id)) {
+        return NextResponse.json(
+          { error: "You must own the full color set to modify houses." },
+          { status: 409 },
+        );
+      }
+
+      if (!tile.colorGroup) {
+        return NextResponse.json(
+          { error: "Property color group not configured." },
+          { status: 409 },
+        );
+      }
+
+      const houses = ownership.houses ?? 0;
+      const houseCost = tile.houseCost ?? 0;
+      const maxDevelopmentLevel = getMaxDevelopmentLevel(tile.rentByHouses);
+      const requestedVoucherTypeRaw =
+        "useConstructionVoucher" in body &&
+        typeof body.useConstructionVoucher === "string"
+          ? body.useConstructionVoucher
+          : null;
+
+      if (action === "BUILD_HOUSE") {
+        if (getMacroHouseBuildBlockedV1(activeMacroEffects)) {
+          return NextResponse.json(
+            { error: "Building houses is currently blocked by a macro event." },
+            { status: 409 },
+          );
+        }
+        if (!houseCost) {
+          return NextResponse.json(
+            { error: "House cost not configured for this property." },
+            { status: 409 },
+          );
+        }
+        const balances = gameState.balances ?? {};
+        const currentBalance = balances[currentPlayer.id] ?? startingCash;
+
+        const nextHouses = houses + 1;
+        if (nextHouses > maxDevelopmentLevel) {
+          return NextResponse.json(
+            { error: "Property is already fully upgraded." },
+            { status: 409 },
+          );
+        }
+        if (
+          houses > 0 &&
+          !ownsFullyBuiltColorSet(
+            tile,
+            boardTiles,
+            ownershipByTile,
+            currentPlayer.id,
+          )
+        ) {
+          return NextResponse.json(
+            {
+              error:
+                "Build on every property in this color set before upgrading.",
+            },
+            { status: 409 },
+          );
+        }
+        const adjustedHouseCost = Math.round(
+          getNextBuildCost({
+            baseCost: houseCost,
+            currentLevel: houses,
+          }) * macroDevelopmentMultiplier,
+        );
+        const eligibleVoucherType = houses === 0 ? "BUILD" : "UPGRADE";
+        const hasBuildVoucher = (currentPlayer.free_build_tokens ?? 0) > 0;
+        const hasUpgradeVoucher = (currentPlayer.free_upgrade_tokens ?? 0) > 0;
+
+        const wantsVoucher =
+          requestedVoucherTypeRaw === "BUILD" || requestedVoucherTypeRaw === "UPGRADE";
+        if (wantsVoucher && requestedVoucherTypeRaw !== eligibleVoucherType) {
+          return NextResponse.json(
+            {
+              error:
+                requestedVoucherTypeRaw === "BUILD"
+                  ? "Build vouchers can only be used on properties without existing houses."
+                  : "Upgrade vouchers can only be used on already developed properties.",
+            },
+            { status: 409 },
+          );
+        }
+        if (requestedVoucherTypeRaw === "BUILD" && !hasBuildVoucher) {
+          return NextResponse.json(
+            { error: "No free build vouchers available." },
+            { status: 409 },
+          );
+        }
+        if (requestedVoucherTypeRaw === "UPGRADE" && !hasUpgradeVoucher) {
+          return NextResponse.json(
+            { error: "No free upgrade vouchers available." },
+            { status: 409 },
+          );
+        }
+        const effectiveHouseCost = wantsVoucher ? 0 : adjustedHouseCost;
+        if (currentBalance < effectiveHouseCost) {
+          return NextResponse.json(
+            { error: "Not enough cash to build a house." },
+            { status: 409 },
+          );
+        }
+
+        const nextFreeBuildTokens =
+          requestedVoucherTypeRaw === "BUILD"
+            ? Math.max(0, (currentPlayer.free_build_tokens ?? 0) - 1)
+            : (currentPlayer.free_build_tokens ?? 0);
+        const nextFreeUpgradeTokens =
+          requestedVoucherTypeRaw === "UPGRADE"
+            ? Math.max(0, (currentPlayer.free_upgrade_tokens ?? 0) - 1)
+            : (currentPlayer.free_upgrade_tokens ?? 0);
+        const consumedVoucher =
+          requestedVoucherTypeRaw === "BUILD" || requestedVoucherTypeRaw === "UPGRADE"
+            ? requestedVoucherTypeRaw
+            : null;
+        const updatedBalances = {
+          ...balances,
+          [currentPlayer.id]: currentBalance - effectiveHouseCost,
+        };
+
+        const ownershipResponse = await fetchFromSupabaseWithService(
+          `property_ownership?game_id=eq.${gameId}&tile_index=eq.${tileIndex}&owner_player_id=eq.${currentPlayer.id}`,
+          {
+            method: "PATCH",
+            headers: {
+              Prefer: "return=representation",
+            },
+            body: JSON.stringify({
+              houses: nextHouses,
+            }),
+          },
+        );
+
+        if (!ownershipResponse) {
+          return NextResponse.json(
+            { error: "Unable to update houses." },
+            { status: 500 },
+          );
+        }
+
+        const events: Array<{
+          event_type: string;
+          payload: Record<string, unknown>;
+        }> = [
+          {
+            event_type: "HOUSE_BUILT",
+            payload: {
+              player_id: currentPlayer.id,
+              tile_index: tileIndex,
+              tile_id: tile.tile_id,
+              house_cost: adjustedHouseCost,
+              effective_charge: effectiveHouseCost,
+              voucher_used: consumedVoucher,
+              houses_before: houses,
+              houses_after: nextHouses,
+            },
+          },
+        ];
+        if (consumedVoucher) {
+          events.push({
+            event_type: "HOUSE_BUILD_VOUCHER_USED",
+            payload: {
+              player_id: currentPlayer.id,
+              player_name: currentPlayer.display_name,
+              tile_index: tileIndex,
+              voucher_type: consumedVoucher,
+              free_build_tokens_after: nextFreeBuildTokens,
+              free_upgrade_tokens_after: nextFreeUpgradeTokens,
+            },
+          });
+        }
+        if (effectiveHouseCost > 0) {
+          events.push({
+            event_type: "CASH_DEBIT",
+            payload: {
+              player_id: currentPlayer.id,
+              amount: effectiveHouseCost,
+              reason: "BUILD_HOUSE",
+              tile_index: tileIndex,
+            },
+          });
+        }
+
+        const finalVersion = currentVersion + events.length;
+        const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+          `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+          {
+            method: "PATCH",
+            headers: {
+              Prefer: "return=representation",
+            },
+            body: JSON.stringify({
+              version: finalVersion,
+              balances: updatedBalances,
+              updated_at: new Date().toISOString(),
+            }),
+          },
+        )) ?? [];
+
+        if (!updatedState) {
+          return NextResponse.json(
+            { error: "Version mismatch." },
+            { status: 409 },
+          );
+        }
+
+        if (consumedVoucher) {
+          const freeBuildDelta = consumedVoucher === "BUILD" ? -1 : 0;
+          const freeUpgradeDelta = consumedVoucher === "UPGRADE" ? -1 : 0;
+          try {
+            const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
+              "rpc/adjust_player_construction_vouchers_atomic",
+              {
+                method: "POST",
+                body: JSON.stringify({
+                  p_game_id: gameId,
+                  p_player_id: currentPlayer.id,
+                  p_free_build_tokens_delta: freeBuildDelta,
+                  p_free_upgrade_tokens_delta: freeUpgradeDelta,
+                }),
+              },
+            )) ?? [];
+
+            if (!updatedPlayer) {
+              return NextResponse.json(
+                { error: "Unable to apply construction voucher." },
+                { status: 500 },
+              );
+            }
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : "Unable to apply construction voucher.";
+            if (
+              message.includes("INSUFFICIENT_FREE_BUILD_TOKENS") ||
+              message.includes("INSUFFICIENT_FREE_UPGRADE_TOKENS")
+            ) {
+              return NextResponse.json(
+                { error: "Construction voucher is no longer available." },
+                { status: 409 },
+              );
+            }
+            throw error;
+          }
+        }
+
+        await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+
+        return NextResponse.json({ gameState: updatedState });
+      }
+
+      if (!houseCost) {
+        return NextResponse.json(
+          { error: "House cost not configured for this property." },
+          { status: 409 },
+        );
+      }
+
+      const balances = gameState.balances ?? {};
+      const currentBalance = balances[currentPlayer.id] ?? startingCash;
+      const nextHouses = 0;
+      const sellValue = Math.round(
+        houseCost * 0.5 * macroHouseSellMultiplier * houses,
+      );
+
+      if (houses <= 0) {
+        return NextResponse.json(
+          { error: "No houses to sell." },
+          { status: 409 },
+        );
+      }
+
+      const updatedBalances = {
+        ...balances,
+        [currentPlayer.id]: currentBalance + sellValue,
+      };
+
+      const ownershipResponse = await fetchFromSupabaseWithService(
+        `property_ownership?game_id=eq.${gameId}&tile_index=eq.${tileIndex}&owner_player_id=eq.${currentPlayer.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            houses: nextHouses,
+          }),
+        },
+      );
+
+      if (!ownershipResponse) {
+        return NextResponse.json(
+          { error: "Unable to update houses." },
+          { status: 500 },
+        );
+      }
+
+      const events: Array<{
+        event_type: string;
+        payload: Record<string, unknown>;
+      }> = [
+        {
+          event_type: action === "SELL_HOTEL" ? "HOTEL_SOLD" : "HOUSE_SOLD",
+          payload: {
+            player_id: currentPlayer.id,
+            tile_index: tileIndex,
+            tile_id: tile.tile_id,
+            house_cost: houseCost,
+            houses_before: houses,
+            houses_after: nextHouses,
+          },
+        },
+        {
+          event_type: "CASH_CREDIT",
+          payload: {
+            player_id: currentPlayer.id,
+            amount: sellValue,
+            reason:
+              action === "SELL_HOTEL"
+                ? "SELL_HOTEL_FULL_DEVELOPMENT"
+                : "SELL_HOUSE_FULL_DEVELOPMENT",
+            tile_index: tileIndex,
+          },
+        },
+      ];
+
+      const finalVersion = currentVersion + events.length;
+      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            version: finalVersion,
+            balances: updatedBalances,
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      )) ?? [];
+
+      if (!updatedState) {
+        return NextResponse.json(
+          { error: "Version mismatch." },
+          { status: 409 },
+        );
+      }
+
+      await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+
+      return NextResponse.json({ gameState: updatedState });
+    };
+
+    if (body.action === "BUILD_HOUSE") {
+      const tileIndex = body.tileIndex;
+      if (typeof tileIndex !== "number") {
+        return NextResponse.json(
+          { error: "Missing property tile." },
+          { status: 400 },
+        );
+      }
+
+      return await handleHouseAction("BUILD_HOUSE", tileIndex);
+    }
+
+    if (body.action === "SELL_HOUSE") {
+      const tileIndex = body.tileIndex;
+      if (typeof tileIndex !== "number") {
+        return NextResponse.json(
+          { error: "Missing property tile." },
+          { status: 400 },
+        );
+      }
+
+      return await handleHouseAction("SELL_HOUSE", tileIndex);
+    }
+
+    if (body.action === "SELL_HOTEL") {
+      const tileIndex = body.tileIndex;
+      if (typeof tileIndex !== "number") {
+        return NextResponse.json(
+          { error: "Missing property tile." },
+          { status: 400 },
+        );
+      }
+
+      return await handleHouseAction("SELL_HOTEL", tileIndex);
+    }
+
+    const loadOwnedOwnableTile = (tileIndex: number) => {
+      const boardPack = getBoardPackById(game.board_pack_id);
+      const tile = boardPack?.tiles?.find((entry) => entry.index === tileIndex);
+      if (!tile) {
+        return { error: "Property not found.", status: 404 };
+      }
+      if (!OWNABLE_TILE_TYPES.has(tile.type)) {
+        return { error: "Tile cannot be sold.", status: 409 };
+      }
+      return { tile };
+    };
+
+    if (body.action === "SELL_TO_MARKET") {
+      const tileIndex = body.tileIndex;
+      if (typeof tileIndex !== "number") {
+        return NextResponse.json(
+          { error: "Missing property tile." },
+          { status: 400 },
+        );
+      }
+
+      const pendingAction = gameState.pending_action as
+        | {
+            type?: unknown;
+            player_id?: unknown;
+          }
+        | null;
+      const shouldClearStalePendingPurchase =
+        pendingAction?.type === "BUY_PROPERTY" &&
+        typeof pendingAction.player_id === "string" &&
+        pendingAction.player_id !== currentPlayer.id;
+
+      const tileResult = loadOwnedOwnableTile(tileIndex);
+      if ("error" in tileResult) {
+        return NextResponse.json(
+          { error: tileResult.error },
+          { status: tileResult.status },
+        );
+      }
+
+      const ownershipByTile = await loadOwnershipByTile(gameId);
+      const ownership = ownershipByTile[tileIndex];
+      if (!ownership || ownership.owner_player_id !== currentPlayer.id) {
+        return NextResponse.json(
+          { error: "You do not own this property." },
+          { status: 409 },
+        );
+      }
+      const currentRound = gameState.rounds_elapsed ?? 0;
+      if (isPropertySaleLocked(ownership.acquired_round, currentRound)) {
+        return NextResponse.json(
+          {
+            errorCode: "PROPERTY_SALE_LOCKED",
+            error:
+              "This property cannot be sold yet. Hold it for 3 rounds after acquisition.",
+          },
+          { status: 409 },
+        );
+      }
+
+      const houses = ownership.houses ?? 0;
+      if (houses > 0) {
+        return NextResponse.json(
+          { error: "Sell all houses before selling this property." },
+          { status: 409 },
+        );
+      }
+      if (ownership.collateral_loan_id) {
+        return NextResponse.json(
+          { error: "Collateralized properties cannot be sold." },
+          { status: 409 },
+        );
+      }
+      if (ownership.purchase_mortgage_id) {
+        return NextResponse.json(
+          { error: "Mortgaged properties cannot be sold." },
+          { status: 409 },
+        );
+      }
+
+      const price = tileResult.tile.price ?? 0;
+      if (!price) {
+        return NextResponse.json(
+          { error: "Property price is unavailable." },
+          { status: 409 },
+        );
+      }
+
+      const marketPriceAtSale = getPropertyMarketValue({
+        basePrice: price,
+        acquiredRound: ownership.acquired_round,
+        currentRound,
+      }).marketPrice;
+      const payout = Math.round(marketPriceAtSale * 0.7);
+      const balances = gameState.balances ?? {};
+      const currentBalance =
+        balances[currentPlayer.id] ?? startingCash;
+      const updatedBalances = {
+        ...balances,
+        [currentPlayer.id]: currentBalance + payout,
+      };
+
+      const ownershipResponse = await fetchFromSupabaseWithService(
+        `property_ownership?game_id=eq.${gameId}&tile_index=eq.${tileIndex}&owner_player_id=eq.${currentPlayer.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            owner_player_id: null,
+            acquired_round: null,
+            collateral_loan_id: null,
+            purchase_mortgage_id: null,
+            houses: 0,
+          }),
+        },
+      );
+
+      if (!ownershipResponse) {
+        return NextResponse.json(
+          { error: "Unable to update ownership." },
+          { status: 500 },
+        );
+      }
+
+      const events: Array<{
+        event_type: string;
+        payload: Record<string, unknown>;
+      }> = [
+        {
+          event_type: "PROPERTY_SOLD_TO_MARKET",
+          payload: {
+            tile_index: tileIndex,
+            tile_id: tileResult.tile.tile_id,
+            player_id: currentPlayer.id,
+            price,
+            market_price_at_sale: marketPriceAtSale,
+            payout,
+          },
+        },
+        {
+          event_type: "CASH_CREDIT",
+          payload: {
+            player_id: currentPlayer.id,
+            amount: payout,
+            reason: "SELL_TO_MARKET",
+            tile_index: tileIndex,
+          },
+        },
+      ];
+
+      const finalVersion = currentVersion + events.length;
+      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            version: finalVersion,
+            balances: updatedBalances,
+            ...(shouldClearStalePendingPurchase
+              ? {
+                  pending_action: null,
+                  turn_phase: currentPlayer.is_in_jail
+                    ? "AWAITING_JAIL_DECISION"
+                    : "AWAITING_ROLL",
+                }
+              : {}),
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      )) ?? [];
+
+      if (!updatedState) {
+        return NextResponse.json(
+          { error: "Version mismatch." },
+          { status: 409 },
+        );
+      }
+
+      await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+
+      return NextResponse.json({ gameState: updatedState });
+    }
+
+    if (body.action === "DEFAULT_PROPERTY") {
+      const tileIndex = body.tileIndex;
+      if (typeof tileIndex !== "number") {
+        return NextResponse.json(
+          { error: "Missing property tile." },
+          { status: 400 },
+        );
+      }
+
+      const pendingAction = gameState.pending_action as
+        | {
+            type?: unknown;
+            player_id?: unknown;
+          }
+        | null;
+      const shouldClearStalePendingPurchase =
+        pendingAction?.type === "BUY_PROPERTY" &&
+        typeof pendingAction.player_id === "string" &&
+        pendingAction.player_id !== currentPlayer.id;
+
+      const tileResult = loadOwnedOwnableTile(tileIndex);
+      if ("error" in tileResult) {
+        return NextResponse.json(
+          { error: tileResult.error },
+          { status: tileResult.status },
+        );
+      }
+
+      const ownershipByTile = await loadOwnershipByTile(gameId);
+      const ownership = ownershipByTile[tileIndex];
+      if (!ownership || ownership.owner_player_id !== currentPlayer.id) {
+        return NextResponse.json(
+          { error: "You do not own this property." },
+          { status: 409 },
+        );
+      }
+
+      const houses = ownership.houses ?? 0;
+      if (houses > 0) {
+        return NextResponse.json(
+          { error: "Sell all houses before defaulting this property." },
+          { status: 409 },
+        );
+      }
+
+      if (!ownership.collateral_loan_id && !ownership.purchase_mortgage_id) {
+        return NextResponse.json(
+          { error: "Property is not collateralized or mortgaged." },
+          { status: 409 },
+        );
+      }
+
+      if (ownership.purchase_mortgage_id) {
+        const [mortgage] = (await fetchFromSupabaseWithService<
+          PurchaseMortgageRow[]
+        >(
+          `purchase_mortgages?select=id,status&game_id=eq.${gameId}&player_id=eq.${currentPlayer.id}&id=eq.${ownership.purchase_mortgage_id}&limit=1`,
+          { method: "GET" },
+        )) ?? [];
+        if (!mortgage) {
+          return NextResponse.json(
+            { error: "Mortgage not found." },
+            { status: 404 },
+          );
+        }
+        if (mortgage.status !== "active") {
+          return NextResponse.json(
+            { error: "Mortgage is not active." },
+            { status: 409 },
+          );
+        }
+        await fetchFromSupabaseWithService(
+          `purchase_mortgages?id=eq.${mortgage.id}`,
+          {
+            method: "PATCH",
+            body: JSON.stringify({
+              status: "defaulted",
+              updated_at: new Date().toISOString(),
+            }),
+          },
+        );
+      }
+
+      if (ownership.collateral_loan_id) {
+        const [loan] = (await fetchFromSupabaseWithService<PlayerLoanRow[]>(
+          `player_loans?select=id,status&game_id=eq.${gameId}&player_id=eq.${currentPlayer.id}&id=eq.${ownership.collateral_loan_id}&limit=1`,
+          { method: "GET" },
+        )) ?? [];
+        if (!loan) {
+          return NextResponse.json(
+            { error: "Collateral loan not found." },
+            { status: 404 },
+          );
+        }
+        if (loan.status !== "active") {
+          return NextResponse.json(
+            { error: "Collateral loan is not active." },
+            { status: 409 },
+          );
+        }
+        await fetchFromSupabaseWithService(`player_loans?id=eq.${loan.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            status: "defaulted",
+            updated_at: new Date().toISOString(),
+          }),
+        });
+      }
+
+      const ownershipResponse = await fetchFromSupabaseWithService(
+        `property_ownership?game_id=eq.${gameId}&tile_index=eq.${tileIndex}&owner_player_id=eq.${currentPlayer.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            owner_player_id: null,
+            acquired_round: null,
+            collateral_loan_id: null,
+            purchase_mortgage_id: null,
+            houses: 0,
+          }),
+        },
+      );
+
+      if (!ownershipResponse) {
+        return NextResponse.json(
+          { error: "Unable to update ownership." },
+          { status: 500 },
+        );
+      }
+
+      const events: Array<{
+        event_type: string;
+        payload: Record<string, unknown>;
+      }> = [
+        {
+          event_type: "PROPERTY_DEFAULTED",
+          payload: {
+            tile_index: tileIndex,
+            tile_id: tileResult.tile.tile_id,
+            player_id: currentPlayer.id,
+            collateral_loan_id: ownership.collateral_loan_id,
+            purchase_mortgage_id: ownership.purchase_mortgage_id,
+          },
+        },
+      ];
+
+      const finalVersion = currentVersion + events.length;
+      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            version: finalVersion,
+            ...(shouldClearStalePendingPurchase
+              ? {
+                  pending_action: null,
+                  turn_phase: currentPlayer.is_in_jail
+                    ? "AWAITING_JAIL_DECISION"
+                    : "AWAITING_ROLL",
+                }
+              : {}),
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      )) ?? [];
+
+      if (!updatedState) {
+        return NextResponse.json(
+          { error: "Version mismatch." },
+          { status: 409 },
+        );
+      }
+
+      await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+
+      return NextResponse.json({ gameState: updatedState });
+    }
+
+    if (body.action === "TAKE_COLLATERAL_LOAN") {
+      if (!rules.loanCollateralEnabled) {
+        return NextResponse.json(
+          { error: "Collateral loans are disabled." },
+          { status: 409 },
+        );
+      }
+      const activeMacroEffects = getActiveMacroEffectsV1ForRules(
+        gameState.active_macro_effects_v1,
+        rules.macroEnabled,
+      );
+      const blockingMacroEffect = getBlockingMacroLoanMortgageEffectV1(activeMacroEffects);
+      if (blockingMacroEffect) {
+        console.debug("Loan blocked by macro", {
+          effectId: blockingMacroEffect.id,
+          roundsRemaining: blockingMacroEffect.roundsRemaining,
+        });
+        return NextResponse.json(
+          { error: "New loans and mortgages are currently blocked." },
+          { status: 409 },
+        );
+      }
+
+      if (!Number.isInteger(body.tileIndex)) {
+        return NextResponse.json(
+          { error: "Missing collateral tile." },
+          { status: 400 },
+        );
+      }
+
+      const tileIndex = body.tileIndex;
+      const boardPack = getBoardPackById(game.board_pack_id);
+      const tile = boardPack?.tiles?.find((entry) => entry.index === tileIndex);
+
+      if (!tile) {
+        return NextResponse.json(
+          { error: "Collateral tile not found." },
+          { status: 404 },
+        );
+      }
+
+      if (!OWNABLE_TILE_TYPES.has(tile.type)) {
+        return NextResponse.json(
+          { error: "Tile cannot be collateralized." },
+          { status: 409 },
+        );
+      }
+
+      const ownershipByTile = await loadOwnershipByTile(gameId);
+      const ownership = ownershipByTile[tileIndex];
+
+      if (!ownership || ownership.owner_player_id !== currentPlayer.id) {
+        return NextResponse.json(
+          { error: "You do not own this property." },
+          { status: 409 },
+        );
+      }
+
+      if (ownership.collateral_loan_id) {
+        return NextResponse.json(
+          { error: "Property already collateralized." },
+          { status: 409 },
+        );
+      }
+
+      if (ownership.purchase_mortgage_id) {
+        return NextResponse.json(
+          { error: "Property has an active purchase mortgage." },
+          { status: 409 },
+        );
+      }
+
+      const marketPrice = getPropertyMarketValue({
+        basePrice: tile.price ?? 0,
+        acquiredRound: ownership.acquired_round,
+        currentRound: gameState.rounds_elapsed ?? 0,
+      }).marketPrice;
+      if (marketPrice <= 0) {
+        return NextResponse.json(
+          { error: "Collateral value unavailable for this tile." },
+          { status: 409 },
+        );
+      }
+
+      const collateralPrincipal = computeOwnedPropertyCollateralPrincipal({
+        tile,
+        ownership,
+        currentRound: gameState.rounds_elapsed ?? 0,
+        boardPackEconomy,
+      });
+      if (collateralPrincipal <= 0) {
+        return NextResponse.json(
+          { error: "Collateral value unavailable for this tile." },
+          { status: 409 },
+        );
+      }
+
+      const rpcResponse = await fetch(
+        `${supabaseUrl}/rest/v1/rpc/take_collateral_loan`,
+        {
+          method: "POST",
+          headers: bankHeaders,
+          body: JSON.stringify({
+            game_id: gameId,
+            player_id: currentPlayer.id,
+            tile_index: tileIndex,
+            expected_version: currentVersion,
+            tile_price: marketPrice,
+            tile_type: tile.type,
+            tile_id: tile.tile_id,
+            actor_user_id: user.id,
+            collateral_ltv_input: COLLATERAL_LOAN_LTV,
+            collateral_principal_input: collateralPrincipal,
+            rate_per_turn_input: rules.collateralRatePerTurn,
+            term_turns_input: rules.collateralTermTurns,
+          }),
+        },
+      );
+
+      if (!rpcResponse.ok) {
+        const errorText = await rpcResponse.text();
+        let errorMessage = errorText;
+        try {
+          const parsed = JSON.parse(errorText) as { message?: string };
+          if (parsed?.message) {
+            errorMessage = parsed.message;
+          }
+        } catch {
+          // noop
+        }
+
+        if (errorMessage === "VERSION_MISMATCH") {
+          return NextResponse.json(
+            { error: "Version mismatch." },
+            { status: 409 },
+          );
+        }
+        if (errorMessage === "ALREADY_COLLATERALIZED") {
+          return NextResponse.json(
+            { error: "Already collateralized." },
+            { status: 409 },
+          );
+        }
+        if (errorMessage === "NOT_OWNER") {
+          return NextResponse.json(
+            { error: "You do not own this property." },
+            { status: 409 },
+          );
+        }
+        if (errorMessage === "COLLATERAL_DISABLED") {
+          return NextResponse.json(
+            { error: "Collateral loans are disabled." },
+            { status: 409 },
+          );
+        }
+        if (errorMessage === "TILE_NOT_OWNABLE") {
+          return NextResponse.json(
+            { error: "Tile cannot be collateralized." },
+            { status: 409 },
+          );
+        }
+        if (errorMessage === "INVALID_PRICE") {
+          return NextResponse.json(
+            { error: "Collateral value unavailable for this tile." },
+            { status: 409 },
+          );
+        }
+        if (errorMessage === "PROPERTY_NOT_OWNED") {
+          return NextResponse.json(
+            { error: "You do not own this property." },
+            { status: 409 },
+          );
+        }
+
+        console.error("[Bank][CollateralLoan] RPC failed", {
+          status: rpcResponse.status,
+          error: errorText,
+        });
+        return NextResponse.json(
+          { error: "Unable to create collateral loan." },
+          { status: 500 },
+        );
+      }
+
+      const [rpcResult] = (await rpcResponse.json()) as Array<{
+        game_state: GameStateRow;
+        property_ownership: OwnershipRow;
+        player_loan: PlayerLoanRow;
+      }>;
+
+      if (!rpcResult?.game_state || !rpcResult?.property_ownership) {
+        return NextResponse.json(
+          { error: "Unable to create collateral loan." },
+          { status: 500 },
+        );
+      }
+
+      return NextResponse.json({
+        gameState: rpcResult.game_state,
+        ownership: rpcResult.property_ownership,
+        loan: rpcResult.player_loan ?? null,
+      });
+    }
+
+    if (body.action === "PAYOFF_COLLATERAL_LOAN") {
+      if (!body.loanId) {
+        return NextResponse.json(
+          { error: "Missing collateral loan." },
+          { status: 400 },
+        );
+      }
+
+      const rpcResponse = await fetch(
+        `${supabaseUrl}/rest/v1/rpc/payoff_collateral_loan`,
+        {
+          method: "POST",
+          headers: bankHeaders,
+          body: JSON.stringify({
+            game_id: gameId,
+            player_id: currentPlayer.id,
+            loan_id: body.loanId,
+            expected_version: currentVersion,
+            actor_user_id: user.id,
+          }),
+        },
+      );
+
+      if (!rpcResponse.ok) {
+        const errorText = await rpcResponse.text();
+        let errorMessage = errorText;
+        try {
+          const parsed = JSON.parse(errorText) as { message?: string };
+          if (parsed?.message) {
+            errorMessage = parsed.message;
+          }
+        } catch {
+          // noop
+        }
+
+        if (errorMessage === "VERSION_MISMATCH") {
+          return NextResponse.json(
+            { error: "Version mismatch." },
+            { status: 409 },
+          );
+        }
+        if (errorMessage === "LOAN_NOT_ACTIVE") {
+          return NextResponse.json(
+            { error: "Loan already paid." },
+            { status: 409 },
+          );
+        }
+        if (errorMessage === "INSUFFICIENT_FUNDS") {
+          return NextResponse.json(
+            { error: "Not enough cash to pay off loan." },
+            { status: 409 },
+          );
+        }
+        if (errorMessage === "COLLATERAL_NOT_LINKED") {
+          return NextResponse.json(
+            { error: "Collateral is not linked to this loan." },
+            { status: 409 },
+          );
+        }
+        if (errorMessage === "COLLATERAL_NOT_FOUND") {
+          return NextResponse.json(
+            { error: "Collateral tile not found." },
+            { status: 409 },
+          );
+        }
+        if (errorMessage === "LOAN_NOT_FOUND") {
+          return NextResponse.json(
+            { error: "Loan not found." },
+            { status: 404 },
+          );
+        }
+
+        console.error("[Bank][CollateralLoan] Payoff RPC failed", {
+          status: rpcResponse.status,
+          error: errorText,
+        });
+        return NextResponse.json(
+          { error: "Unable to pay off collateral loan." },
+          { status: 500 },
+        );
+      }
+
+      const [rpcResult] = (await rpcResponse.json()) as Array<{
+        game_state: GameStateRow;
+        property_ownership: OwnershipRow;
+        player_loan: PlayerLoanRow;
+      }>;
+
+      if (!rpcResult?.game_state || !rpcResult?.property_ownership) {
+        return NextResponse.json(
+          { error: "Unable to pay off collateral loan." },
+          { status: 500 },
+        );
+      }
+
+      return NextResponse.json({
+        gameState: rpcResult.game_state,
+        ownership: rpcResult.property_ownership,
+        loan: rpcResult.player_loan ?? null,
+      });
+    }
+
+    if (body.action === "PAYOFF_PURCHASE_MORTGAGE") {
+      if (!body.mortgageId) {
+        return NextResponse.json(
+          { error: "Missing purchase mortgage." },
+          { status: 400 },
+        );
+      }
+
+      const [mortgage] = (await fetchFromSupabaseWithService<
+        PurchaseMortgageRow[]
+      >(
+        `purchase_mortgages?select=id,tile_index,principal_original,principal_remaining,accrued_interest_unpaid,status&game_id=eq.${gameId}&player_id=eq.${currentPlayer.id}&id=eq.${body.mortgageId}&limit=1`,
+        { method: "GET" },
+      )) ?? [];
+
+      if (!mortgage) {
+        return NextResponse.json(
+          { error: "Mortgage not found." },
+          { status: 404 },
+        );
+      }
+
+      if (mortgage.status !== "active") {
+        return NextResponse.json(
+          { error: "Mortgage already paid." },
+          { status: 409 },
+        );
+      }
+
+      const payoffAmount =
+        (mortgage.principal_remaining ?? 0) +
+        (mortgage.accrued_interest_unpaid ?? 0);
+
+      if (payoffAmount <= 0) {
+        return NextResponse.json(
+          { error: "Mortgage balance already cleared." },
+          { status: 409 },
+        );
+      }
+
+      const balances = gameState.balances ?? {};
+      const currentBalance =
+        balances[currentPlayer.id] ?? startingCash;
+
+      if (currentBalance < payoffAmount) {
+        return NextResponse.json(
+          { error: "Not enough cash to pay off mortgage." },
+          { status: 409 },
+        );
+      }
+
+      await fetchFromSupabaseWithService(`purchase_mortgages?id=eq.${mortgage.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          principal_remaining: 0,
+          accrued_interest_unpaid: 0,
+          status: "paid",
+          updated_at: new Date().toISOString(),
+        }),
+      });
+
+      await fetchFromSupabaseWithService(
+        `property_ownership?game_id=eq.${gameId}&tile_index=eq.${mortgage.tile_index}&purchase_mortgage_id=eq.${mortgage.id}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            purchase_mortgage_id: null,
+          }),
+        },
+      );
+
+      const updatedBalances = {
+        ...balances,
+        [currentPlayer.id]: currentBalance - payoffAmount,
+      };
+
+      const events: Array<{
+        event_type: string;
+        payload: Record<string, unknown>;
+      }> = [
+        {
+          event_type: "CASH_DEBIT",
+          payload: {
+            player_id: currentPlayer.id,
+            amount: payoffAmount,
+            reason: "PURCHASE_MORTGAGE_PAYOFF",
+            tile_index: mortgage.tile_index,
+            mortgage_id: mortgage.id,
+          },
+        },
+        {
+          event_type: "PURCHASE_MORTGAGE_PAID",
+          payload: {
+            mortgage_id: mortgage.id,
+            player_id: currentPlayer.id,
+            tile_index: mortgage.tile_index,
+            principal_paid: mortgage.principal_remaining,
+            interest_paid: mortgage.accrued_interest_unpaid,
+            total_paid: payoffAmount,
+            completion_reason: "PAID_OFF",
+            principal_remaining_after: 0,
+            accrued_interest_unpaid_after: 0,
+            turns_remaining_after: 0,
+          },
+        },
+      ];
+
+      const finalVersion = currentVersion + events.length;
+
+      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            version: finalVersion,
+            balances: updatedBalances,
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      )) ?? [];
+
+      if (!updatedState) {
+        return NextResponse.json(
+          { error: "Version mismatch." },
+          { status: 409 },
+        );
+      }
+
+      await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+
+      return NextResponse.json({ gameState: updatedState });
+    }
+
+    if (body.action === "JAIL_ROLL_FOR_DOUBLES") {
+      if (gameState.turn_phase !== "AWAITING_JAIL_DECISION") {
+        return NextResponse.json(
+          { error: "No jail decision required right now." },
+          { status: 409 },
+        );
+      }
+
+      if (!currentPlayer.is_in_jail) {
+        return NextResponse.json(
+          { error: "You are not in jail." },
+          { status: 409 },
+        );
+      }
+
+      const skipNextRoll =
+        gameState.skip_next_roll_by_player?.[currentPlayer.id] === true;
+      if (skipNextRoll) {
+        const nextSkipNextRollByPlayer = {
+          ...(gameState.skip_next_roll_by_player ?? {}),
+          [currentPlayer.id]: false,
+        };
+        return await advanceTurn({
+          gameId,
+          game,
+          gameState,
+          players,
+          currentPlayer,
+          currentVersion,
+          userId: user.id,
+          rules,
+          startingCash: startingCash,
+          boardPack,
+          extraEvents: [
+            {
+              event_type: "TURN_SKIPPED_PANDEMIC",
+              payload: {
+                player_id: currentPlayer.id,
+                player_name: currentPlayer.display_name,
+              },
+            },
+          ],
+          extraGameStatePatch: {
+            skip_next_roll_by_player: nextSkipNextRollByPlayer,
+          },
+        });
+      }
+
+      const { dice, total: rollTotal } = rollDice();
+      const [dieOne, dieTwo] = dice;
+      const isDouble = dieOne === dieTwo;
+      const doublesCount = gameState?.doubles_count ?? 0;
+      const allowDoublesBonus = false;
+      const nextDoublesCount =
+        isDouble && allowDoublesBonus ? doublesCount + 1 : 0;
+      const turnsRemaining = Math.max(
+        0,
+        currentPlayer.jail_turns_remaining - 1,
+      );
+      const shouldReleaseFromJail = isDouble || turnsRemaining === 0;
+      const playersById = players.reduce<Record<string, { display_name: string | null }>>(
+        (acc, player) => {
+          acc[player.id] = { display_name: player.display_name };
+          return acc;
+        },
+        {},
+      );
+      const bettingSettlement = settleBettingMarketForRoll({
+        bettingMarketState: gameState.betting_market_state,
+        balances: gameState?.balances ?? {},
+        playersById,
+        dice: [dieOne, dieTwo],
+      });
+
+      if (!shouldReleaseFromJail) {
+        const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
+          `players?id=eq.${currentPlayer.id}`,
+          {
+            method: "PATCH",
+            headers: {
+              Prefer: "return=representation",
+            },
+            body: JSON.stringify({
+              jail_turns_remaining: turnsRemaining,
+            }),
+          },
+        )) ?? [];
+
+        if (!updatedPlayer) {
+          return NextResponse.json(
+            { error: "Unable to update jail turns." },
+            { status: 500 },
+          );
+        }
+
+        return await advanceTurn({
+          gameId,
+          game,
+          gameState,
+          players,
+          currentPlayer,
+          currentVersion,
+          userId: user.id,
+          rules,
+          startingCash: startingCash,
+          boardPack,
+          extraEvents: [
+            {
+              event_type: "ROLL_DICE",
+              payload: {
+                player_id: currentPlayer.id,
+                player_name: currentPlayer.display_name,
+                roll: rollTotal,
+                dice,
+              } satisfies DiceEventPayload,
+            },
+            ...bettingSettlement.events,
+            {
+              event_type: "JAIL_DOUBLES_FAIL",
+              payload: {
+                player_id: currentPlayer.id,
+                player_name: currentPlayer.display_name,
+                dice,
+                turns_remaining: turnsRemaining,
+              },
+            },
+          ],
+          extraGameStatePatch: {
+            ...(bettingSettlement.balancesChanged
+              ? { balances: bettingSettlement.balances }
+              : {}),
+            betting_market_state: bettingSettlement.bettingMarketState,
+          },
+        });
+      }
+
+      const boardTiles = resolveBoardTilesForRules({ boardPack, rules: gameState.rules });
+      const boardSize = boardTiles.length > 0 ? boardTiles.length : 40;
+      const currentPosition = Number.isFinite(currentPlayer.position)
+        ? currentPlayer.position
+        : 0;
+      const newPosition = (currentPosition + rollTotal) % boardSize;
+      const passedStart = currentPosition + rollTotal >= boardSize;
+      const landingTile = boardTiles[newPosition] ?? {
+        index: newPosition,
+        tile_id: `tile-${newPosition}`,
+        type: "PROPERTY",
+        name: `Tile ${newPosition}`,
+      };
+      const ownershipByTile = await loadOwnershipByTile(gameId);
+      const jailTile =
+        landingTile.type === "GO_TO_JAIL"
+          ? boardTiles.find((tile) => tile.type === "JAIL") ?? {
+              index: 10,
+              tile_id: "jail",
+              type: "JAIL",
+              name: "Jail",
+            }
+          : null;
+      const resolvedTile = landingTile;
+      const finalPosition = resolvedTile.index;
+      const shouldSendToJail = landingTile.type === "GO_TO_JAIL" && Boolean(jailTile);
+      const activeLandingTile = landingTile;
+      const activeResolvedTile = resolvedTile;
+      const forcedFine = !isDouble;
+      const balances = bettingSettlement.balances;
+      let updatedBalances = balances;
+      let balancesChanged = bettingSettlement.balancesChanged;
+      let bankruptcyCandidate: BankruptcyCandidate | null = null;
+      if (forcedFine) {
+        const currentBalance =
+          updatedBalances[currentPlayer.id] ?? startingCash;
+        const nextBalance = currentBalance - jailFineAmount;
+        if (nextBalance < 0) {
+          bankruptcyCandidate = {
+            reason: "JAIL_PAY_FINE",
+            cashBefore: currentBalance,
+            cashAfter: nextBalance,
+            amountDue: jailFineAmount,
+            label: "Jail fine",
+          };
+        } else {
+          updatedBalances = {
+            ...updatedBalances,
+            [currentPlayer.id]: nextBalance,
+          };
+          balancesChanged = true;
+        }
+      }
+      let nextChanceIndex = gameState?.chance_index ?? 0;
+      let nextCommunityIndex = gameState?.community_index ?? 0;
+      let nextChanceOrder = gameState?.chance_order ?? null;
+      let nextCommunityOrder = gameState?.community_order ?? null;
+      let nextChanceDrawPtr = gameState?.chance_draw_ptr ?? 0;
+      let nextCommunityDrawPtr = gameState?.community_draw_ptr ?? 0;
+      let nextChanceSeed = gameState?.chance_seed ?? null;
+      let nextCommunitySeed = gameState?.community_seed ?? null;
+      let nextChanceReshuffleCount = gameState?.chance_reshuffle_count ?? 0;
+      let nextCommunityReshuffleCount = gameState?.community_reshuffle_count ?? 0;
+      let chanceStateChanged = false;
+      let communityStateChanged = false;
+      const nextGetOutOfJailFreeCount =
+        currentPlayer.get_out_of_jail_free_count ?? 0;
+      const getOutOfJailFreeCountChanged = false;
+      const nextTaxExemptionPassCount =
+        currentPlayer.tax_exemption_pass_count ?? 0;
+      const taxExemptionPassCountChanged = false;
+
+      const events: Array<{
+        event_type: string;
+        payload: Record<string, unknown>;
+      }> = [
+        {
+          event_type: "ROLL_DICE",
+          payload: {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.display_name,
+            roll: rollTotal,
+            dice,
+          } satisfies DiceEventPayload,
+        },
+        ...bettingSettlement.events,
+      ];
+
+      if (isDouble) {
+        events.push(
+          {
+            event_type: "ROLLED_DOUBLE",
+            payload: {
+              player_id: currentPlayer.id,
+              player_name: currentPlayer.display_name,
+              roll: rollTotal,
+              dice,
+              doubles_count: nextDoublesCount,
+            } satisfies DiceEventPayload,
+          },
+          {
+            event_type: "JAIL_DOUBLES_SUCCESS",
+            payload: {
+              player_id: currentPlayer.id,
+              player_name: currentPlayer.display_name,
+              dice,
+            },
+          },
+        );
+      } else {
+        events.push({
+          event_type: "JAIL_DOUBLES_FAIL",
+          payload: {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.display_name,
+            dice,
+            turns_remaining: turnsRemaining,
+          },
+        });
+      }
+
+      if (forcedFine) {
+        events.push(
+          {
+            event_type: "JAIL_PAY_FINE",
+            payload: {
+              player_id: currentPlayer.id,
+              player_name: currentPlayer.display_name,
+              amount: jailFineAmount,
+              forced: true,
+            },
+          },
+          {
+            event_type: "CASH_DEBIT",
+            payload: {
+              player_id: currentPlayer.id,
+              amount: jailFineAmount,
+              reason: "JAIL_PAY_FINE",
+            },
+          },
+        );
+      }
+
+      events.push({
+        event_type: "MOVE_PLAYER",
+        payload: {
+          player_id: currentPlayer.id,
+          from: currentPosition,
+          to: newPosition,
+          roll_total: rollTotal,
+          dice,
+          passedStart,
+          tile_id: landingTile.tile_id,
+          tile_name: landingTile.name,
+        },
+      });
+
+      if (passedStart || landingTile.type === "START") {
+        const reason = passedStart ? "PASS_START" : "LAND_GO";
+        const goResult = applyGoSalary({
+          player: currentPlayer,
+          balances: updatedBalances,
+          startingCash: startingCash,
+          events,
+          reason,
+          packEconomy: boardPackEconomy,
+          boardTiles,
+          ownershipByTile,
+        });
+        updatedBalances = goResult.balances;
+        balancesChanged = balancesChanged || goResult.balancesChanged;
+      }
+
+      events.push({
+        event_type: "LAND_ON_TILE",
+        payload: {
+          player_id: currentPlayer.id,
+          tile_id: landingTile.tile_id,
+          tile_type: landingTile.type,
+          tile_index: landingTile.index,
+        },
+      });
+
+      const resolutionEvent = resolveTile(landingTile, currentPlayer);
+      if (resolutionEvent) {
+        events.push({
+          event_type: resolutionEvent.event_type,
+          payload: resolutionEvent.payload,
+        });
+      }
+      const cardTriggeredGoToJail = false;
+      const cardUtilityRollOverride:
+        | { total: number; dice: [number, number] }
+        | null = null;
+      const eventDeckState: EventDeckState = {
+        nextChanceIndex,
+        nextCommunityIndex,
+        nextChanceOrder,
+        nextCommunityOrder,
+        nextChanceDrawPtr,
+        nextCommunityDrawPtr,
+        nextChanceSeed,
+        nextCommunitySeed,
+        nextChanceReshuffleCount,
+        nextCommunityReshuffleCount,
+        chanceStateChanged,
+        communityStateChanged,
+      };
+      const drawOutcome = drawEventCardForLanding({
+        landingTile,
+        boardPack,
+        gameId,
+        state: eventDeckState,
+      });
+      if (drawOutcome) {
+        const { eventDeck, drawResult, card } = drawOutcome;
+        nextChanceIndex = eventDeckState.nextChanceIndex;
+        nextCommunityIndex = eventDeckState.nextCommunityIndex;
+        nextChanceOrder = eventDeckState.nextChanceOrder;
+        nextCommunityOrder = eventDeckState.nextCommunityOrder;
+        nextChanceDrawPtr = eventDeckState.nextChanceDrawPtr;
+        nextCommunityDrawPtr = eventDeckState.nextCommunityDrawPtr;
+        nextChanceSeed = eventDeckState.nextChanceSeed;
+        nextCommunitySeed = eventDeckState.nextCommunitySeed;
+        nextChanceReshuffleCount = eventDeckState.nextChanceReshuffleCount;
+        nextCommunityReshuffleCount = eventDeckState.nextCommunityReshuffleCount;
+        chanceStateChanged = eventDeckState.chanceStateChanged;
+        communityStateChanged = eventDeckState.communityStateChanged;
+
+        events.push({
+          event_type: "DRAW_CARD",
+          payload: {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.display_name,
+            deck: eventDeck.deck,
+            card_id: card.id,
+            card_title: card.title,
+            card_kind: card.kind,
+            draw_index: drawResult.drawIndex,
+          },
+        });
+        events.push({
+          event_type: "CARD_REVEALED",
+          payload: {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.display_name,
+            deck: eventDeck.deck,
+            card_id: card.id,
+            card_title: card.title,
+            card_kind: card.kind,
+          },
+        });
+
+        const finalVersion = currentVersion + events.length;
+        const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+          `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+          {
+            method: "PATCH",
+            headers: {
+              Prefer: "return=representation",
+            },
+            body: JSON.stringify({
+              version: finalVersion,
+              last_roll: rollTotal,
+              doubles_count: nextDoublesCount,
+              ...(balancesChanged ? { balances: updatedBalances } : {}),
+              betting_market_state: bettingSettlement.bettingMarketState,
+              ...(nextChanceIndex !== (gameState?.chance_index ?? 0)
+                ? { chance_index: nextChanceIndex }
+                : {}),
+              ...(nextCommunityIndex !== (gameState?.community_index ?? 0)
+                ? { community_index: nextCommunityIndex }
+                : {}),
+              ...(chanceStateChanged
+                ? {
+                    chance_order: nextChanceOrder,
+                    chance_draw_ptr: nextChanceDrawPtr,
+                    chance_seed: nextChanceSeed,
+                    chance_reshuffle_count: nextChanceReshuffleCount,
+                  }
+                : {}),
+              ...(communityStateChanged
+                ? {
+                    community_order: nextCommunityOrder,
+                    community_draw_ptr: nextCommunityDrawPtr,
+                    community_seed: nextCommunitySeed,
+                    community_reshuffle_count: nextCommunityReshuffleCount,
+                  }
+                : {}),
+              pending_card_active: true,
+              pending_card_deck: eventDeck.deck,
+              pending_card_id: card.id,
+              pending_card_title: card.title,
+              pending_card_kind: card.kind,
+              pending_card_payload:
+                typeof card.payload === "object" && card.payload
+                  ? card.payload
+                  : null,
+              pending_card_drawn_by_player_id: currentPlayer.id,
+              pending_card_drawn_at: new Date().toISOString(),
+              pending_card_source_tile_index: activeResolvedTile.index,
+              turn_phase: "AWAITING_CARD_CONFIRM",
+              pending_action: null,
+              updated_at: new Date().toISOString(),
+            }),
+          },
+        )) ?? [];
+
+        if (!updatedState) {
+          return NextResponse.json(
+            { error: "Version mismatch." },
+            { status: 409 },
+          );
+        }
+
+        const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
+          `players?id=eq.${currentPlayer.id}`,
+          {
+            method: "PATCH",
+            headers: {
+              Prefer: "return=representation",
+            },
+            body: JSON.stringify({
+              position: finalPosition,
+              is_in_jail: Boolean(shouldSendToJail && jailTile),
+              jail_turns_remaining: shouldSendToJail && jailTile ? 3 : 0,
+              ...(getOutOfJailFreeCountChanged
+                ? { get_out_of_jail_free_count: nextGetOutOfJailFreeCount }
+                : {}),
+              ...(taxExemptionPassCountChanged
+                ? { tax_exemption_pass_count: nextTaxExemptionPassCount }
+                : {}),
+            }),
+          },
+        )) ?? [];
+
+        if (!updatedPlayer) {
+          return NextResponse.json(
+            { error: "Unable to update player position." },
+            { status: 500 },
+          );
+        }
+
+        await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+
+        return NextResponse.json({ gameState: updatedState });
+      }
+
+      return await finalizeMoveResolution({
+        gameId,
+        game,
+        gameState,
+        players,
+        currentPlayer,
+        updatedBalances,
+        balancesChanged,
+        bankruptcyCandidate,
+        activeLandingTile,
+        activeResolvedTile,
+        finalPosition,
+        shouldSendToJail,
+        jailTile,
+        cardTriggeredGoToJail,
+        cardUtilityRollOverride,
+        rollTotal,
+        isDouble,
+        allowExtraRoll: false,
+        nextDoublesCount,
+        events,
+        currentVersion,
+        userId: user.id,
+        ownershipByTile,
+        boardTiles,
+        boardPack,
+        boardPackEconomy,
+        rules,
+        startingCash: startingCash,
+        activeMacroEffects: getActiveMacroEffectsV1ForRules(
+          gameState?.active_macro_effects_v1,
+          rules.macroEnabled,
+        ),
+        nextChanceIndex,
+        nextCommunityIndex,
+        nextChanceOrder,
+        nextCommunityOrder,
+        nextChanceDrawPtr,
+        nextCommunityDrawPtr,
+        nextChanceSeed,
+        nextCommunitySeed,
+        nextChanceReshuffleCount,
+        nextCommunityReshuffleCount,
+        chanceStateChanged,
+        communityStateChanged,
+        nextGetOutOfJailFreeCount,
+        getOutOfJailFreeCountChanged,
+        nextTaxExemptionPassCount,
+        taxExemptionPassCountChanged,
+        extraGameStatePatch: {
+          betting_market_state: bettingSettlement.bettingMarketState,
+        },
+      });
+    }
+
+    if (body.action === "JAIL_PAY_FINE") {
+      if (gameState.turn_phase !== "AWAITING_JAIL_DECISION") {
+        return NextResponse.json(
+          { error: "No jail decision required right now." },
+          { status: 409 },
+        );
+      }
+
+      if (!currentPlayer.is_in_jail) {
+        return NextResponse.json(
+          { error: "You are not in jail." },
+          { status: 409 },
+        );
+      }
+
+      const balances = gameState.balances ?? {};
+      const currentBalance =
+        balances[currentPlayer.id] ?? startingCash;
+      const nextBalance = currentBalance - jailFineAmount;
+      const updatedBalances = {
+        ...balances,
+        [currentPlayer.id]: nextBalance,
+      };
+      const events: Array<{
+        event_type: string;
+        payload: Record<string, unknown>;
+      }> = [
+        {
+          event_type: "JAIL_PAY_FINE",
+          payload: {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.display_name,
+            amount: jailFineAmount,
+          },
+        },
+        {
+          event_type: "CASH_DEBIT",
+          payload: {
+            player_id: currentPlayer.id,
+            amount: jailFineAmount,
+            reason: "JAIL_PAY_FINE",
+          },
+        },
+      ];
+      if (nextBalance < 0) {
+        const insolvencyResult = await enterInsolvencyRecovery({
+          gameId,
+          gameState,
+          player: currentPlayer,
+          candidate: {
+            reason: "JAIL_PAY_FINE",
+            cashBefore: currentBalance,
+            cashAfter: nextBalance,
+            amountDue: jailFineAmount,
+            label: "Jail fine",
+          },
+          events: [],
+          currentVersion,
+          userId: user.id,
+        });
+
+        if (insolvencyResult.handled) {
+          if (insolvencyResult.error) {
+            return NextResponse.json(
+              { error: insolvencyResult.error },
+              { status: 409 },
+            );
+          }
+          return NextResponse.json({ gameState: insolvencyResult.updatedState });
+        }
+      }
+      const finalVersion = currentVersion + events.length;
+
+      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            version: finalVersion,
+            balances: updatedBalances,
+            turn_phase: "AWAITING_ROLL",
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      )) ?? [];
+
+      if (!updatedState) {
+        return NextResponse.json(
+          { error: "Version mismatch." },
+          { status: 409 },
+        );
+      }
+
+      const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
+        `players?id=eq.${currentPlayer.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            is_in_jail: false,
+            jail_turns_remaining: 0,
+          }),
+        },
+      )) ?? [];
+
+      if (!updatedPlayer) {
+        return NextResponse.json(
+          { error: "Unable to release player from jail." },
+          { status: 500 },
+        );
+      }
+
+      await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+
+      return NextResponse.json({ gameState: updatedState });
+    }
+
+    if (body.action === "USE_GET_OUT_OF_JAIL_FREE") {
+      if (gameState.turn_phase !== "AWAITING_JAIL_DECISION") {
+        return NextResponse.json(
+          { error: "No jail decision required right now." },
+          { status: 409 },
+        );
+      }
+
+      if (!currentPlayer.is_in_jail) {
+        return NextResponse.json(
+          { error: "You are not in jail." },
+          { status: 409 },
+        );
+      }
+
+      const currentCount = currentPlayer.get_out_of_jail_free_count ?? 0;
+      if (currentCount <= 0) {
+        return NextResponse.json(
+          { error: "No Get Out of Jail Free cards available." },
+          { status: 409 },
+        );
+      }
+
+      const nextCount = Math.max(0, currentCount - 1);
+      const events: Array<{
+        event_type: string;
+        payload: Record<string, unknown>;
+      }> = [
+        {
+          event_type: "CARD_GET_OUT_OF_JAIL_FREE_USED",
+          payload: {
+            player_id: currentPlayer.id,
+            player_name: currentPlayer.display_name,
+            remaining_cards: nextCount,
+          },
+        },
+      ];
+
+      const finalVersion = currentVersion + events.length;
+
+      const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
+        `game_state?game_id=eq.${gameId}&version=eq.${currentVersion}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            version: finalVersion,
+            turn_phase: "AWAITING_ROLL",
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      )) ?? [];
+
+      if (!updatedState) {
+        return NextResponse.json(
+          { error: "Version mismatch." },
+          { status: 409 },
+        );
+      }
+
+      const [updatedPlayer] = (await fetchFromSupabaseWithService<PlayerRow[]>(
+        `players?id=eq.${currentPlayer.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            Prefer: "return=representation",
+          },
+          body: JSON.stringify({
+            is_in_jail: false,
+            jail_turns_remaining: 0,
+            get_out_of_jail_free_count: nextCount,
+          }),
+        },
+      )) ?? [];
+
+      if (!updatedPlayer) {
+        return NextResponse.json(
+          { error: "Unable to release player from jail." },
+          { status: 500 },
+        );
+      }
+
+      await emitGameEvents(gameId, currentVersion + 1, events, user.id);
+
+      return NextResponse.json({ gameState: updatedState });
+    }
+
+    if (body.action === "END_TURN") {
+      if (gameState.pending_action) {
+        return NextResponse.json(
+          { error: "Pending decision must be resolved." },
+          { status: 409 },
+        );
+      }
+      return await advanceTurn({
+        gameId,
+        game,
+        gameState,
+        players,
+        currentPlayer,
+        currentVersion,
+        userId: user.id,
+        rules,
+        startingCash: startingCash,
+        boardPack,
+      });
+    }
+
+    return NextResponse.json(
+      { error: "Unsupported action." },
+      { status: 400 },
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error.";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+};
