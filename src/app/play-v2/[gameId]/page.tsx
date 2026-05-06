@@ -546,6 +546,9 @@ export default function PlayV2Page() {
   const latestCurrentUserPlayerIdRef = useRef<string | null>(null);
   const aiNudgeInFlightRef = useRef(false);
   const lastAiNudgeKeyRef = useRef<string | null>(null);
+  const pendingAiNudgeKeyRef = useRef<string | null>(null);
+  const latestAiNudgeKeyRef = useRef<string | null>(null);
+  const [aiNudgeRetryNonce, setAiNudgeRetryNonce] = useState(0);
   const sliceRequestEpochsRef = useRef<SliceRequestEpochs>({
     gameMeta: 0,
     players: 0,
@@ -1716,23 +1719,52 @@ export default function PlayV2Page() {
   const isAiTurn = Boolean(
     isInProgress && actionableAiPlayer?.is_ai && !actionableAiPlayer.is_eliminated,
   );
-
-  useEffect(() => {
+  const currentAiNudgeKey = useMemo(() => {
     if (!routeGameId || !isAiTurn || !gameState?.version || !session?.access_token) {
-      return;
+      return null;
     }
 
     const aiActionablePlayerId = auctionActive
       ? (gameState.auction_turn_player_id ?? "none")
       : (gameState.current_player_id ?? "none");
-    const nudgeKey = `${routeGameId}:${gameState.version}:${auctionActive ? "auction" : "normal"}:${aiActionablePlayerId}`;
-    if (lastAiNudgeKeyRef.current === nudgeKey || aiNudgeInFlightRef.current) {
+    return `${routeGameId}:${gameState.version}:${auctionActive ? "auction" : "normal"}:${aiActionablePlayerId}`;
+  }, [
+    auctionActive,
+    gameState?.auction_turn_player_id,
+    gameState?.current_player_id,
+    gameState?.version,
+    isAiTurn,
+    routeGameId,
+    session?.access_token,
+  ]);
+
+  useEffect(() => {
+    latestAiNudgeKeyRef.current = currentAiNudgeKey;
+    if (pendingAiNudgeKeyRef.current && pendingAiNudgeKeyRef.current !== currentAiNudgeKey) {
+      pendingAiNudgeKeyRef.current = null;
+    }
+  }, [currentAiNudgeKey]);
+
+  useEffect(() => {
+    if (!routeGameId || !session?.access_token || !currentAiNudgeKey) {
       return;
     }
 
-    lastAiNudgeKeyRef.current = nudgeKey;
+    if (lastAiNudgeKeyRef.current === currentAiNudgeKey) {
+      return;
+    }
+
+    if (aiNudgeInFlightRef.current) {
+      pendingAiNudgeKeyRef.current = currentAiNudgeKey;
+      return;
+    }
+
+    pendingAiNudgeKeyRef.current = null;
+    lastAiNudgeKeyRef.current = currentAiNudgeKey;
     aiNudgeInFlightRef.current = true;
+    let didStartAiNudge = false;
     const timeout = window.setTimeout(() => {
+      didStartAiNudge = true;
       const postAiNudge = (accessToken: string) =>
         fetch("/api/bank/ai/turn", {
           method: "POST",
@@ -1745,35 +1777,53 @@ export default function PlayV2Page() {
 
       postAiNudge(session.access_token)
         .then(async (response) => {
+          let finalResponse = response;
           if (response.status === 401) {
             const refreshedSession = await supabaseClient.refreshSession();
             setSession(refreshedSession);
             if (refreshedSession?.access_token) {
-              return postAiNudge(refreshedSession.access_token);
+              finalResponse = await postAiNudge(refreshedSession.access_token);
             }
           }
 
-          if (!response.ok && response.status !== 401 && response.status !== 403) {
-            console.warn("AI turn nudge failed", response.status);
+          if (!finalResponse.ok && finalResponse.status !== 401 && finalResponse.status !== 403) {
+            console.warn("AI turn nudge failed", finalResponse.status);
+          } else if (process.env.NODE_ENV === "development" && finalResponse.ok) {
+            const payload = (await finalResponse.clone().json().catch(() => null)) as
+              | { stopped?: unknown; actions?: unknown; actionContext?: unknown; status?: unknown; error?: unknown }
+              | null;
+            if (payload?.stopped) {
+              console.debug("AI turn nudge stopped", {
+                stopped: payload.stopped,
+                actions: payload.actions,
+                actionContext: payload.actionContext,
+                status: payload.status,
+                error: payload.error,
+              });
+            }
           }
-          return response;
+          return finalResponse;
         })
         .catch(() => undefined)
         .finally(() => {
           aiNudgeInFlightRef.current = false;
+          const pendingKey = pendingAiNudgeKeyRef.current;
+          if (pendingKey && latestAiNudgeKeyRef.current === pendingKey && lastAiNudgeKeyRef.current !== pendingKey) {
+            setAiNudgeRetryNonce((nonce) => nonce + 1);
+          } else if (pendingKey && latestAiNudgeKeyRef.current !== pendingKey) {
+            pendingAiNudgeKeyRef.current = null;
+          }
         });
     }, 350);
 
-    return () => window.clearTimeout(timeout);
-  }, [
-    auctionActive,
-    gameState?.auction_turn_player_id,
-    gameState?.current_player_id,
-    gameState?.version,
-    isAiTurn,
-    routeGameId,
-    session?.access_token,
-  ]);
+    return () => {
+      window.clearTimeout(timeout);
+      if (!didStartAiNudge && lastAiNudgeKeyRef.current === currentAiNudgeKey) {
+        lastAiNudgeKeyRef.current = null;
+        aiNudgeInFlightRef.current = false;
+      }
+    };
+  }, [aiNudgeRetryNonce, currentAiNudgeKey, routeGameId, session?.access_token]);
 
   const pendingPurchase = useMemo<PendingPurchaseAction | null>(() => {
     const pendingAction = gameState?.pending_action;

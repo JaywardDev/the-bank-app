@@ -358,6 +358,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, stopped: "already_running" });
   }
 
+  let lockedPlayerId = initialActionable.player.id;
   const actions: string[] = [];
   const seenStates = new Set<string>();
   try {
@@ -378,7 +379,28 @@ export async function POST(request: Request) {
       }
       if (player.ai_difficulty && player.ai_difficulty !== "easy") return NextResponse.json({ ok: true, actions, stopped: "difficulty_unavailable", actionContext });
 
-      if (actionContext === "normal_turn") {
+      if (player.id !== lockedPlayerId) {
+        if (actions.length === 0) {
+          return NextResponse.json({ ok: true, actions, stopped: "lock_lost", actionContext });
+        }
+
+        try {
+          await releaseLock(gameId, lockToken);
+        } catch {
+          return NextResponse.json({ ok: true, actions, stopped: "lock_lost", actionContext });
+        }
+
+        const handoffLocked = await acquireLock({
+          gameId,
+          playerId: player.id,
+          stateVersion: gameState.version,
+          lockToken,
+        });
+        if (!handoffLocked) {
+          return NextResponse.json({ ok: true, actions, stopped: "already_running", actionContext });
+        }
+        lockedPlayerId = player.id;
+      } else if (actionContext === "normal_turn") {
         const lockStillOwned = await validateAndRenewLock({
           gameId,
           playerId: player.id,
