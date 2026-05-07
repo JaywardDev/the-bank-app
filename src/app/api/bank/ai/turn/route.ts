@@ -1,4 +1,8 @@
 import { NextResponse } from "next/server";
+import { DEFAULT_BOARD_PACK_ECONOMY, getBoardPackById } from "@/lib/boardPacks";
+import type { BoardTile } from "@/lib/boardPacks";
+import { isPropertySaleLocked } from "@/lib/propertySaleLock";
+import { resolveBoardTilesForRules } from "@/lib/resolvedBoardTiles";
 import { SUPABASE_URL } from "@/lib/env";
 import {
   executeBankActionRequest,
@@ -40,6 +44,7 @@ type PlayerRow = {
 type GameRow = {
   id: string;
   status: string | null;
+  board_pack_id: string | null;
 };
 
 type GameStateRow = {
@@ -50,12 +55,38 @@ type GameStateRow = {
   last_roll: number | null;
   doubles_count: number | null;
   turn_phase: string | null;
+  rounds_elapsed: number | null;
+  rules: Record<string, unknown> | null;
+  active_macro_effects_v1: unknown[] | null;
   pending_action: Record<string, unknown> | null;
   pending_card_active: boolean | null;
   pending_card_drawn_by_player_id: string | null;
   auction_active: boolean | null;
+  auction_tile_index: number | null;
+  auction_initiator_player_id: string | null;
+  auction_current_bid: number | null;
+  auction_current_winner_player_id: string | null;
   auction_turn_player_id: string | null;
   auction_turn_ends_at: string | null;
+  auction_eligible_player_ids: string[] | null;
+  auction_passed_player_ids: string[] | null;
+  auction_min_increment: number | null;
+};
+
+type OwnershipRow = {
+  tile_index: number;
+  owner_player_id: string | null;
+  acquired_round: number | null;
+  collateral_loan_id: string | null;
+  purchase_mortgage_id: string | null;
+  houses: number | null;
+};
+
+type LoanRow = {
+  id: string;
+  player_id: string;
+  collateral_tile_index: number | null;
+  status: string;
 };
 
 type AiAction =
@@ -70,9 +101,12 @@ type AiAction =
   | { action: "JAIL_PAY_FINE" }
   | { action: "JAIL_ROLL_FOR_DOUBLES" }
   | { action: "USE_GET_OUT_OF_JAIL_FREE" }
-  | { action: "BUY_PROPERTY"; tileIndex: number }
+  | { action: "BUY_PROPERTY"; tileIndex: number; financing?: "MORTGAGE"; downPaymentPercent?: 50 }
   | { action: "DECLINE_PROPERTY"; tileIndex: number }
+  | { action: "AUCTION_BID"; amount: number }
   | { action: "AUCTION_PASS" }
+  | { action: "SELL_TO_MARKET"; tileIndex: number }
+  | { action: "TAKE_COLLATERAL_LOAN"; tileIndex: number }
   | { action: "CONFIRM_INSOLVENCY_PAYMENT" }
   | { action: "DECLARE_BANKRUPTCY" };
 
@@ -98,7 +132,7 @@ const fetchFromSupabaseWithService = async <T>(path: string, options: RequestIni
 
 const loadSnapshot = async (gameId: string) => {
   const [game] = (await fetchFromSupabaseWithService<GameRow[]>(
-    `games?select=id,status&id=eq.${gameId}&limit=1`,
+    `games?select=id,status,board_pack_id&id=eq.${gameId}&limit=1`,
     { method: "GET" },
   )) ?? [];
   const players = (await fetchFromSupabaseWithService<PlayerRow[]>(
@@ -106,10 +140,18 @@ const loadSnapshot = async (gameId: string) => {
     { method: "GET" },
   )) ?? [];
   const [gameState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
-    `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,turn_phase,pending_action,pending_card_active,pending_card_drawn_by_player_id,auction_active,auction_turn_player_id,auction_turn_ends_at&game_id=eq.${gameId}&limit=1`,
+    `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,rules,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_drawn_by_player_id,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
     { method: "GET" },
   )) ?? [];
-  return { game: game ?? null, players, gameState: gameState ?? null };
+  const ownershipRows = (await fetchFromSupabaseWithService<OwnershipRow[]>(
+    `property_ownership?select=tile_index,owner_player_id,acquired_round,collateral_loan_id,purchase_mortgage_id,houses&game_id=eq.${gameId}`,
+    { method: "GET" },
+  )) ?? [];
+  const loanRows = (await fetchFromSupabaseWithService<LoanRow[]>(
+    `player_loans?select=id,player_id,collateral_tile_index,status&game_id=eq.${gameId}&status=eq.active`,
+    { method: "GET" },
+  )) ?? [];
+  return { game: game ?? null, players, gameState: gameState ?? null, ownershipRows, loanRows };
 };
 
 const userIsGameMember = async (gameId: string, userId: string) => {
@@ -222,6 +264,202 @@ const pendingPlayerId = (state: GameStateRow) =>
     ? state.pending_action.player_id
     : null;
 
+
+type AiPlanningContext = {
+  state: GameStateRow;
+  player: PlayerRow;
+  game: GameRow | null;
+  players: PlayerRow[];
+  boardTiles: BoardTile[];
+  ownershipRows: OwnershipRow[];
+  loanRows: LoanRow[];
+  actionsTaken: string[];
+};
+
+type SetOwnershipStatus = {
+  setTiles: BoardTile[];
+  ownedByAi: BoardTile[];
+  ownsAny: boolean;
+  ownsNone: boolean;
+  completes: boolean;
+};
+
+const isOwnableTile = (tile: BoardTile | null | undefined): tile is BoardTile =>
+  tile?.type === "PROPERTY" || tile?.type === "RAIL" || tile?.type === "UTILITY";
+
+const getSetGroupKey = (tile: BoardTile | null | undefined): string | null => {
+  if (!isOwnableTile(tile)) return null;
+  if (tile.type === "PROPERTY") return tile.colorGroup ? `color:${tile.colorGroup}` : null;
+  if (tile.type === "RAIL") return "rail";
+  if (tile.type === "UTILITY") return "utility";
+  return null;
+};
+
+const getSetTiles = (boardTiles: BoardTile[], tile: BoardTile | null | undefined) => {
+  const key = getSetGroupKey(tile);
+  if (!key) return [];
+  return boardTiles.filter((candidate) => getSetGroupKey(candidate) === key);
+};
+
+const getOwnershipByTile = (ownershipRows: OwnershipRow[]) =>
+  ownershipRows.reduce<Record<number, OwnershipRow>>((acc, row) => {
+    if (row.owner_player_id) acc[row.tile_index] = row;
+    return acc;
+  }, {});
+
+const getSetOwnershipStatus = ({
+  boardTiles,
+  ownershipRows,
+  playerId,
+  tile,
+}: {
+  boardTiles: BoardTile[];
+  ownershipRows: OwnershipRow[];
+  playerId: string;
+  tile: BoardTile;
+}): SetOwnershipStatus => {
+  const ownershipByTile = getOwnershipByTile(ownershipRows);
+  const setTiles = getSetTiles(boardTiles, tile);
+  const ownedByAi = setTiles.filter((setTile) => ownershipByTile[setTile.index]?.owner_player_id === playerId);
+  const targetOwned = ownershipByTile[tile.index]?.owner_player_id === playerId;
+  const ownedCountAfterTarget = ownedByAi.length + (targetOwned ? 0 : 1);
+  const completes = setTiles.length > 0 && ownedCountAfterTarget >= setTiles.length;
+  return {
+    setTiles,
+    ownedByAi,
+    ownsAny: ownedByAi.length > 0,
+    ownsNone: ownedByAi.length === 0,
+    completes,
+  };
+};
+
+const wouldCompleteSet = (status: SetOwnershipStatus) => status.completes;
+
+const isCompletedSet = ({
+  boardTiles,
+  ownershipRows,
+  playerId,
+  tile,
+}: {
+  boardTiles: BoardTile[];
+  ownershipRows: OwnershipRow[];
+  playerId: string;
+  tile: BoardTile;
+}) => {
+  const ownershipByTile = getOwnershipByTile(ownershipRows);
+  const setTiles = getSetTiles(boardTiles, tile);
+  return setTiles.length > 0 && setTiles.every((setTile) => ownershipByTile[setTile.index]?.owner_player_id === playerId);
+};
+
+const calculateReserve = ({
+  propertyPrice,
+  passGoAmount,
+  completion,
+}: {
+  propertyPrice: number;
+  passGoAmount: number;
+  completion: boolean;
+}) =>
+  completion
+    ? Math.max(propertyPrice * 0.4, passGoAmount)
+    : Math.max(propertyPrice * 0.75, passGoAmount * 1.5);
+
+const isInTargetSet = (candidate: BoardTile, targetStatus: SetOwnershipStatus) =>
+  targetStatus.setTiles.some((targetSetTile) => targetSetTile.index === candidate.index);
+
+const getWeakSellableAssets = ({
+  boardTiles,
+  ownershipRows,
+  playerId,
+  targetStatus,
+  roundsElapsed,
+}: {
+  boardTiles: BoardTile[];
+  ownershipRows: OwnershipRow[];
+  playerId: string;
+  targetStatus: SetOwnershipStatus;
+  roundsElapsed: number;
+}) => {
+  const ownershipByTile = getOwnershipByTile(ownershipRows);
+  return boardTiles
+    .filter(isOwnableTile)
+    .filter((tile) => {
+      const ownership = ownershipByTile[tile.index];
+      if (!ownership || ownership.owner_player_id !== playerId) return false;
+      if (isInTargetSet(tile, targetStatus)) return false;
+      if (isCompletedSet({ boardTiles, ownershipRows, playerId, tile })) return false;
+      if ((ownership.houses ?? 0) !== 0) return false;
+      if (ownership.collateral_loan_id || ownership.purchase_mortgage_id) return false;
+      if (isPropertySaleLocked(ownership.acquired_round, roundsElapsed)) return false;
+      const candidateSetTiles = getSetTiles(boardTiles, tile);
+      const ownedInCandidateSet = candidateSetTiles.filter(
+        (setTile) => ownershipByTile[setTile.index]?.owner_player_id === playerId,
+      );
+      return ownedInCandidateSet.length === 1;
+    })
+    .sort((a, b) => (a.price ?? 0) - (b.price ?? 0));
+};
+
+const getCollateralCandidates = ({
+  boardTiles,
+  ownershipRows,
+  playerId,
+  targetTile,
+  targetStatus,
+}: {
+  boardTiles: BoardTile[];
+  ownershipRows: OwnershipRow[];
+  playerId: string;
+  targetTile: BoardTile;
+  targetStatus: SetOwnershipStatus;
+}) => {
+  const ownershipByTile = getOwnershipByTile(ownershipRows);
+  return boardTiles
+    .filter(isOwnableTile)
+    .filter((tile) => {
+      const ownership = ownershipByTile[tile.index];
+      if (!ownership || ownership.owner_player_id !== playerId) return false;
+      if (tile.index === targetTile.index || isInTargetSet(tile, targetStatus)) return false;
+      if (isCompletedSet({ boardTiles, ownershipRows, playerId, tile })) return false;
+      if ((ownership.houses ?? 0) !== 0) return false;
+      if (ownership.collateral_loan_id || ownership.purchase_mortgage_id) return false;
+      return true;
+    })
+    .sort((a, b) => (b.price ?? 0) - (a.price ?? 0));
+};
+
+const calculateAuctionMaxBid = ({
+  state,
+  playerId,
+  status,
+  propertyPrice,
+}: {
+  state: GameStateRow;
+  playerId: string;
+  status: SetOwnershipStatus;
+  propertyPrice: number;
+}) => {
+  if (wouldCompleteSet(status)) return Math.floor(propertyPrice * 1.4);
+  if (status.ownsAny) return Math.floor(propertyPrice * 1.1);
+  return Math.floor(propertyPrice * (state.auction_initiator_player_id === playerId ? 0.7 : 0.5));
+};
+
+const pendingPurchaseTileIndex = (state: GameStateRow) =>
+  typeof state.pending_action?.tile_index === "number" ? state.pending_action.tile_index : null;
+
+const hasLoanMortgageBlockingMacro = (state: GameStateRow) =>
+  state.rules?.macroEnabled !== false &&
+  Array.isArray(state.active_macro_effects_v1) &&
+  state.active_macro_effects_v1.some((effect) => {
+    if (!effect || typeof effect !== "object") return false;
+    const candidate = effect as { effects?: { loan_mortgage_new_blocked?: unknown }; roundsRemaining?: unknown };
+    return (
+      candidate.effects?.loan_mortgage_new_blocked === true &&
+      typeof candidate.roundsRemaining === "number" &&
+      candidate.roundsRemaining > 0
+    );
+  });
+
 const chooseEasyAction = ({
   state,
   player,
@@ -283,6 +521,93 @@ const chooseEasyAction = ({
   return null;
 };
 
+
+// Medium v1 intentionally stays conservative: set-building, cash reserves, limited liquidity, and no trading/building/inland heuristics.
+const chooseMediumAction = (context: AiPlanningContext): AiAction | null => {
+  const { state, player, game, boardTiles, ownershipRows, loanRows, actionsTaken } = context;
+  const passGoAmount = getBoardPackById(game?.board_pack_id)?.economy.passGoAmount ?? DEFAULT_BOARD_PACK_ECONOMY.passGoAmount ?? 200;
+  const cash = state.balances?.[player.id] ?? 0;
+
+  if (state.auction_active) {
+    if (state.auction_turn_player_id !== player.id) return null;
+    const tileIndex = state.auction_tile_index;
+    const tile = typeof tileIndex === "number" ? boardTiles.find((entry) => entry.index === tileIndex) : null;
+    const propertyPrice = tile?.price;
+    if (!tile || !isOwnableTile(tile) || typeof propertyPrice !== "number" || propertyPrice <= 0) {
+      return { action: "AUCTION_PASS" };
+    }
+
+    const status = getSetOwnershipStatus({ boardTiles, ownershipRows, playerId: player.id, tile });
+    const currentBid = state.auction_current_bid ?? 0;
+    const minIncrement = state.auction_min_increment ?? getBoardPackById(game?.board_pack_id)?.economy.auctionMinIncrement ?? 10;
+    const nextBid = currentBid === 0 ? minIncrement : currentBid + minIncrement;
+    const reserve = calculateReserve({ propertyPrice, passGoAmount, completion: wouldCompleteSet(status) });
+    const strategyMaxBid = calculateAuctionMaxBid({ state, playerId: player.id, status, propertyPrice });
+
+    return nextBid <= strategyMaxBid && nextBid <= cash - reserve
+      ? { action: "AUCTION_BID", amount: nextBid }
+      : { action: "AUCTION_PASS" };
+  }
+
+  const type = pendingType(state);
+  const actorId = pendingPlayerId(state);
+  if (type === "BUY_PROPERTY" && actorId === player.id) {
+    const tileIndex = pendingPurchaseTileIndex(state);
+    const price = typeof state.pending_action?.price === "number" ? state.pending_action.price : null;
+    const targetTile = typeof tileIndex === "number" ? boardTiles.find((entry) => entry.index === tileIndex) : null;
+    if (tileIndex === null || !targetTile || !isOwnableTile(targetTile) || typeof price !== "number" || price <= 0) return null;
+
+    const targetStatus = getSetOwnershipStatus({ boardTiles, ownershipRows, playerId: player.id, tile: targetTile });
+    if (targetStatus.ownsNone && !wouldCompleteSet(targetStatus)) {
+      return { action: "DECLINE_PROPERTY", tileIndex };
+    }
+
+    const completion = wouldCompleteSet(targetStatus);
+    const reserve = calculateReserve({ propertyPrice: price, passGoAmount, completion });
+    if (cash - price >= reserve) return { action: "BUY_PROPERTY", tileIndex };
+
+    const loanMortgageBlocked = hasLoanMortgageBlockingMacro(state);
+    const downPayment = Math.ceil(price * 0.5);
+    if (!loanMortgageBlocked && cash - downPayment >= reserve) {
+      return { action: "BUY_PROPERTY", tileIndex, financing: "MORTGAGE", downPaymentPercent: 50 };
+    }
+
+    const roundsElapsed = state.rounds_elapsed ?? 0;
+    const alreadyRestructuredForThisPurchase = actionsTaken.includes("SELL_TO_MARKET") || actionsTaken.includes("TAKE_COLLATERAL_LOAN");
+    const weakAssets = alreadyRestructuredForThisPurchase ? [] : getWeakSellableAssets({
+      boardTiles,
+      ownershipRows,
+      playerId: player.id,
+      targetStatus,
+      roundsElapsed,
+    });
+    if (weakAssets.length > 0) return { action: "SELL_TO_MARKET", tileIndex: weakAssets[0].index };
+
+    const activeCollateralLoans = loanRows.filter((loan) => loan.player_id === player.id && loan.status === "active");
+    if (!loanMortgageBlocked && !alreadyRestructuredForThisPurchase && activeCollateralLoans.length === 0) {
+      const collateralCandidates = getCollateralCandidates({
+        boardTiles,
+        ownershipRows,
+        playerId: player.id,
+        targetTile,
+        targetStatus,
+      });
+      if (collateralCandidates.length > 0) return { action: "TAKE_COLLATERAL_LOAN", tileIndex: collateralCandidates[0].index };
+    }
+
+    return { action: "DECLINE_PROPERTY", tileIndex };
+  }
+
+  return chooseEasyAction({ state, player });
+};
+
+const chooseAiAction = (context: AiPlanningContext): AiAction | null => {
+  const difficulty = context.player.ai_difficulty ?? "easy";
+  if (difficulty === "medium") return chooseMediumAction(context);
+  if (difficulty === "easy") return chooseEasyAction({ state: context.state, player: context.player });
+  return null;
+};
+
 export async function POST(request: Request) {
   if (!isConfigured()) {
     return NextResponse.json({ error: "Supabase is not configured." }, { status: 500 });
@@ -339,7 +664,7 @@ export async function POST(request: Request) {
       actionContext: initialActionable.actionContext,
     });
   }
-  if (initialActionable.player.ai_difficulty && initialActionable.player.ai_difficulty !== "easy") {
+  if (initialActionable.player.ai_difficulty === "hard") {
     return NextResponse.json({
       ok: true,
       stopped: "difficulty_unavailable",
@@ -360,10 +685,11 @@ export async function POST(request: Request) {
 
   let lockedPlayerId = initialActionable.player.id;
   const actions: string[] = [];
+  let collateralPurchaseTileIndex: number | null = null;
   const seenStates = new Set<string>();
   try {
     for (let step = 0; step < 12; step += 1) {
-      const { game, gameState, players } = await loadSnapshot(gameId);
+      const { game, gameState, players, ownershipRows, loanRows } = await loadSnapshot(gameId);
       if (game?.status !== "in_progress" || !gameState) return NextResponse.json({ ok: true, actions, stopped: "game_over" });
       const { actionContext, player } = findActionablePlayer({ gameState, players });
       if (!player || player.is_eliminated) {
@@ -377,7 +703,7 @@ export async function POST(request: Request) {
           actionContext,
         });
       }
-      if (player.ai_difficulty && player.ai_difficulty !== "easy") return NextResponse.json({ ok: true, actions, stopped: "difficulty_unavailable", actionContext });
+      if (player.ai_difficulty === "hard") return NextResponse.json({ ok: true, actions, stopped: "difficulty_unavailable", actionContext });
 
       if (player.id !== lockedPlayerId) {
         if (actions.length === 0) {
@@ -400,7 +726,11 @@ export async function POST(request: Request) {
           return NextResponse.json({ ok: true, actions, stopped: "already_running", actionContext });
         }
         lockedPlayerId = player.id;
-      } else if (actionContext === "normal_turn") {
+      } else {
+        const lockPlayerId = actionContext === "auction" ? gameState.auction_turn_player_id : gameState.current_player_id;
+        if (lockPlayerId !== player.id) {
+          return NextResponse.json({ ok: true, actions, stopped: "lock_lost", actionContext });
+        }
         const lockStillOwned = await validateAndRenewLock({
           gameId,
           playerId: player.id,
@@ -408,7 +738,7 @@ export async function POST(request: Request) {
           lockToken,
         });
         if (!lockStillOwned) {
-          return NextResponse.json({ ok: true, actions, stopped: "lock_lost" });
+          return NextResponse.json({ ok: true, actions, stopped: "lock_lost", actionContext });
         }
       }
 
@@ -421,11 +751,31 @@ export async function POST(request: Request) {
         lastRoll: gameState.last_roll,
         auctionTurnPlayerId: gameState.auction_turn_player_id,
         auctionTurnEndsAt: gameState.auction_turn_ends_at,
+        auctionCurrentBid: gameState.auction_current_bid,
+        auctionCurrentWinnerPlayerId: gameState.auction_current_winner_player_id,
       });
       if (seenStates.has(stateKey)) return NextResponse.json({ ok: true, actions, stopped: "repeated_state" });
       seenStates.add(stateKey);
 
-      const aiAction = chooseEasyAction({ state: gameState, player });
+      if (collateralPurchaseTileIndex !== null) {
+        const currentPendingTileIndex = pendingPurchaseTileIndex(gameState);
+        if (pendingType(gameState) !== "BUY_PROPERTY" || pendingPlayerId(gameState) !== player.id || currentPendingTileIndex !== collateralPurchaseTileIndex) {
+          return NextResponse.json({ ok: true, actions, stopped: "collateral_purchase_changed", actionContext });
+        }
+      }
+
+      const boardPack = getBoardPackById(game.board_pack_id);
+      const boardTiles = resolveBoardTilesForRules({ boardPack, rules: gameState.rules });
+      const aiAction = chooseAiAction({
+        state: gameState,
+        player,
+        game,
+        players,
+        boardTiles,
+        ownershipRows,
+        loanRows,
+        actionsTaken: actions,
+      });
       if (!aiAction) return NextResponse.json({ ok: true, actions, stopped: "unsupported_state" });
 
       const actionResponse = await executeBankActionRequest({
@@ -455,6 +805,15 @@ export async function POST(request: Request) {
           status: actionResponse.status,
           error: payload?.error ?? null,
         });
+      }
+      if (aiAction.action === "TAKE_COLLATERAL_LOAN") {
+        collateralPurchaseTileIndex = pendingPurchaseTileIndex(gameState);
+      }
+      if (
+        (aiAction.action === "BUY_PROPERTY" || aiAction.action === "DECLINE_PROPERTY") &&
+        aiAction.tileIndex === collateralPurchaseTileIndex
+      ) {
+        collateralPurchaseTileIndex = null;
       }
       actions.push(aiAction.action);
     }
