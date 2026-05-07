@@ -11,6 +11,29 @@ import { calculateReserve } from "../heuristics/reserves";
 import { getWeakSellableAssets } from "../heuristics/sellableAssets";
 import { chooseEasyAction, pendingPlayerId, pendingType } from "./easy";
 
+const countOwnedOwnables = ({
+  boardTiles,
+  ownershipRows,
+  playerId,
+}: {
+  boardTiles: AiPlanningContext["boardTiles"];
+  ownershipRows: AiPlanningContext["ownershipRows"];
+  playerId: string;
+}) => {
+  const ownableTileIndexes = new Set(boardTiles.filter(isOwnableTile).map((tile) => tile.index));
+  return ownershipRows.filter(
+    (row) => row.owner_player_id === playerId && ownableTileIndexes.has(row.tile_index),
+  ).length;
+};
+
+const isInExpansionMode = ({
+  ownedOwnableCount,
+  roundsElapsed,
+}: {
+  ownedOwnableCount: number;
+  roundsElapsed: number;
+}) => ownedOwnableCount < 3 || (roundsElapsed <= 3 && ownedOwnableCount < 2);
+
 // Medium v1 intentionally stays conservative: set-building, cash reserves, limited liquidity, and no trading/building/inland heuristics.
 export const chooseMediumAction = (context: AiPlanningContext): AiAction | null => {
   const { state, player, game, boardTiles, ownershipRows, loanRows, actionsTaken } = context;
@@ -47,11 +70,17 @@ export const chooseMediumAction = (context: AiPlanningContext): AiAction | null 
     if (tileIndex === null || !targetTile || !isOwnableTile(targetTile) || typeof price !== "number" || price <= 0) return null;
 
     const targetStatus = getSetOwnershipStatus({ boardTiles, ownershipRows, playerId: player.id, tile: targetTile });
-    if (targetStatus.ownsNone && !wouldCompleteSet(targetStatus)) {
+    const completion = wouldCompleteSet(targetStatus);
+    const roundsElapsed = state.rounds_elapsed ?? 0;
+    const ownsNoneNonCompletion = targetStatus.ownsNone && !completion;
+    const expansionMode = isInExpansionMode({
+      ownedOwnableCount: countOwnedOwnables({ boardTiles, ownershipRows, playerId: player.id }),
+      roundsElapsed,
+    });
+    if (ownsNoneNonCompletion && !expansionMode) {
       return { action: "DECLINE_PROPERTY", tileIndex };
     }
 
-    const completion = wouldCompleteSet(targetStatus);
     const reserve = calculateReserve({ propertyPrice: price, passGoAmount, completion });
     if (cash - price >= reserve) return { action: "BUY_PROPERTY", tileIndex };
 
@@ -61,7 +90,10 @@ export const chooseMediumAction = (context: AiPlanningContext): AiAction | null 
       return { action: "BUY_PROPERTY", tileIndex, financing: "MORTGAGE", downPaymentPercent: 50 };
     }
 
-    const roundsElapsed = state.rounds_elapsed ?? 0;
+    if (ownsNoneNonCompletion && expansionMode) {
+      return { action: "DECLINE_PROPERTY", tileIndex };
+    }
+
     const alreadyRestructuredForThisPurchase = actionsTaken.includes("SELL_TO_MARKET") || actionsTaken.includes("TAKE_COLLATERAL_LOAN");
     const weakAssets = alreadyRestructuredForThisPurchase ? [] : getWeakSellableAssets({
       boardTiles,
