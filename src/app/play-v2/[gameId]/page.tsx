@@ -525,6 +525,12 @@ export default function PlayV2Page() {
   >(null);
   const [cancelingBetId, setCancelingBetId] = useState<string | null>(null);
   const [dismissedCompensationEventIds, setDismissedCompensationEventIds] = useState<string[]>([]);
+  const [dismissedMortgagePaidEventIds, setDismissedMortgagePaidEventIds] = useState<string[]>([]);
+
+  const dismissedMortgagePaidEventIdSet = useMemo(
+    () => new Set(dismissedMortgagePaidEventIds),
+    [dismissedMortgagePaidEventIds],
+  );
 
   const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
   const resumeRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
@@ -4474,7 +4480,10 @@ export default function PlayV2Page() {
       const seen = new Set(currentQueue.map((entry) => entry.eventId));
       const additions: MortgagePaidModalItem[] = [];
       for (const event of [...events].reverse()) {
-        if (seen.has(event.id) || event.event_type !== "PURCHASE_MORTGAGE_PAID") {
+        if (event.event_type !== "PURCHASE_MORTGAGE_PAID") {
+          continue;
+        }
+        if (seen.has(event.id) || dismissedMortgagePaidEventIdSet.has(event.id)) {
           continue;
         }
         const payload = event.payload ?? {};
@@ -4492,7 +4501,19 @@ export default function PlayV2Page() {
       }
       return additions.length > 0 ? [...currentQueue, ...additions] : currentQueue;
     });
-  }, [currentUserPlayerId, events, getTileNameByIndex]);
+  }, [currentUserPlayerId, dismissedMortgagePaidEventIdSet, events, getTileNameByIndex]);
+
+  const handleMortgagePaidModalDismiss = useCallback(() => {
+    const dismissedEventId = mortgagePaidQueue[0]?.eventId;
+    if (dismissedEventId) {
+      setDismissedMortgagePaidEventIds((dismissedIds) =>
+        dismissedIds.includes(dismissedEventId)
+          ? dismissedIds
+          : [...dismissedIds, dismissedEventId],
+      );
+    }
+    setMortgagePaidQueue((current) => current.slice(1));
+  }, [mortgagePaidQueue]);
 
   const handleOwnedActionClick = useCallback(
     (args: {
@@ -6817,12 +6838,8 @@ export default function PlayV2Page() {
         }
         confirmLabel="OK"
         cancelLabel={undefined}
-        onConfirm={() =>
-          setMortgagePaidQueue((current) => current.slice(1))
-        }
-        onCancel={() =>
-          setMortgagePaidQueue((current) => current.slice(1))
-        }
+        onConfirm={handleMortgagePaidModalDismiss}
+        onCancel={handleMortgagePaidModalDismiss}
       />
       <ConfirmActionModalV2
         open={showEndSessionConfirm}
