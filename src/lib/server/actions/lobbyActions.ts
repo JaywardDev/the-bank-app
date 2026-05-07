@@ -298,9 +298,9 @@ export const handleLobbyAction = async ({
       ? body.aiDifficulty
       : "easy";
 
-    if (difficulty !== "easy") {
+    if (difficulty === "hard") {
       return NextResponse.json(
-        { error: "Only Easy AI is available for now." },
+        { error: "Hard AI is unavailable for now." },
         { status: 400 },
       );
     }

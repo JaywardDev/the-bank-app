@@ -805,14 +805,14 @@ export default function LobbyPage() {
                         aria-label="AI difficulty"
                       >
                         <option value="easy">Easy</option>
-                        <option value="medium" disabled>Medium — Future</option>
+                        <option value="medium">Medium</option>
                         <option value="hard" disabled>Hard — Future</option>
                       </select>
                       <button
                         className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-400"
                         type="button"
                         onClick={handleAddAiPlayer}
-                        disabled={loadingAction === "add-ai" || aiDifficulty !== "easy"}
+                        disabled={loadingAction === "add-ai" || aiDifficulty === "hard"}
                       >
                         {loadingAction === "add-ai" ? "Adding…" : "Add AI"}
                       </button>
