@@ -10,6 +10,8 @@ import BoardViewport from "@/components/play-v2/BoardViewport";
 import GoToJailModalV2 from "@/components/play-v2/GoToJailModalV2";
 import PendingCardModalV2 from "@/components/play-v2/PendingCardModalV2";
 import PendingMacroModalV2 from "@/components/play-v2/PendingMacroModalV2";
+import EconomicBoomModal from "@/components/play-v2/EconomicBoomModal";
+import EconomicBoomSummaryCard from "@/components/play-v2/EconomicBoomSummaryCard";
 import SuperTaxModalV2 from "@/components/play-v2/SuperTaxModalV2";
 import IncomeTaxModalV2 from "@/components/play-v2/IncomeTaxModalV2";
 import PendingPurchaseModalV2 from "@/components/play-v2/PendingPurchaseModalV2";
@@ -94,6 +96,10 @@ import {
 import type { TradeProposal } from "@/features/trade/types";
 import { initializeSoundManager, playSound } from "@/lib/sound";
 import { formatEventDescription } from "@/lib/eventFeedFormatters";
+import {
+  findCurrentRoundEconomicBoomSummary,
+  shouldShowEconomicBoomModal,
+} from "@/lib/economicBoomEvents";
 
 type GameMeta = {
   id: string;
@@ -439,6 +445,9 @@ export default function PlayV2Page() {
   const [playersLoaded, setPlayersLoaded] = useState(false);
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [events, setEvents] = useState<GameEvent[]>([]);
+  const [dismissedEconomicBoomIds, setDismissedEconomicBoomIds] = useState<
+    string[]
+  >([]);
   const [mortgagePaidQueue, setMortgagePaidQueue] = useState<MortgagePaidModalItem[]>([]);
   const [ownershipByTile, setOwnershipByTile] = useState<OwnershipByTile>({});
   const [tradeProposals, setTradeProposals] = useState<TradeProposal[]>([]);
@@ -799,7 +808,7 @@ export default function PlayV2Page() {
     async (gameId: string, accessToken?: string) => {
       const requestEpoch = startSliceRequest("events");
       const rows = await supabaseClient.fetchFromSupabase<GameEvent[]>(
-        `game_events?select=id,event_type,payload,created_at,version&game_id=eq.${gameId}&order=version.desc&limit=100`,
+        `game_events?select=id,event_type,payload,created_at,version&game_id=eq.${gameId}&order=version.desc&limit=250`,
         { method: "GET" },
         accessToken,
       );
@@ -3482,6 +3491,31 @@ export default function PlayV2Page() {
     return new Map(cards.map((card) => [card.id, card]));
   }, [selectedBoardPack?.macroDeck?.cards]);
 
+  const currentRoundEconomicBoomSummary = useMemo(
+    () =>
+      findCurrentRoundEconomicBoomSummary({
+        events,
+        currentRound: gameState?.rounds_elapsed ?? null,
+      }),
+    [events, gameState?.rounds_elapsed],
+  );
+
+  const shouldRevealEconomicBoomModal = shouldShowEconomicBoomModal({
+    summary: currentRoundEconomicBoomSummary,
+    dismissedBoomIds: dismissedEconomicBoomIds,
+  });
+
+  const handleDismissEconomicBoomModal = useCallback(() => {
+    if (!currentRoundEconomicBoomSummary) {
+      return;
+    }
+    setDismissedEconomicBoomIds((previous) =>
+      previous.includes(currentRoundEconomicBoomSummary.boomId)
+        ? previous
+        : [...previous, currentRoundEconomicBoomSummary.boomId],
+    );
+  }, [currentRoundEconomicBoomSummary]);
+
   const activeMacroDisplayItems = useMemo(() => {
     return activeMacroEffectsV1.map((effect) => {
       const macroId = typeof effect.id === "string" ? effect.id : "";
@@ -5801,7 +5835,9 @@ export default function PlayV2Page() {
         onRightDrawerModeChange={setRightDrawerMode}
         tradeNeedsAttention={Boolean(incomingTradeProposal)}
         tradeAccessibleDuringDecision={Boolean(pendingInsolvencyRecovery)}
-        macroEffectsActive={activeMacroDisplayItems.length > 0}
+        macroEffectsActive={
+          activeMacroDisplayItems.length > 0 || Boolean(currentRoundEconomicBoomSummary)
+        }
         canRoll={canRoll}
         canEndTurn={canEndTurn}
         actionLoading={actionLoading}
@@ -6366,6 +6402,14 @@ export default function PlayV2Page() {
               </p>
             </div>
 
+            {currentRoundEconomicBoomSummary ? (
+              <EconomicBoomSummaryCard
+                summary={currentRoundEconomicBoomSummary}
+                formatMoney={formatMoney}
+                compact
+              />
+            ) : null}
+
             {activeMacroDisplayItems.length === 0 ? (
               <div className="rounded-lg border border-white/10 bg-white/5 p-3 text-xs text-white/60">
                 No active macro effects right now.
@@ -6537,6 +6581,13 @@ export default function PlayV2Page() {
           </div>
         }
       />
+      {shouldRevealEconomicBoomModal ? (
+        <EconomicBoomModal
+          summary={currentRoundEconomicBoomSummary}
+          formatMoney={formatMoney}
+          onDismiss={handleDismissEconomicBoomModal}
+        />
+      ) : null}
       {gameOverState && !gameOverOverlayDismissed ? (
         <div className="fixed inset-0 z-[250] flex items-center justify-center bg-[#2A1709]/65 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-3xl border border-[#D3A369]/30 bg-[#4E3018]/95 p-6 text-center shadow-2xl">

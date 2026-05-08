@@ -4794,31 +4794,10 @@ const advanceTurn = async ({
       });
     }
 
-    const macroDeck = resolveMacroDeck(boardPack);
-    if (
-      nextRound % MACRO_EVENT_INTERVAL_ROUNDS === 0 &&
-      macroDeck.cards.length > 0
-    ) {
-      const macroEvent = macroDeck.draw(nextLastMacroEventId ?? undefined);
-      nextLastMacroEventId = macroEvent.id;
-      triggeredMacroEvent = macroEvent;
-      events.push({
-        event_type: "MACRO_EVENT_TRIGGERED",
-        payload: {
-          deck_id: macroDeck.id,
-          deck_name: macroDeck.name,
-          event_id: macroEvent.id,
-          event_name: macroEvent.name,
-          duration_rounds: macroEvent.durationRounds,
-          effects: macroEvent.effects,
-          rarity: macroEvent.rarity ?? null,
-          mode: "weighted",
-          round_index: nextRound,
-        },
-      });
-    }
   }
 
+  // Economic Boom resolves before drawing any newly triggered macro event so
+  // same-round macro effects cannot change the boom payout basis.
   if (shouldTriggerEconomicBoomSeason({
     tableRoundAdvanced,
     nextRound,
@@ -4847,6 +4826,34 @@ const advanceTurn = async ({
       ...extraGameStatePatch,
       last_economic_boom_round: nextRound,
     };
+  }
+
+  // Draw the new macro event after boom events have been added to preserve
+  // reveal/event ordering for rounds that have both seasonal economy and macro.
+  if (macroEnabled && tableRoundAdvanced) {
+    const macroDeck = resolveMacroDeck(boardPack);
+    if (
+      nextRound % MACRO_EVENT_INTERVAL_ROUNDS === 0 &&
+      macroDeck.cards.length > 0
+    ) {
+      const macroEvent = macroDeck.draw(nextLastMacroEventId ?? undefined);
+      nextLastMacroEventId = macroEvent.id;
+      triggeredMacroEvent = macroEvent;
+      events.push({
+        event_type: "MACRO_EVENT_TRIGGERED",
+        payload: {
+          deck_id: macroDeck.id,
+          deck_name: macroDeck.name,
+          event_id: macroEvent.id,
+          event_name: macroEvent.name,
+          duration_rounds: macroEvent.durationRounds,
+          effects: macroEvent.effects,
+          rarity: macroEvent.rarity ?? null,
+          mode: "weighted",
+          round_index: nextRound,
+        },
+      });
+    }
   }
 
   const nextTurnPhase = nextPlayer.is_in_jail

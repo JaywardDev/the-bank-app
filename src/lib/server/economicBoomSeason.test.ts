@@ -83,7 +83,12 @@ test("economic boom handles fewer than six eligible tiles and filters eliminated
     round: 10,
     boardTiles,
     ownershipByTile: {
-      1: { owner_player_id: "p1", collateral_loan_id: null, purchase_mortgage_id: null, houses: 0 },
+      1: {
+        owner_player_id: "p1",
+        collateral_loan_id: null,
+        purchase_mortgage_id: null,
+        houses: 0,
+      },
       2: { owner_player_id: "p2", collateral_loan_id: "loan-1", purchase_mortgage_id: null, houses: 0 },
       3: { owner_player_id: "p3", collateral_loan_id: null, purchase_mortgage_id: null, houses: 0 },
     },
@@ -126,7 +131,12 @@ test("economic boom utility rent basis uses fixed roll 7", () => {
     round: 10,
     boardTiles,
     ownershipByTile: {
-      1: { owner_player_id: "p1", collateral_loan_id: null, purchase_mortgage_id: null, houses: 0 },
+      1: {
+        owner_player_id: "p1",
+        collateral_loan_id: null,
+        purchase_mortgage_id: null,
+        houses: 0,
+      },
     },
     players,
     balances: { p1: 0 },
@@ -137,4 +147,92 @@ test("economic boom utility rent basis uses fixed roll 7", () => {
   assert.equal(revenue?.payload.utility_rent_basis_roll, 7);
   assert.equal(revenue?.payload.rent_basis, 28);
   assert.equal(revenue?.payload.payout_amount, 14);
+});
+
+test("economic boom rent basis uses already-active macro effects and excludes newly triggered same-round effects", () => {
+  const boardTiles = [makeTile(1, "PROPERTY", "Demand District")];
+  const ownershipByTile = {
+    1: {
+      owner_player_id: "p1",
+      collateral_loan_id: null,
+      purchase_mortgage_id: null,
+      houses: 0,
+    },
+  };
+  const existingMacroEffects = [
+    {
+      id: "existing-growth",
+      name: "Existing Growth",
+      effects: { rent_multiplier: 2 },
+      roundsRemaining: 1,
+      roundsApplied: 1,
+    },
+  ];
+  const newlyTriggeredMacroEffects = [
+    ...existingMacroEffects,
+    {
+      id: "new-surge",
+      name: "New Surge",
+      effects: { rent_multiplier: 3 },
+      roundsRemaining: 3,
+      roundsApplied: 0,
+    },
+  ];
+
+  const boomBeforeNewMacro = buildEconomicBoomSeason({
+    gameId: "g5",
+    round: 10,
+    boardTiles,
+    ownershipByTile,
+    players,
+    balances: { p1: 0 },
+    activeMacroEffects: existingMacroEffects,
+    boardPackEconomy: economy,
+  });
+  const boomIfNewMacroWereAppliedToo = buildEconomicBoomSeason({
+    gameId: "g5",
+    round: 10,
+    boardTiles,
+    ownershipByTile,
+    players,
+    balances: { p1: 0 },
+    activeMacroEffects: newlyTriggeredMacroEffects,
+    boardPackEconomy: economy,
+  });
+
+  const actualRevenue = boomBeforeNewMacro.events.find(
+    (event) => event.event_type === "ECONOMIC_BOOM_REVENUE",
+  );
+  const wronglyAmplifiedRevenue = boomIfNewMacroWereAppliedToo.events.find(
+    (event) => event.event_type === "ECONOMIC_BOOM_REVENUE",
+  );
+
+  assert.equal(actualRevenue?.payload.rent_basis, 20);
+  assert.equal(actualRevenue?.payload.payout_amount, 10);
+  assert.equal(wronglyAmplifiedRevenue?.payload.rent_basis, 60);
+});
+
+test("economic boom event batch orders started before revenue and cash entries", () => {
+  const result = buildEconomicBoomSeason({
+    gameId: "g6",
+    round: 10,
+    boardTiles: [makeTile(1, "PROPERTY", "Market Street")],
+    ownershipByTile: {
+      1: {
+        owner_player_id: "p1",
+        collateral_loan_id: null,
+        purchase_mortgage_id: null,
+        houses: 0,
+      },
+    },
+    players,
+    balances: { p1: 0 },
+    activeMacroEffects: [],
+    boardPackEconomy: economy,
+  });
+
+  assert.deepEqual(
+    result.events.map((event) => event.event_type),
+    ["ECONOMIC_BOOM_STARTED", "ECONOMIC_BOOM_REVENUE", "CASH_CREDIT"],
+  );
 });
