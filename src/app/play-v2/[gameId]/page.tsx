@@ -6586,6 +6586,7 @@ export default function PlayV2Page() {
           summary={currentRoundEconomicBoomSummary}
           formatMoney={formatMoney}
           onDismiss={handleDismissEconomicBoomModal}
+          boardTiles={resolvedBoardTiles}
         />
       ) : null}
       {gameOverState && !gameOverOverlayDismissed ? (
