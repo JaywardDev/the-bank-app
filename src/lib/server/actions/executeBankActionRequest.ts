@@ -1322,6 +1322,36 @@ const fetchFromSupabaseWithService = async <T>(
   return parseSupabaseResponse<T>(response);
 };
 
+export const resolveAuthoritativeVersionFromUpdateResponse = (
+  response:
+    | number
+    | { version?: unknown; game_state?: { version?: unknown } | null }
+    | Array<{ version?: unknown; game_state?: { version?: unknown } | null }>
+    | null
+    | undefined,
+): number | null => {
+  if (typeof response === "number" && Number.isInteger(response)) {
+    return response;
+  }
+
+  const candidate = Array.isArray(response) ? response[0] : response;
+  if (!candidate || typeof candidate !== "object") {
+    return null;
+  }
+
+  const nestedVersion = candidate.game_state?.version;
+  if (typeof nestedVersion === "number" && Number.isInteger(nestedVersion)) {
+    return nestedVersion;
+  }
+
+  const directVersion = candidate.version;
+  if (typeof directVersion === "number" && Number.isInteger(directVersion)) {
+    return directVersion;
+  }
+
+  return null;
+};
+
 const parseRpcErrorMessage = (errorText: string) => {
   try {
     const parsed = JSON.parse(errorText) as { message?: string };
@@ -6978,11 +7008,15 @@ export const executeBankActionRequest = async ({
           },
         );
 
-        if (!compensationResponse) {
-          throw new Error("Compensation response missing");
+        const compensationVersion = resolveAuthoritativeVersionFromUpdateResponse(
+          compensationResponse,
+        );
+
+        if (compensationVersion === null) {
+          throw new Error("Compensation response missing updated version");
         }
 
-        currentVersion += 1;
+        currentVersion = compensationVersion;
       }
 
       const rpcResponse = await fetch(
