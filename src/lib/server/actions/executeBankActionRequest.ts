@@ -64,7 +64,12 @@ import {
   mergeCommunicationUnlockIntoRules,
   shouldUnlockCommunicationUtility,
 } from "@/lib/runtimeUnlocks";
-import { getUtilityRentMultiplierForOwnedCount, ownsFullyBuiltColorSet } from "@/lib/rent";
+import { ownsFullColorSet, ownsFullyBuiltColorSet } from "@/lib/rent";
+import { calculateAuthoritativeRent } from "@/lib/server/authoritativeRent";
+import {
+  buildEconomicBoomSeason,
+  shouldTriggerEconomicBoomSeason,
+} from "@/lib/server/economicBoomSeason";
 import { handleLobbyAction } from "@/lib/server/actions/lobbyActions";
 import { handleBettingAction } from "@/lib/server/actions/bettingActions";
 import { handleInlandAction } from "@/lib/server/actions/inlandActions";
@@ -435,6 +440,7 @@ type GameStateRow = {
   income_tax_baseline_cash_by_player: Record<string, number> | null;
   betting_market_state: Record<string, unknown> | null;
   inland_explored_cells: unknown[] | null;
+  last_economic_boom_round: number | null;
 };
 
 type OwnershipRow = {
@@ -709,35 +715,6 @@ const getMacroInterestDeltaPerTurn = (activeEffects: ActiveMacroEffect[]) =>
     return total + delta;
   }, 0);
 
-const getMacroRentMultiplierV1 = (activeEffects: ActiveMacroEffectV1[]) =>
-  activeEffects.reduce((product, effect) => {
-    const multiplier = effect.effects.rent_multiplier;
-    if (typeof multiplier === "number") {
-      return product * multiplier;
-    }
-    return product;
-  }, 1);
-
-const getMacroRailRentMultiplierV1 = (activeEffects: ActiveMacroEffectV1[]) =>
-  activeEffects.reduce((product, effect) => {
-    const multiplier = effect.effects.rail_rent_multiplier;
-    if (typeof multiplier === "number") {
-      return product * multiplier;
-    }
-    return product;
-  }, 1);
-
-const getMacroUtilityRentBonusPctPerHouseV1 = (
-  activeEffects: ActiveMacroEffectV1[],
-) =>
-  activeEffects.reduce((total, effect) => {
-    const bonus = effect.effects.utility_rent_bonus_per_house_pct;
-    if (typeof bonus === "number") {
-      return total + bonus;
-    }
-    return total;
-  }, 0);
-
 const getMacroBuildCostMultiplierV1 = (activeEffects: ActiveMacroEffectV1[]) =>
   activeEffects.reduce((product, effect) => {
     const multiplier = effect.effects.build_cost_multiplier;
@@ -749,24 +726,6 @@ const getMacroBuildCostMultiplierV1 = (activeEffects: ActiveMacroEffectV1[]) =>
 
 const getMacroHouseBuildBlockedV1 = (activeEffects: ActiveMacroEffectV1[]) =>
   activeEffects.some((effect) => effect.effects.house_build_blocked === true);
-
-const getMacroRentMultiplierForColorGroupV1 = (
-  activeEffects: ActiveMacroEffectV1[],
-  colorGroup?: string | null,
-) => {
-  if (!colorGroup) {
-    return 1;
-  }
-  const normalizedColorGroup = colorGroup.toLowerCase();
-  return activeEffects.reduce((product, effect) => {
-    const byGroup = effect.effects.rent_multiplier_by_color_group;
-    if (!byGroup) {
-      return product;
-    }
-    const entry = byGroup[normalizedColorGroup];
-    return typeof entry === "number" ? product * entry : product;
-  }, 1);
-};
 
 const getMacroMortgageFlatDeltaV1 = (activeEffects: ActiveMacroEffectV1[]) =>
   activeEffects.reduce((total, effect) => {
@@ -2875,212 +2834,6 @@ const resolvePlayerElimination = async ({
   return { handled: true, updatedState };
 };
 
-const countOwnedTilesByType = (
-  boardTiles: TileInfo[],
-  ownershipByTile: OwnershipByTile,
-  ownerId: string,
-  tileType: string,
-) =>
-  boardTiles.filter(
-    (tile) =>
-      tile.type === tileType &&
-      ownershipByTile[tile.index]?.owner_player_id === ownerId,
-  ).length;
-
-const ownsFullColorSet = (
-  tile: TileInfo,
-  boardTiles: TileInfo[],
-  ownershipByTile: OwnershipByTile,
-  ownerId: string,
-) => {
-  if (tile.type !== "PROPERTY" || !tile.colorGroup) {
-    return false;
-  }
-  const groupTiles = boardTiles.filter(
-    (entry) =>
-      entry.type === "PROPERTY" && entry.colorGroup === tile.colorGroup,
-  );
-  if (groupTiles.length === 0) {
-    return false;
-  }
-  return groupTiles.every(
-    (entry) => ownershipByTile[entry.index]?.owner_player_id === ownerId,
-  );
-};
-
-const normalizeRentByHousesTiers = (rentByHouses?: number[] | null) => {
-  if (!rentByHouses || rentByHouses.length === 0) {
-    return rentByHouses ?? null;
-  }
-  if (rentByHouses.length !== 5) {
-    return [...rentByHouses];
-  }
-
-  const tier4 = rentByHouses[3] ?? rentByHouses[4] ?? 0;
-  const tier5 = rentByHouses[4] ?? tier4;
-  if (tier5 <= tier4) {
-    return [...rentByHouses.slice(0, 4), tier4, rentByHouses[4]];
-  }
-  const insertedTier = Math.min(
-    tier5 - 1,
-    Math.max(tier4 + 1, Math.round((tier4 + tier5) / 2)),
-  );
-  return [...rentByHouses.slice(0, 4), insertedTier, rentByHouses[4]];
-};
-
-const getPropertyRentWithDev = (
-  tile: TileInfo,
-  dev: number,
-) => {
-  const rentByHouses = normalizeRentByHousesTiers(tile.rentByHouses);
-  if (!rentByHouses || rentByHouses.length === 0) {
-    return tile.baseRent ?? 0;
-  }
-  const normalizedDev = Number.isFinite(dev) ? Math.max(0, Math.floor(dev)) : 0;
-  if (normalizedDev <= rentByHouses.length - 1) {
-    return rentByHouses[normalizedDev] ?? tile.baseRent ?? 0;
-  }
-  return rentByHouses[rentByHouses.length - 1] ?? tile.baseRent ?? 0;
-};
-
-const calculateRent = ({
-  tile,
-  ownerId,
-  currentPlayerId,
-  boardTiles,
-  ownershipByTile,
-  diceTotal,
-  activeMacroEffects,
-  boardPackEconomy,
-}: {
-  tile: TileInfo;
-  ownerId: string | null;
-  currentPlayerId: string;
-  boardTiles: TileInfo[];
-  ownershipByTile: OwnershipByTile;
-  diceTotal?: number | null;
-  activeMacroEffects: ActiveMacroEffectV1[];
-  boardPackEconomy: BoardPackEconomy;
-}) => {
-  if (!ownerId || ownerId === currentPlayerId) {
-    return { amount: 0, meta: null };
-  }
-
-  const rentMultiplier = getMacroRentMultiplierV1(activeMacroEffects);
-  const railMultiplier = getMacroRailRentMultiplierV1(activeMacroEffects);
-  const utilityBonusPctPerHouse = getMacroUtilityRentBonusPctPerHouseV1(
-    activeMacroEffects,
-  );
-  const macroMeta =
-    rentMultiplier !== 1 || railMultiplier !== 1 || utilityBonusPctPerHouse !== 0
-      ? {
-          rent_multiplier: rentMultiplier,
-          rail_rent_multiplier: railMultiplier,
-          utility_rent_bonus_per_house_pct: utilityBonusPctPerHouse,
-        }
-      : null;
-
-  if (tile.type === "RAIL") {
-    const railCount = countOwnedTilesByType(
-      boardTiles,
-      ownershipByTile,
-      ownerId,
-      "RAIL",
-    );
-    const baseAmount = boardPackEconomy.railRentByCount[railCount] ?? 0;
-    const amount = Math.round(baseAmount * rentMultiplier * railMultiplier);
-    return {
-      amount,
-      meta: {
-        rent_type: "RAIL",
-        railroads_owned: railCount,
-        base_rent: baseAmount,
-        ...(macroMeta ?? {}),
-      },
-    };
-  }
-
-  if (tile.type === "UTILITY") {
-    const utilityCount = countOwnedTilesByType(
-      boardTiles,
-      ownershipByTile,
-      ownerId,
-      "UTILITY",
-    );
-    const multiplier = getUtilityRentMultiplierForOwnedCount(
-      utilityCount,
-      boardPackEconomy.utilityRentMultipliers,
-    );
-    const total = diceTotal ?? 0;
-    const utilityBaseAmount = boardPackEconomy.utilityBaseAmount ?? 1;
-    const baseAmount = multiplier * total * utilityBaseAmount;
-    const totalHousesOwned = Object.values(ownershipByTile).reduce(
-      (sum, ownership) =>
-        ownership.owner_player_id === ownerId ? sum + ownership.houses : sum,
-      0,
-    );
-    const utilityBonusMultiplier =
-      1 + utilityBonusPctPerHouse * totalHousesOwned;
-    const amount = Math.round(
-      baseAmount * rentMultiplier * utilityBonusMultiplier,
-    );
-    return {
-      amount,
-      meta: {
-        rent_type: "UTILITY",
-        utilities_owned: utilityCount,
-        dice_total: total,
-        multiplier,
-        base_rent: baseAmount,
-        utility_bonus_multiplier: utilityBonusMultiplier,
-        utility_houses_owned: totalHousesOwned,
-        ...(macroMeta ?? {}),
-      },
-    };
-  }
-
-  if (tile.type === "PROPERTY") {
-    const dev = ownershipByTile[tile.index]?.houses ?? 0;
-    const amount = getPropertyRentWithDev(tile, dev);
-    // Monopoly (complete color set) doubles only the no-house base rent.
-    // Do not apply this to developed properties; houses/hotels already define rent.
-    const hasMonopolyNoDev =
-      dev === 0 && ownsFullColorSet(tile, boardTiles, ownershipByTile, ownerId);
-    const baseNoHouseRent = tile.rentByHouses?.[0] ?? tile.baseRent ?? 0;
-    const monopolyAdjustedAmount = hasMonopolyNoDev
-      ? baseNoHouseRent * 2
-      : amount;
-    const colorGroupMultiplier = getMacroRentMultiplierForColorGroupV1(
-      activeMacroEffects,
-      tile.colorGroup,
-    );
-    const finalAmount = Math.round(
-      monopolyAdjustedAmount * rentMultiplier * colorGroupMultiplier,
-    );
-    return {
-      amount: finalAmount,
-      meta: {
-        rent_type: "PROPERTY",
-        houses: dev,
-        base_rent: monopolyAdjustedAmount,
-        monopoly_applied: hasMonopolyNoDev,
-        color_group_multiplier: colorGroupMultiplier,
-        ...(macroMeta ?? {}),
-      },
-    };
-  }
-
-  const amount = tile.baseRent ?? 0;
-  return {
-    amount: Math.round(amount * rentMultiplier),
-    meta: {
-      rent_type: "PROPERTY",
-      base_rent: amount,
-      ...(macroMeta ?? {}),
-    },
-  };
-};
-
 const applyGoSalary = ({
   player,
   balances,
@@ -3576,7 +3329,7 @@ const finalizeMoveResolution = async ({
           activeLandingTile.type === "UTILITY" && cardUtilityRollOverride
             ? cardUtilityRollOverride.total
             : rollTotal ?? 0;
-        return calculateRent({
+        return calculateAuthoritativeRent({
           tile: activeLandingTile,
           ownerId: rentOwnerId,
           currentPlayerId: currentPlayer.id,
@@ -5066,6 +4819,36 @@ const advanceTurn = async ({
     }
   }
 
+  if (shouldTriggerEconomicBoomSeason({
+    tableRoundAdvanced,
+    nextRound,
+    lastEconomicBoomRound: gameState.last_economic_boom_round ?? null,
+    isGameOver: false,
+  })) {
+    const boomOwnershipByTile = await loadOwnershipByTile(gameId);
+    const boomBoardTiles = resolveBoardTilesForRules({
+      boardPack: boardPack ?? getBoardPackById(null),
+      rules: gameState.rules,
+    });
+    const boomResult = buildEconomicBoomSeason({
+      gameId,
+      round: nextRound,
+      boardTiles: boomBoardTiles,
+      ownershipByTile: boomOwnershipByTile,
+      players,
+      balances: updatedBalances,
+      activeMacroEffects: macroEnabled ? nextActiveMacroEffectsV1 : [],
+      boardPackEconomy: boardPack?.economy ?? DEFAULT_BOARD_PACK_ECONOMY,
+    });
+    events.push(...boomResult.events);
+    updatedBalances = boomResult.balances;
+    balancesChanged = balancesChanged || boomResult.balancesChanged;
+    extraGameStatePatch = {
+      ...extraGameStatePatch,
+      last_economic_boom_round: nextRound,
+    };
+  }
+
   const nextTurnPhase = nextPlayer.is_in_jail
     ? "AWAITING_JAIL_DECISION"
     : "AWAITING_ROLL";
@@ -5281,7 +5064,7 @@ export const executeBankActionRequest = async ({
     )) ?? [];
 
     const [gameState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
-      `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,betting_market_state,inland_explored_cells,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
+      `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_economic_boom_round,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,betting_market_state,inland_explored_cells,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
       { method: "GET" },
     )) ?? [];
 
@@ -5352,7 +5135,7 @@ export const executeBankActionRequest = async ({
       }
 
       const [updatedState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
-        `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,betting_market_state,inland_explored_cells,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
+        `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_economic_boom_round,last_macro_event_id,active_macro_effects,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_deck,pending_card_id,pending_card_title,pending_card_kind,pending_card_payload,pending_card_drawn_by_player_id,pending_card_drawn_at,pending_card_source_tile_index,skip_next_roll_by_player,income_tax_baseline_cash_by_player,betting_market_state,inland_explored_cells,chance_index,community_index,chance_order,community_order,chance_draw_ptr,community_draw_ptr,chance_seed,community_seed,chance_reshuffle_count,community_reshuffle_count,free_parking_pot,rules,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
         { method: "GET" },
       )) ?? [];
 
@@ -8061,7 +7844,7 @@ export const executeBankActionRequest = async ({
             if (!ownerId || ownerId === player.id) {
               continue;
             }
-            const rentResult = calculateRent({
+            const rentResult = calculateAuthoritativeRent({
               tile: currentTile,
               ownerId,
               currentPlayerId: player.id,

@@ -149,6 +149,7 @@ type GameState = {
   last_roll: number | null;
   doubles_count: number | null;
   rounds_elapsed: number | null;
+  last_economic_boom_round?: number | null;
   turn_phase: string | null;
   pending_action: Record<string, unknown> | null;
   pending_card_active: boolean | null;

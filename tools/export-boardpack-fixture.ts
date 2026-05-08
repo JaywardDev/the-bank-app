@@ -132,6 +132,18 @@ const fixture = {
     super_tax_rate: rules.superTaxRate,
   },
   inland_rules: inlandRules,
+  economic_boom_rules: {
+    enabled: true,
+    interval_rounds: 10,
+    draws: 6,
+    payout_rate: 0.5,
+    utility_rent_basis_roll: 7,
+    property_weights_by_level: [1, 2, 4, 7, 11, 16],
+    rail_weight: 2,
+    utility_weight: 2,
+    exclude_collateralized: true,
+    include_purchase_mortgaged: true,
+  },
   tiles,
 } satisfies Record<string, JsonValue>;
 

@@ -51,6 +51,7 @@ type GameState = {
   current_player_id: string | null;
   balances: Record<string, number> | null;
   last_roll: number | null;
+  last_economic_boom_round?: number | null;
   chance_index: number | null;
   community_index: number | null;
   free_parking_pot: number | null;
@@ -231,6 +232,8 @@ const meaningfulEventTypes = new Set([
   "MACRO_EVENT_TRIGGERED",
   "MACRO_EVENT_EXPIRED",
   "MACRO_EXPIRED",
+  "ECONOMIC_BOOM_STARTED",
+  "ECONOMIC_BOOM_REVENUE",
 ]);
 
 const isMeaningfulBoardEvent = (eventType: string, description: string) => {

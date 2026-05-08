@@ -16,9 +16,10 @@ These Phase 5 rules are **approximations only**. They are for designer feedback 
 - Balanced player policy is default and prioritizes liquidity survival before insolvency.
 - Proactive collateral loans are modeled as simplified action-based liquidity (not emergency auto-mortgage behavior).
 - Purchase mortgages are modeled as acquisition obligations with scheduled payments and default behavior.
-- Passive inland income, betting, and auctions are simplified approximations for macro-economy pressure testing.
+- Passive inland income, betting, auctions, and Economic Boom Season are simplified approximations for macro-economy pressure testing.
 - Generated fixtures now include boardpack-derived `loan_rules` from runtime `GameRules` resolution.
 - Generated fixtures now include boardpack-derived `tax_rules` (`income_tax_rate`, `super_tax_rate`) from runtime `GameRules` resolution.
+- Generated fixtures include `economic_boom_rules`; the simulator triggers one weighted, without-replacement boom batch every 10 completed rounds by default and reports boom season/draw/payout totals.
 - The simulator uses fixture `loan_rules` by default.
 - The simulator uses fixture `tax_rules` by default.
 - Tax tiles are now split into income tax, super tax, and fixed-tax fallback (when subtype is unknown).

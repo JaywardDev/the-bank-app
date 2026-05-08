@@ -42,7 +42,7 @@ export const loadSnapshot = async (gameId: string) => {
     { method: "GET" },
   )) ?? [];
   const [gameState] = (await fetchFromSupabaseWithService<GameStateRow[]>(
-    `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,rules,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_drawn_by_player_id,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
+    `game_state?select=game_id,version,current_player_id,balances,last_roll,doubles_count,rounds_elapsed,last_economic_boom_round,rules,active_macro_effects_v1,turn_phase,pending_action,pending_card_active,pending_card_drawn_by_player_id,auction_active,auction_tile_index,auction_initiator_player_id,auction_current_bid,auction_current_winner_player_id,auction_turn_player_id,auction_turn_ends_at,auction_eligible_player_ids,auction_passed_player_ids,auction_min_increment&game_id=eq.${gameId}&limit=1`,
     { method: "GET" },
   )) ?? [];
   const ownershipRows = (await fetchFromSupabaseWithService<OwnershipRow[]>(

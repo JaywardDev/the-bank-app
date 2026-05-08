@@ -42,6 +42,7 @@ type GameState = {
   current_player_id: string | null;
   balances: Record<string, number> | null;
   last_roll: number | null;
+  last_economic_boom_round?: number | null;
   chance_index: number | null;
   community_index: number | null;
   free_parking_pot: number | null;

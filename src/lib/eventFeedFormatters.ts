@@ -169,6 +169,25 @@ export const formatEventDescription = (
       return `Turn → ${payload.to_player_name}`;
     }
 
+    if (event.event_type === "ECONOMIC_BOOM_STARTED") {
+      return "Economic Boom Season begins as consumer activity surges across the board.";
+    }
+
+    if (event.event_type === "ECONOMIC_BOOM_REVENUE") {
+      const tileName =
+        typeof payload?.tile_name === "string"
+          ? payload.tile_name
+          : getTileNameByIndex(parseNumber(payload?.tile_index));
+      const ownerName =
+        typeof payload?.owner_player_name === "string"
+          ? payload.owner_player_name
+          : "Player";
+      const payout = parseNumber(payload?.payout_amount);
+      const amountLabel =
+        payout !== null ? formatMoney(payout, currencyCode, currencySymbol) : "revenue";
+      return `${tileName} attracted strong consumer demand. ${ownerName} received ${amountLabel}.`;
+    }
+
     if (event.event_type === "INLAND_PASSIVE_INCOME") {
       const playerName =
         typeof payload?.player_name === "string" ? payload.player_name : "Player";
@@ -1446,6 +1465,7 @@ export const deriveWalletTransactions = (
     INTERIOR_SITE_DEVELOPED: "resource development",
     RESOURCE_DEVELOPMENT: "resource development",
     BANK_OWNED_INTERIOR_PURCHASE: "bank inland purchase",
+    ECONOMIC_BOOM_REVENUE: "economic boom revenue",
   };
 
   for (const event of events) {

@@ -136,6 +136,9 @@ class GameResult:
     developed_inland_sites_count: int
     inland_resources_found_by_type: Counter[str]
     developed_inland_sites_by_resource: Counter[str]
+    economic_boom_seasons: int
+    economic_boom_payout_total: int
+    economic_boom_draws: int
 
 
 # helpers omitted comments for brevity
@@ -367,6 +370,90 @@ def _credit_inland_passive(player: Player, stats: Counter[str]) -> None:
     stats["inland_passive_income_total"] += payout
     stats["inland_passive_income_events"] += 1
 
+
+def _economic_boom_rules(boardpack: dict[str, Any]) -> dict[str, Any]:
+    rules = boardpack.get("economic_boom_rules")
+    if isinstance(rules, dict):
+        return rules
+    return {
+        "enabled": True,
+        "interval_rounds": 10,
+        "draws": 6,
+        "payout_rate": 0.5,
+        "utility_rent_basis_roll": 7,
+        "property_weights_by_level": [1, 2, 4, 7, 11, 16],
+        "rail_weight": 2,
+        "utility_weight": 2,
+        "exclude_collateralized": True,
+        "include_purchase_mortgaged": True,
+    }
+
+
+def _boom_tile_weight(tile: dict[str, Any], rules: dict[str, Any]) -> int:
+    ttype = tile.get("type")
+    if ttype == "property":
+        weights = rules.get("property_weights_by_level")
+        if not isinstance(weights, list) or not weights:
+            weights = [1, 2, 4, 7, 11, 16]
+        # The basic simulation does not model property upgrades yet, so level 0 is authoritative here.
+        return int(weights[0])
+    if ttype in {"rail", "railroad", "transport"}:
+        return int(rules.get("rail_weight") or 2)
+    if ttype == "utility":
+        return int(rules.get("utility_weight") or 2)
+    return 0
+
+
+def _boom_rent_basis(tile: dict[str, Any], owner: Player, owners_by_tile: dict[int, Player], boardpack: dict[str, Any], rules: dict[str, Any]) -> int:
+    ttype = tile.get("type")
+    if ttype == "utility":
+        utility_base = int(tile.get("utility_base_amount") or 1)
+        utility_count = sum(1 for idx, candidate_owner in owners_by_tile.items() if candidate_owner is owner and boardpack["tiles"][idx].get("type") == "utility")
+        multiplier = 10 if utility_count >= 2 else int(tile.get("utility_multiplier") or 4)
+        return int(rules.get("utility_rent_basis_roll") or 7) * multiplier * utility_base
+    if ttype in {"rail", "railroad", "transport"}:
+        rail_count = sum(1 for idx, candidate_owner in owners_by_tile.items() if candidate_owner is owner and boardpack["tiles"][idx].get("type") in {"rail", "railroad", "transport"})
+        rail_rents = tile.get("rail_rent_by_count")
+        if isinstance(rail_rents, list) and rail_count < len(rail_rents):
+            return int(rail_rents[rail_count] or 0)
+    return int(tile.get("base_rent") or tile.get("rent") or max(0, _price(tile) * 0.1))
+
+
+def _run_economic_boom(boardpack: dict[str, Any], rng: random.Random, owners_by_tile: dict[int, Player], stats: Counter[str]) -> None:
+    rules = _economic_boom_rules(boardpack)
+    if rules.get("enabled") is False:
+        return
+    candidates: list[tuple[int, Player, int]] = []
+    for tile_index, owner in owners_by_tile.items():
+        tile = boardpack["tiles"][tile_index]
+        if owner.bankrupt:
+            continue
+        if rules.get("exclude_collateralized", True) and tile_index in owner.collateralized_tiles:
+            continue
+        if tile.get("type") not in {"property", "rail", "railroad", "transport", "utility"}:
+            continue
+        weight = _boom_tile_weight(tile, rules)
+        if weight > 0:
+            candidates.append((tile_index, owner, weight))
+
+    draws = min(int(rules.get("draws") or 6), len(candidates))
+    stats["economic_boom_seasons"] += 1
+    for _ in range(draws):
+        total_weight = sum(weight for _, _, weight in candidates)
+        threshold = rng.random() * total_weight
+        selected_index = 0
+        for index, (_, _, weight) in enumerate(candidates):
+            threshold -= weight
+            if threshold < 0:
+                selected_index = index
+                break
+        tile_index, owner, _ = candidates.pop(selected_index)
+        basis = _boom_rent_basis(boardpack["tiles"][tile_index], owner, owners_by_tile, boardpack, rules)
+        payout = round(basis * float(rules.get("payout_rate") or 0.5))
+        owner.cash += payout
+        stats["economic_boom_payout_total"] += payout
+        stats["economic_boom_draws"] += 1
+
 def play_game(boardpack: dict[str, Any], rng: random.Random, max_rounds: int, cfg: SimulationConfig, income_tax_rate: float, super_tax_rate: float) -> GameResult:
     players = [Player(name=f"Player {i}", cash=boardpack["starting_cash"], starting_cash=boardpack["starting_cash"], income_tax_baseline_cash=boardpack["starting_cash"]) for i in range(1, PLAYER_COUNT + 1)]
     owners_by_tile: dict[int, Player] = {}
@@ -544,6 +631,11 @@ def play_game(boardpack: dict[str, Any], rng: random.Random, max_rounds: int, cf
                     stats["passive_income_total"] += payout
                     stats["passive_income_events"] += 1
 
+        boom_rules = _economic_boom_rules(boardpack)
+        boom_interval = int(boom_rules.get("interval_rounds") or 10)
+        if boom_interval > 0 and round_number % boom_interval == 0:
+            _run_economic_boom(boardpack, rng, owners_by_tile, stats)
+
     return GameResult(
         rounds=rounds_played,
         bankruptcy_count=sum(1 for p in players if p.bankrupt),
@@ -589,6 +681,9 @@ def play_game(boardpack: dict[str, Any], rng: random.Random, max_rounds: int, cf
         developed_inland_sites_count=stats["developed_inland_sites_count"],
         inland_resources_found_by_type=Counter({k.split("::", 1)[1]: v for k, v in stats.items() if k.startswith("inland_resources_found::")}),
         developed_inland_sites_by_resource=Counter({k.split("::", 1)[1]: v for k, v in stats.items() if k.startswith("developed_inland_sites_by_resource::")}),
+        economic_boom_seasons=stats["economic_boom_seasons"],
+        economic_boom_payout_total=stats["economic_boom_payout_total"],
+        economic_boom_draws=stats["economic_boom_draws"],
     )
 
 
@@ -618,6 +713,8 @@ def summarize_results(boardpack: dict[str, Any], results: list[GameResult], sett
             "inland_empty_results": r.inland_empty_results, "inland_cash_spent": r.inland_cash_spent,
             "inland_cash_earned": r.inland_cash_earned, "inland_passive_income_total": r.inland_passive_income_total,
             "inland_passive_income_events": r.inland_passive_income_events, "developed_inland_sites_count": r.developed_inland_sites_count,
+            "economic_boom_seasons": r.economic_boom_seasons, "economic_boom_payout_total": r.economic_boom_payout_total,
+            "economic_boom_draws": r.economic_boom_draws,
         })
         insolvency_by_reason.update(r.insolvency_by_reason)
         agg.update({f"inland_resources_found::{k}": v for k, v in r.inland_resources_found_by_type.items()})
@@ -639,6 +736,7 @@ def summarize_results(boardpack: dict[str, Any], results: list[GameResult], sett
         "betting": {"enabled": cfg.enable_betting, "bets_placed": agg["bets_placed"], "betting_staked": agg["betting_staked"], "betting_winnings": agg["betting_winnings"], "betting_net": agg["betting_winnings"] - agg["betting_staked"]},
         "auctions": {"enabled": cfg.enable_auctions, "auctions_started": agg["auctions_started"], "auctions_completed": agg["auctions_completed"], "auction_cash_drained": agg["auction_cash_drained"]},
         "tax_paid": total_tax_paid, "tax_events": total_tax_events,
+        "economic_boom": {"seasons": agg["economic_boom_seasons"], "payout_total": agg["economic_boom_payout_total"], "draws": agg["economic_boom_draws"]},
         "tax_breakdown": {
             "income_tax_paid": agg["income_tax_paid"], "income_tax_events": agg["income_tax_events"],
             "super_tax_paid": agg["super_tax_paid"], "super_tax_events": agg["super_tax_events"],
@@ -813,6 +911,7 @@ def main() -> None:
     print(f"Income tax paid/events: {s['tax_breakdown']['income_tax_paid']} / {s['tax_breakdown']['income_tax_events']}")
     print(f"Super tax paid/events: {s['tax_breakdown']['super_tax_paid']} / {s['tax_breakdown']['super_tax_events']}")
     print(f"Fixed tax paid/events: {s['tax_breakdown']['fixed_tax_paid']} / {s['tax_breakdown']['fixed_tax_events']}")
+    print(f"Economic boom stats: {s['economic_boom']}")
     print(f"Most-owned tiles (top 5): {s['most_owned_tiles_top_5']}")
     print(f"Most-landed-on tiles (top 5): {s['most_landed_on_tiles_top_5']}")
     print(f"Highest rent-earning tiles (top 5): {s['highest_rent_earning_tiles_top_5']}")

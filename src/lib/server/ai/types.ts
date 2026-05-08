@@ -34,6 +34,7 @@ export type GameStateRow = {
   doubles_count: number | null;
   turn_phase: string | null;
   rounds_elapsed: number | null;
+  last_economic_boom_round: number | null;
   rules: Record<string, unknown> | null;
   active_macro_effects_v1: unknown[] | null;
   pending_action: Record<string, unknown> | null;

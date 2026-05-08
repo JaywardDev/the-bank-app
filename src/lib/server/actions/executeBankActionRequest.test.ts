@@ -41,6 +41,7 @@ const makeGameState = (pending_action: Record<string, unknown>, version = 10) =>
   last_roll: null,
   doubles_count: 0,
   rounds_elapsed: 0,
+  last_economic_boom_round: null,
   last_macro_event_id: null,
   active_macro_effects: null,
   active_macro_effects_v1: null,
