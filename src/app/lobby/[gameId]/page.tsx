@@ -30,6 +30,11 @@ type Game = {
   created_by: string | null;
 };
 
+type AiDifficulty = "easy" | "medium" | "hard";
+
+const availableAiDifficulty: AiDifficulty = "easy";
+const isAvailableAiDifficulty = (difficulty: AiDifficulty) => difficulty === availableAiDifficulty;
+
 type Player = {
   id: string;
   user_id: string | null;
@@ -41,7 +46,7 @@ type Player = {
   is_eliminated: boolean;
   eliminated_at: string | null;
   is_ai: boolean;
-  ai_difficulty: "easy" | "medium" | "hard" | null;
+  ai_difficulty: AiDifficulty | null;
 };
 
 type GameState = {
@@ -60,7 +65,7 @@ export default function LobbyPage() {
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [hostGameMode, setHostGameMode] = useState<"classic" | "round_mode">("classic");
   const [hostRoundLimit, setHostRoundLimit] = useState<RoundLimitOption>(DEFAULT_ROUND_LIMIT);
-  const [aiDifficulty, setAiDifficulty] = useState<"easy" | "medium" | "hard">("easy");
+  const [aiDifficulty, setAiDifficulty] = useState<AiDifficulty>(availableAiDifficulty);
   const [authLoading, setAuthLoading] = useState(true);
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
   const [sessionInvalid, setSessionInvalid] = useState(false);
@@ -578,11 +583,21 @@ export default function LobbyPage() {
   };
 
 
+  useEffect(() => {
+    if (!isAvailableAiDifficulty(aiDifficulty)) {
+      setAiDifficulty(availableAiDifficulty);
+    }
+  }, [aiDifficulty]);
+
   const handleAddAiPlayer = async () => {
     if (!session || !activeGame) {
       setNotice("Join a lobby before adding AI players.");
       return;
     }
+
+    const submittedAiDifficulty = isAvailableAiDifficulty(aiDifficulty)
+      ? aiDifficulty
+      : availableAiDifficulty;
 
     setLoadingAction("add-ai");
     setNotice(null);
@@ -591,7 +606,7 @@ export default function LobbyPage() {
       const result = await performBankActionWithRecovery({
         action: "ADD_AI_PLAYER",
         gameId: activeGame.id,
-        aiDifficulty,
+        aiDifficulty: submittedAiDifficulty,
       });
       if (!result) return;
       await loadLobby(activeGame.id, result.accessToken);
@@ -801,18 +816,18 @@ export default function LobbyPage() {
                       <select
                         className="h-8 rounded-md border border-neutral-300 bg-white px-2 text-xs font-semibold text-neutral-800"
                         value={aiDifficulty}
-                        onChange={(event) => setAiDifficulty(event.target.value as "easy" | "medium" | "hard")}
+                        onChange={(event) => setAiDifficulty(event.target.value as AiDifficulty)}
                         aria-label="AI difficulty"
                       >
                         <option value="easy">Easy</option>
-                        <option value="medium">Medium</option>
+                        <option value="medium" disabled>Medium (under training)</option>
                         <option value="hard" disabled>Hard — Future</option>
                       </select>
                       <button
                         className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-neutral-400"
                         type="button"
                         onClick={handleAddAiPlayer}
-                        disabled={loadingAction === "add-ai" || aiDifficulty === "hard"}
+                        disabled={loadingAction === "add-ai" || !isAvailableAiDifficulty(aiDifficulty)}
                       >
                         {loadingAction === "add-ai" ? "Adding…" : "Add AI"}
                       </button>
